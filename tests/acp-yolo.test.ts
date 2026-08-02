@@ -142,6 +142,36 @@ describe("acp --yolo", () => {
     expect(bridgedReqId).not.toBeNull();
   });
 
+  it("auto-approves plan_proposed with --yolo so the model can execute plans without blocking", async () => {
+    const gate = new PauseGate();
+    let bridged = false;
+    makeListener({ yolo: true }, "review")(gate, () => {
+      bridged = true;
+    });
+
+    const promise = gate.ask({
+      kind: "plan_proposed",
+      payload: { plan: "Step 1\nStep 2", steps: [{ id: "s1" }, { id: "s2" }], summary: "do it" },
+    });
+    await expect(promise).resolves.toEqual({ type: "approve" });
+    expect(bridged).toBe(false);
+  });
+
+  it("bridges plan_proposed to the client in auto mode (only yolo bypasses)", async () => {
+    const gate = new PauseGate();
+    let bridgedReqId: number | null = null;
+    makeListener({ yolo: false }, "auto")(gate, (id) => {
+      bridgedReqId = id;
+      gate.resolve(id, { type: "approve" } as never);
+    });
+
+    await gate.ask({
+      kind: "plan_proposed",
+      payload: { plan: "Step 1" },
+    });
+    expect(bridgedReqId).not.toBeNull();
+  });
+
   it("auto-picks the first option for ask_choice with --yolo so the loop never strands on a branch question", async () => {
     const gate = new PauseGate();
     let bridged = false;

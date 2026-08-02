@@ -3938,6 +3938,11 @@ function AppInner({
           break;
         }
         case "plan_proposed": {
+          const auto = autoResolveVerdict(request, editModeRef.current);
+          if (auto !== null) {
+            pauseGate.resolve(request.id, auto);
+            break;
+          }
           const p = payload as { plan: string; steps?: PlanStep[]; summary?: string };
           setPendingPlan(p.plan);
           planStepsRef.current = p.steps ?? null;

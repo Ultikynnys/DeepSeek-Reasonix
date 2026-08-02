@@ -29,6 +29,13 @@ export function autoResolveVerdict(req: PauseRequest, editMode: EditMode): unkno
   if ((req.kind === "run_command" || req.kind === "run_background") && editMode === "yolo") {
     return { type: "run_once" };
   }
+  // YOLO: plan_proposed — the plan gate would strand the loop on an approval
+  // picker nobody is watching (headless/ACP/YOLO). Auto-approve so the model
+  // can execute the plan without blocking. plan_checkpoint below is already
+  // auto-continued; this closes the remaining interaction gap.
+  if (req.kind === "plan_proposed" && editMode === "yolo") {
+    return { type: "approve" };
+  }
   // YOLO: an ask_choice branch question would strand the loop on a picker
   // nobody is watching (headless/ACP runs especially) — auto-pick the first
   // option so the model carries on with the leading branch. Cancel is just a

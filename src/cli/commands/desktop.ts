@@ -1930,6 +1930,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           tabId,
         );
       }
+      // plan_proposed auto-approved in yolo — clear any prior plan state and
+      // track step count so $step_completed progress-to-clear still works.
+      if (req.kind === "plan_proposed") {
+        const payload = req.payload as { plan: string; steps?: { id: string }[]; summary?: string };
+        if (tab) {
+          tab.completedStepIds.clear();
+          tab.planTotalSteps = payload.steps?.length ?? 0;
+        }
+      }
       if (tab) tab.pendingGateIds.delete(req.id);
       pauseGate.resolve(req.id, auto);
       return;

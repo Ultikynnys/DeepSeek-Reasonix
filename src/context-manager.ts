@@ -125,8 +125,13 @@ export class ContextManager {
     for (const e of entries) {
       const content = typeof e.content === "string" ? e.content : "";
       total += countTokensBounded(content);
-      if (e.role === "assistant" && Array.isArray(e.tool_calls) && e.tool_calls.length > 0) {
-        total += countTokensBounded(JSON.stringify(e.tool_calls));
+      if (e.role === "assistant") {
+        if (Array.isArray(e.tool_calls) && e.tool_calls.length > 0) {
+          total += countTokensBounded(JSON.stringify(e.tool_calls));
+        }
+        if (e.reasoning_content && (e.reasoning_content as string).length > 0) {
+          total += countTokensBounded(e.reasoning_content as string);
+        }
       }
     }
     return total;
@@ -192,13 +197,22 @@ export class ContextManager {
     };
     if (all.length === 0) return noop;
 
-    // Per-message token cost includes tool_calls JSON; otherwise heavy tool-call
-    // arguments slip through the tail-budget check and the boundary slides past
-    // the active tool turn. No chat-template wrapper here — that would double-count.
+    // Per-message token cost includes tool_calls JSON and reasoning_content;
+    // otherwise heavy tool-call arguments slip through the tail-budget check and
+    // the boundary slides past the active tool turn. reasoning_content counts
+    // against API promptTokens and must be passed back round-trip — ignoring it
+    // causes the fold to underestimate usage by thousands of tokens in
+    // thinking-mode sessions. No chat-template wrapper here — that would
+    // double-count.
     const tokenCounts = all.map((m) => {
       let n = countTokensBounded(typeof m.content === "string" ? m.content : "");
-      if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-        n += countTokensBounded(JSON.stringify(m.tool_calls));
+      if (m.role === "assistant") {
+        if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+          n += countTokensBounded(JSON.stringify(m.tool_calls));
+        }
+        if (m.reasoning_content && (m.reasoning_content as string).length > 0) {
+          n += countTokensBounded(m.reasoning_content as string);
+        }
       }
       return n;
     });
@@ -216,6 +230,32 @@ export class ContextManager {
     // would be wiped. Default fold path (post-response) tolerates empty tail so
     // cache-aligned summary tests still exercise the "summarize all" shape.
     if (opts?.requireTailBoundary && boundary >= all.length) return noop;
+
+    // Guard: when the tail would be empty, the most recent assistant message
+    // (with its pending tool_calls) is summarized away. fixToolCallPairing
+    // would then drop the tool results that follow as stray/unpaired — the
+    // model would never see them. Force at least the last user→assistant
+    // exchange into the tail.
+    if (boundary >= all.length && all.length >= 1) {
+      const last = all[all.length - 1]!;
+      if (
+        last.role === "assistant" &&
+        Array.isArray(last.tool_calls) &&
+        last.tool_calls.length > 0
+      ) {
+        // Walk back to find the user message that precedes this assistant
+        for (let i = all.length - 2; i >= 0; i--) {
+          if (all[i]!.role === "user") {
+            boundary = i;
+            break;
+          }
+        }
+        if (boundary >= all.length) boundary = all.length - 1;
+        // Recompute cumTokens for the adjusted tail
+        cumTokens = 0;
+        for (let i = boundary; i < all.length; i++) cumTokens += tokenCounts[i]!;
+      }
+    }
 
     const head = all.slice(0, boundary);
     const tail = all.slice(boundary);

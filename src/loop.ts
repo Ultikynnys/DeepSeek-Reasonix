@@ -964,22 +964,10 @@ export class CacheFirstLoop {
         };
       }
 
-      if (repairedCalls.length === 0) {
-        if (this._steerQueue.length > 0) {
-          continue;
-        }
-        if (allSuppressed) {
-          yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
-          this._steerQueue.length = 0;
-          return;
-        }
-        yield { turn: this._turn, role: "done", content: assistantContent };
-        this._steerQueue.length = 0;
-        return;
-      }
-
       // Context-management decision after each turn's response.
       // ContextManager owns the policy; loop renders the events.
+      // Must run BEFORE the repairedCalls.length === 0 early-return so
+      // text-only responses also benefit from auto-fold / force-summary.
       const decision = this.context.decideAfterUsage(usage, this.model, this._foldedThisTurn);
       if (decision.kind === "fold") {
         this._foldedThisTurn = true;
@@ -1023,6 +1011,20 @@ export class CacheFirstLoop {
         };
         this.context.trimTrailingToolCalls();
         yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "context-guard" });
+        this._steerQueue.length = 0;
+        return;
+      }
+
+      if (repairedCalls.length === 0) {
+        if (this._steerQueue.length > 0) {
+          continue;
+        }
+        if (allSuppressed) {
+          yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
+          this._steerQueue.length = 0;
+          return;
+        }
+        yield { turn: this._turn, role: "done", content: assistantContent };
         this._steerQueue.length = 0;
         return;
       }
