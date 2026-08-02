@@ -14,13 +14,20 @@ const model: SlashHandler = (args, loop, ctx) => {
   if (!id) {
     return { openModelPicker: true };
   }
-  loop.configure({ model: id });
-  ctx.dispatch?.({ type: "session.model.change", model: id });
   try {
     saveModel(id);
-  } catch {
+  } catch (err) {
+    const msg = (err as Error).message;
+    // Validation errors from saveModel (unsupported model on official endpoint)
+    // are user-facing — surface them. Disk/permission errors: runtime change
+    // still takes effect; just warn.
+    if (msg.startsWith("Unsupported model")) {
+      return { info: msg };
+    }
     /* disk full / perms — runtime change still took effect */
   }
+  loop.configure({ model: id });
+  ctx.dispatch?.({ type: "session.model.change", model: id });
   if (known && known.length > 0 && !known.includes(id)) {
     return {
       info: t("handlers.model.modelNotInCatalog", { id, list: known.join(", ") }),

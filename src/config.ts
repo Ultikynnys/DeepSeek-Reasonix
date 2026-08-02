@@ -1215,7 +1215,15 @@ export function loadModel(path: string = defaultConfigPath()): string {
 export function saveModel(model: string, path: string = defaultConfigPath()): void {
   const trimmed = model.trim();
   if (!trimmed) return;
+  // On the official endpoint, refuse to persist a model the API won't accept.
+  // Custom-endpoint owners set their own namespace — validation is on them.
   const cfg = readConfig(path);
+  const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
+  if (!customEndpoint && !SUPPORTED_OFFICIAL_MODELS.includes(trimmed)) {
+    throw new Error(
+      `Unsupported model "${trimmed}". Official endpoint only accepts: ${SUPPORTED_OFFICIAL_MODELS.join(", ")}. Set a custom baseUrl to use other models.`,
+    );
+  }
   cfg.model = trimmed;
   writeConfig(cfg, path);
 }

@@ -160,16 +160,16 @@ describe("handleSlash", () => {
 
   it("/model switches the model", () => {
     const loop = makeLoop();
-    handleSlash("model", ["deepseek-reasoner"], loop);
-    expect(loop.model).toBe("deepseek-reasoner");
+    handleSlash("model", ["deepseek-v4-pro"], loop);
+    expect(loop.model).toBe("deepseek-v4-pro");
   });
 
   it("/model soft-warns when id is not in the fetched catalog but still switches", () => {
     const loop = makeLoop();
-    const r = handleSlash("model", ["deepseek-made-up"], loop, {
-      models: ["deepseek-chat", "deepseek-reasoner"],
+    const r = handleSlash("model", ["deepseek-v4-pro"], loop, {
+      models: ["deepseek-v4-flash"],
     });
-    expect(loop.model).toBe("deepseek-made-up");
+    expect(loop.model).toBe("deepseek-v4-pro");
     expect(r.info).toMatch(/not in the fetched catalog/);
   });
 
