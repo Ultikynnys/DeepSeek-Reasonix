@@ -7,11 +7,13 @@ import { ChoiceRequestedError, registerChoiceTool } from "../src/tools/choice.js
 
 class AutoGate extends PauseGate {
   private _choice: { type: string; optionId?: string; text?: string };
+  lastPayload: unknown;
   constructor(choice: { type: string; optionId?: string; text?: string }) {
     super();
     this._choice = choice;
   }
   override ask(_opts: { kind: string; payload?: unknown }): Promise<any> {
+    this.lastPayload = _opts.payload;
     return Promise.resolve(this._choice);
   }
 }
@@ -76,7 +78,7 @@ describe("registerChoiceTool + ask_choice", () => {
     expect(seen[0]?.question).toBe("Pick a route.");
   });
 
-  it("defaults allowCustom to false when not provided", async () => {
+  it("defaults allowCustom to true so free-text input is always available", async () => {
     const reg = new ToolRegistry();
     registerChoiceTool(reg);
     const gate = new AutoGate({ type: "pick", optionId: "A" });
@@ -91,8 +93,29 @@ describe("registerChoiceTool + ask_choice", () => {
       }),
       { confirmationGate: gate },
     );
-    // Tool works without error — allowCustom defaults to false
+    // Tool works without error — custom input is on by default
     expect(out).toBe("user picked: A");
+    expect((gate.lastPayload as { allowCustom?: boolean }).allowCustom).toBe(true);
+  });
+
+  it("allowCustom: false explicitly hides the custom input", async () => {
+    const reg = new ToolRegistry();
+    registerChoiceTool(reg);
+    const gate = new AutoGate({ type: "pick", optionId: "A" });
+    const out = await reg.dispatch(
+      "ask_choice",
+      JSON.stringify({
+        question: "Which one?",
+        options: [
+          { id: "A", title: "one" },
+          { id: "B", title: "two" },
+        ],
+        allowCustom: false,
+      }),
+      { confirmationGate: gate },
+    );
+    expect(out).toBe("user picked: A");
+    expect((gate.lastPayload as { allowCustom?: boolean }).allowCustom).toBe(false);
   });
 
   it("drops malformed option entries (DeepSeek sometimes misses fields)", async () => {

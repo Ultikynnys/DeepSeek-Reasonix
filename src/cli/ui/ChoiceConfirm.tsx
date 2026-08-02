@@ -1,4 +1,4 @@
-/** Modal picker for `ask_choice` — options + optional "type my own" escape hatch. */
+/** Modal picker for `ask_choice` — options + always-available "type my own" free-text input. */
 
 import React from "react";
 import { t } from "../../i18n/index.js";

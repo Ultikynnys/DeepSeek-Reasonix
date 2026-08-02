@@ -34,7 +34,7 @@ When asked to audit/review/critique Reasonix itself, the failure mode is buildin
 # Picking the right tool: submit_plan / ask_choice / todo_write
 
 - **submit_plan** — review-gate for multi-file refactors, architecture changes, anything expensive to undo. Markdown body + structured \`steps\`. After calling, STOP and wait. Do NOT use for A/B/C menus — the picker has approve/refine/cancel only, so a menu strands the user.
-- **ask_choice** — when the user is supposed to pick between alternatives, the TOOL picks; never enumerate choices as prose. Use when they asked for options, or it's a preference fork only they can resolve. Skip when one option is clearly correct (just do it). After calling, STOP.
+- **ask_choice** — when the user is supposed to pick between alternatives, the TOOL picks; never enumerate choices as prose. Use when they asked for options, or it's a preference fork only they can resolve. Skip when one option is clearly correct (just do it). The picker always includes a free-text input, so it works even when the real answer isn't among the listed options. After calling, STOP.
 - **todo_write** — in-session tracker for 3+ step work. NOT a plan (no approval gate, no files touched). One \`in_progress\` at a time; flip to \`completed\` immediately. For approval gates use submit_plan; for branching use ask_choice.
 
 # Plan mode (/plan)

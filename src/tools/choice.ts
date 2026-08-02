@@ -69,7 +69,7 @@ export function registerChoiceTool(
   registry.register({
     name: "ask_choice",
     description:
-      "Render an arrow-key picker with 2–6 alternatives. Use when the user is supposed to pick — never enumerate choices as prose. Skip when one option is clearly best (just do it) or a free-form text answer fits. Max 6 options; set `allowCustom:true` when their real answer might not fit.",
+      "Render an arrow-key picker with 2–6 alternatives. Use when the user is supposed to pick — never enumerate choices as prose. Skip when one option is clearly best (just do it). The picker ALWAYS shows a 'type your own answer' free-text input; pass `allowCustom:false` only when the answer must be one of the listed options.",
     readOnly: true,
     parameters: {
       type: "object",
@@ -97,7 +97,8 @@ export function registerChoiceTool(
         },
         allowCustom: {
           type: "boolean",
-          description: "Shows a 'type my own answer' escape hatch. Default false.",
+          description:
+            "Hide the 'type my own answer' free-text input. Default true (always shown).",
         },
       },
       required: ["question", "options"],
@@ -120,7 +121,7 @@ export function registerChoiceTool(
           "ask_choice: too many options (max 6). If you really have this many branches, split into two sequential ask_choice calls or narrow down first.",
         );
       }
-      const allowCustom = args?.allowCustom === true;
+      const allowCustom = args?.allowCustom !== false;
       opts.onChoiceRequested?.(question, options);
       // Block until the user picks an option, types custom text, or cancels
       const verdict = await (ctx?.confirmationGate ?? pauseGate).ask({

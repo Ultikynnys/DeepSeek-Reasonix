@@ -289,7 +289,7 @@ function choicePrompt(
 ): ApprovalPrompt {
   const question = String(payload.question ?? "Choose an option");
   const rawOptions = Array.isArray(payload.options) ? payload.options : [];
-  const allowCustom = payload.allowCustom === true;
+  const allowCustom = payload.allowCustom !== false;
 
   const actions: ApprovalAction[] = rawOptions.map((o: unknown) => {
     const opt = o as Record<string, unknown>;

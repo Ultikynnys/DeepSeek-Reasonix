@@ -681,7 +681,7 @@ export function useQQChannel({
               return true;
             }
           }
-          if (payload.allowCustom) {
+          if (payload.allowCustom !== false) {
             onChoiceResolveRef.current({ type: "text", text });
           } else {
             onChoiceResolveRef.current({ type: "cancel" });

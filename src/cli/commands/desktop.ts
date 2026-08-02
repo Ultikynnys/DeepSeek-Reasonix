@@ -1327,7 +1327,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
         pauseGate.resolve(
           gateId,
-          payload.allowCustom ? { type: "text", text } : { type: "cancel" },
+          payload.allowCustom !== false ? { type: "text", text } : { type: "cancel" },
         );
         return true;
       }
