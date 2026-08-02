@@ -371,6 +371,8 @@ interface ServerOverviewStats {
 
 interface ServerOverviewResponse {
   stats?: ServerOverviewStats;
+  /** Model context cap — meter denominator + compaction-limit ticks. */
+  contextCapTokens?: number;
 }
 
 function mapSessionItem(s: ServerSessionItem) {
@@ -418,6 +420,15 @@ function emitOverviewSnapshot(overview: ServerOverviewResponse | null | undefine
       currency: firstBalance.currency,
       total: Number.parseFloat(firstBalance.total_balance) || 0,
       isAvailable: true,
+    });
+  }
+
+  // Real model context cap → meter denominator + compaction-limit ticks.
+  if (typeof overview?.contextCapTokens === "number" && overview.contextCapTokens > 0) {
+    emitEvent({
+      type: "$ctx_breakdown",
+      tabId: "tab-1",
+      ctxMax: overview.contextCapTokens,
     });
   }
 }
@@ -478,6 +489,10 @@ function emitSkillsFromServer(data: any): void {
 
 function emitMemoryEntriesFromServer(entries: any[] | undefined): void {
   emitEvent({ type: "$memory", tabId: "tab-1", entries: entries ?? [] });
+}
+
+function emitMemoryResult(ok: boolean, message: string): void {
+  emitEvent({ type: "$memory_result", tabId: "tab-1", ok, message });
 }
 
 async function loadAndEmitMcp(): Promise<void> {
@@ -894,6 +909,68 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
     }
     case "memory_read": {
       if (typeof payload.path === "string") await loadAndEmitMemoryDetail(payload.path);
+      break;
+    }
+    case "memory_write": {
+      try {
+        const data = await apiFetch("memory/structured", {
+          method: "POST",
+          body: JSON.stringify({
+            scope: payload.scope,
+            name: payload.name,
+            description: payload.description,
+            body: payload.body,
+            ...(typeof payload.type === "string" && payload.type ? { type: payload.type } : {}),
+          }),
+        });
+        emitMemoryResult(data?.saved === true, `saved ${payload.scope}/${payload.name}`);
+      } catch (err) {
+        emitMemoryResult(false, err instanceof Error ? err.message : String(err));
+      }
+      await loadAndEmitMemory();
+      break;
+    }
+    case "memory_delete": {
+      try {
+        const data = await apiFetch(
+          `memory/structured?path=${encodeURIComponent(String(payload.path ?? ""))}`,
+          { method: "DELETE" },
+        );
+        emitMemoryResult(data?.deleted === true, data?.deleted ? "memory deleted" : "memory not found");
+      } catch (err) {
+        emitMemoryResult(false, err instanceof Error ? err.message : String(err));
+      }
+      await loadAndEmitMemory();
+      break;
+    }
+    case "memory_export": {
+      try {
+        const data = await apiFetch("memory/export");
+        emitEvent({
+          type: "$memory_export",
+          tabId: "tab-1",
+          text: JSON.stringify(data, null, 2),
+        });
+      } catch (err) {
+        emitMemoryResult(false, err instanceof Error ? err.message : String(err));
+      }
+      break;
+    }
+    case "memory_import": {
+      try {
+        const data = await apiFetch("memory/import", {
+          method: "POST",
+          body: JSON.stringify(JSON.parse(String(payload.json ?? "{}"))),
+        });
+        const skipped =
+          Array.isArray(data?.skipped) && data.skipped.length > 0
+            ? ` (skipped ${data.skipped.length})`
+            : "";
+        emitMemoryResult(true, `imported ${data?.imported ?? 0} memories${skipped}`);
+      } catch (err) {
+        emitMemoryResult(false, err instanceof Error ? err.message : String(err));
+      }
+      await loadAndEmitMemory();
       break;
     }
     case "mcp_specs_add":

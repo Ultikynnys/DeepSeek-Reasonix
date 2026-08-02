@@ -29,9 +29,8 @@ export interface StatusBar {
   sessionCost: number;
   balance?: number;
   balanceCurrency?: string;
-  /** User-togglable cost display currency ("USD" or "CNY"). When set, takes
-   *  precedence over `balanceCurrency` for cost formatting. Seeded from
-   *  config on mount; toggle by clicking the turn-cost pill in the status bar. */
+  /** User-togglable cost display currency ("USD" or "CNY"). When set, overrides the
+   *  default USD cost formatting. Seeded from config on mount; unset → USD. */
   costDisplayCurrency?: string;
   cacheHit: number;
   /** Last-turn prompt tokens; drives the context-usage pill. */

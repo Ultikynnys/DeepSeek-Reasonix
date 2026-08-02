@@ -212,7 +212,7 @@ export const ru: TranslationSchema = {
     memory: {
       ...EN.slash.memory,
       description: "показать / управлять закреплённой памятью (REASONIX.md + ~/.reasonix/memory)",
-      argsHint: "[list|show <имя>|forget <имя>|clear <область> confirm]",
+      argsHint: "[list|save <имя> <текст>|show <имя>|forget <имя>|clear <область> confirm]",
     },
     skill: {
       ...EN.slash.skill,

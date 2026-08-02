@@ -43,7 +43,13 @@ function renderPanel() {
       sessionFiles={[{ path: "src/new-file.ts", status: "m" }]}
       memory={[]}
       memoryDetail={null}
+      memoryResult={null}
       onReadMemory={() => {}}
+      onWriteMemory={() => {}}
+      onDeleteMemory={() => {}}
+      onExportMemories={() => {}}
+      onImportMemories={() => {}}
+      onDismissMemoryResult={() => {}}
     />,
   );
 }
@@ -83,7 +89,13 @@ describe("ContextPanel files", () => {
         sessionFiles={[]}
         memory={[]}
         memoryDetail={null}
+        memoryResult={null}
         onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
       />,
     );
 

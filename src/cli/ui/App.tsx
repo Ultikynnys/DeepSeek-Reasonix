@@ -3997,6 +3997,14 @@ function AppInner({
           break;
         }
         case "choice": {
+          // Shared policy (src/core/pause-policy.ts): in yolo the picker
+          // never mounts — the first option is auto-picked so the loop
+          // doesn't strand on a branch question.
+          const auto = autoResolveVerdict(request, editModeRef.current);
+          if (auto !== null) {
+            pauseGate.resolve(request.id, auto);
+            break;
+          }
           const p = payload as {
             question: string;
             options: unknown[];

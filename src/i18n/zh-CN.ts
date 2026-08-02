@@ -284,7 +284,7 @@ export const zhCN: TranslationSchema = {
     },
     memory: {
       description: "显示 / 管理固定记忆（REASONIX.md + ~/.reasonix/memory）",
-      argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
+      argsHint: "[list|show <name>|save <name> <text>|forget <name>|clear <scope> confirm]",
     },
     skill: {
       description: "列出 / 运行用户技能（项目 + 自定义 + 全局 + 内置）",
@@ -1213,6 +1213,7 @@ export const zhCN: TranslationSchema = {
     editsLabel: "编辑:",
     mcpLoading: "MCP",
     ctx: "上下文",
+    compactionLimits: "折叠@{fold} · 强制@{force}",
     shortcutsHint: "Ctrl+P 快捷键",
   },
   editMode: {
@@ -1432,7 +1433,7 @@ export const zhCN: TranslationSchema = {
   },
   ctxBreakdown: {
     title: "▣ 上下文",
-    compactHint: "  /compact 折叠（超过 50% 自动触发）· /new 清空日志",
+    compactHint: "  /compact 折叠（超过 75% 自动触发）· /new 清空日志",
     topTools: "  常用工具（按成本排序，{count} 个）：",
     msg: "条",
     turnLabel: "轮",

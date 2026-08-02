@@ -29,5 +29,16 @@ export function autoResolveVerdict(req: PauseRequest, editMode: EditMode): unkno
   if ((req.kind === "run_command" || req.kind === "run_background") && editMode === "yolo") {
     return { type: "run_once" };
   }
+  // YOLO: an ask_choice branch question would strand the loop on a picker
+  // nobody is watching (headless/ACP runs especially) — auto-pick the first
+  // option so the model carries on with the leading branch. Cancel is just a
+  // hang-proof fallback; choice.ts already sanitizes options before gating.
+  if (req.kind === "choice" && editMode === "yolo") {
+    const payload = req.payload as { options?: unknown[] };
+    const first = Array.isArray(payload.options) ? payload.options[0] : undefined;
+    const id = first && typeof first === "object" ? (first as { id?: unknown }).id : undefined;
+    if (typeof id === "string" && id.length > 0) return { type: "pick", optionId: id };
+    return { type: "cancel" };
+  }
   return null;
 }

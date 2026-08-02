@@ -694,8 +694,9 @@ export class CacheFirstLoop {
 
     // Turn-start fold: covers cases the post-response check can't see — terminal
     // prior turn (no tool_calls → no decideAfterUsage), session restore from
-    // disk, huge user paste. Fires only above TURN_START_FOLD_THRESHOLD; the
-    // post-response 75% trigger handles routine growth.
+    // disk, huge user paste. TURN_START_FOLD_THRESHOLD shares the post-response
+    // HISTORY_FOLD_THRESHOLD (75%), so every request ships below the fold line
+    // regardless of turn shape.
     {
       const turnStart = this.context.estimateTurnStart(
         this.buildMessages(),

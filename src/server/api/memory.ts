@@ -14,7 +14,11 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
 import {
   collectMemoryEntriesForWorkspace,
+  deleteMemoryEntry,
+  exportMemories,
+  importMemories,
   readMemoryEntryDetail,
+  writeMemoryEntry,
 } from "../../desktop/memory-browser.js";
 import {
   PROJECT_MEMORY_FILE,
@@ -101,6 +105,76 @@ export async function handleMemory(
       return { status: 200, body: { detail: readMemoryEntryDetail({ path }, cwd) } };
     } catch (err) {
       return { status: 404, body: { error: (err as Error).message } };
+    }
+  }
+
+  // Structured-entry management — MemoryStore-based so MEMORY.md regenerates
+  // and the entry is pinned on next /new. (The raw <scope>/<name> endpoints
+  // below remain for the freeform-file editor.)
+  if (method === "POST" && rest[0] === "structured") {
+    if (!cwd) return { status: 503, body: { error: "no active project" } };
+    const input = parseBody(body) as Partial<{
+      scope: string;
+      name: string;
+      description: string;
+      body: string;
+      type?: string;
+    }>;
+    try {
+      const scope = input.scope === "project" ? "project" : "global";
+      const { path } = writeMemoryEntry(
+        {
+          scope,
+          name: String(input.name ?? ""),
+          description: String(input.description ?? ""),
+          body: String(input.body ?? ""),
+          ...(typeof input.type === "string" && input.type ? { type: input.type } : {}),
+        },
+        cwd,
+      );
+      ctx.audit?.({
+        ts: Date.now(),
+        action: "save-memory",
+        payload: { scope, name: input.name, path },
+      });
+      return { status: 200, body: { saved: true, path } };
+    } catch (err) {
+      return { status: 400, body: { error: (err as Error).message } };
+    }
+  }
+  if (method === "DELETE" && rest[0] === "structured") {
+    if (!cwd) return { status: 503, body: { error: "no active project" } };
+    const path = query.get("path");
+    if (!path) return { status: 400, body: { error: "path query parameter required" } };
+    try {
+      const ok = deleteMemoryEntry(path, cwd);
+      if (!ok) return { status: 404, body: { error: "memory not found" } };
+      ctx.audit?.({ ts: Date.now(), action: "delete-memory", payload: { path } });
+      return { status: 200, body: { deleted: true } };
+    } catch (err) {
+      return { status: 400, body: { error: (err as Error).message } };
+    }
+  }
+  if (method === "GET" && rest[0] === "export") {
+    if (!cwd) return { status: 503, body: { error: "no active project" } };
+    try {
+      return { status: 200, body: exportMemories(cwd) };
+    } catch (err) {
+      return { status: 500, body: { error: (err as Error).message } };
+    }
+  }
+  if (method === "POST" && rest[0] === "import") {
+    if (!cwd) return { status: 503, body: { error: "no active project" } };
+    try {
+      const result = importMemories(parseBody(body), cwd);
+      ctx.audit?.({
+        ts: Date.now(),
+        action: "import-memory",
+        payload: { imported: result.imported, skipped: result.skipped.length },
+      });
+      return { status: 200, body: result };
+    } catch (err) {
+      return { status: 400, body: { error: (err as Error).message } };
     }
   }
 

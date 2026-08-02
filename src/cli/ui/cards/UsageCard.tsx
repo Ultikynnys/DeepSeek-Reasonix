@@ -29,9 +29,10 @@ function bar(ratio: number, color: Color): React.ReactElement {
 
 export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement {
   // Read live display-currency toggle so the card re-renders when the
-  // user swaps currency via click or shortcut.
+  // user swaps currency via click or shortcut. Costs never inherit the
+  // wallet currency — unset → USD.
   const costDisplayCurrency = useAgentState((s) => s.status.costDisplayCurrency);
-  const costCur = costDisplayCurrency ?? card.balanceCurrency;
+  const costCur = costDisplayCurrency;
   if (card.compact) return <CompactUsageRow card={card} displayCurrency={costCur} />;
   const cap = Math.max(1, card.tokens.promptCap);
   const promptRatio = card.tokens.prompt / cap;

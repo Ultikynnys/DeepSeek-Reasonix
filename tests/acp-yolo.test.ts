@@ -141,4 +141,60 @@ describe("acp --yolo", () => {
     });
     expect(bridgedReqId).not.toBeNull();
   });
+
+  it("auto-picks the first option for ask_choice with --yolo so the loop never strands on a branch question", async () => {
+    const gate = new PauseGate();
+    let bridged = false;
+    makeListener({ yolo: true }, "review")(gate, () => {
+      bridged = true;
+    });
+
+    const promise = gate.ask({
+      kind: "choice",
+      payload: {
+        question: "Which approach?",
+        options: [
+          { id: "option-1", title: "First" },
+          { id: "option-2", title: "Second" },
+        ],
+        allowCustom: true,
+      },
+    });
+    await expect(promise).resolves.toEqual({ type: "pick", optionId: "option-1" });
+    expect(bridged).toBe(false);
+  });
+
+  it("cancels a malformed choice (no well-formed options) rather than hanging", async () => {
+    const gate = new PauseGate();
+    let bridged = false;
+    makeListener({ yolo: true }, "review")(gate, () => {
+      bridged = true;
+    });
+
+    const promise = gate.ask({
+      kind: "choice",
+      payload: { question: "Which approach?", options: [], allowCustom: true },
+    });
+    await expect(promise).resolves.toEqual({ type: "cancel" });
+    expect(bridged).toBe(false);
+  });
+
+  it("bridges ask_choice to the client in auto mode (only yolo bypasses)", async () => {
+    const gate = new PauseGate();
+    let bridgedReqId: number | null = null;
+    makeListener({ yolo: false }, "auto")(gate, (id) => {
+      bridgedReqId = id;
+      gate.resolve(id, { type: "pick", optionId: "option-1" } as never);
+    });
+
+    await gate.ask({
+      kind: "choice",
+      payload: {
+        question: "Which approach?",
+        options: [{ id: "option-1", title: "First" }],
+        allowCustom: true,
+      },
+    });
+    expect(bridgedReqId).not.toBeNull();
+  });
 });

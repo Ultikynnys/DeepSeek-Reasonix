@@ -20,6 +20,7 @@ import {
 } from "../src/i18n/index.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
+import { MemoryStore } from "../src/memory/user.js";
 import { VERSION } from "../src/version.js";
 
 function makeLoop() {
@@ -1320,6 +1321,121 @@ describe("handleSlash", () => {
     it("refuses to guess a root when memoryRoot is absent", () => {
       const r = handleSlash("memory", [], makeLoop());
       expect(r.info).toMatch(/no working directory/);
+    });
+
+    it("saves a memory via /memory save and it lands in the store", () => {
+      const r = handleSlash(
+        "memory",
+        ["save", "favorite-lang", "TypeScript", "for", "this", "repo"],
+        makeLoop(),
+        { memoryRoot: root },
+      );
+      expect(r.info).toMatch(/saved/);
+      const store = new MemoryStore({ homeDir: join(root, ".reasonix") });
+      const entry = store.read("global", "favorite-lang");
+      expect(entry.body).toBe("TypeScript for this repo");
+      expect(entry.type).toBe("user"); // global default type
+      expect(entry.description).toBe("TypeScript for this repo"); // derived from body
+    });
+
+    it("save respects --scope/--type/--priority/--description flags", () => {
+      const r = handleSlash(
+        "memory",
+        [
+          "save",
+          "lint-first",
+          "--scope",
+          "global",
+          "--type",
+          "feedback",
+          "--priority",
+          "high",
+          "--description",
+          "always-lint",
+          "always",
+          "lint",
+          "before",
+          "committing",
+        ],
+        makeLoop(),
+        { memoryRoot: root },
+      );
+      expect(r.info).toMatch(/saved/);
+      const store = new MemoryStore({ homeDir: join(root, ".reasonix") });
+      const entry = store.read("global", "lint-first");
+      expect(entry.type).toBe("feedback");
+      expect(entry.priority).toBe("high");
+      expect(entry.description).toBe("always-lint");
+      expect(entry.body).toBe("always lint before committing");
+    });
+
+    it("save requires a name and a body", () => {
+      const r1 = handleSlash("memory", ["save"], makeLoop(), { memoryRoot: root });
+      expect(r1.info).toMatch(/usage: \/memory save/);
+      const r2 = handleSlash("memory", ["save", "name-only"], makeLoop(), { memoryRoot: root });
+      expect(r2.info).toMatch(/usage: \/memory save/);
+    });
+
+    it("save refuses project scope when no working directory is attached", () => {
+      const r = handleSlash(
+        "memory",
+        ["save", "--scope", "project", "note", "body", "text"],
+        makeLoop(),
+        { memoryRoot: root },
+      );
+      expect(r.info).toMatch(/project scope unavailable/);
+    });
+
+    it("saved memories appear in /memory list", () => {
+      const store = new MemoryStore({ homeDir: join(root, ".reasonix") });
+      store.write({
+        name: "budget-cap",
+        scope: "global",
+        type: "user",
+        description: "never exceed $5",
+        body: "cap spend at $5 per session",
+      });
+      const r = handleSlash("memory", ["list"], makeLoop(), { memoryRoot: root });
+      expect(r.info).toContain("budget-cap");
+      expect(r.info).toContain("never exceed $5");
+    });
+
+    it("show resolves a unique name prefix; ambiguous prefixes suggest candidates", () => {
+      const store = new MemoryStore({ homeDir: join(root, ".reasonix") });
+      store.write({
+        name: "budget-cap",
+        scope: "global",
+        type: "user",
+        description: "cap",
+        body: "never exceed $5",
+      });
+      store.write({
+        name: "budget-cadence",
+        scope: "global",
+        type: "user",
+        description: "cadence",
+        body: "review weekly",
+      });
+      const hit = handleSlash("memory", ["show", "budget-cad"], makeLoop(), { memoryRoot: root });
+      expect(hit.info).toContain("review weekly");
+
+      const amb = handleSlash("memory", ["show", "budget"], makeLoop(), { memoryRoot: root });
+      expect(amb.info).toMatch(/Did you mean/);
+      expect(amb.info).toContain("global/budget-cap");
+    });
+
+    it("forget resolves a unique name prefix and deletes", () => {
+      const store = new MemoryStore({ homeDir: join(root, ".reasonix") });
+      store.write({
+        name: "old-note",
+        scope: "global",
+        type: "user",
+        description: "stale",
+        body: "no longer true",
+      });
+      const r = handleSlash("memory", ["forget", "old-n"], makeLoop(), { memoryRoot: root });
+      expect(r.info).toMatch(/forgot global\/old-note/);
+      expect(() => store.read("global", "old-note")).toThrow();
     });
   });
 

@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ChangeEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { getLangLabel, getSupportedLangs, setLang, t, useLang } from "../i18n";
 import { I } from "../icons";
@@ -71,6 +71,7 @@ export function SettingsModal({
   skills,
   memory,
   memoryDetail,
+  memoryResult,
   qq,
   onClose,
   onSave,
@@ -84,6 +85,11 @@ export function SettingsModal({
   onAddMcpSpec,
   onRemoveMcpSpec,
   onReadMemory,
+  onWriteMemory,
+  onDeleteMemory,
+  onExportMemories,
+  onImportMemories,
+  onDismissMemoryResult,
 }: {
   settings: SettingsType;
   balance: Balance | null;
@@ -105,6 +111,7 @@ export function SettingsModal({
   skills: SkillInfo[];
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
+  memoryResult: { ok: boolean; message: string } | null;
   qq: QQDesktopSettingsState | null;
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
@@ -118,6 +125,11 @@ export function SettingsModal({
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
   onReadMemory: (path: string) => void;
+  onWriteMemory: (scope: "global" | "project", name: string, description: string, body: string) => void;
+  onDeleteMemory: (path: string) => void;
+  onExportMemories: () => void;
+  onImportMemories: (json: string) => void;
+  onDismissMemoryResult: () => void;
 }) {
   const [page, setPage] = useState<PageId>(initialPage ?? "general");
   const [qqConfigureOpen, setQQConfigureOpen] = useState(false);
@@ -203,7 +215,17 @@ export function SettingsModal({
               />
             )}
             {page === "memory" && (
-              <PageMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
+              <PageMemory
+                entries={memory}
+                detail={memoryDetail}
+                result={memoryResult}
+                onRead={onReadMemory}
+                onWrite={onWriteMemory}
+                onDelete={onDeleteMemory}
+                onExport={onExportMemories}
+                onImport={onImportMemories}
+                onDismissResult={onDismissMemoryResult}
+              />
             )}
             {page === "rules" && <PageRules settings={settings} onSave={onSave} />}
             {page === "billing" && (
@@ -1237,23 +1259,86 @@ function PageSkills({
 function PageMemory({
   entries,
   detail,
+  result,
   onRead,
+  onWrite,
+  onDelete,
+  onExport,
+  onImport,
+  onDismissResult,
 }: {
   entries: MemoryEntryInfo[];
   detail: MemoryDetail | null;
+  result: { ok: boolean; message: string } | null;
   onRead: (path: string) => void;
+  onWrite: (scope: "global" | "project", name: string, description: string, body: string) => void;
+  onDelete: (path: string) => void;
+  onExport: () => void;
+  onImport: (json: string) => void;
+  onDismissResult: () => void;
 }) {
+  const [composing, setComposing] = useState(false);
+  const [name, setName] = useState("");
+  const [scope, setScope] = useState<"global" | "project">("project");
+  const [body, setBody] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const submit = (): void => {
+    const trimmedName = name.trim();
+    const trimmedBody = body.trim();
+    if (!trimmedName || !trimmedBody) return;
+    onWrite(scope, trimmedName, trimmedBody.slice(0, 150), trimmedBody);
+    setName("");
+    setBody("");
+    setComposing(false);
+  };
+
+  const onFile = (e: ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onImport(String(reader.result ?? ""));
+    reader.readAsText(file);
+  };
+
   return (
     <section className="section">
-      <div className="stitle">{t("settings.memorySection")}</div>
+      <div className="stitle">
+        {t("settings.memorySection")}
+        <span className="mem-actions">
+          <button type="button" className="btn small" onClick={onExport}>
+            ⇪ {t("contextPanel.saveLabel")}
+          </button>
+          <button type="button" className="btn small" onClick={() => fileRef.current?.click()}>
+            ⇓ {t("contextPanel.loadLabel")}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: "none" }}
+            onChange={onFile}
+          />
+        </span>
+      </div>
+
+      {result ? (
+        <div className={`mem-result ${result.ok ? "" : "err"}`}>
+          <span>{result.message}</span>
+          <button type="button" className="mem-result-x" onClick={onDismissResult}>
+            ✕
+          </button>
+        </div>
+      ) : null}
+
       {entries.length === 0 ? (
         <div className="muted-card">{t("settings.memoryDesc")}</div>
       ) : (
         <div className="memory-browser">
           <div className="memory-list">
             {entries.map((m) => (
-              <button
-                type="button"
+              <div
                 className="memory-item"
                 data-active={detail?.path === m.path}
                 key={m.path}
@@ -1262,13 +1347,67 @@ function PageMemory({
                 <span className="memory-kind">{m.kind.replace("_", " ")}</span>
                 <span className="memory-name">{m.description || m.name}</span>
                 <span className="memory-path">{m.path}</span>
-              </button>
+                <button
+                  type="button"
+                  className="mem-del"
+                  title={t("contextPanel.deleteMemory")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(m.path);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
             ))}
           </div>
-          <pre className="memory-detail">
-            {detail ? detail.body : t("settings.memoryDesc")}
-          </pre>
+          <pre className="memory-detail">{detail ? detail.body : t("settings.memoryDesc")}</pre>
         </div>
+      )}
+
+      {composing ? (
+        <div className="mem-composer">
+          <div className="mem-composer-row">
+            <input
+              className="mem-input"
+              placeholder={t("contextPanel.newNamePh")}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              spellCheck={false}
+            />
+            <select
+              className="mem-scope"
+              value={scope}
+              onChange={(e) => setScope(e.target.value as "global" | "project")}
+            >
+              <option value="project">{t("contextPanel.scopeProject")}</option>
+              <option value="global">{t("contextPanel.scopeGlobal")}</option>
+            </select>
+          </div>
+          <textarea
+            className="mem-textarea"
+            placeholder={t("contextPanel.newBodyPh")}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+          />
+          <div className="mem-composer-actions">
+            <button
+              type="button"
+              className="btn small"
+              disabled={!name.trim() || !body.trim()}
+              onClick={submit}
+            >
+              {t("contextPanel.saveMemory")}
+            </button>
+            <button type="button" className="btn small ghost" onClick={() => setComposing(false)}>
+              {t("contextPanel.cancelMemory")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="btn small" onClick={() => setComposing(true)}>
+          ＋ {t("contextPanel.newMemory")}
+        </button>
       )}
     </section>
   );

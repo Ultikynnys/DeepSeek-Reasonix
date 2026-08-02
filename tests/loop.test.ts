@@ -737,10 +737,10 @@ describe("CacheFirstLoop (non-streaming)", () => {
   });
 
   it("auto-folds history when promptTokens crosses the normal fold threshold", async () => {
-    // ctxMax sized so the seed log (~90K content tokens) stays under preflight's
-    // 95% threshold AND the fold tailBudget (20%) stays smaller than the log
-    // so fold has a meaningful head to compact. The mocked usage trips post-
-    // response auto-fold without preflight stealing the work.
+    // ctxMax sized so the seed log (~90K content tokens) stays under the
+    // turn-start preflight's 75% threshold AND the fold tailBudget (20%) stays
+    // smaller than the log so fold has a meaningful head to compact. The mocked
+    // usage trips post-response auto-fold without preflight stealing the work.
     DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 200_000;
     const tripPrompt = Math.ceil(
       200_000 *

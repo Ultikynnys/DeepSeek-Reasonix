@@ -36,9 +36,10 @@ export const HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION = 0.1;
 export const HISTORY_FOLD_MIN_SAVINGS_FRACTION = 0.3;
 /** Above this fraction we exit the turn with a summary instead of folding (defense in depth). */
 export const FORCE_SUMMARY_THRESHOLD = 0.8;
-/** Turn-start local estimate above this fraction triggers a pre-iter fold. Covers cases the
- * post-response fold can't (terminal prior turn, fresh session restore, huge user paste). */
-export const TURN_START_FOLD_THRESHOLD = 0.9;
+/** Turn-start local estimate above this fraction triggers a pre-iter fold — terminal prior
+ *  turns, session restores, and huge pastes. Shares HISTORY_FOLD_THRESHOLD (75%) so every
+ *  request ships below the fold line regardless of turn shape. */
+export const TURN_START_FOLD_THRESHOLD = HISTORY_FOLD_THRESHOLD;
 /** Hard deadline for semantic fold summaries so a hung request cannot stall the turn loop. */
 export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
 /** Prepended to fold summary content so the model knows it's a synthesized recap.

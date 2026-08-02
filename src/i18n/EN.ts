@@ -295,7 +295,7 @@ export const EN: TranslationSchema = {
     },
     memory: {
       description: "show / manage pinned memory (REASONIX.md + ~/.reasonix/memory)",
-      argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
+      argsHint: "[list|show <name>|save <name> <text>|forget <name>|clear <scope> confirm]",
     },
     skill: {
       description: "list / run user skills (project + custom + global + builtin)",
@@ -1131,9 +1131,10 @@ export const EN: TranslationSchema = {
       noRoot:
         "no working directory on this session — `/memory` needs a root to resolve REASONIX.md from. (Running in a test harness?)",
       listEmpty:
-        "no user memories yet. The model can call `remember` to save one, or you can create files by hand in ~/.reasonix/memory/global/ or the per-project subdir.",
+        "no user memories yet. Save one: /memory save <name> <text> (or ask the model to `remember` it for you).",
       listHeader: "User memories ({count}):",
-      listFooter: "View body: /memory show <name>   Delete: /memory forget <name>",
+      listFooter:
+        "Show: /memory show <name>   Save: /memory save <name> <text>   Delete: /memory forget <name>",
       showUsage: "usage: /memory show <name>  or  /memory show <scope>/<name>",
       showNotFound: "no memory found: {target}",
       showFailed: "show failed: {reason}",
@@ -1142,6 +1143,13 @@ export const EN: TranslationSchema = {
       forgetInfo: "▸ forgot {scope}/{name}. Next /new or launch won't see it.",
       forgetFailed: "could not forget {scope}/{name} (already gone?)",
       forgetError: "forget failed: {reason}",
+      notFoundSuggest: "no memory found: {target}. Did you mean: {candidates}",
+      saveUsage:
+        "usage: /memory save <name> <text…>  [--scope global|project] [--type <t>] [--priority low|medium|high] [--description <one-liner>] [--expires project_end]",
+      saveNoProject:
+        "project scope unavailable in this session (no working directory). Use --scope global, or run `reasonix code` for project-scoped memory.",
+      saved: "▸ saved ({scope}/{name}): {description}",
+      saveError: "save failed: {reason}",
       clearUsage: "usage: /memory clear <global|project> confirm",
       clearConfirm:
         "about to delete every memory in scope={scope}. Re-run with the word 'confirm' to proceed: /memory clear {scope} confirm",
@@ -1151,13 +1159,14 @@ export const EN: TranslationSchema = {
       layerProject: "  1. {file} — committable team memory (in the repo).",
       layerGlobal: "  2. ~/.reasonix/memory/global/ — your cross-project private memory.",
       layerProjectHash: "  3. ~/.reasonix/memory/<project-hash>/ — this project's private memory.",
-      askModel: "Ask the model to `remember` something, or hand-edit files directly.",
+      askModel:
+        "Save: /memory save <name> <text> — or ask the model to `remember` it. Remove: /memory forget <name>.",
       changesNote:
         "Changes take effect on next /new or launch — the system prompt is hashed once per session to keep the prefix cache warm.",
       subcommands:
-        "Subcommands: /memory list | /memory show <name> | /memory forget <name> | /memory clear <scope> confirm",
+        "Subcommands: /memory list | /memory show <name> | /memory save <name> <text> | /memory forget <name> | /memory clear <scope> confirm",
       changesNoteShort:
-        "Changes take effect on next /new or launch. Subcommands: /memory list | show | forget | clear",
+        "Changes take effect on next /new or launch. Subcommands: /memory list | show <name> | save <name> <text> | forget <name> | clear",
     },
     mcp: {
       noServers:
@@ -1286,6 +1295,7 @@ export const EN: TranslationSchema = {
     editsLabel: "edits:",
     mcpLoading: "MCP",
     ctx: "ctx",
+    compactionLimits: "fold@{fold} \u00b7 force@{force}",
     shortcutsHint: "Ctrl+P shortcuts",
   },
   editMode: {
@@ -1515,7 +1525,7 @@ export const EN: TranslationSchema = {
   },
   ctxBreakdown: {
     title: "\u25a3 context",
-    compactHint: "  /compact folds (auto at 50%) \u00b7 /new wipes log",
+    compactHint: "  /compact folds (auto at 75%) \u00b7 /new wipes log",
     topTools: "  top tool results by cost ({count}):",
     msg: "msg",
     turnLabel: "turn",

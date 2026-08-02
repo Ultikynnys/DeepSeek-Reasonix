@@ -200,6 +200,8 @@ export type CtxBreakdownEvent = {
   reservedTokens: number;
   /** Current log token count (real-time) — sent after /compact to refresh the meter. */
   logTokens?: number;
+  /** Model context cap — denominator + compaction-limit ticks for the meter. */
+  ctxMax?: number;
 };
 
 export type MemoryEntryInfo = {
@@ -224,6 +226,17 @@ export type MemoryDetail = MemoryEntryInfo & {
 export type MemoryDetailEvent = {
   type: "$memory_detail";
   detail: MemoryDetail;
+};
+
+export type MemoryResultEvent = {
+  type: "$memory_result";
+  ok: boolean;
+  message: string;
+};
+
+export type MemoryExportEvent = {
+  type: "$memory_export";
+  text: string;
 };
 
 export type RetryResultEvent = { type: "$retry_result"; text: string };
@@ -510,6 +523,8 @@ export type IncomingEvent = { tabId?: string } & (
   | CtxBreakdownEvent
   | MemoryEvent
   | MemoryDetailEvent
+  | MemoryResultEvent
+  | MemoryExportEvent
   | JobsEvent
   | UserMessageEvent
   | ModelTurnStartedEvent
@@ -541,6 +556,10 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "session_import_scan" }
   | { cmd: "session_import_bulk"; sources: ExternalSessionSource[] }
   | { cmd: "memory_read"; path: string }
+  | { cmd: "memory_write"; scope: "global" | "project"; name: string; description: string; body: string; type?: string; priority?: "low" | "medium" | "high" }
+  | { cmd: "memory_delete"; path: string }
+  | { cmd: "memory_export" }
+  | { cmd: "memory_import"; json: string }
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
   | { cmd: "settings_get" }

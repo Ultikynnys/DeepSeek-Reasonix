@@ -457,6 +457,8 @@ export interface TranslationSchema {
     mcpLoading: string;
     /** Word used in the context-usage pill (rendered as `ctx 72% · 144K/200K`). */
     ctx: string;
+    /** Auto-compaction limits shown on the ctx pill (rendered as `fold@225K · force@240K`). */
+    compactionLimits: string;
     /** Hint shown next to the ⚑ icon — triggers the shortcut help modal. */
     shortcutsHint: string;
   };

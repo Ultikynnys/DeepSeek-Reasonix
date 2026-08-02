@@ -222,7 +222,8 @@ export const de: TranslationSchema = {
     },
     memory: {
       ...EN.slash.memory,
-      argsHint: "[Liste|<Name> anzeigen|<Name> vergessen|<Bereich> löschen – Bestätigen]",
+      argsHint:
+        "[Liste|speichern <Name> <Text>|<Name> anzeigen|<Name> vergessen|<Bereich> löschen – Bestätigen]",
       description: "Pinned Memory anzeigen / verwalten (REASONIX.md + ~/.reasonix/memory)",
     },
     skill: {
@@ -1602,7 +1603,7 @@ export const de: TranslationSchema = {
   ctxBreakdown: {
     ...EN.ctxBreakdown,
     title: "▣ Kontext",
-    compactHint: "  /compact faltet (automatisch bei 50 %) · /new löscht Log",
+    compactHint: "  /compact faltet (automatisch bei 75 %) · /new löscht Log",
     topTools: "  Top-Tool-Ergebnisse nach Kosten ({count}):",
     msg: "Nachr",
     turnLabel: "Turn",

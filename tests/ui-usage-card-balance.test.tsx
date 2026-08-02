@@ -88,7 +88,8 @@ describe("UsageCard - balance currency symbol", () => {
     expect(text).toContain("¥6.55");
   });
 
-  // Turn/session costs in the card must follow wallet currency, not unconditional ¥.
+  // Turn/session costs in the card follow costDisplayCurrency — never the
+  // wallet currency. Unset → USD.
   // (Header renders `formatCost(cost)`; body renders `formatCost(sessionCost, …, 3)`.)
 
   it("full card: USD wallet renders $ for turn cost (header) AND session cost (body)", () => {
@@ -112,5 +113,19 @@ describe("UsageCard - balance currency symbol", () => {
     } as any);
     const text = renderCard(card);
     expect(text).toContain("$0.0308");
+  });
+
+  it("full card: CNY wallet still renders $ for turn cost (header) AND session cost (body)", () => {
+    const card = baseCard({
+      cost: 0.0308,
+      sessionCost: 0.064,
+      balance: 6.55,
+      balanceCurrency: "CNY",
+    } as any);
+    const text = renderCard(card);
+    expect(text).toContain("$0.0308");
+    expect(text).toContain("$0.064");
+    // balance itself stays in the wallet's native currency
+    expect(text).toContain("¥6.55");
   });
 });

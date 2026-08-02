@@ -1,9 +1,15 @@
 import { basename } from "node:path";
 import { t } from "@/i18n/index.js";
 import { PROJECT_MEMORY_FILE, memoryEnabled, readProjectMemory } from "@/memory/project.js";
-import { type MemoryScope, MemoryStore, effectivePriority } from "@/memory/user.js";
+import {
+  type MemoryExpires,
+  type MemoryPriority,
+  type MemoryScope,
+  MemoryStore,
+  effectivePriority,
+} from "@/memory/user.js";
 import type { SlashHandler } from "../dispatch.js";
-import { resolveMemoryTarget } from "../helpers.js";
+import { resolveMemoryTarget, suggestMemoryTargets } from "../helpers.js";
 
 /** Parses optional flags out of a slash-arg list. Returns the type filter (`--type X` or `--type=X`) and the residue without those tokens. */
 function pickTypeFlag(args: string[]): { type: string | null; rest: string[] } {
@@ -27,6 +33,69 @@ function pickTypeFlag(args: string[]): { type: string | null; rest: string[] } {
     rest.push(a);
   }
   return { type, rest };
+}
+
+interface SaveFlags {
+  scope?: MemoryScope;
+  type?: string;
+  priority?: MemoryPriority;
+  description?: string;
+  expires?: MemoryExpires;
+  rest: string[];
+}
+
+/** `/memory save` flag parser — `--flag value`, `--flag=value`, or bare words. */
+function parseSaveFlags(args: string[]): SaveFlags {
+  const out: SaveFlags = { rest: [] };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] ?? "";
+    const flag = a.match(/^--(\w+)(?:=(.+))?$/);
+    if (!flag) {
+      out.rest.push(a);
+      continue;
+    }
+    const key = flag[1]!;
+    const inline = flag[2];
+    const take = (): string | null => {
+      if (inline !== undefined) return inline;
+      const next = args[i + 1];
+      if (next && !next.startsWith("--")) {
+        i++;
+        return next;
+      }
+      return null;
+    };
+    const val = take();
+    switch (key) {
+      case "scope":
+        if (val === "global" || val === "project") out.scope = val;
+        break;
+      case "type":
+        if (val) out.type = val;
+        break;
+      case "priority":
+        if (val === "low" || val === "medium" || val === "high") out.priority = val;
+        break;
+      case "description":
+        if (val) out.description = val;
+        break;
+      case "expires":
+        if (val === "project_end") out.expires = val;
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+/** One-line index description when `--description` isn't given: first ~120 chars of the body, clipped at a word boundary. */
+function deriveDescription(body: string): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  if (flat.length <= 120) return flat;
+  const cut = flat.slice(0, 120);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${cut.slice(0, lastSpace > 60 ? lastSpace : 120)}…`;
 }
 
 const memory: SlashHandler = (args, _loop, ctx) => {
@@ -71,7 +140,7 @@ const memory: SlashHandler = (args, _loop, ctx) => {
     const target = args[1];
     if (!target) return { info: t("handlers.memory.showUsage") };
     const resolved = resolveMemoryTarget(store, target);
-    if (!resolved) return { info: t("handlers.memory.showNotFound", { target }) };
+    if (!resolved) return { info: notFoundInfo(t, store, target, "handlers.memory.showNotFound") };
     try {
       const entry = store.read(resolved.scope, resolved.name);
       return {
@@ -94,7 +163,8 @@ const memory: SlashHandler = (args, _loop, ctx) => {
     const target = args[1];
     if (!target) return { info: t("handlers.memory.forgetUsage") };
     const resolved = resolveMemoryTarget(store, target);
-    if (!resolved) return { info: t("handlers.memory.forgetNotFound", { target }) };
+    if (!resolved)
+      return { info: notFoundInfo(t, store, target, "handlers.memory.forgetNotFound") };
     try {
       const ok = store.delete(resolved.scope, resolved.name);
       return {
@@ -104,6 +174,36 @@ const memory: SlashHandler = (args, _loop, ctx) => {
       };
     } catch (err) {
       return { info: t("handlers.memory.forgetError", { reason: (err as Error).message }) };
+    }
+  }
+
+  if (sub === "save" || sub === "add") {
+    const flags = parseSaveFlags(args.slice(1));
+    const name = flags.rest[0] ?? "";
+    const body = flags.rest.slice(1).join(" ").trim();
+    if (!name || !body) return { info: t("handlers.memory.saveUsage") };
+    const hasProject = store.hasProjectScope();
+    const scope = flags.scope ?? (hasProject ? "project" : "global");
+    if (scope === "project" && !hasProject) {
+      return { info: t("handlers.memory.saveNoProject") };
+    }
+    const type = flags.type ?? (scope === "project" ? "project" : "user");
+    const description = flags.description ?? deriveDescription(body);
+    try {
+      store.write({
+        name,
+        scope,
+        type,
+        description,
+        body,
+        ...(flags.priority ? { priority: flags.priority } : {}),
+        ...(flags.expires ? { expires: flags.expires } : {}),
+      });
+      return {
+        info: `${t("handlers.memory.saved", { scope, name, description })}\n${t("handlers.memory.changesNoteShort")}`,
+      };
+    } catch (err) {
+      return { info: t("handlers.memory.saveError", { reason: (err as Error).message }) };
     }
   }
 
@@ -190,5 +290,18 @@ const memory: SlashHandler = (args, _loop, ctx) => {
   parts.push("", t("handlers.memory.changesNoteShort"));
   return { info: parts.join("\n") };
 };
+
+/** "no memory found" + a "did you mean" list when the name doesn't resolve exactly. */
+function notFoundInfo(
+  tr: (path: string, params?: Record<string, string | number>) => string,
+  store: MemoryStore,
+  target: string,
+  notFoundKey: string,
+): string {
+  const candidates = suggestMemoryTargets(store, target);
+  return candidates.length > 0
+    ? tr("handlers.memory.notFoundSuggest", { target, candidates: candidates.join(", ") })
+    : tr(notFoundKey, { target });
+}
 
 export const handlers: Record<string, SlashHandler> = { memory };

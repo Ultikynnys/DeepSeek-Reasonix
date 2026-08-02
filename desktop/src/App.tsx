@@ -226,6 +226,8 @@ export type UsageStats = {
   reservedTokens: number;
   /** Current conversation log tokens, refreshed by the desktop sidecar. */
   liveLogTokens: number;
+  /** Model context cap — meter denominator + compaction-limit ticks. */
+  ctxMax?: number;
 };
 
 export type SessionInfo = {
@@ -312,6 +314,10 @@ type State = {
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
+  /** Outcome of the last memory write/delete/import RPC — shown as a transient banner in the memory panel. */
+  memoryResult: { ok: boolean; message: string } | null;
+  /** JSON bundle produced by memory_export — rendered in a copy modal. */
+  memoryExport: string | null;
   jobs: JobInfo[];
   /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
   activeSkill: SkillOrigin | null;
@@ -348,6 +354,8 @@ type Action =
   | { t: "resolve_checkpoint"; id: number; verdict: CheckpointVerdict }
   | { t: "resolve_revision"; id: number; verdict: RevisionVerdict }
   | { t: "dismiss_plan" }
+  | { t: "dismiss_memory_result" }
+  | { t: "dismiss_memory_export" }
   | { t: "dismiss_error"; id: string }
   | { t: "mention_results"; results: MentionResults }
   | { t: "mention_preview"; preview: MentionPreviewState }
@@ -559,6 +567,10 @@ export function reduce(state: State, action: Action): State {
     }
     case "dismiss_plan":
       return { ...state, activePlan: null };
+    case "dismiss_memory_result":
+      return { ...state, memoryResult: null };
+    case "dismiss_memory_export":
+      return { ...state, memoryExport: null };
     case "dismiss_error":
       return {
         ...state,
@@ -907,6 +919,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       if (typeof ev.logTokens === "number") {
         next.liveLogTokens = ev.logTokens;
       }
+      if (typeof ev.ctxMax === "number") {
+        next.ctxMax = ev.ctxMax;
+      }
       return { ...state, usage: next };
     }
     case "$memory":
@@ -920,6 +935,10 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "$memory_detail":
       return { ...state, memoryDetail: ev.detail };
+    case "$memory_result":
+      return { ...state, memoryResult: { ok: ev.ok, message: ev.message } };
+    case "$memory_export":
+      return { ...state, memoryExport: ev.text };
     case "$jobs":
       return { ...state, jobs: ev.items };
     case "$balance":
@@ -1381,6 +1400,8 @@ function TabRuntime({
     sessionFiles: [],
     memory: [],
     memoryDetail: null,
+    memoryResult: null,
+    memoryExport: null,
     jobs: [],
     activeSkill: null,
     queuedSends: [],
@@ -2539,7 +2560,15 @@ function TabRuntime({
           sessionFiles={state.sessionFiles}
           memory={state.memory}
           memoryDetail={state.memoryDetail}
+          memoryResult={state.memoryResult}
           onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
+          onWriteMemory={(scope, name, description, body) =>
+            sendRpc({ cmd: "memory_write", scope, name, description, body })
+          }
+          onDeleteMemory={(path) => sendRpc({ cmd: "memory_delete", path })}
+          onExportMemories={() => sendRpc({ cmd: "memory_export" })}
+          onImportMemories={(json) => sendRpc({ cmd: "memory_import", json })}
+          onDismissMemoryResult={() => dispatch({ t: "dismiss_memory_result" })}
         />
 
         <StatusBar
@@ -2606,6 +2635,7 @@ function TabRuntime({
             skills={state.skills}
             memory={state.memory}
             memoryDetail={state.memoryDetail}
+            memoryResult={state.memoryResult}
             qq={state.qq}
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
@@ -2621,6 +2651,13 @@ function TabRuntime({
             onAddMcpSpec={addMcpSpec}
             onRemoveMcpSpec={removeMcpSpec}
             onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
+            onWriteMemory={(scope, name, description, body) =>
+              sendRpc({ cmd: "memory_write", scope, name, description, body })
+            }
+            onDeleteMemory={(path) => sendRpc({ cmd: "memory_delete", path })}
+            onExportMemories={() => sendRpc({ cmd: "memory_export" })}
+            onImportMemories={(json) => sendRpc({ cmd: "memory_import", json })}
+            onDismissMemoryResult={() => dispatch({ t: "dismiss_memory_result" })}
           />
         ) : null}
 
@@ -2631,6 +2668,13 @@ function TabRuntime({
           onStop={(jobId) => sendRpc({ cmd: "jobs_stop", jobId })}
           onStopAll={() => sendRpc({ cmd: "jobs_stop_all" })}
         />
+
+        {state.memoryExport !== null ? (
+          <MemoryExportModal
+            text={state.memoryExport}
+            onClose={() => dispatch({ t: "dismiss_memory_export" })}
+          />
+        ) : null}
 
         <Toast message={toast} />
 
@@ -2645,6 +2689,63 @@ function WinMinimize() {
     <svg width="10" height="1" viewBox="0 0 10 1" aria-hidden>
       <rect width="10" height="1" fill="currentColor" />
     </svg>
+  );
+}
+
+/** Export-result modal: shows the memory bundle JSON with a copy button (clipboard + execCommand fallback). */
+function MemoryExportModal({
+  text,
+  onClose,
+}: {
+  text: string;
+  onClose: () => void;
+}): React.ReactElement {
+  const [copied, setCopied] = useState(false);
+  const copy = async (): Promise<void> => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — the textarea stays selectable so manual copy works */
+    }
+  };
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal memory-export-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="modal-title">{t("memoryExport.title")}</div>
+          <button type="button" className="iconbtn" onClick={onClose} title={t("memoryExport.close")}>
+            ✕
+          </button>
+        </div>
+        <p className="muted">{t("memoryExport.hint")}</p>
+        <textarea
+          className="memory-export-text"
+          readOnly
+          value={text}
+          spellCheck={false}
+          onFocus={(e) => e.currentTarget.select()}
+        />
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={copy}>
+            {copied ? t("memoryExport.copied") : t("memoryExport.copy")}
+          </button>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            {t("memoryExport.close")}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 function WinMaximize() {

@@ -356,29 +356,29 @@ export const USD_TO_CNY = 7.2;
 
 const SYMBOL: Record<string, string> = { USD: "$", CNY: "¥" };
 
-/** Format an amount already in `currency`. Undefined currency → CNY (matches pre-fix behavior). */
+/** Format an amount already in `currency`. Undefined currency → USD. */
 export function formatBalance(
   amount: number,
   currency?: string,
   opts?: { fractionDigits?: number; label?: boolean },
 ): string {
-  const cur = currency ?? "CNY";
+  const cur = currency ?? "USD";
   const sym = SYMBOL[cur];
   const digits = opts?.fractionDigits ?? 2;
   const body = sym ? `${sym}${amount.toFixed(digits)}` : `${cur} ${amount.toFixed(digits)}`;
   return opts?.label ? `w ${body}` : body;
 }
 
-/** Format an internal USD cost in the wallet's display currency. Undefined currency → CNY. */
+/** Format an internal USD cost in the display currency. Undefined currency → USD. */
 export function formatCost(costUsd: number, currency?: string, fractionDigits = 4): string {
-  const cur = currency ?? "CNY";
+  const cur = currency ?? "USD";
   const amount = cur === "CNY" ? costUsd * USD_TO_CNY : costUsd;
   return formatBalance(amount, cur, { fractionDigits });
 }
 
 /** Threshold color for a wallet balance. USD is converted to CNY before the threshold check. */
 export function balanceColor(amount: number, currency?: string): Color {
-  const cny = (currency ?? "CNY") === "USD" ? amount * USD_TO_CNY : amount;
+  const cny = (currency ?? "USD") === "USD" ? amount * USD_TO_CNY : amount;
   if (cny < 5) return TONE.err;
   if (cny < 20) return TONE.warn;
   return TONE.brand;

@@ -2,7 +2,9 @@ import { spawnSync } from "node:child_process";
 import type { MemoryScope, MemoryStore } from "../../../memory/user.js";
 import type { SlashResult } from "./types.js";
 
-/** Bare names try project scope first (more specific) before falling back to global. */
+/** Bare names try project scope first (more specific) before falling back to global.
+ *  Exact match wins; a single unique case-insensitive prefix match also resolves
+ *  (so `/memory show budget` finds `budget-cap` without tab-completing the name). */
 export function resolveMemoryTarget(
   store: MemoryStore,
   raw: string,
@@ -25,7 +27,23 @@ export function resolveMemoryTarget(
       /* next scope */
     }
   }
+  const needle = raw.toLowerCase();
+  const matches: Array<{ scope: MemoryScope; name: string }> = [];
+  for (const e of store.list()) {
+    if (e.name.toLowerCase().startsWith(needle)) matches.push({ scope: e.scope, name: e.name });
+  }
+  if (matches.length === 1) return matches[0] ?? null;
   return null;
+}
+
+/** Case-insensitive substring candidates for the "did you mean" fallback in show/forget. */
+export function suggestMemoryTargets(store: MemoryStore, raw: string): string[] {
+  const needle = raw.toLowerCase();
+  const out: string[] = [];
+  for (const e of store.list()) {
+    if (e.name.toLowerCase().includes(needle)) out.push(`${e.scope}/${e.name}`);
+  }
+  return out.slice(0, 5);
 }
 
 export function appendSection(

@@ -485,8 +485,8 @@ describe("formatBalance", () => {
     expect(formatBalance(6.55, "CNY")).toBe("¥6.55");
   });
 
-  it("undefined currency defaults to CNY (matches pre-fix unconditional ¥)", () => {
-    expect(formatBalance(0.91)).toBe("¥0.91");
+  it("undefined currency defaults to USD", () => {
+    expect(formatBalance(0.91)).toBe("$0.91");
   });
 
   it("unknown currency falls back to ISO-code prefix", () => {
@@ -555,8 +555,8 @@ describe("balanceColor", () => {
     expect(balanceColor(3.0, "USD")).toBe("#7dd3fc"); // ≈ ¥21.60 → brand
   });
 
-  it("undefined currency defaults to CNY (matches pre-fix behavior)", () => {
-    expect(balanceColor(8)).toBe("#fbbf24");
+  it("undefined currency defaults to USD (8 USD ≈ ¥57.6 → brand)", () => {
+    expect(balanceColor(8)).toBe("#7dd3fc");
   });
 });
 
@@ -571,7 +571,7 @@ describe("formatCost (turn/session — currency-aware)", () => {
     expect(formatCost(0.064, "CNY", 3)).toBe("¥0.461");
   });
 
-  it("undefined currency defaults to CNY (backward compat)", () => {
-    expect(formatCost(0.0308)).toBe("¥0.2218");
+  it("undefined currency defaults to USD (no conversion)", () => {
+    expect(formatCost(0.0308)).toBe("$0.0308");
   });
 });

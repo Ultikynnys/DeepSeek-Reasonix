@@ -57,9 +57,9 @@ describe("SessionPicker — cost column follows wallet currency, not hardcoded �
     expect(text).not.toContain("¥");
   });
 
-  it("neither prop nor meta: falls back to ¥ (unchanged from pre-fix)", () => {
+  it("neither prop nor meta: falls back to $ (USD default)", () => {
     const text = renderPicker([makeSession()], undefined);
-    expect(text).toContain("¥0.36");
-    expect(text).not.toContain("$0.05");
+    expect(text).toContain("$0.05");
+    expect(text).not.toContain("¥");
   });
 });

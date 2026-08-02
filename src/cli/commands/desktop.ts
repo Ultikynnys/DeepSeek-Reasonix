@@ -72,7 +72,11 @@ import {
   type MemoryEntryDetail,
   type MemoryEntryInfo,
   collectMemoryEntriesForWorkspace,
+  deleteMemoryEntry,
+  exportMemories,
+  importMemories,
   readMemoryEntryDetail,
+  writeMemoryEntry,
 } from "../../desktop/memory-browser.js";
 import {
   loadDesktopQQState,
@@ -115,6 +119,7 @@ import {
   importExternalSessions,
 } from "../../session-import.js";
 import { SkillStore } from "../../skills.js";
+import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS } from "../../telemetry/stats.js";
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage } from "../../types.js";
@@ -149,6 +154,18 @@ type InMessage = { tabId?: string } & (
   | { cmd: "session_import_scan" }
   | { cmd: "session_import_bulk"; sources: ExternalSessionSource[] }
   | { cmd: "memory_read"; path: string }
+  | {
+      cmd: "memory_write";
+      scope: "global" | "project";
+      name: string;
+      description: string;
+      body: string;
+      type?: string;
+      priority?: "low" | "medium" | "high";
+    }
+  | { cmd: "memory_delete"; path: string }
+  | { cmd: "memory_export" }
+  | { cmd: "memory_import"; json: string }
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
   | { cmd: "settings_get" }
@@ -460,6 +477,8 @@ interface CtxBreakdownEvent {
   reservedTokens: number;
   /** Current log token count (real-time) — sent after /compact to refresh the meter. */
   logTokens?: number;
+  /** Model context cap — denominator + compaction-limit ticks for the meter. */
+  ctxMax?: number;
 }
 
 interface MemoryEvent {
@@ -470,6 +489,17 @@ interface MemoryEvent {
 interface MemoryDetailEvent {
   type: "$memory_detail";
   detail: MemoryEntryDetail;
+}
+
+interface MemoryResultEvent {
+  type: "$memory_result";
+  ok: boolean;
+  message: string;
+}
+
+interface MemoryExportEvent {
+  type: "$memory_export";
+  text: string;
 }
 
 interface SkillInfo {
@@ -558,6 +588,8 @@ type EmittableEvent =
   | CtxBreakdownEvent
   | MemoryEvent
   | MemoryDetailEvent
+  | MemoryResultEvent
+  | MemoryExportEvent
   | JobsEvent;
 
 const STDOUT_BACKPRESSURE_WAIT = new Int32Array(new SharedArrayBuffer(4));
@@ -929,7 +961,17 @@ function emitCtxBreakdown(tab: Tab): void {
       }
     }
   }
-  emit({ type: "$ctx_breakdown", reservedTokens: sys + tools, logTokens }, tab.id);
+  // ctxMax drives the panel meter's denominator + compaction-limit ticks —
+  // keep it in sync with the loop's context cap (DEEPSEEK_CONTEXT_TOKENS).
+  emit(
+    {
+      type: "$ctx_breakdown",
+      reservedTokens: sys + tools,
+      logTokens,
+      ctxMax: DEEPSEEK_CONTEXT_TOKENS[tab.currentModel] ?? DEFAULT_CONTEXT_TOKENS,
+    },
+    tab.id,
+  );
 }
 
 function emitSkills(tab: Tab): void {
@@ -2507,6 +2549,76 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emit({ type: "$memory_detail", detail }, tab.id);
       } catch (err) {
         emit({ type: "$error", message: `memory_read failed: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "memory_write") {
+      try {
+        writeMemoryEntry(
+          {
+            scope: msg.scope,
+            name: msg.name,
+            description: msg.description,
+            body: msg.body,
+            ...(msg.type ? { type: msg.type } : {}),
+            ...(msg.priority ? { priority: msg.priority } : {}),
+          },
+          tab.rootDir,
+        );
+        emitMemory(tab);
+        emit(
+          { type: "$memory_result", ok: true, message: `saved ${msg.scope}/${msg.name}` },
+          tab.id,
+        );
+      } catch (err) {
+        emit({ type: "$memory_result", ok: false, message: (err as Error).message }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "memory_delete") {
+      try {
+        const ok = deleteMemoryEntry(msg.path, tab.rootDir);
+        emitMemory(tab);
+        emit(
+          {
+            type: "$memory_result",
+            ok,
+            message: ok ? "memory deleted" : "memory not found",
+          },
+          tab.id,
+        );
+      } catch (err) {
+        emit({ type: "$memory_result", ok: false, message: (err as Error).message }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "memory_export") {
+      try {
+        const bundle = exportMemories(tab.rootDir);
+        emit({ type: "$memory_export", text: JSON.stringify(bundle, null, 2) }, tab.id);
+      } catch (err) {
+        emit(
+          { type: "$error", message: `memory_export failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
+    if (msg.cmd === "memory_import") {
+      try {
+        const result = importMemories(JSON.parse(msg.json), tab.rootDir);
+        emitMemory(tab);
+        const skipped = result.skipped.length > 0 ? ` (skipped ${result.skipped.length})` : "";
+        emit(
+          {
+            type: "$memory_result",
+            ok: true,
+            message: `imported ${result.imported} memory${result.imported === 1 ? "" : "ies"}${skipped}`,
+          },
+          tab.id,
+        );
+      } catch (err) {
+        emit({ type: "$memory_result", ok: false, message: (err as Error).message }, tab.id);
       }
       return;
     }

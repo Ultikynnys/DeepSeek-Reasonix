@@ -79,20 +79,20 @@ describe.skip("StatusRow — turn cost currency", () => {
     expect(text).not.toContain("wallet ");
   });
 
-  it("CNY wallet: turn cost shows ¥ (USD→CNY)", async () => {
+  it("CNY wallet: turn cost stays $ (costs don't inherit wallet currency)", async () => {
     const text = await renderStatusRow({
       cost: 0.0308,
       balance: 6.55,
       balanceCurrency: "CNY",
     } as any);
-    expect(text).toContain("¥0.2218 turn");
+    expect(text).toContain("$0.0308 turn");
     expect(text).not.toContain(" session ");
     expect(text).not.toContain("wallet ");
   });
 
-  it("no wallet info: turn cost defaults to ¥", async () => {
+  it("no wallet info: turn cost defaults to $", async () => {
     const text = await renderStatusRow({ cost: 0.0308, balance: undefined } as any);
-    expect(text).toContain("¥0.2218 turn");
+    expect(text).toContain("$0.0308 turn");
     expect(text).not.toContain("wallet ");
   });
 

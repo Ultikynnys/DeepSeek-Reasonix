@@ -29,6 +29,10 @@ const CTX_TOKENS_MIN_COLS = 90;
 const CTX_BAR_MIN_COLS = 110;
 const CTX_BAR_CELLS = 8;
 
+/** Auto-compaction thresholds (context-manager.ts) — drawn as zones on the ctx bar. */
+const COMPACT_FOLD_RATIO = 0.75;
+const COMPACT_FORCE_RATIO = 0.8;
+
 const DEFAULT_STATUS_BAR_CONFIG: StatusBarConfig = {
   showBalance: true,
   showSessionCost: true,
@@ -96,7 +100,7 @@ export function StatusRow({
                 {"▸ "}
               </Text>
               <Text bold color={FG.body}>
-                {`${formatCost(status.cost, status.costDisplayCurrency ?? status.balanceCurrency)} ${t("statusBar.turn")}`}
+                {`${formatCost(status.cost, status.costDisplayCurrency)} ${t("statusBar.turn")}`}
               </Text>
             </Pill>
           </>
@@ -181,27 +185,46 @@ function CtxUsagePill({
 }): React.ReactElement {
   const ratio = cap > 0 ? Math.min(1, tokens / cap) : 0;
   const pct = Math.round(ratio * 100);
-  const color = ratio >= 0.8 ? TONE.err : ratio >= 0.5 ? TONE.warn : TONE.ok;
+  const color =
+    ratio >= COMPACT_FORCE_RATIO ? TONE.err : ratio >= COMPACT_FOLD_RATIO ? TONE.warn : TONE.ok;
   const showTokens = cols >= CTX_TOKENS_MIN_COLS;
   const showBar = cols >= CTX_BAR_MIN_COLS;
   const filled = Math.round(CTX_BAR_CELLS * ratio);
+  // Cells past the compaction thresholds render with distinct zone glyphs so
+  // the auto-fold (75%) and forced-summary (80%) limits are visible on the bar.
+  const foldCell = COMPACT_FOLD_RATIO * CTX_BAR_CELLS;
+  const forceCell = COMPACT_FORCE_RATIO * CTX_BAR_CELLS;
+  let bar = "";
+  for (let i = 0; i < CTX_BAR_CELLS; i++) {
+    if (i >= forceCell)
+      bar += "\u2593"; // ▓ — past the forced-summary limit
+    else if (i >= foldCell)
+      bar += "\u2592"; // ▒ — in the auto-fold band
+    else bar += i < filled ? GLYPH.block : GLYPH.shade1;
+  }
+  const fmtCompact = (n: number): string => (n >= 1000 ? `${Math.round(n / 1000)}K` : String(n));
   return (
     <>
       <Text color={FG.meta} wrap="truncate">{`${t("statusBar.ctx")} `}</Text>
       {showBar && (
         <>
           <Text color={color} wrap="truncate">
-            {GLYPH.block.repeat(filled)}
-          </Text>
-          <Text color={FG.faint} wrap="truncate">
-            {GLYPH.shade1.repeat(CTX_BAR_CELLS - filled)}
+            {bar}
           </Text>
           <Text wrap="truncate"> </Text>
         </>
       )}
       <Text color={color} wrap="truncate">{`${pct}%`}</Text>
       {showTokens && (
-        <Text color={FG.faint}>{` · ${formatTokens(tokens)}/${formatTokens(cap)}`}</Text>
+        <>
+          <Text color={FG.faint}>{` · ${formatTokens(tokens)}/${formatTokens(cap)}`}</Text>
+          <Text color={TONE.warn}>
+            {` · ${t("statusBar.compactionLimits", {
+              fold: fmtCompact(Math.floor(cap * COMPACT_FOLD_RATIO)),
+              force: fmtCompact(Math.floor(cap * COMPACT_FORCE_RATIO)),
+            })}`}
+          </Text>
+        </>
       )}
     </>
   );

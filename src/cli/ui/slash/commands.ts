@@ -53,7 +53,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     cmd: "compact",
     group: "chat",
     summary:
-      "fold older turns into a summary message (cache-safe). Auto-fires at 50% ctx; this is the manual trigger.",
+      "fold older turns into a summary message (cache-safe). Auto-fires at 75% of the context cap; this is the manual trigger.",
   },
   {
     cmd: "stop",
@@ -165,7 +165,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "memory",
     group: "extend",
-    argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
+    argsHint: "[list|show <name>|save <name> <text>|forget <name>|clear <scope> confirm]",
     summary: "show / manage pinned memory (REASONIX.md + ~/.reasonix/memory)",
   },
   {

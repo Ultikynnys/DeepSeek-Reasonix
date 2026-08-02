@@ -33,12 +33,14 @@ export function pricingFor(model: string, path?: string): ModelPricing | undefin
 /** Reference Claude Sonnet 4.6 pricing (USD per 1M tokens). */
 export const CLAUDE_SONNET_PRICING = { input: 3.0, output: 15.0 };
 
-/** Prompt-side window only; completion caps live server-side and don't affect this gauge. */
+/** Prompt-side window only; completion caps live server-side. Deliberately below the API's
+ *  1M-token ceiling: quality degrades past ~300K, and compaction thresholds in
+ *  context-manager.ts are fractions of this cap (fold at 0.75 × 300K = 225K). */
 export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
-  "deepseek-v4-flash": 1_000_000,
-  "deepseek-v4-pro": 1_000_000,
-  "deepseek-chat": 1_000_000,
-  "deepseek-reasoner": 1_000_000,
+  "deepseek-v4-flash": 300_000,
+  "deepseek-v4-pro": 300_000,
+  "deepseek-chat": 300_000,
+  "deepseek-reasoner": 300_000,
 };
 
 /** Fallback when the caller's model id isn't in the table — safe lower bound. */

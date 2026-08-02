@@ -41,9 +41,9 @@ describe("StatsPanel — top-bar cost + balance follow wallet currency", () => {
     expect(text).toContain("[w ¥6.55]");
   });
 
-  it("no wallet: cost defaults to ¥ (matches pre-fix unconditional ¥)", () => {
+  it("no wallet: cost defaults to $", () => {
     const text = renderPanel(null);
-    expect(text).toContain("[¥0.2218]");
+    expect(text).toContain("[$0.0308]");
     expect(text).not.toContain("[w ");
   });
 });

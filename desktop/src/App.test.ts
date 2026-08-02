@@ -74,6 +74,8 @@ function initialState(): Parameters<typeof reduce>[0] {
     sessionFiles: [],
     memory: [],
     memoryDetail: null,
+    memoryResult: null,
+    memoryExport: null,
     jobs: [],
     activeSkill: null,
     queuedSends: [],

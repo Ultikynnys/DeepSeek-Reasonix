@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
@@ -7,7 +8,14 @@ import { PanelErrorBoundary } from "./error-boundary";
 
 type Tab = "files" | "tools" | "memory" | "rules";
 
-const CONTEXT_MAX_TOKENS = 1_000_000;
+/** Fallback until the server reports the real cap via $ctx_breakdown — the V4 context
+ *  window is 300K (DEEPSEEK_CONTEXT_TOKENS); never show the old 1M API ceiling. */
+const CONTEXT_MAX_TOKENS = 300_000;
+
+/** 1_234_567 → "1235K" — used for compaction-limit labels on the meter. */
+function fmtCompact(n: number): string {
+  return n >= 1000 ? `${Math.round(n / 1000)}K` : String(Math.round(n));
+}
 
 export function ContextPanel({
   settings,
@@ -17,7 +25,13 @@ export function ContextPanel({
   sessionFiles,
   memory,
   memoryDetail,
+  memoryResult,
   onReadMemory,
+  onWriteMemory,
+  onDeleteMemory,
+  onExportMemories,
+  onImportMemories,
+  onDismissMemoryResult,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -26,7 +40,13 @@ export function ContextPanel({
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
+  memoryResult: { ok: boolean; message: string } | null;
   onReadMemory: (path: string) => void;
+  onWriteMemory: (scope: "global" | "project", name: string, description: string, body: string) => void;
+  onDeleteMemory: (path: string) => void;
+  onExportMemories: () => void;
+  onImportMemories: (json: string) => void;
+  onDismissMemoryResult: () => void;
 }) {
   useLang();
   const [tab, setTab] = useState<Tab>("files");
@@ -36,10 +56,13 @@ export function ContextPanel({
   // reserved portion in cacheMiss instead, so do the same for `used`.
   const cached = Math.max(0, usage.cacheHitTokens - reserved);
   const used = Math.max(0, usage.cacheMissTokens - Math.max(0, reserved - usage.cacheHitTokens));
-  const reservedPct = Math.min(100, (reserved / CONTEXT_MAX_TOKENS) * 100);
-  const usedPct = Math.min(100, (used / CONTEXT_MAX_TOKENS) * 100);
-  const cachedPct = Math.min(100, (cached / CONTEXT_MAX_TOKENS) * 100);
-  const free = Math.max(0, CONTEXT_MAX_TOKENS - reserved - used - cached);
+  // Real per-model cap from the server (300K for V4) — the fallback below
+  // matches it so the bar is never wrong while the first snapshot is in flight.
+  const ctxMax = usage.ctxMax ?? CONTEXT_MAX_TOKENS;
+  const reservedPct = Math.min(100, (reserved / ctxMax) * 100);
+  const usedPct = Math.min(100, (used / ctxMax) * 100);
+  const cachedPct = Math.min(100, (cached / ctxMax) * 100);
+  const free = Math.max(0, ctxMax - reserved - used - cached);
   return (
     <aside className="ctx">
       <div className="ctx-tabs">
@@ -63,13 +86,28 @@ export function ContextPanel({
             <span>{t("contextPanel.contextTokens")}</span>
             <span className="right">
               {(reserved + used + cached).toLocaleString()} /{" "}
-              {CONTEXT_MAX_TOKENS.toLocaleString()}
+              {ctxMax.toLocaleString()}
             </span>
           </div>
           <div className="meter">
             <span className="rsvd" style={{ width: `${reservedPct}%` }} />
             <span className="cached" style={{ width: `${cachedPct}%` }} />
             <span className="used" style={{ width: `${usedPct}%` }} />
+            {/* Auto-compaction limits (context-manager.ts): fold 75% / forced summary 80% */}
+            <span
+              className="meter-tick fold"
+              style={{ left: "75%" }}
+              title={t("contextPanel.foldTick", {
+                tokens: fmtCompact(ctxMax * 0.75),
+              })}
+            />
+            <span
+              className="meter-tick force"
+              style={{ left: "80%" }}
+              title={t("contextPanel.forceTick", {
+                tokens: fmtCompact(ctxMax * 0.8),
+              })}
+            />
           </div>
           <div className="legend">
             <span className="l">
@@ -87,6 +125,13 @@ export function ContextPanel({
             <span className="l">
               {t("contextPanel.freeKey")} <span className="v">{free.toLocaleString()}</span>
             </span>
+            <span className="l">
+              <span className="sw z" />
+              {t("contextPanel.compactionAt", {
+                fold: fmtCompact(ctxMax * 0.75),
+                force: fmtCompact(ctxMax * 0.8),
+              })}
+            </span>
           </div>
         </div>
 
@@ -94,7 +139,17 @@ export function ContextPanel({
           {tab === "files" && <CtxFiles files={sessionFiles} />}
           {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
           {tab === "memory" && (
-            <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
+            <CtxMemory
+              entries={memory}
+              detail={memoryDetail}
+              result={memoryResult}
+              onRead={onReadMemory}
+              onWrite={onWriteMemory}
+              onDelete={onDeleteMemory}
+              onExport={onExportMemories}
+              onImport={onImportMemories}
+              onDismissResult={onDismissMemoryResult}
+            />
           )}
           {tab === "rules" && <CtxRules settings={settings} />}
         </PanelErrorBoundary>
@@ -246,27 +301,97 @@ function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }
 function CtxMemory({
   entries,
   detail,
+  result,
   onRead,
+  onWrite,
+  onDelete,
+  onExport,
+  onImport,
+  onDismissResult,
 }: {
   entries: MemoryEntryInfo[];
   detail: MemoryDetail | null;
+  result: { ok: boolean; message: string } | null;
   onRead: (path: string) => void;
+  onWrite: (scope: "global" | "project", name: string, description: string, body: string) => void;
+  onDelete: (path: string) => void;
+  onExport: () => void;
+  onImport: (json: string) => void;
+  onDismissResult: () => void;
 }) {
+  const [composing, setComposing] = useState(false);
+  const [name, setName] = useState("");
+  const [scope, setScope] = useState<"global" | "project">("project");
+  const [body, setBody] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const submit = (): void => {
+    const trimmedName = name.trim();
+    const trimmedBody = body.trim();
+    if (!trimmedName || !trimmedBody) return;
+    onWrite(scope, trimmedName, trimmedBody.slice(0, 150), trimmedBody);
+    setName("");
+    setBody("");
+    setComposing(false);
+  };
+
+  const onFile = (e: ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onImport(String(reader.result ?? ""));
+    reader.readAsText(file);
+  };
+
   return (
     <div className="ctx-block">
       <div className="h">
         <span>{t("contextPanel.memoryTitle")}</span>
         <span className="right">
-          {entries.length === 0 ? "—" : t("contextPanel.itemCount", { count: entries.length })}
+          <span className="mem-actions">
+            <button
+              type="button"
+              className="mem-action"
+              title={t("contextPanel.exportMemories")}
+              onClick={onExport}
+            >
+              ⇪ {t("contextPanel.saveLabel")}
+            </button>
+            <button
+              type="button"
+              className="mem-action"
+              title={t("contextPanel.importMemories")}
+              onClick={() => fileRef.current?.click()}
+            >
+              ⇓ {t("contextPanel.loadLabel")}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,application/json"
+              style={{ display: "none" }}
+              onChange={onFile}
+            />
+          </span>
         </span>
       </div>
+
+      {result ? (
+        <div className={`mem-result ${result.ok ? "" : "err"}`}>
+          <span>{result.message}</span>
+          <button type="button" className="mem-result-x" onClick={onDismissResult}>
+            ✕
+          </button>
+        </div>
+      ) : null}
+
       {entries.length === 0 ? (
         <div className="ctx-empty">{t("contextPanel.noMemoriesMsg")}</div>
       ) : (
         <div className="mem">
           {entries.map((m) => (
-            <button
-              type="button"
+            <div
               className="mem-row"
               data-active={detail?.path === m.path}
               key={m.path}
@@ -276,10 +401,62 @@ function CtxMemory({
                 {m.scope === "project" ? t("contextPanel.scopeProject") : t("contextPanel.scopeGlobal")}
               </span>
               <span className="txt">{m.description || m.name}</span>
-            </button>
+              <button
+                type="button"
+                className="mem-del"
+                title={t("contextPanel.deleteMemory")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(m.path);
+                }}
+              >
+                ✕
+              </button>
+            </div>
           ))}
-          {detail ? <pre className="mem-detail">{detail.body}</pre> : null}
         </div>
+      )}
+
+      {detail ? <pre className="mem-detail">{detail.body}</pre> : null}
+
+      {composing ? (
+        <div className="mem-composer">
+          <div className="mem-composer-row">
+            <input
+              className="mem-input"
+              placeholder={t("contextPanel.newNamePh")}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              spellCheck={false}
+            />
+            <select
+              className="mem-scope"
+              value={scope}
+              onChange={(e) => setScope(e.target.value as "global" | "project")}
+            >
+              <option value="project">{t("contextPanel.scopeProject")}</option>
+              <option value="global">{t("contextPanel.scopeGlobal")}</option>
+            </select>
+          </div>
+          <textarea
+            className="mem-textarea"
+            placeholder={t("contextPanel.newBodyPh")}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+          />
+          <div className="mem-composer-actions">
+            <button type="button" className="btn small" disabled={!name.trim() || !body.trim()} onClick={submit}>
+              {t("contextPanel.saveMemory")}
+            </button>
+            <button type="button" className="btn small ghost" onClick={() => setComposing(false)}>
+              {t("contextPanel.cancelMemory")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="mem-new" onClick={() => setComposing(true)}>
+          ＋ {t("contextPanel.newMemory")}
+        </button>
       )}
     </div>
   );

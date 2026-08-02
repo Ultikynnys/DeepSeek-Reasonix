@@ -56,6 +56,9 @@ export function StatusBar({
   const cacheHitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
   const runningJobs = jobs.filter((j) => j.running).length;
   const spent = formatMoney(usage.totalCostUsd, currency);
+  // Dual-currency: keep the primary display currency and show the conversion
+  // to the other one right next to it (¥ primary → $ conversion by default).
+  const spentOther = formatMoney(usage.totalCostUsd, currency === "CNY" ? "USD" : "CNY");
   const balanceLabel = balance
     ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
     : "—";
@@ -98,7 +101,10 @@ export function StatusBar({
       <span className="seg">
         <I.coin size={11} />
         <span>{t("statusbar.thisTurn")}</span>
-        <span className="v ok">{spent}</span>
+        <span className="v ok">
+          {spent}
+          <span className="conv">{`(${spentOther})`}</span>
+        </span>
       </span>
 
       <span className="grow" />
