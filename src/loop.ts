@@ -10,6 +10,7 @@ import {
   truncateForModelByTokens,
 } from "./mcp/registry.js";
 
+import { createCheckpoint, restoreCheckpoint } from "./code/checkpoints.js";
 import { ContextManager, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
@@ -120,6 +121,32 @@ function shrinkMessageForRetention(message: ChatMessage): ChatMessage {
   return (
     shrinkOversizedToolCallArgsByTokens([message], DEFAULT_MAX_RESULT_TOKENS).messages[0] ?? message
   );
+}
+
+/** Extract relative paths that a file-modifying tool call targets. Used by the
+ *  audit listener to track which files each turn touches for per-turn snapshots. */
+function fileModPaths(name: string, args: Record<string, unknown>): string[] {
+  switch (name) {
+    case "edit_file":
+    case "write_file":
+    case "delete_file":
+    case "create_directory":
+    case "delete_directory":
+      return typeof args.path === "string" ? [args.path] : [];
+    case "multi_edit": {
+      const edits = args.edits as Array<{ path?: string }> | undefined;
+      return edits?.map((e) => e.path).filter((p): p is string => typeof p === "string") ?? [];
+    }
+    case "move_file":
+    case "copy_file": {
+      const out: string[] = [];
+      if (typeof args.source === "string") out.push(args.source);
+      if (typeof args.destination === "string") out.push(args.destination);
+      return out;
+    }
+    default:
+      return [];
+  }
 }
 
 export class CacheFirstLoop {
@@ -287,6 +314,17 @@ export class CacheFirstLoop {
       getFewShots: () => this.prefix.fewShots,
       onLogRewrite: () => this.readTracker.reset(),
     });
+
+    // Track file-modifying tool calls so we can snapshot at turn boundaries.
+    this.tools.setAuditListener(({ name, args }) => {
+      if (!this._rootDir) return;
+      const paths = fileModPaths(name, args);
+      for (const p of paths) {
+        if (!this._touchedFiles.has(p)) {
+          this._touchedFiles.set(p, this._turn);
+        }
+      }
+    });
   }
 
   /** Replace older turns with one summary message; keep tail within keepRecentTokens budget. */
@@ -356,6 +394,10 @@ export class CacheFirstLoop {
     // injects it as a user message and the next turn leaks prior intent.
     this._steerQueue.length = 0;
     this._steerConsumed = false;
+    // Per-turn snapshots are scoped to the session; /new starts fresh.
+    this._touchedFiles.clear();
+    this._turnCheckpoints.clear();
+    this._userTurnCount = 0;
     let systemRebuilt = false;
     if (this._rebuildSystem) {
       try {
@@ -384,6 +426,10 @@ export class CacheFirstLoop {
     this._inflight.clear();
     this._steerQueue.length = 0;
     this._steerConsumed = false;
+    // Snapshots are scoped to the workspace root; switching resets tracking.
+    this._touchedFiles.clear();
+    this._turnCheckpoints.clear();
+    this._userTurnCount = 0;
     this.sessionName = opts.sessionName;
     if (this._rebuildSystem) {
       try {
@@ -402,6 +448,12 @@ export class CacheFirstLoop {
       this.stream = opts.stream;
     }
     if (opts.reasoningEffort !== undefined) this.reasoningEffort = opts.reasoningEffort;
+  }
+
+  /** Set the project root for per-turn file snapshots. Call before step() in code mode.
+   *  Pass `null` to disable snapshots (non-code / chat mode). */
+  setRootDir(dir: string | null): void {
+    this._rootDir = dir;
   }
 
   /** `null` disables the cap; any change re-arms the 80% warning. */
@@ -511,6 +563,15 @@ export class CacheFirstLoop {
   }
   private _inflightCounter = 0;
 
+  /** Files touched this session → the first turn number they were modified (1-indexed). */
+  private readonly _touchedFiles = new Map<string, number>();
+  /** Checkpoints keyed by userTurnIndex (0-indexed count of user messages). */
+  private readonly _turnCheckpoints = new Map<number, string>();
+  /** Running count of user turns processed so far. */
+  private _userTurnCount = 0;
+  /** Project root for per-turn file snapshots. `null` = snapshots disabled (non-code mode). */
+  private _rootDir: string | null = null;
+
   private buildMessages(): ChatMessage[] {
     const healedMessages = this.healActiveLogBeforeSend();
     return [...this.prefix.toMessages(), ...healedMessages];
@@ -585,7 +646,9 @@ export class CacheFirstLoop {
     return userText;
   }
 
-  /** Rewind to the N-th user turn (0-indexed). Drops that turn + everything after. */
+  /** Rewind to the N-th user turn (0-indexed). Drops that turn + everything after.
+   *  Also restores the file snapshot taken at the start of this turn so the
+   *  workspace matches the conversation state. */
   rewindToUserTurn(userTurnIndex: number): string | null {
     const entries = this.log.entries;
     let count = 0;
@@ -610,6 +673,27 @@ export class CacheFirstLoop {
         /* disk-full / perms — in-memory compaction still applies */
       }
     }
+
+    // Restore files to the state at the start of this user turn.
+    const cpId = this._turnCheckpoints.get(userTurnIndex);
+    if (cpId && this._rootDir) {
+      try {
+        restoreCheckpoint(this._rootDir, cpId);
+      } catch {
+        // Best-effort; conversation rewind already succeeded.
+      }
+    }
+
+    // Prune touched-files tracking to only files from before this turn.
+    for (const [path, turn] of this._touchedFiles) {
+      if (turn > userTurnIndex) this._touchedFiles.delete(path);
+    }
+    // Prune checkpoints from this turn onward.
+    for (const key of this._turnCheckpoints.keys()) {
+      if (key >= userTurnIndex) this._turnCheckpoints.delete(key);
+    }
+    this._userTurnCount = userTurnIndex;
+
     return userText;
   }
 
@@ -656,6 +740,26 @@ export class CacheFirstLoop {
       }
     }
     this._turn++;
+    // Per-turn file snapshot: capture the current state of all files touched
+    // by previous turns so we can rewind here later. Runs BEFORE the user
+    // message is appended so the snapshot represents "state after turn N-1,
+    // before turn N processes the user's message."
+    if (this._rootDir && this._touchedFiles.size > 0) {
+      const userTurnIndex = this._userTurnCount;
+      try {
+        const paths = [...this._touchedFiles.keys()];
+        const meta = createCheckpoint({
+          rootDir: this._rootDir,
+          name: `auto-turn-${userTurnIndex}`,
+          source: "auto-session-start",
+          paths,
+        });
+        this._turnCheckpoints.set(userTurnIndex, meta.id);
+      } catch {
+        // Snapshot failure shouldn't block the turn.
+      }
+    }
+    this._userTurnCount++;
     this.scratch.reset();
     // A fresh user turn is a new intent — don't let StormBreaker's
     // old sliding window of (name, args) signatures keep blocking

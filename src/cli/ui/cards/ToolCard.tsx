@@ -1,4 +1,5 @@
-import { Box, type Color, Text, useStdout } from "ink";
+import { resolve as resolvePath } from "node:path";
+import { Box, type Color, Link, Text, useStdout } from "ink";
 import React from "react";
 import { t } from "../../../i18n/index.js";
 import { Markdown } from "../markdown.js";
@@ -8,6 +9,7 @@ import { PULSE_SQUARE, Pulse } from "../primitives/Pulse.js";
 import type { ToolCard as ToolCardData } from "../state/cards.js";
 import { useIsInflight } from "../state/inflight-context.js";
 import { VerboseContext } from "../state/verbose-context.js";
+import { WorkspaceRootContext } from "../state/workspace-root-context.js";
 import { clipToCells } from "../text-width.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 import { selectToolPreviewLines } from "../tool-summary.js";
@@ -35,7 +37,12 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
     [card.name, card.output],
   );
 
+  const rootDir = React.useContext(WorkspaceRootContext);
   const verbose = React.useContext(VerboseContext);
+  const fileRef = React.useMemo(
+    () => (rootDir ? extractFileRef(card.name, card.args) : null),
+    [rootDir, card.name, card.args],
+  );
   const tail = tailLinesFor(card.name);
   const preview = selectToolPreviewLines({
     toolName: card.name,
@@ -77,6 +84,17 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
         subtitle={argsLabel || undefined}
         meta={meta.length > 0 ? meta : undefined}
       />
+      {fileRef && (
+        <Box flexDirection="row">
+          <Text color={FG.faint}> ↗ </Text>
+          <Link url={fileUrl(fileRef, rootDir!)}>
+            <Text color={TONE.brand} underline>
+              {fileRef.path}
+              {fileRef.line ? `:${fileRef.line}` : ""}
+            </Text>
+          </Link>
+        </Box>
+      )}
       {showBody &&
         (subagentMarkdown !== null ? (
           <Markdown text={subagentMarkdown} width={lineCells} />
@@ -233,4 +251,81 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export interface FileRef {
+  /** Relative path as it appears in the tool args. */
+  path: string;
+  /** 1-indexed line number, if the tool provides position info (e.g. read_file range). */
+  line?: number;
+}
+
+/** File-modifying or file-viewing tools whose primary arg is a path. */
+const FILE_PATH_TOOLS = new Set([
+  "read_file",
+  "edit_file",
+  "write_file",
+  "delete_file",
+  "create_directory",
+  "delete_directory",
+  "get_symbols",
+  "find_in_code",
+]);
+
+/** Extract a file reference (path + optional line) from parsed tool args.
+ *  Returns `null` when the tool isn't file-oriented or args are unparseable. */
+export function extractFileRef(name: string, args: unknown): FileRef | null {
+  if (!FILE_PATH_TOOLS.has(name)) {
+    // multi_edit: use the first edit's path
+    if (name === "multi_edit") {
+      if (args && typeof args === "object") {
+        const edits = (args as Record<string, unknown>).edits;
+        if (Array.isArray(edits) && edits.length > 0) {
+          const first = edits[0];
+          if (first && typeof first === "object") {
+            const p = (first as Record<string, unknown>).path;
+            if (typeof p === "string") return { path: p };
+          }
+        }
+      }
+      return null;
+    }
+    // move_file / copy_file: use source
+    if (name === "move_file" || name === "copy_file") {
+      if (args && typeof args === "object") {
+        const source = (args as Record<string, unknown>).source;
+        if (typeof source === "string") return { path: source };
+      }
+      return null;
+    }
+    return null;
+  }
+
+  if (!args || typeof args !== "object") return null;
+  const rec = args as Record<string, unknown>;
+  const path = rec.path;
+  if (typeof path !== "string") return null;
+
+  let line: number | undefined;
+  // read_file supports `range` like "50-100" or "50-50"
+  if (name === "read_file" && typeof rec.range === "string") {
+    const first = rec.range.split("-")[0];
+    const n = Number.parseInt(first ?? "", 10);
+    if (Number.isFinite(n) && n > 0) line = n;
+  }
+  // get_symbols / find_in_code: path + optional line from args or result
+  if (name === "get_symbols" || name === "find_in_code") {
+    if (typeof rec.line === "number" && rec.line > 0) line = rec.line;
+  }
+
+  return { path, line };
+}
+
+/** Build an OSC8 `file://` URL from a FileRef and project root. */
+function fileUrl(ref: FileRef, rootDir: string): string {
+  const abs = resolvePath(rootDir, ref.path);
+  // Use forward slashes for cross-platform URL compatibility.
+  const normalized = abs.replace(/\\/g, "/");
+  const line = ref.line ?? 1;
+  return `file:///${normalized}:${line}`;
 }

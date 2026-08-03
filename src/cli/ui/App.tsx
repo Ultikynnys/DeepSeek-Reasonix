@@ -127,6 +127,7 @@ import { PromptInput } from "./PromptInput.js";
 import { SessionPicker } from "./SessionPicker.js";
 import { ShellConfirm, type ShellConfirmChoice } from "./ShellConfirm.js";
 import { useRenderTrace } from "./render-trace.js";
+import { WorkspaceRootContext } from "./state/workspace-root-context.js";
 
 import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
@@ -1028,6 +1029,8 @@ function AppInner({
       rebuildSystem,
     });
     loopRef.current = l;
+    // Enable per-turn file snapshots so EditPicker can restore workspace state.
+    l.setRootDir(currentRootDir);
     return l;
   }, [model, system, rebuildSystem, budgetUsd, session, tools, codeMode]);
 
@@ -1167,6 +1170,12 @@ function AppInner({
   useEffect(() => {
     loop.hooks = hookList;
   }, [loop, hookList]);
+
+  // Keep per-turn file-snapshot root in sync when the workspace changes
+  // (e.g. `/cwd`). Snapshots are scoped to a single workspace lifetime.
+  useEffect(() => {
+    loop.setRootDir(currentRootDir);
+  }, [loop, currentRootDir]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only seed
   useEffect(() => {
@@ -4288,11 +4297,13 @@ function AppInner({
               <Box flexDirection="column" flexGrow={1}>
                 <LiveExpandContext.Provider value={liveExpand}>
                   <VerboseContext.Provider value={verboseMode}>
-                    {historyScrollMode === "app" ? (
-                      <CardStream suppressLive={modalOpen} />
-                    ) : (
-                      <StaticCardStream suppressLive={modalOpen} />
-                    )}
+                    <WorkspaceRootContext.Provider value={codeMode ? currentRootDir : null}>
+                      {historyScrollMode === "app" ? (
+                        <CardStream suppressLive={modalOpen} />
+                      ) : (
+                        <StaticCardStream suppressLive={modalOpen} />
+                      )}
+                    </WorkspaceRootContext.Provider>
                   </VerboseContext.Provider>
                 </LiveExpandContext.Provider>
                 {/*

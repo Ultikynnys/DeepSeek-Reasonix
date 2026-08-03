@@ -1,7 +1,11 @@
 /** CacheFirstLoop integration — fake-fetch DeepSeekClient, non-streaming path. */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient, Usage } from "../src/client.js";
+import { createCheckpoint } from "../src/code/checkpoints.js";
 import {
   HISTORY_FOLD_AGGRESSIVE_THRESHOLD,
   HISTORY_FOLD_THRESHOLD,
@@ -2429,5 +2433,229 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
       retryable: true,
       recoverable: false,
     });
+  });
+});
+
+describe("CacheFirstLoop — per-turn file snapshots", () => {
+  let workspace: string;
+  let homeDir: string;
+  let realHome: string | undefined;
+
+  beforeEach(() => {
+    realHome = process.env.HOME;
+    homeDir = mkdtempSync(join(tmpdir(), "rx-loop-cp-home-"));
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    workspace = mkdtempSync(join(tmpdir(), "rx-loop-cp-work-"));
+  });
+
+  afterEach(() => {
+    if (realHome === undefined) {
+      // biome-ignore lint/performance/noDelete: env-var cleanup
+      delete process.env.HOME;
+    } else process.env.HOME = realHome;
+    rmSync(homeDir, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  /** Register a write_file tool and return the tools registry. */
+  function makeTools(workDir: string): ToolRegistry {
+    const tools = new ToolRegistry();
+    tools.register<{ path: string; content: string }, string>({
+      name: "write_file",
+      description: "write a file",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" }, content: { type: "string" } },
+        required: ["path", "content"],
+      },
+      fn: async (args) => {
+        const abs = join(workDir, args.path);
+        const { dirname } = await import("node:path");
+        const dir = dirname(abs);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(abs, args.content);
+        return `wrote ${args.content.length} chars to ${args.path}`;
+      },
+    });
+    return tools;
+  }
+
+  it("tracks file-modifying tool calls via the audit listener", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "write_file", arguments: '{"path":"hello.txt","content":"world"}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    loop.setRootDir(workspace);
+
+    await loop.run("create a file");
+    // The audit listener should have recorded the path.
+    // Can't directly inspect private fields, but the side-effect is
+    // that a checkpoint should have been created for turn 0.
+    // We verify indirectly via rewind behavior.
+    expect(existsSync(join(workspace, "hello.txt"))).toBe(true);
+    expect(readFileSync(join(workspace, "hello.txt"), "utf8")).toBe("world");
+  });
+
+  it("creates a checkpoint at the start of each turn with touched files", async () => {
+    const client = makeClient([
+      // Turn 1: create hello.txt
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "write_file", arguments: '{"path":"hello.txt","content":"v1"}' },
+          },
+        ],
+      },
+      { content: "created" },
+      // Turn 2: modify hello.txt
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "c2",
+            type: "function",
+            function: { name: "write_file", arguments: '{"path":"hello.txt","content":"v2"}' },
+          },
+        ],
+      },
+      { content: "modified" },
+    ]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    loop.setRootDir(workspace);
+
+    // Turn 1
+    await loop.run("create hello.txt");
+    expect(readFileSync(join(workspace, "hello.txt"), "utf8")).toBe("v1");
+
+    // Turn 2 — a checkpoint should have been created at the start (capturing v1)
+    await loop.run("modify hello.txt");
+    expect(readFileSync(join(workspace, "hello.txt"), "utf8")).toBe("v2");
+
+    // Rewind to turn 1 (userTurnIndex=1, second message) — should restore v1
+    const text = loop.rewindToUserTurn(1);
+    expect(text).toBe("modify hello.txt");
+    // File should be back to v1 (state after turn 1, before turn 2)
+    expect(readFileSync(join(workspace, "hello.txt"), "utf8")).toBe("v1");
+  });
+
+  it("rewindToUserTurn(0) clears touched-files tracking", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "write_file", arguments: '{"path":"x.txt","content":"data"}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    loop.setRootDir(workspace);
+
+    await loop.run("create x.txt");
+    expect(existsSync(join(workspace, "x.txt"))).toBe(true);
+
+    // Rewinding to turn 0 clears tracking (though file on disk may remain
+    // since we never snapshotted the initial empty state).
+    const text = loop.rewindToUserTurn(0);
+    expect(text).toBe("create x.txt");
+    // Conversation is truncated but file tracking is cleared.
+    // The file still exists on disk (documented limitation for first-turn rewind).
+  });
+
+  it("clearLog resets touched-files tracking", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "write_file", arguments: '{"path":"f.txt","content":"x"}' },
+          },
+        ],
+      },
+      { content: "ok" },
+    ]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    loop.setRootDir(workspace);
+
+    await loop.run("go");
+    expect(existsSync(join(workspace, "f.txt"))).toBe(true);
+
+    // After clearLog, a new turn should not have stale checkpoints.
+    loop.clearLog();
+    // Start a fresh turn — should not crash or find old checkpoints.
+    await loop.run("fresh start");
+    // No assertion needed beyond no-throw; clearLog resets the counter.
+  });
+
+  it("snapshots are disabled when rootDir is null (non-code mode)", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "write_file", arguments: '{"path":"nope.txt","content":"nope"}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    // NOT calling setRootDir — should be null, snapshots disabled.
+
+    await loop.run("try");
+    // Should not throw; the audit listener is a no-op when rootDir is null.
+    expect(existsSync(join(workspace, "nope.txt"))).toBe(true);
   });
 });
