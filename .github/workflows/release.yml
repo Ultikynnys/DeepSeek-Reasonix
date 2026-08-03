@@ -1,42 +1,164 @@
-name: Build Windows installer
+name: Release
 
-# The only release workflow that matters: build the Windows installer and
-# attach it to a draft GitHub Release on this fork. Plain `v<semver>` tags
-# (v0.53.3, ...) trigger it. Nothing is published to npm from this repo —
-# the npm publish workflows were removed.
+# The ONLY workflow in this repo. Every push to main is verified (lint,
+# typecheck, build, tests) and then released: the patch version is bumped
+# from package.json, a `vX.Y.Z` tag + `chore(release)` commit are pushed
+# (via GITHUB_TOKEN, which does NOT re-trigger workflows), the Windows
+# installer is built and attached to a draft GitHub Release.
+#
+# `workflow_dispatch` with a `tag` input rebuilds an existing tag instead
+# of auto-versioning (e.g. v0.53.6 — the tag must exist on the remote).
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build (e.g. v0.53.3). Required when running manually; the tag must exist on the remote."
-        required: true
+        description: "Optional existing tag to rebuild (e.g. v0.53.6). Empty = auto-version from main."
+        required: false
         type: string
 
 permissions:
   contents: write
 
+# Serialize runs so queued commits bump past the previous release instead
+# of racing on the same tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  build-windows-installer:
+  verify:
+    name: verify (${{ matrix.os }} · node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ["22"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (biome)
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (tsup + dashboard)
+        run: npm run build
+
+      - name: Test (vitest + coverage)
+        run: npm run test:coverage
+
+      - name: Coverage job summary
+        if: always()
+        run: node scripts/coverage-summary.mjs
+
+      # Smoke-test the bench harnesses themselves. --dry skips all LLM
+      # calls, so this catches wiring regressions (task factories, CLI
+      # parsing, file IO, checker determinism) without needing a
+      # DEEPSEEK_API_KEY in CI. RUNNER_TEMP is set on every GH Actions
+      # runner (POSIX + Windows) — beats hardcoding /tmp.
+      - name: τ-bench harness dry-run
+        run: npx tsx benchmarks/tau-bench/runner.ts --dry --out "${{ runner.temp }}/tau-dry.json"
+
+      - name: Notify Discord on main failure
+        if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_CI_WEBHOOK }}
+        run: |
+          test -n "$WEBHOOK_URL" || { echo "DISCORD_CI_WEBHOOK unset, skipping"; exit 0; }
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -sS -X POST -H "Content-Type: application/json" \
+            -d "{\"content\":\"❌ CI failed on \`${{ github.ref_name }}\` (${{ matrix.os }}) — ${{ github.actor }}\n${RUN_URL}\"}" \
+            "$WEBHOOK_URL"
+
+  release:
     name: build windows installer
+    needs: verify
     runs-on: windows-latest
     # secrets.* isn't accessible from step-level if:, so expose presence as a
     # job-level env. Treat "true"/"false" strings as booleans downstream.
     env:
       HAS_WIN_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Resolve tag
-        id: tag
+      - name: Resolve ref
+        id: ref
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "ref=refs/tags/${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            # Rebuild an existing tag: use it as-is, no new commit/tag.
+            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "new=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Base = package.json version (NOT the latest tag — the fork has
+          # upstream v1.x tags that would corrupt a version-sort).
+          base=$(node -p "require('./package.json').version")
+          maj=${base%%.*}; rest=${base#*.}; min=${rest%%.*}; pat=${rest#*.}
+          while :; do
+            ver="${maj}.${min}.${pat}"
+            if ! git rev-parse -q --verify "refs/tags/v${ver}" >/dev/null; then
+              break
+            fi
+            pat=$((pat + 1))
+          done
+          echo "version=v${ver}" >> "$GITHUB_OUTPUT"
+          echo "new=1" >> "$GITHUB_OUTPUT"
+
+      - name: Bump package.json + desktop version
+        if: steps.version.outputs.new == '1'
+        shell: bash
+        run: |
+          ver="${{ steps.version.outputs.version }}"
+          semver="${ver#v}"
+          node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('package.json','utf8'));j.version='${semver}';fs.writeFileSync('package.json',JSON.stringify(j,null,2)+'\n')"
+          node scripts/sync-desktop-version.mjs "${ver}"
+
+      # GITHUB_TOKEN pushes don't create new workflow runs, so this commit
+      # and tag never re-trigger this workflow. `git push origin HEAD:main`
+      # (not `git push origin main`) because checkout left us on a detached
+      # HEAD at GITHUB_SHA. If main moved meanwhile, the push is rejected
+      # and the run fails — the concurrency-queued run for the newer commit
+      # then produces the next version instead.
+      - name: Commit + tag + push
+        if: steps.version.outputs.new == '1'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json desktop/package.json desktop/src-tauri/tauri.conf.json desktop/src-tauri/Cargo.toml
+          git commit -m "chore(release): ${{ steps.version.outputs.version }}"
+          git tag "${{ steps.version.outputs.version }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.version.outputs.version }}"
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -57,9 +179,6 @@ jobs:
 
       - name: Install root deps
         run: npm ci
-
-      - name: Sync desktop version from tag
-        run: node scripts/sync-desktop-version.mjs "${{ steps.tag.outputs.name }}"
 
       - name: Build CLI bundle (dist/)
         run: npm run build
@@ -94,8 +213,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
-          tagName: ${{ steps.tag.outputs.name }}
-          releaseName: Reasonix ${{ steps.tag.outputs.name }}
+          tagName: ${{ steps.version.outputs.version }}
+          releaseName: Reasonix ${{ steps.version.outputs.version }}
           releaseDraft: true
           prerelease: false
           args: --target x86_64-pc-windows-msvc
@@ -111,8 +230,8 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           projectPath: desktop
-          tagName: ${{ steps.tag.outputs.name }}
-          releaseName: Reasonix ${{ steps.tag.outputs.name }}
+          tagName: ${{ steps.version.outputs.version }}
+          releaseName: Reasonix ${{ steps.version.outputs.version }}
           releaseDraft: true
           prerelease: false
           args: --target x86_64-pc-windows-msvc
