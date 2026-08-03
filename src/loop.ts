@@ -333,6 +333,7 @@ export class CacheFirstLoop {
     beforeMessages: number;
     afterMessages: number;
     summaryChars: number;
+    error?: string;
   }> {
     return this.context.fold(this.model, opts);
   }
@@ -829,6 +830,15 @@ export class CacheFirstLoop {
               afterMessages: result.afterMessages,
             }),
           };
+        } else if (result.error) {
+          // The summary call failed (timeout / API error) — the status above
+          // must not be the last word. Warn so the user knows the compaction
+          // didn't happen instead of the conversation silently continuing.
+          yield {
+            turn: this._turn,
+            role: "warning",
+            content: t("loop.compactFailed", { reason: result.error }),
+          };
         }
       }
     }
@@ -1099,6 +1109,15 @@ export class CacheFirstLoop {
                 summaryChars: result.summaryChars,
               },
             ),
+          };
+        } else if (result.error) {
+          // The summary call failed (timeout / API error) — surface it so the
+          // "compacting history…" status isn't the last word and the turn
+          // doesn't look like it silently stopped.
+          yield {
+            turn: this._turn,
+            role: "warning",
+            content: t("loop.compactFailed", { reason: result.error }),
           };
         }
       } else if (decision.kind === "exit-with-summary") {

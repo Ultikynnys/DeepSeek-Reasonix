@@ -695,6 +695,7 @@ export const EN: TranslationSchema = {
     stormSuppressed: "Suppressed {count} repeated tool call(s) — same name + args fired 3+ times.",
     compactingHistoryStatus: "compacting history{aggressiveTag}…",
     aggressiveTag: " (aggressive)",
+    compactFailed: "compaction failed — {reason}. Continuing with the conversation un-folded.",
     foldedHistory:
       "context {before}/{ctxMax} ({pct}%) — folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Continuing.",
     aggressivelyFoldedHistory:

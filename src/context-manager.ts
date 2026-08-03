@@ -83,6 +83,8 @@ export interface FoldResult {
   beforeMessages: number;
   afterMessages: number;
   summaryChars: number;
+  /** Why the fold didn't happen, when the summarizer failed (as opposed to a legit nothing-to-fold noop). */
+  error?: string;
 }
 
 function buildFoldSummaryInstruction(pinnedSkillNames: string[]): string {
@@ -188,6 +190,10 @@ export class ContextManager {
   ): Promise<FoldResult> {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
     const tailBudget = opts?.keepRecentTokens ?? Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
+    // Keep the live array reference — append() pushes in place, compactInPlace()
+    // swaps the array. Identity lets the commit step detect messages appended
+    // after the snapshot (see merge-at-commit below).
+    const snapshotEntries = this.deps.log.entries;
     const all = this.deps.log.toMessages();
     const noop: FoldResult = {
       folded: false,
@@ -264,7 +270,14 @@ export class ContextManager {
 
     const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(head);
     const summary = await this.summarizeForFold(head, pinnedNames);
-    if (!summary.content) return noop;
+    if (!summary.content) {
+      // Summarizer failure — surface it so the loop can warn instead of the
+      // "compacting history…" status silently no-opping. Turn aborts are
+      // already swallowed inside summarizeForFold (the abort path owns the
+      // messaging), so error is only set for real failures.
+      if (summary.error) return { ...noop, error: summary.error };
+      return noop;
+    }
 
     const memoTail =
       pinnedBodies.length > 0 ? `\n\n${SKILL_PIN_MEMO_HEADER}\n\n${pinnedBodies.join("\n\n")}` : "";
@@ -283,7 +296,16 @@ export class ContextManager {
       model,
       summary.reasoningContent,
     );
-    const replacement = [summaryMsg, ...tail];
+    // Merge-at-commit: the summarizer call can run for seconds while a
+    // user-triggered /compact races an in-flight tool dispatch (the desktop
+    // compact_history IPC has no busy gate on the loop). A wholesale
+    // replacement would clobber any message appended to the live log after
+    // the snapshot — e.g. a tool result that landed mid-fold — orphaning it
+    // so the model never sees the read. The array identity check is the
+    // append-only detector: appends push in place, compactInPlace swaps.
+    const liveEntries = this.deps.log.entries;
+    const liveAppends = liveEntries === snapshotEntries ? liveEntries.slice(all.length) : [];
+    const replacement = [summaryMsg, ...tail, ...liveAppends];
     this.deps.log.compactInPlace(replacement);
     this.persistRewrite(replacement);
     this.deps.onLogRewrite?.();
@@ -315,7 +337,7 @@ export class ContextManager {
   private async summarizeForFold(
     messagesToSummarize: ChatMessage[],
     pinnedSkillNames: string[],
-  ): Promise<{ content: string; reasoningContent: string }> {
+  ): Promise<{ content: string; reasoningContent: string; error?: string }> {
     const summaryModel = "deepseek-v4-flash";
     const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
     const agentSystem = this.deps.getSystemPrompt();
@@ -367,8 +389,17 @@ export class ContextManager {
         content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
         reasoningContent: resp.reasoningContent ?? "",
       };
-    } catch {
-      return { content: "", reasoningContent: "" };
+    } catch (err) {
+      // Esc during a fold aborts the turn — the abort path owns that
+      // messaging, so stay silent. Any other failure is reported so the
+      // loop can warn instead of the compaction silently no-opping.
+      if (turnSignal.aborted) return { content: "", reasoningContent: "" };
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: "",
+        reasoningContent: "",
+        error: message === "fold-timeout" ? "summary request timed out" : message,
+      };
     } finally {
       if (timeout) clearTimeout(timeout);
       cleanupAbort();

@@ -297,6 +297,7 @@ export interface TranslationSchema {
     stormSuppressed: string;
     compactingHistoryStatus: string;
     aggressiveTag: string;
+    compactFailed: string;
     foldedHistory: string;
     aggressivelyFoldedHistory: string;
     forcingSummary: string;

@@ -2906,6 +2906,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "compact_history") {
       if (!tab.runtime) return;
+      // Folding while a turn is mid-flight races the tool dispatch: the fold's
+      // wholesale log replacement can clobber a tool result that lands while
+      // the summary call runs, orphaning it so the model never sees the read —
+      // and the UI's "task complete" toast fires while the loop is still
+      // working. Refuse while busy (same gate as prompt injection below).
+      if (tab.aborter) {
+        emit(
+          {
+            type: "$error",
+            message: "Session is busy — wait for the current turn to finish before compacting.",
+          },
+          tab.id,
+        );
+        return;
+      }
       void tab.runtime.loop
         .compactHistory()
         .then(() => emitCtxBreakdown(tab))

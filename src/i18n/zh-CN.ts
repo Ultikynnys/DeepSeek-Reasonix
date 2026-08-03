@@ -669,6 +669,7 @@ export const zhCN: TranslationSchema = {
     stormSuppressed: "已抑制 {count} 次重复工具调用 — 同一名称 + 参数触发 3 次以上。",
     compactingHistoryStatus: "正在压缩历史{aggressiveTag}…",
     aggressiveTag: "（激进）",
+    compactFailed: "压缩失败 — {reason}。继续对话，历史未折叠。",
     foldedHistory:
       "上下文 {before}/{ctxMax}（{pct}%）— 已折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。继续。",
     aggressivelyFoldedHistory:
