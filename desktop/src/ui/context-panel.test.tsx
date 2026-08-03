@@ -99,7 +99,7 @@ describe("ContextPanel files", () => {
       />,
     );
 
-    expect(screen.getByText("150 / 1,000,000")).toBeTruthy();
+    expect(screen.getByText("150 / 300,000")).toBeTruthy();
     expect(screen.getByText("100")).toBeTruthy();
   });
 });

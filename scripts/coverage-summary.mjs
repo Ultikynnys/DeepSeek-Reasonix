@@ -1,7 +1,11 @@
 import { readFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: on Windows the latter yields "/D:/a/…" which
+// path.join turns into "\D:\a\…" and fs then resolves against the current
+// drive as "D:\D:\a\…" (ENOENT). fileURLToPath returns a proper "D:\a\…".
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SUMMARY_PATH = join(ROOT, "coverage", "coverage-summary.json");
 
 const GITHUB_STEP_SUMMARY = process.env.GITHUB_STEP_SUMMARY;
