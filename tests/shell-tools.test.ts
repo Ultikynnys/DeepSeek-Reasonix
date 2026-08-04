@@ -727,6 +727,102 @@ describe("registerShellTools — dispatch integration", () => {
   });
 });
 
+describe("user cancel (Ctrl+K / desktop Stop) — cancelSignal contract", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "reasonix-cancel-"));
+  });
+  afterEach(async () => {
+    for (let i = 0; i < 5; i++) {
+      try {
+        rmSync(tmp, { recursive: true, force: true });
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+  });
+
+  it("dispatch forwards cancelSignal into the tool ctx and run_command returns cancelledByUser with the stall hint", async () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp, extraAllowed: ["node"] });
+    const cancel = new AbortController();
+    const run = registry.dispatch(
+      "run_command",
+      JSON.stringify({ command: 'node -e "setTimeout(()=>{}, 10000)"' }),
+      { cancelSignal: cancel.signal },
+    );
+    cancel.abort();
+    const out = await run;
+    const parsed = JSON.parse(out) as { cancelledByUser?: boolean; error?: string };
+    expect(parsed.cancelledByUser).toBe(true);
+    expect(parsed.error).toContain("intentional user cancellation");
+    expect(parsed.error).toContain("stalls indefinitely or takes too long");
+  }, 15000);
+
+  it("cancel result is appended promptly — does not wait for the child to die", async () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp, extraAllowed: ["node"] });
+    const cancel = new AbortController();
+    const t0 = Date.now();
+    const run = registry.dispatch(
+      "run_command",
+      JSON.stringify({ command: 'node -e "setTimeout(()=>{}, 60000)"' }),
+      { cancelSignal: cancel.signal },
+    );
+    // Let the child actually spawn, then force-cancel it.
+    await new Promise((r) => setTimeout(r, 150));
+    cancel.abort();
+    const out = await run;
+    const elapsed = Date.now() - t0;
+    const parsed = JSON.parse(out) as { cancelledByUser?: boolean };
+    expect(parsed.cancelledByUser).toBe(true);
+    expect(elapsed).toBeLessThan(2000);
+  }, 15000);
+
+  it("wait_for_job cancel wakes the wait immediately with cancelledByUser", async () => {
+    const registry = new ToolRegistry();
+    const jobs = new (await import("../src/tools/jobs.js")).JobRegistry();
+    registerShellTools(registry, { rootDir: tmp, jobs, extraAllowed: ["node"] });
+    try {
+      const started = await jobs.start(`node -e "setTimeout(()=>{}, 60000)"`, {
+        cwd: tmp,
+        waitSec: 0.2,
+      });
+      const cancel = new AbortController();
+      const t0 = Date.now();
+      const run = registry.dispatch(
+        "wait_for_job",
+        JSON.stringify({ jobId: started.jobId, timeoutMs: 60_000 }),
+        { cancelSignal: cancel.signal },
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      cancel.abort();
+      const out = await run;
+      const elapsed = Date.now() - t0;
+      const parsed = JSON.parse(out) as { cancelledByUser?: boolean; error?: string };
+      expect(parsed.cancelledByUser).toBe(true);
+      expect(parsed.error).toContain("intentional user cancellation");
+      expect(elapsed).toBeLessThan(2000);
+    } finally {
+      await jobs.shutdown(1500);
+    }
+  }, 15000);
+
+  it("runCommand with an already-aborted signal settles fast with exitCode null", async () => {
+    const cancel = new AbortController();
+    cancel.abort();
+    const t0 = Date.now();
+    const r = await runCommand('node -e "setTimeout(()=>{}, 60000)"', {
+      cwd: tmp,
+      signal: cancel.signal,
+    });
+    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(r.exitCode).toBe(null);
+    expect(r.timedOut).toBe(false);
+  }, 15000);
+});
+
 describe("formatCommandResult", () => {
   it("marks the exit code on success", () => {
     expect(formatCommandResult("ls", { exitCode: 0, output: "a\nb", timedOut: false })).toBe(

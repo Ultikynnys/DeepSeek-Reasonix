@@ -338,7 +338,12 @@ export class JobRegistry {
 
   async waitForJob(
     id: number,
-    opts: { timeoutMs?: number; waitFor?: "exit" | "output-or-exit" } = {},
+    opts: {
+      timeoutMs?: number;
+      waitFor?: "exit" | "output-or-exit";
+      /** Per-tool-call cancel — Ctrl+K / desktop Stop wakes the wait immediately so the cancelled result reaches the model without waiting out the timeout. */
+      cancelSignal?: AbortSignal;
+    } = {},
   ): Promise<JobWaitResult | null> {
     const job = this.jobs.get(id);
     if (!job) return null;
@@ -361,6 +366,15 @@ export class JobRegistry {
         new Promise<void>((resolve) => {
           wakeOutput = resolve;
           job.outputWaiters.add(resolve);
+        }),
+      );
+    }
+    if (opts.cancelSignal) {
+      racers.push(
+        new Promise<void>((resolve) => {
+          const onCancel = () => resolve();
+          if (opts.cancelSignal!.aborted) onCancel();
+          else opts.cancelSignal!.addEventListener("abort", onCancel, { once: true });
         }),
       );
     }

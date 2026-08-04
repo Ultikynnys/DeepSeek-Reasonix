@@ -533,6 +533,13 @@ async function runPipeGroup(
           new Promise<number | null>((resolve) => {
             c.once("error", () => resolve(null));
             c.once("close", (code) => resolve(code));
+            // Fast-settle when we killed the group (timeout / abort): on
+            // Windows + Node ≥ 24, 'close' (stdio drain) can lag seconds
+            // behind a killed process — the user-cancel message must reach
+            // the log and the model immediately, not after pipes drain.
+            c.once("exit", (code) => {
+              if (timedOut || opts.signal?.aborted) resolve(code);
+            });
           }),
       ),
     );

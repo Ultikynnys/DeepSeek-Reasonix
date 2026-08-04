@@ -23,6 +23,13 @@ export {
   tokenizeCommand,
 } from "./shell/parse.js";
 export type { ResolveExecutableOptions, RunCommandResult } from "./shell/exec.js";
+
+// Explanatory note appended to every force-cancelled shell tool result. It is
+// written to the log the instant the cancel fires (fast-settle in exec.ts /
+// jobs.ts) and reaches the model on the very next prompt — never queued via
+// the steer mechanism, which could arrive too late to stop a blind retry.
+export const USER_CANCEL_NOTE =
+  "This is an intentional user cancellation — users do this when a task stalls indefinitely or takes too long. Do not blindly retry the same command; check what it was waiting on, adjust, or proceed with the conversation.";
 export {
   injectPowerShellUtf8,
   killProcessTree,
@@ -145,8 +152,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       if (ctx?.cancelSignal?.aborted) {
         return JSON.stringify({
           cancelledByUser: true,
-          error:
-            "Command was force-stopped by the user. This is typically done when a command stalls or takes too long.",
+          error: `Command force-stopped by the user. ${USER_CANCEL_NOTE}`,
           output: result.output,
           exitCode: result.exitCode,
         });
@@ -213,7 +219,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       if (ctx?.cancelSignal?.aborted) {
         return JSON.stringify({
           cancelledByUser: true,
-          error: "Background job startup was force-stopped by the user.",
+          error: `Background job startup force-stopped by the user. ${USER_CANCEL_NOTE}`,
           jobId: result.jobId,
           preview: result.preview,
           exitCode: result.exitCode,
@@ -289,34 +295,15 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       },
       ctx,
     ) => {
-      const cancel = ctx?.cancelSignal;
-      let out: import("./jobs.js").JobWaitResult | null = null;
-      if (cancel) {
-        // Race the wait with the user's cancel request (Ctrl+K / desktop Stop).
-        out = await Promise.race([
-          jobs.waitForJob(args.jobId, {
-            timeoutMs: args.timeoutMs,
-            waitFor: args.waitFor,
-          }),
-          new Promise<null>((resolve) => {
-            if (cancel.aborted) {
-              resolve(null);
-              return;
-            }
-            cancel.addEventListener("abort", () => resolve(null), { once: true });
-          }),
-        ]);
-      } else {
-        out = await jobs.waitForJob(args.jobId, {
-          timeoutMs: args.timeoutMs,
-          waitFor: args.waitFor,
-        });
-      }
-      if (cancel?.aborted) {
+      const out = await jobs.waitForJob(args.jobId, {
+        timeoutMs: args.timeoutMs,
+        waitFor: args.waitFor,
+        cancelSignal: ctx?.cancelSignal,
+      });
+      if (ctx?.cancelSignal?.aborted) {
         return JSON.stringify({
           cancelledByUser: true,
-          error:
-            "Wait was force-stopped by the user. The job may still be running in the background.",
+          error: `Wait force-stopped by the user. ${USER_CANCEL_NOTE}`,
           jobId: args.jobId,
         });
       }

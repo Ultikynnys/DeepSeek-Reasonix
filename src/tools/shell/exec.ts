@@ -121,15 +121,36 @@ export async function runCommand(
     let totalBytes = 0;
     const byteCap = maxChars * 2 * 4; // worst-case 4 bytes/char for utf-8/gbk
     let timedOut = false;
-    let aborted = false;
+    let settled = false;
     const killChildTree = () => killProcessTree(child);
+    // Single settle path with an idempotency guard: the kill paths (timeout /
+    // abort) call finish() immediately so the result — including whatever
+    // partial output was captured — reaches the log and the model the moment
+    // the signal fires. Waiting for 'close' alone can lag seconds on Windows
+    // + Node ≥ 24 (stdio drain behind taskkill /T /F), which would delay a
+    // user cancel message past the point of usefulness. Normal runs settle
+    // on 'close' with the real exit code.
+    const finish = (exitCode: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killTimer);
+      opts.signal?.removeEventListener("abort", onAbort);
+      const merged = Buffer.concat(chunks);
+      const buf = smartDecodeOutput(merged);
+      const output =
+        buf.length > maxChars
+          ? `${buf.slice(0, maxChars)}\n\n[… truncated ${buf.length - maxChars} chars …]`
+          : buf;
+      resolve({ exitCode, output, timedOut });
+    };
     const killTimer = setTimeout(() => {
       timedOut = true;
       killChildTree();
+      finish(null);
     }, timeoutMs);
     const onAbort = () => {
-      aborted = true;
       killChildTree();
+      finish(null);
     };
     // Check synchronously first — if the signal aborted before listener attach
     // (parent loop was already cancelled), addEventListener with `once:true`
@@ -159,17 +180,7 @@ export async function runCommand(
       opts.signal?.removeEventListener("abort", onAbort);
       reject(err);
     });
-    child.on("close", (code) => {
-      clearTimeout(killTimer);
-      opts.signal?.removeEventListener("abort", onAbort);
-      const merged = Buffer.concat(chunks);
-      const buf = smartDecodeOutput(merged);
-      const output =
-        buf.length > maxChars
-          ? `${buf.slice(0, maxChars)}\n\n[… truncated ${buf.length - maxChars} chars …]`
-          : buf;
-      resolve({ exitCode: code, output, timedOut });
-    });
+    child.on("close", (code) => finish(code));
   });
 }
 

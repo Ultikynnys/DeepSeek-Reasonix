@@ -301,6 +301,10 @@ export class ToolRegistry {
       }
       const result = await tool.fn(args, {
         signal: opts.signal,
+        // Per-tool-call cancel (Ctrl+K / desktop Stop) must reach the tool's
+        // ctx or the handler never learns the user force-stopped it — it would
+        // keep running and no cancelledByUser result would ever be appended.
+        cancelSignal: opts.cancelSignal,
         confirmationGate: opts.confirmationGate,
         readTracker: opts.readTracker,
       });
