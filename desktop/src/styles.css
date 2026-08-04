@@ -2945,6 +2945,32 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   display: flex;
   gap: 6px;
 }
+.card-head-row {
+  display: flex;
+  align-items: center;
+}
+.head-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 8px;
+  padding: 5px 9px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-sans, "Geist", system-ui, sans-serif);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.head-action:hover {
+  color: var(--fg);
+  background: var(--panel-2);
+}
+.card.is-compact .head-action {
+  padding: 3px 7px;
+}
 .btn {
   padding: 5px 12px;
   border-radius: 6px;
@@ -4079,7 +4105,7 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   padding-left: 32px;
 }
 .tree .node[data-kind="file"] {
-  cursor: default;
+  cursor: pointer;
   align-items: flex-start;
 }
 .tree .node .ico {

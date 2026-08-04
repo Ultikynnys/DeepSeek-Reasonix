@@ -552,6 +552,8 @@ export const zhCN: typeof en = {
     diffDiscard: "丢弃",
     diffApply: "应用",
     diffAwaiting: "等待批准",
+    file: "文件",
+    openInEditor: "在编辑器中打开",
     errorName: "错误",
     searchName: "网页搜索",
     subagentDone: "完成",

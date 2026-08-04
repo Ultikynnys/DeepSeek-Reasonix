@@ -565,6 +565,8 @@ export const de: typeof en = {
     diffDiscard: "Verwerfen",
     diffApply: "Anwenden",
     diffAwaiting: "Wartet auf Freigabe",
+    file: "Datei",
+    openInEditor: "Im Editor öffnen",
     errorName: "Fehler",
     searchName: "Websuche",
     subagentDone: "Erledigt",

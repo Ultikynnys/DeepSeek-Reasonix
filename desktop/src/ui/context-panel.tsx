@@ -251,6 +251,7 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
                 data-kind="file"
                 title={n.path}
                 style={{ paddingLeft: 4 + n.depth * 14 }}
+                onClick={() => void openContextFile(n.path, settings)}
               >
                 <span className="ico">
                   <I.file size={12} />
@@ -269,7 +270,10 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
                   className="tree-action"
                   aria-label={t("contextPanel.openFile", { path: n.path })}
                   title={t("contextPanel.openFile", { path: n.path })}
-                  onClick={() => void openContextFile(n.path, settings)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void openContextFile(n.path, settings);
+                  }}
                 >
                   <I.file size={12} />
                 </button>
@@ -278,7 +282,10 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
                   className="tree-action"
                   aria-label={t("contextPanel.copyPath", { path: n.path })}
                   title={t("contextPanel.copyPath", { path: n.path })}
-                  onClick={() => void navigator.clipboard?.writeText(n.path)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void navigator.clipboard?.writeText(n.path);
+                  }}
                 >
                   <I.copy size={12} />
                 </button>

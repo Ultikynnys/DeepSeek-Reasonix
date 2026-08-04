@@ -19,7 +19,7 @@ import remarkMath from "remark-math";
 import { CodeView } from "./CodeView";
 import { t, useLang } from "./i18n";
 
-async function openWithEditor(
+export async function openWithEditor(
   editor: string | undefined,
   abs: string,
   line?: number,
@@ -32,10 +32,10 @@ async function openWithEditor(
 }
 
 type WorkspaceCtx = { dir?: string; editor?: string };
-const WorkspaceContext = createContext<WorkspaceCtx>({});
+export const WorkspaceContext = createContext<WorkspaceCtx>({});
 export const WorkspaceProvider = WorkspaceContext.Provider;
 
-function resolveAgainstWorkspace(rel: string, ws: string | undefined): string {
+export function resolveAgainstWorkspace(rel: string, ws: string | undefined): string {
   if (!ws) return rel;
   const isWindows = ws.includes("\\");
   if (/^[a-zA-Z]:[\\/]/.test(rel) || rel.startsWith("/")) {

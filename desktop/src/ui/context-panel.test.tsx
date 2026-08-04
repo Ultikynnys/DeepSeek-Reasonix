@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings, UsageStats } from "../App";
 import { setLang } from "../i18n";
 import { ContextPanel } from "./context-panel";
@@ -62,6 +62,13 @@ describe("ContextPanel files", () => {
   });
   afterEach(cleanup);
 
+  beforeAll(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn() },
+      configurable: true,
+    });
+  });
+
   it("keeps each tracked file's full path visible", () => {
     const { container } = renderPanel();
 
@@ -77,6 +84,27 @@ describe("ContextPanel files", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open file: src/new-file.ts" }));
 
     await waitFor(() => expect(openPath).toHaveBeenCalledWith("/repo/src/new-file.ts"));
+    expect(openPath).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the file when the file row itself is clicked", async () => {
+    const { container } = renderPanel();
+
+    fireEvent.click(container.querySelector('[data-kind="file"]')!);
+
+    await waitFor(() => expect(openPath).toHaveBeenCalledWith("/repo/src/new-file.ts"));
+    expect(openPath).toHaveBeenCalledTimes(1);
+  });
+
+  it("copying a path does not open the file", async () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy path: src/new-file.ts" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(navigator.clipboard.writeText)).toHaveBeenCalledWith("src/new-file.ts"),
+    );
+    expect(openPath).not.toHaveBeenCalled();
   });
 
   it("renders live log tokens even before final usage arrives", () => {

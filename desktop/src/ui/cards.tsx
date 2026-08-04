@@ -1,10 +1,58 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, useContext, useMemo, useState, type ReactNode } from "react";
 import { I } from "../icons";
-import { Markdown } from "../Markdown";
+import { Markdown, WorkspaceContext, openWithEditor, resolveAgainstWorkspace } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { Shortcut } from "./shortcut";
 
 type Tone = "default" | "success" | "warning" | "danger" | "accent" | "violet";
+
+/** Pull a file ref (path + optional line) out of a tool's JSON args, mirroring the TUI ToolCard ↗ link. */
+function extractToolFileRef(args?: string): { path: string; line?: number } | null {
+  if (!args) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(args);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const rec = parsed as Record<string, unknown>;
+  if (typeof rec.path === "string") {
+    let line: number | undefined;
+    // read_file supports `range` like "50-100" — open at the first line.
+    if (typeof rec.range === "string") {
+      const first = rec.range.split("-")[0];
+      const n = Number.parseInt(first ?? "", 10);
+      if (Number.isFinite(n) && n > 0) line = n;
+    }
+    if (line === undefined && typeof rec.line === "number" && rec.line > 0) line = rec.line;
+    return { path: rec.path, line };
+  }
+  // multi_edit: use the first edit's path
+  if (Array.isArray(rec.edits) && rec.edits.length > 0) {
+    const first = rec.edits[0] as Record<string, unknown> | undefined;
+    if (first && typeof first.path === "string") return { path: first.path };
+  }
+  // move_file / copy_file: open the source
+  if (typeof rec.source === "string" && rec.source) return { path: rec.source };
+  return null;
+}
+
+/** Always-visible "open in editor" action rendered in the card header, next to the collapse toggle. */
+function OpenFileButton({ path, line, label }: { path: string; line?: number; label: string }) {
+  const ws = useContext(WorkspaceContext);
+  return (
+    <button
+      type="button"
+      className="head-action"
+      title={label}
+      onClick={() => void openWithEditor(ws.editor, resolveAgainstWorkspace(path, ws.dir), line)}
+    >
+      <I.link size={12} />
+      <span>{label}</span>
+    </button>
+  );
+}
 
 export function Card({
   tone = "default",
@@ -32,29 +80,32 @@ export function Card({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className={compact ? "card is-compact" : "card"} data-tone={tone} data-open={open}>
-      <button
-        type="button"
-        className="card-head"
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          width: "100%",
-          background: "none",
-          border: "none",
-          textAlign: "left",
-          font: "inherit",
-          color: "inherit",
-        }}
-      >
-        <span className="ico">{icon}</span>
-        <span className="kind">{kind}</span>
-        {name ? <span className="name">{name}</span> : null}
-        <span className="grow" />
-        {meta ? <span className="meta">{meta}</span> : null}
+      <div className="card-head-row">
+        <button
+          type="button"
+          className="card-head"
+          onClick={() => setOpen((v) => !v)}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: "none",
+            border: "none",
+            textAlign: "left",
+            font: "inherit",
+            color: "inherit",
+          }}
+        >
+          <span className="ico">{icon}</span>
+          <span className="kind">{kind}</span>
+          {name ? <span className="name">{name}</span> : null}
+          <span className="grow" />
+          {meta ? <span className="meta">{meta}</span> : null}
+          <span className="chev">
+            <I.chev size={12} />
+          </span>
+        </button>
         {headRight}
-        <span className="chev">
-          <I.chev size={12} />
-        </span>
-      </button>
+      </div>
       {open ? <div className="card-body">{children}</div> : null}
     </div>
   );
@@ -343,6 +394,7 @@ export function ToolCard({
   durationMs?: number;
 }) {
   useLang();
+  const fileRef = useMemo(() => extractToolFileRef(args), [args]);
   const running = result === undefined;
   const tone: Tone = running ? "default" : ok === false ? "danger" : "success";
   return (
@@ -366,6 +418,15 @@ export function ToolCard({
             <span className="meta-dur">{durationMs} ms</span>
           ) : null}
         </>
+      }
+      headRight={
+        fileRef ? (
+          <OpenFileButton
+            path={fileRef.path}
+            line={fileRef.line}
+            label={`${fileRef.path}${fileRef.line ? `:${fileRef.line}` : ""}`}
+          />
+        ) : undefined
       }
     >
       <div className="tool-call">
@@ -478,6 +539,13 @@ export function DiffCard({
   onDiscard?: () => void;
 }) {
   useLang();
+  const openLine = useMemo(() => {
+    for (const x of lines) {
+      if (x.t === "rm" && x.l) return x.l;
+      if (x.t === "add" && x.r) return x.r;
+    }
+    return undefined;
+  }, [lines]);
   const adds = lines.filter((x) => x.t === "add").length;
   const rms = lines.filter((x) => x.t === "rm").length;
   return (
@@ -496,6 +564,9 @@ export function DiffCard({
             <StatusIcon state="waiting" label={t("cards.diffAwaiting")} />
           )}
         </>
+      }
+      headRight={
+        <OpenFileButton path={filename} line={openLine} label={t("cards.openInEditor")} />
       }
     >
       <div className="diff">

@@ -534,6 +534,8 @@ export const en = {
     diffDiscard: "Discard",
     diffApply: "Apply",
     diffAwaiting: "Waiting approval",
+    file: "file",
+    openInEditor: "Open in editor",
     errorName: "Error",
     searchName: "Web search",
     subagentDone: "Done",
