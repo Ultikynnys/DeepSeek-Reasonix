@@ -561,6 +561,8 @@ export const de: typeof en = {
     shellAlwaysAllow: "Immer erlauben",
     shellReject: "Ablehnen",
     shellRun: "Ausführen",
+    shellStop: "Stopp",
+    shellStopHint: "Den laufenden Befehl stoppen, ohne das Gespräch abzubrechen.",
     diffApplyChanges: "Änderungen anwenden",
     diffDiscard: "Verwerfen",
     diffApply: "Anwenden",

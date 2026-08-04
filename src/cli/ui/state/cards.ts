@@ -46,6 +46,8 @@ export interface ToolCard extends CardBase {
   aborted?: boolean;
   /** Set when dispatch refused the call (e.g. plan-mode bounce). UI swaps spinner for a red "rejected" badge and hides the verbose error body. */
   rejected?: boolean;
+  /** Set when the user force-stopped the tool (Ctrl+K / desktop Stop) without aborting the turn. */
+  cancelled?: boolean;
 }
 
 export interface TaskStep {

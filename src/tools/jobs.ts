@@ -69,8 +69,10 @@ export interface JobStartOptions {
   cwd: string;
   /** Capped at 30; ready-signal match short-circuits. Default 3. */
   waitSec?: number;
-  /** Signal plumbed through from the calling tool's AbortSignal. */
+  /** Turn abort signal — Esc/Stop ends the turn. Merged with cancelSignal in start(). */
   signal?: AbortSignal;
+  /** Per-tool-call cancel signal — Ctrl+K / desktop Stop kills just this job without ending the turn. */
+  cancelSignal?: AbortSignal;
   /** Total per-job output buffer cap (bytes). Default 64 KB. */
   maxBufferBytes?: number;
 }
@@ -103,6 +105,20 @@ export interface JobRecord {
   running: boolean;
   /** Error from spawn() itself (ENOENT, etc.) once surfaced. */
   spawnError?: string;
+}
+
+/** Returns an AbortSignal that fires when either of the two input signals
+ *  fires. If both are undefined, returns undefined. */
+export function mergeSignals(a?: AbortSignal, b?: AbortSignal): AbortSignal | undefined {
+  if (!a && !b) return undefined;
+  if (!a) return b;
+  if (!b) return a;
+  const ctrl = new AbortController();
+  const handler = () => ctrl.abort();
+  a.addEventListener("abort", handler, { once: true });
+  b.addEventListener("abort", handler, { once: true });
+  if (a.aborted || b.aborted) ctrl.abort();
+  return ctrl.signal;
 }
 
 export class JobRegistry {
@@ -267,10 +283,13 @@ export class JobRegistry {
     child.on("close", settleClosed);
 
     const onAbort = () => this.stop(id, { graceMs: 100 });
-    if (opts.signal?.aborted) {
+    // Merge the turn abort signal with the per-tool-call cancel signal so
+    // Esc AND Ctrl+K / desktop Stop both kill the job during startup.
+    const merged = mergeSignals(opts.signal, opts.cancelSignal);
+    if (merged?.aborted) {
       onAbort();
     } else {
-      opts.signal?.addEventListener("abort", onAbort, { once: true });
+      merged?.addEventListener("abort", onAbort, { once: true });
     }
 
     // Race: (a) ready signal, (b) child exit, (c) wait deadline.

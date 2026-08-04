@@ -543,6 +543,7 @@ export type IncomingEvent = { tabId?: string } & (
 export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "user_input"; text: string }
   | { cmd: "abort" }
+  | { cmd: "cancel_tool" }
   | { cmd: "confirm_response"; id: number; response: ConfirmationChoice }
   | { cmd: "choice_response"; id: number; response: ChoiceVerdict }
   | { cmd: "plan_response"; id: number; response: PlanVerdict }

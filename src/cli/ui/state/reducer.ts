@@ -67,6 +67,7 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       return mutateCard(state, event.id, "tool", (c) => {
         const finalOutput = event.output ?? c.output;
         const rejected = isPlanModeRejection(finalOutput);
+        const cancelled = isUserCancellation(finalOutput);
         return {
           ...c,
           done: true,
@@ -75,6 +76,7 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
           elapsedMs: event.elapsedMs,
           ...(event.aborted ? { aborted: true } : {}),
           ...(rejected ? { rejected: true } : {}),
+          ...(cancelled ? { cancelled: true } : {}),
         };
       });
     }
@@ -485,6 +487,16 @@ function isPlanModeRejection(output: string): boolean {
   try {
     const parsed = JSON.parse(output);
     return parsed?.rejectedReason === "plan-mode";
+  } catch {
+    return false;
+  }
+}
+
+function isUserCancellation(output: string): boolean {
+  if (!output) return false;
+  try {
+    const parsed = JSON.parse(output);
+    return parsed?.cancelledByUser === true;
   } catch {
     return false;
   }

@@ -186,6 +186,8 @@ export class CacheFirstLoop {
   /** Threaded through HTTP + every tool dispatch so Esc cancels in-flight work, not after. */
   private _turnAbort: AbortController = new AbortController();
   private _discardAbortRequested = false;
+  /** Per-tool-call abort — Ctrl+K / desktop Stop kills the running tool without ending the turn. Rotated per dispatch. */
+  private _toolCancelController: AbortController | null = null;
   /** Authoritative running-id set — UI cards consult this instead of trusting end-event delivery. Insert at dispatch entry, delete in finally. */
   private readonly _inflight = new InflightSet();
 
@@ -526,8 +528,13 @@ export class CacheFirstLoop {
         };
       }
 
+      // Rotate the per-tool-call cancel controller so a stale cancel from a
+      // prior tool can't kill the current one. Shell tools merge this with
+      // the turn signal; Ctrl+K / desktop Stop fires only this one.
+      this._toolCancelController = new AbortController();
       const result = await this.tools.dispatch(name, args, {
         signal,
+        cancelSignal: this._toolCancelController.signal,
         maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
         confirmationGate: this.confirmationGate,
         readTracker: this.readTracker,
@@ -549,6 +556,7 @@ export class CacheFirstLoop {
       return { preWarnings, postWarnings, result };
     } finally {
       this._inflight.delete(this.inflightIdFor(call));
+      this._toolCancelController = null;
     }
   }
 
@@ -602,6 +610,13 @@ export class CacheFirstLoop {
   abort(opts: LoopAbortOptions = {}): void {
     if (opts.discardCurrentTurn) this._discardAbortRequested = true;
     this._turnAbort.abort();
+  }
+
+  /** Cancel the running tool call without aborting the turn. Ctrl+K / desktop Stop
+   *  kills the subprocess; the tool returns `cancelledByUser:true` and the
+   *  conversation continues. No-op if no tool is running. */
+  cancelCurrentTool(_reason: string): void {
+    this._toolCancelController?.abort();
   }
 
   private resetAbortState(): void {

@@ -4,7 +4,7 @@ import * as pathMod from "node:path";
 import { addProjectShellAllowed } from "../config.js";
 import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
-import { JobRegistry } from "./jobs.js";
+import { JobRegistry, mergeSignals } from "./jobs.js";
 import {
   DEFAULT_MAX_OUTPUT_CHARS,
   DEFAULT_TIMEOUT_SEC,
@@ -140,8 +140,17 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         cwd: rootDir,
         timeoutSec: effectiveTimeout,
         maxOutputChars,
-        signal: ctx?.signal,
+        signal: mergeSignals(ctx?.signal, ctx?.cancelSignal),
       });
+      if (ctx?.cancelSignal?.aborted) {
+        return JSON.stringify({
+          cancelledByUser: true,
+          error:
+            "Command was force-stopped by the user. This is typically done when a command stalls or takes too long.",
+          output: result.output,
+          exitCode: result.exitCode,
+        });
+      }
       return formatCommandResult(cmd, result);
     },
   });
@@ -198,8 +207,18 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         cwd,
         waitSec: args.waitSec,
         signal: ctx?.signal,
+        cancelSignal: ctx?.cancelSignal,
       });
       opts.onJobsChanged?.();
+      if (ctx?.cancelSignal?.aborted) {
+        return JSON.stringify({
+          cancelledByUser: true,
+          error: "Background job startup was force-stopped by the user.",
+          jobId: result.jobId,
+          preview: result.preview,
+          exitCode: result.exitCode,
+        });
+      }
       return formatJobStart(result);
     },
   });
@@ -262,15 +281,45 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       },
       required: ["jobId"],
     },
-    fn: async (args: {
-      jobId: number;
-      timeoutMs?: number;
-      waitFor?: "exit" | "output-or-exit";
-    }) => {
-      const out = await jobs.waitForJob(args.jobId, {
-        timeoutMs: args.timeoutMs,
-        waitFor: args.waitFor,
-      });
+    fn: async (
+      args: {
+        jobId: number;
+        timeoutMs?: number;
+        waitFor?: "exit" | "output-or-exit";
+      },
+      ctx,
+    ) => {
+      const cancel = ctx?.cancelSignal;
+      let out: import("./jobs.js").JobWaitResult | null = null;
+      if (cancel) {
+        // Race the wait with the user's cancel request (Ctrl+K / desktop Stop).
+        out = await Promise.race([
+          jobs.waitForJob(args.jobId, {
+            timeoutMs: args.timeoutMs,
+            waitFor: args.waitFor,
+          }),
+          new Promise<null>((resolve) => {
+            if (cancel.aborted) {
+              resolve(null);
+              return;
+            }
+            cancel.addEventListener("abort", () => resolve(null), { once: true });
+          }),
+        ]);
+      } else {
+        out = await jobs.waitForJob(args.jobId, {
+          timeoutMs: args.timeoutMs,
+          waitFor: args.waitFor,
+        });
+      }
+      if (cancel?.aborted) {
+        return JSON.stringify({
+          cancelledByUser: true,
+          error:
+            "Wait was force-stopped by the user. The job may still be running in the background.",
+          jobId: args.jobId,
+        });
+      }
       if (!out) return `job ${args.jobId}: not found (use list_jobs)`;
       if (out.exited) opts.onJobsChanged?.();
       return {

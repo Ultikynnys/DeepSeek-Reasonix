@@ -549,6 +549,8 @@ export const zhCN: typeof en = {
     shellAlwaysAllow: "始终允许",
     shellReject: "拒绝",
     shellRun: "运行",
+    shellStop: "停止",
+    shellStopHint: "停止正在运行的命令，不会中止对话。",
     diffApplyChanges: "应用变更",
     diffDiscard: "丢弃",
     diffApply: "应用",

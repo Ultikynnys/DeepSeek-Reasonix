@@ -1776,6 +1776,16 @@ function AppInner({
       setPendingShortcuts((prev) => !prev);
       return;
     }
+    // Ctrl+K: cancel the currently-running tool without aborting the turn.
+    // Only fires when a tool is actually running (loop active + inflight > 0).
+    // Esc still aborts the entire turn.
+    if (key.ctrl && key.input === "k" && isLoopActive() && loop.inflight.size > 0) {
+      loop.cancelCurrentTool("User cancelled the running command");
+      log.pushInfo(
+        `⊗ ${t("common.cancel")} — the running command was force-stopped by user. The conversation continues.`,
+      );
+      return;
+    }
     if (
       key.escape &&
       !submittingRef.current &&

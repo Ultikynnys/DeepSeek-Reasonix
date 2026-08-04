@@ -269,6 +269,7 @@ export function ShellCard({
   onApprove,
   onReject,
   onAlwaysAllow,
+  onStop,
 }: {
   command: string;
   output?: string;
@@ -277,6 +278,7 @@ export function ShellCard({
   onApprove?: () => void;
   onReject?: () => void;
   onAlwaysAllow?: () => void;
+  onStop?: () => void;
 }) {
   useLang();
   const tone: Tone = state === "failed" ? "danger" : state === "done" ? "success" : "warning";
@@ -347,6 +349,18 @@ export function ShellCard({
               ) : null}
               <button type="button" className="btn primary" onClick={onApprove}>
                 {t("cards.shellRun")} <Shortcut keys={["mod", "enter"]} />
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {state === "running" && onStop ? (
+          <div className="approve-row">
+            <div className="why">
+              {t("cards.shellRunning")} — {t("cards.shellStopHint")}
+            </div>
+            <div className="actions">
+              <button type="button" className="btn danger" onClick={onStop}>
+                {t("cards.shellStop")}
               </button>
             </div>
           </div>

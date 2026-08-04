@@ -110,6 +110,7 @@ export const AssistantMsg = memo(function AssistantMsg({
   onApproveConfirm,
   onRejectConfirm,
   onAlwaysAllowConfirm,
+  onStopTool,
   pendingConfirms,
 }: {
   segments: AssistantSegment[];
@@ -119,6 +120,7 @@ export const AssistantMsg = memo(function AssistantMsg({
   onApproveConfirm: (id: number) => void;
   onRejectConfirm: (id: number) => void;
   onAlwaysAllowConfirm: (id: number, prefix: string) => void;
+  onStopTool: () => void;
   pendingConfirms: PendingConfirm[];
 }) {
   const [copied, setCopied] = useState(false);
@@ -192,6 +194,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                       }
                     : undefined
                 }
+                onStop={onStopTool}
               />
             );
           }

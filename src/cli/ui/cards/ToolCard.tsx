@@ -157,13 +157,14 @@ function unwrapSubagentMarkdown(name: string, output: string): string | null {
   }
 }
 
-type ToolStatus = "running" | "ok" | "rejected" | "error" | "aborted";
+type ToolStatus = "running" | "ok" | "rejected" | "error" | "aborted" | "cancelled";
 
 function toolStatus(card: ToolCardData, isInflight: boolean): ToolStatus {
   // Running is derived from the loop's inflight set so a missed `tool` event
   // can't strand the spinner forever — finally in runOneToolCall guarantees
   // the id leaves the set on every exit path.
   if (isInflight) return "running";
+  if (card.cancelled) return "cancelled";
   if (card.rejected) return "rejected";
   if (card.aborted) return "aborted";
   if (card.exitCode !== undefined && card.exitCode !== 0) return "error";
@@ -182,6 +183,8 @@ function statusGlyph(s: ToolStatus): string {
       return "✗";
     case "aborted":
       return "⊘";
+    case "cancelled":
+      return "⊗";
   }
 }
 
@@ -192,6 +195,7 @@ function headerColorFor(s: ToolStatus): Color {
     case "rejected":
     case "error":
     case "aborted":
+    case "cancelled":
       return TONE.err;
     case "running":
       return TONE_ACTIVE.brand;

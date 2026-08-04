@@ -11,7 +11,10 @@ import { saveTruncatedResult, shouldSkipSave } from "./tools/truncated-result-sa
 import type { JSONSchema, ToolSpec } from "./types.js";
 
 export interface ToolCallContext {
+  /** Turn abort signal — Esc/Stop fires this, ending the entire turn. */
   signal?: AbortSignal;
+  /** Per-tool-call cancel signal — Ctrl+K or the desktop Stop button fires this to kill just the current running tool without aborting the turn. */
+  cancelSignal?: AbortSignal;
   /** Inject a mock PauseGate for tests. When absent, tools use the singleton. */
   confirmationGate?: PauseGate;
   /** Per-session tracker of files the model has read. Filesystem tools mark on read/write, edit_file/multi_edit consult before mutating. */
@@ -187,6 +190,7 @@ export class ToolRegistry {
     argumentsRaw: string | Record<string, unknown>,
     opts: {
       signal?: AbortSignal;
+      cancelSignal?: AbortSignal;
       maxResultChars?: number;
       maxResultTokens?: number;
       /** Inject a mock PauseGate for tests. */

@@ -530,6 +530,8 @@ export const en = {
     shellAlwaysAllow: "Always allow",
     shellReject: "Reject",
     shellRun: "Run",
+    shellStop: "Stop",
+    shellStopHint: "Stop the running command without aborting the conversation.",
     diffApplyChanges: "Apply changes",
     diffDiscard: "Discard",
     diffApply: "Apply",

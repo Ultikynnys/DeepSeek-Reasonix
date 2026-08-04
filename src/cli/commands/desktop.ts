@@ -224,6 +224,7 @@ type InMessage = { tabId?: string } & (
   | { cmd: "retry" }
   | { cmd: "btw"; text: string }
   | { cmd: "desktop_resync" }
+  | { cmd: "cancel_tool" }
 );
 
 interface NeedsSetupEvent {
@@ -2369,6 +2370,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "abort") {
       abortTurn(tab, desktopUserAbortLoopOptions());
       cancelPendingGates(tab);
+      return;
+    }
+    if (msg.cmd === "cancel_tool") {
+      tab.runtime?.loop.cancelCurrentTool("User stopped the running command (desktop Stop button)");
       return;
     }
     if (msg.cmd === "tab_close") {

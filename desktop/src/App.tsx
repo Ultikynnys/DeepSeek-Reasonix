@@ -2362,6 +2362,7 @@ function TabRuntime({
                             onApproveConfirm={onApproveConfirm}
                             onRejectConfirm={onRejectConfirm}
                             onAlwaysAllowConfirm={onAlwaysAllowConfirm}
+                            onStopTool={() => sendRpc({ cmd: "cancel_tool" })}
                             pendingConfirms={state.pendingConfirms}
                           />
                           {stats ? <DiffStats stats={stats} /> : null}
