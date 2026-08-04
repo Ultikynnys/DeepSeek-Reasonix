@@ -2,10 +2,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 import {
   HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS,
+  HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS,
   HISTORY_FOLD_SUMMARY_TIMEOUT_MS,
 } from "../src/context-manager.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
+
+function okJsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function serviceUnavailableResponse(): Response {
+  return new Response(JSON.stringify({ error: { message: "service unavailable" } }), {
+    status: 503,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 function abortableNeverFetch(): typeof fetch {
   return vi.fn((_url: unknown, init: { signal?: AbortSignal } | undefined) => {
@@ -102,5 +117,84 @@ describe("ContextManager fold timeout", () => {
       summaryChars: 0,
       error: "summary request timed out",
     });
+  });
+
+  it("retries a retryable 503 once and folds successfully when the service recovers", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () => {
+        calls++;
+        // First chat() call: all 4 client-level attempts hit the outage.
+        // Fold attempt 2's chat() succeeds on its first fetch.
+        return calls <= 4
+          ? serviceUnavailableResponse()
+          : okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+      }),
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    seedTurns(loop, 6);
+    const beforeMessages = loop.log.length;
+
+    const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
+    // Attempt 1 exhausts the client's internal 4× backoff retries and fails fast.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_TIMEOUT_MS + 5_000);
+    expect(await Promise.race([resultPromise, Promise.resolve("still-pending" as const)])).toBe(
+      "still-pending",
+    );
+    // The 30s retry pause elapses; attempt 2 succeeds immediately.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS);
+    const result = await Promise.race([resultPromise, Promise.resolve("still-pending" as const)]);
+    expect(result).not.toBe("still-pending");
+    expect(result).toMatchObject({
+      folded: true,
+      beforeMessages,
+      summaryChars: 7,
+    });
+    expect(loop.log.length).toBeLessThan(beforeMessages);
+    expect(calls).toBe(5);
+  });
+
+  it("gives up with the 503 error after the automatic retry when the outage persists", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () => {
+        calls++;
+        return serviceUnavailableResponse();
+      }),
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    seedTurns(loop, 6);
+    const beforeMessages = loop.log.length;
+
+    const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
+    // Attempt 1 fails fast; the fold is now in its 30s retry pause.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_TIMEOUT_MS + 5_000);
+    expect(await Promise.race([resultPromise, Promise.resolve("still-pending" as const)])).toBe(
+      "still-pending",
+    );
+    // Pause elapses and attempt 2 also exhausts the client's retries.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS);
+    const result = await Promise.race([resultPromise, Promise.resolve("still-pending" as const)]);
+    expect(result).not.toBe("still-pending");
+    expect(result).toMatchObject({
+      folded: false,
+      beforeMessages,
+      afterMessages: beforeMessages,
+      summaryChars: 0,
+    });
+    expect((result as { error?: string }).error).toMatch(/503/);
+    expect(calls).toBe(8);
   });
 });

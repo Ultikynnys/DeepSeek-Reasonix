@@ -49,6 +49,12 @@ export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
 export const HISTORY_FOLD_SUMMARY_PER_TOKEN_MS = 0.5;
 /** Ceiling for the scaled deadline — a hung request still can't stall the turn loop. */
 export const HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS = 180_000;
+// Automatic fold-summary retries after a fast retryable failure (5xx / 429 / network): the
+// client already retried 4× with short backoff, so this is one slower pause + one more attempt
+// — a partial outage gets time to clear before the fold gives up. Timeouts/aborts never retry.
+export const HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS = 2;
+/** Pause between fold-summary attempts — matches the "wait 30s and retry" user hint. */
+export const HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS = 30_000;
 /** Prepended to fold summary content so the model knows it's a synthesized recap.
  *  Re-export of the shared constant so existing imports keep resolving. */
 export const HISTORY_FOLD_MARKER = COMPACTION_SUMMARY_MARKER;
@@ -121,6 +127,37 @@ function collectPinnedSkills(head: ChatMessage[]): { names: string[]; bodies: st
     }
   }
   return { names: [...pinned.keys()], bodies: [...pinned.values()] };
+}
+
+/** Fast retryable fold-summary failures get one automatic retry. The client already retried
+ *  4× with short backoff, so what survived that is either permanent (4xx) or a slow hang
+ *  (fold-timeout) — only 5xx / 429 / network errors are worth the longer pause. */
+function isRetryableFoldSummaryError(message: string): boolean {
+  if (message === "fold-timeout" || message === "fold-aborted" || message === "aborted") {
+    return false;
+  }
+  if (/^DeepSeek (5\d{2}|429):/.test(message)) return true;
+  if (/^DeepSeek \d{3}:/.test(message)) return false;
+  return true; // network-level failures (fetch failed, ECONNRESET, …)
+}
+
+/** Abort-aware pause between fold attempts — Esc during the wait cancels instantly. */
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("fold-aborted"));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new Error("fold-aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export class ContextManager {
@@ -362,6 +399,15 @@ export class ContextManager {
     const foldCtrl = new AbortController();
     let cleanupAbort = (): void => {};
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    // Deadline scales with the head being summarized: prefill + queue time
+    // grows with the prompt, so a fixed short timeout would deterministically
+    // kill folds at large context sizes (e.g. 15s vs a 240k-token prefill) —
+    // exactly when compaction matters most. Still ceilinged so a hung
+    // request can't stall the turn loop indefinitely.
+    const deadlineMs = Math.min(
+      HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS,
+      HISTORY_FOLD_SUMMARY_TIMEOUT_MS + Math.round(headTokens * HISTORY_FOLD_SUMMARY_PER_TOKEN_MS),
+    );
     try {
       const abortPromise = new Promise<never>((_, reject) => {
         const abort = () => {
@@ -375,51 +421,71 @@ export class ContextManager {
           cleanupAbort = () => turnSignal.removeEventListener("abort", abort);
         }
       });
-      // Deadline scales with the head being summarized: prefill + queue time
-      // grows with the prompt, so a fixed short timeout would deterministically
-      // kill folds at large context sizes (e.g. 15s vs a 240k-token prefill) —
-      // exactly when compaction matters most. Still ceilinged so a hung
-      // request can't stall the turn loop indefinitely.
-      const deadlineMs = Math.min(
-        HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS,
-        HISTORY_FOLD_SUMMARY_TIMEOUT_MS +
-          Math.round(headTokens * HISTORY_FOLD_SUMMARY_PER_TOKEN_MS),
-      );
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => {
-          foldCtrl.abort();
-          reject(new Error("fold-timeout"));
-        }, deadlineMs);
-      });
-      const resp = await Promise.race([
-        this.deps.client.chat({
-          model: summaryModel,
-          messages,
-          tools: tools.length ? (tools as ToolSpec[]) : undefined,
-          signal: foldCtrl.signal,
-          thinking: "disabled",
-        }),
-        abortPromise,
-        timeoutPromise,
-      ]);
-      this.deps.stats.record(this.deps.getCurrentTurn(), summaryModel, resp.usage ?? new Usage());
-      return {
-        content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
-        reasoningContent: resp.reasoningContent ?? "",
-      };
-    } catch (err) {
-      // Esc during a fold aborts the turn — the abort path owns that
-      // messaging, so stay silent. Any other failure is reported so the
-      // loop can warn instead of the compaction silently no-opping.
-      if (turnSignal.aborted) return { content: "", reasoningContent: "" };
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        content: "",
-        reasoningContent: "",
-        error: message === "fold-timeout" ? "summary request timed out" : message,
-      };
+      for (let attempt = 0; attempt < HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS; attempt++) {
+        if (turnSignal.aborted) return { content: "", reasoningContent: "" };
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            foldCtrl.abort();
+            reject(new Error("fold-timeout"));
+          }, deadlineMs);
+        });
+        try {
+          const resp = await Promise.race([
+            this.deps.client.chat({
+              model: summaryModel,
+              messages,
+              tools: tools.length ? (tools as ToolSpec[]) : undefined,
+              signal: foldCtrl.signal,
+              thinking: "disabled",
+            }),
+            abortPromise,
+            timeoutPromise,
+          ]);
+          this.deps.stats.record(
+            this.deps.getCurrentTurn(),
+            summaryModel,
+            resp.usage ?? new Usage(),
+          );
+          return {
+            content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
+            reasoningContent: resp.reasoningContent ?? "",
+          };
+        } catch (err) {
+          // Esc during a fold aborts the turn — the abort path owns that
+          // messaging, so stay silent. Any other failure is reported so the
+          // loop can warn instead of the compaction silently no-opping.
+          if (turnSignal.aborted) return { content: "", reasoningContent: "" };
+          const message = err instanceof Error ? err.message : String(err);
+          // Automatic retry for fast retryable failures (5xx / 429 / network):
+          // the client already retried 4× with short backoff, so this pause is
+          // the longer "wait 30s and retry" window — a partial outage gets
+          // time to clear before the fold gives up. Timeouts and aborts are
+          // not retried — they already consumed the full scaled deadline.
+          const retryable =
+            attempt < HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS - 1 && isRetryableFoldSummaryError(message);
+          if (!retryable) {
+            return {
+              content: "",
+              reasoningContent: "",
+              error: message === "fold-timeout" ? "summary request timed out" : message,
+            };
+          }
+        } finally {
+          // Disarm the attempt deadline before the retry pause — leaving it
+          // armed would abort foldCtrl mid-pause and poison the next attempt.
+          if (timeout) clearTimeout(timeout);
+        }
+        // Retryable failure — pause, then loop into the next attempt.
+        try {
+          await abortableDelay(HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS, turnSignal);
+        } catch {
+          // Aborted during the pause — the abort path owns the messaging.
+          return { content: "", reasoningContent: "" };
+        }
+      }
+      // Unreachable — every attempt returns or continues past the last one.
+      return { content: "", reasoningContent: "", error: "summary request failed" };
     } finally {
-      if (timeout) clearTimeout(timeout);
       cleanupAbort();
     }
   }
