@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
+import {
+  HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS,
+  HISTORY_FOLD_SUMMARY_TIMEOUT_MS,
+} from "../src/context-manager.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 
@@ -46,7 +50,9 @@ describe("ContextManager fold timeout", () => {
     const beforeMessages = loop.log.length;
 
     const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
-    await vi.advanceTimersByTimeAsync(15_000);
+    // The deadline is scaled by head size; advancing past the ceiling is
+    // guaranteed to fire the fold timeout regardless of how large the head is.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS + 1_000);
 
     const result = await Promise.race([resultPromise, Promise.resolve("still-pending" as const)]);
     expect(result).not.toBe("still-pending");
@@ -55,7 +61,46 @@ describe("ContextManager fold timeout", () => {
       beforeMessages,
       afterMessages: beforeMessages,
       summaryChars: 0,
+      error: "summary request timed out",
     });
     expect(loop.log.length).toBe(beforeMessages);
+  });
+
+  it("scales the deadline with head size — a large log is not killed at the base timeout", async () => {
+    vi.useFakeTimers();
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: abortableNeverFetch() });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    // 30 turns × ~450 tokens/message → ~27k total tokens, so the head alone
+    // pushes the scaled deadline well past the 15s base (≈ 15s + 13k × 0.5ms).
+    const pad = "context padding for fold timeout regression ".repeat(40);
+    for (let i = 0; i < 30; i++) {
+      loop.log.append({ role: "user", content: `question ${i}: ${pad}` });
+      loop.log.append({ role: "assistant", content: `answer ${i}: ${pad}` });
+    }
+    const beforeMessages = loop.log.length;
+
+    const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
+
+    // At the old fixed 15s deadline the request would already have been killed.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_TIMEOUT_MS);
+    expect(await Promise.race([resultPromise, Promise.resolve("still-pending" as const)])).toBe(
+      "still-pending",
+    );
+
+    // Once the scaled deadline elapses the fold still fails open.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS);
+    const result = await Promise.race([resultPromise, Promise.resolve("still-pending" as const)]);
+    expect(result).not.toBe("still-pending");
+    expect(result).toMatchObject({
+      folded: false,
+      beforeMessages,
+      afterMessages: beforeMessages,
+      summaryChars: 0,
+      error: "summary request timed out",
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
+import { HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS } from "../src/context-manager.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 
@@ -107,7 +108,9 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
     const beforeMessages = loop.log.length;
 
     const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
-    await vi.advanceTimersByTimeAsync(15_000);
+    // Deadline is scaled by head size — advancing past the ceiling is
+    // guaranteed to fire the fold timeout for any head.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS + 1_000);
     const result = await resultPromise;
 
     // Fail-open stays, but the reason is no longer swallowed — the loop

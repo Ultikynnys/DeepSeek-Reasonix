@@ -40,8 +40,15 @@ export const FORCE_SUMMARY_THRESHOLD = 0.8;
  *  turns, session restores, and huge pastes. Shares HISTORY_FOLD_THRESHOLD (75%) so every
  *  request ships below the fold line regardless of turn shape. */
 export const TURN_START_FOLD_THRESHOLD = HISTORY_FOLD_THRESHOLD;
-/** Hard deadline for semantic fold summaries so a hung request cannot stall the turn loop. */
+// Base hard deadline for fold summaries so a hung request cannot stall the turn loop. The real
+// deadline scales with the size of the head being summarized: a fixed short cap deterministically
+// kills legitimate folds at large contexts (prefill + queue time grows with the prompt) — exactly
+// when compaction matters most.
 export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
+/** Extra budget per head token — prefill roughly scales with input size. */
+export const HISTORY_FOLD_SUMMARY_PER_TOKEN_MS = 0.5;
+/** Ceiling for the scaled deadline — a hung request still can't stall the turn loop. */
+export const HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS = 180_000;
 /** Prepended to fold summary content so the model knows it's a synthesized recap.
  *  Re-export of the shared constant so existing imports keep resolving. */
 export const HISTORY_FOLD_MARKER = COMPACTION_SUMMARY_MARKER;
@@ -269,7 +276,7 @@ export class ContextManager {
     if (headTokens < totalTokens * HISTORY_FOLD_MIN_SAVINGS_FRACTION) return noop;
 
     const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(head);
-    const summary = await this.summarizeForFold(head, pinnedNames);
+    const summary = await this.summarizeForFold(head, pinnedNames, headTokens);
     if (!summary.content) {
       // Summarizer failure — surface it so the loop can warn instead of the
       // "compacting history…" status silently no-opping. Turn aborts are
@@ -337,6 +344,7 @@ export class ContextManager {
   private async summarizeForFold(
     messagesToSummarize: ChatMessage[],
     pinnedSkillNames: string[],
+    headTokens: number,
   ): Promise<{ content: string; reasoningContent: string; error?: string }> {
     const summaryModel = "deepseek-v4-flash";
     const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
@@ -367,11 +375,21 @@ export class ContextManager {
           cleanupAbort = () => turnSignal.removeEventListener("abort", abort);
         }
       });
+      // Deadline scales with the head being summarized: prefill + queue time
+      // grows with the prompt, so a fixed short timeout would deterministically
+      // kill folds at large context sizes (e.g. 15s vs a 240k-token prefill) —
+      // exactly when compaction matters most. Still ceilinged so a hung
+      // request can't stall the turn loop indefinitely.
+      const deadlineMs = Math.min(
+        HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS,
+        HISTORY_FOLD_SUMMARY_TIMEOUT_MS +
+          Math.round(headTokens * HISTORY_FOLD_SUMMARY_PER_TOKEN_MS),
+      );
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
           foldCtrl.abort();
           reject(new Error("fold-timeout"));
-        }, HISTORY_FOLD_SUMMARY_TIMEOUT_MS);
+        }, deadlineMs);
       });
       const resp = await Promise.race([
         this.deps.client.chat({
