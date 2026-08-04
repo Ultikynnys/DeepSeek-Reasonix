@@ -667,7 +667,7 @@ export const zhCN: TranslationSchema = {
     stormStuck:
       "已停止卡死的重试循环 — 模型在自纠提示后仍以相同参数重复调用同一工具。请尝试 /retry、换种说法，或排查底层阻塞。",
     stormSuppressed: "已抑制 {count} 次重复工具调用 — 同一名称 + 参数触发 3 次以上。",
-    compactingHistoryStatus: "正在压缩历史{aggressiveTag}…",
+    compactingHistoryStatus: "正在压缩历史{aggressiveTag}…可能需要一两分钟 — Esc 不会中断",
     aggressiveTag: "（激进）",
     compactFailed: "压缩失败 — {reason}。继续对话，历史未折叠。",
     foldedHistory:

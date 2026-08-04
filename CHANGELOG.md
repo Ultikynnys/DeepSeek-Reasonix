@@ -3,6 +3,28 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Compaction hardening — the fold now always runs to completion.**
+
+- Esc / Stop no longer aborts a running compaction. The fold summary request
+  was wired to the turn's abort signal, so any interrupt killed the
+  summarizer mid-flight and silently no-opped the compaction — "compacting
+  history…" was the last word, the context kept climbing, and sessions
+  ended up at the 80% forced-summary guard. Compaction is now
+  non-interruptible by design: a deferred Esc is honored at the next loop
+  boundary instead (turn-start folds), and a stop that lands during a
+  post-response fold no longer poisons the next turn with an instant abort.
+- Fold-summary deadline scaled for real heads: 0.5ms → 1.0ms per head
+  token, ceiling 180s → 300s. A ~240k-token head now gets ~4.3 minutes —
+  comfortably past the 1-2 minutes a real fold takes at that size, so
+  legitimate folds stop dying with "summary request timed out" exactly when
+  compaction matters most.
+- Commit guard: if the log is replaced mid-fold (concurrent compaction /
+  clear), the fold refuses to apply instead of clobbering the live log.
+- Compaction status row now states it may take a minute or two and that Esc
+  won't interrupt it.
+
 ## [0.53.2] — 2026-05-27
 
 **TUI crash fix — `useBoxMetrics` no longer trips React's max-update-depth.**

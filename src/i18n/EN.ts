@@ -693,7 +693,8 @@ export const EN: TranslationSchema = {
     stormStuck:
       "Stopped a stuck retry loop — the model kept calling the same tool with identical args after a self-correction nudge. Try /retry, rephrase, or rule out the underlying blocker.",
     stormSuppressed: "Suppressed {count} repeated tool call(s) — same name + args fired 3+ times.",
-    compactingHistoryStatus: "compacting history{aggressiveTag}…",
+    compactingHistoryStatus:
+      "compacting history{aggressiveTag}… may take a minute or two — Esc won't interrupt",
     aggressiveTag: " (aggressive)",
     compactFailed: "compaction failed — {reason}. Continuing with the conversation un-folded.",
     foldedHistory:

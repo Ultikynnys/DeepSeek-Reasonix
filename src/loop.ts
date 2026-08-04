@@ -307,7 +307,6 @@ export class CacheFirstLoop {
       log: this.log,
       stats: this.stats,
       sessionName: this.sessionName,
-      getAbortSignal: () => this._turnAbort.signal,
       getCurrentTurn: () => this._turn,
       getSystemPrompt: () => this.prefix.system,
       getToolSpecs: () => this.prefix.toolSpecs,
@@ -801,7 +800,9 @@ export class CacheFirstLoop {
     // prior turn (no tool_calls → no decideAfterUsage), session restore from
     // disk, huge user paste. TURN_START_FOLD_THRESHOLD shares the post-response
     // HISTORY_FOLD_THRESHOLD (75%), so every request ships below the fold line
-    // regardless of turn shape.
+    // regardless of turn shape. The fold is non-interruptible (see
+    // summarizeForFold): an Esc pressed during it is deferred — the iter-0
+    // abort check below honors it after the compaction completes.
     {
       const turnStart = this.context.estimateTurnStart(
         this.buildMessages(),
@@ -1094,6 +1095,15 @@ export class CacheFirstLoop {
           content: t("loop.compactingHistoryStatus", { aggressiveTag }),
         };
         const result = await this.compactHistory({ keepRecentTokens: decision.tailBudget });
+        // Esc/Stop during compaction: the fold is deliberately non-interruptible
+        // (see summarizeForFold), so a stop request that landed mid-summary is
+        // consumed here when the turn is finishing — there's nothing left to
+        // stop. Without the reset, the aborted controller would carry into the
+        // next step() (carryAbort) and instantly abort the user's next message.
+        // When tool calls are still pending the abort is left intact: the
+        // dispatch below cancels them and the next iter-top check runs the
+        // normal abort path (discard or synthetic + reset).
+        if (signal.aborted && repairedCalls.length === 0) this.resetAbortState();
         if (result.folded) {
           yield {
             turn: this._turn,

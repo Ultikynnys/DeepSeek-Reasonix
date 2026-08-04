@@ -125,8 +125,44 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
     expect(loop.log.length).toBe(beforeMessages);
   });
 
-  it("stays silent (no error) when the turn aborts during the fold", async () => {
+  it("ignores a turn abort — the fold still runs until its scaled deadline", async () => {
+    vi.useFakeTimers();
     const client = new DeepSeekClient({ apiKey: "sk-test", fetch: abortableNeverFetch() });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    seedTurns(loop, 6);
+    const beforeMessages = loop.log.length;
+
+    const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
+    // Esc / Stop mid-fold: compaction is non-interruptible by design, so the
+    // turn abort must NOT cancel the summarizer — only the scaled deadline
+    // can end it (and fail it open with a visible reason).
+    loop.abort();
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS + 1_000);
+
+    const result = await resultPromise;
+    expect(result).toMatchObject({
+      folded: false,
+      beforeMessages,
+      afterMessages: beforeMessages,
+      summaryChars: 0,
+      error: "summary request timed out",
+    });
+    expect(loop.log.length).toBe(beforeMessages);
+  });
+
+  it("commits the fold even when the turn was aborted while summarizing", async () => {
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () => {
+        // Let the abort land before the summary response arrives.
+        await Promise.resolve();
+        return okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+      }),
+    });
     const loop = new CacheFirstLoop({
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
@@ -135,12 +171,37 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
     seedTurns(loop, 6);
 
     const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
-    loop.abort();
-    const result = await resultPromise;
+    loop.abort(); // Esc arrives mid-summary — must not cancel the request.
 
-    // Esc aborts the turn — the abort path owns the messaging, so a fold
-    // interrupted by it must not surface a spurious compaction warning.
+    const result = await resultPromise;
+    expect(result.folded).toBe(true);
+    // The folded log is committed even though the turn was aborted.
+    expect(loop.log.entries[0]?.content).toContain("SUMMARY");
+    expect(loop.log.length).toBeLessThan(13);
+  });
+
+  it("refuses to clobber a log that was replaced while the summary was in flight", async () => {
+    const replacement = { role: "user" as const, content: "replacement log" };
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () => {
+        // A concurrent compaction / clear swapped the log array mid-fold.
+        loop.log.compactInPlace([replacement]);
+        return okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+      }),
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    seedTurns(loop, 6);
+
+    const result = await loop.compactHistory({ keepRecentTokens: 40 });
+
+    // The fold refuses to apply rather than resurrect the snapshot head.
     expect(result.folded).toBe(false);
-    expect(result.error).toBeUndefined();
+    expect(result.error).toMatch(/rewritten while compaction/i);
+    expect(loop.log.entries).toEqual([replacement]);
   });
 });

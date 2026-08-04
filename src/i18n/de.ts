@@ -714,7 +714,8 @@ export const de: TranslationSchema = {
       "Festgefahrene Wiederholungsschleife gestoppt — das Modell rief dasselbe Tool mit identischen Argumenten auf, selbst nach einem Selbstkorrektur-Hinweis. Versuche /retry, umformulieren oder schließe den zugrunde liegenden Blocker aus.",
     stormSuppressed:
       "{count} wiederholte Tool-Aufrufe unterdrückt — gleicher Name + Argumente 3+ Mal gesendet.",
-    compactingHistoryStatus: "Komprimiere Verlauf{aggressiveTag}...",
+    compactingHistoryStatus:
+      "Komprimiere Verlauf{aggressiveTag}... kann ein bis zwei Minuten dauern — Esc unterbricht nicht",
     aggressiveTag: " (aggressiv)",
     foldedHistory:
       "Kontext {before}/{ctxMax} ({pct}%) — {beforeMessages} Nachrichten → {afterMessages} gefaltet (Zusammenfassung {summaryChars} Zeichen). Fahre fort.",

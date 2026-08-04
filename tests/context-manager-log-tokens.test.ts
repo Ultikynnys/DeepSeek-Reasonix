@@ -11,7 +11,6 @@ function makeManager(log: AppendOnlyLog): ContextManager {
     log,
     stats: new SessionStats(),
     sessionName: null,
-    getAbortSignal: () => new AbortController().signal,
     getCurrentTurn: () => 1,
   });
 }
