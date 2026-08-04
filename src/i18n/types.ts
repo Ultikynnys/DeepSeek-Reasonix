@@ -801,7 +801,7 @@ export interface TranslationSchema {
     retries: string;
     reasoningLabel: string;
     runningLabel: string;
-    cancelHint: string;
+    stop: string;
     workingLabel: string;
     defaultFooter: string;
     applyAction: string;

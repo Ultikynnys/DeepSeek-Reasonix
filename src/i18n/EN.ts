@@ -1699,7 +1699,7 @@ export const EN: TranslationSchema = {
     retries: "retries",
     reasoningLabel: "reasoning \u00b7 {count} \u00b6",
     runningLabel: "running",
-    cancelHint: "Ctrl+K stops this command",
+    stop: "Stop",
     workingLabel: "working",
     defaultFooter: "\u2191\u2193 pick  \u00b7  \u23ce confirm  \u00b7  esc cancel",
     applyAction: "[a] apply",

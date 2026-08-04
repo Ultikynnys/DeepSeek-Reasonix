@@ -182,6 +182,7 @@ import { handleMcpBrowseSlash } from "./mcp-browse.js";
 import { formatMcpLifecycleEvent } from "./mcp-lifecycle.js";
 import { replaceMcpServerSummary } from "./mcp-server-list.js";
 import { formatMcpSlowToast } from "./mcp-toast.js";
+import { beginClickTracking, endClickTracking } from "./mouse-mode.js";
 import { openUrl } from "./open-url.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
@@ -194,7 +195,9 @@ import {
 } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
+import { isShellToolName } from "./state/cards.js";
 import { ChatScrollProvider, useChatScrollActions } from "./state/chat-scroll-provider.js";
+import { hitTestClickRegion } from "./state/click-regions.js";
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
@@ -1684,28 +1687,68 @@ function AppInner({
     });
   });
 
+  // While a shell command runs, SGR mouse tracking is turned on so its Stop
+  // button is clickable; native wheel/selection resume when none runs.
+  const [clickTrackingOn, setClickTrackingOn] = useState(false);
+  const runningShellRef = useRef(false);
+  const cards = useAgentState((s) => s.cards);
+
+  useKeystroke(
+    (ev) => {
+      if (ev.paste || modalOpen) return;
+      if (ev.mouseScrollUp) {
+        chatScroll.scrollWheelUp();
+        return;
+      }
+      if (ev.mouseScrollDown) {
+        chatScroll.scrollWheelDown();
+        return;
+      }
+      if (ev.pageUp && (busy || input.length === 0)) {
+        chatScroll.scrollPageUp();
+        return;
+      }
+      if (ev.pageDown && (busy || input.length === 0)) {
+        chatScroll.scrollPageDown();
+        return;
+      }
+      if (ev.end && (busy || input.length === 0)) {
+        chatScroll.jumpToBottom();
+      }
+    },
+    historyScrollMode === "app" || clickTrackingOn,
+  );
+
+  useEffect(() => {
+    const running = cards.some(
+      (c) =>
+        c.kind === "tool" &&
+        isShellToolName(c.name) &&
+        !c.done &&
+        !c.aborted &&
+        !c.rejected &&
+        !c.cancelled,
+    );
+    if (running && !runningShellRef.current) beginClickTracking();
+    else if (!running && runningShellRef.current) endClickTracking();
+    runningShellRef.current = running;
+    setClickTrackingOn(running);
+  }, [cards]);
+
+  // Mouse click on a running shell card's Stop button — cancels exactly that
+  // tool without aborting the turn. Regions are published each render by
+  // CardStream; the inflight guard keeps a stale region from acting after the
+  // tool already finished.
   useKeystroke((ev) => {
-    if (ev.paste || modalOpen) return;
-    if (ev.mouseScrollUp) {
-      chatScroll.scrollWheelUp();
-      return;
-    }
-    if (ev.mouseScrollDown) {
-      chatScroll.scrollWheelDown();
-      return;
-    }
-    if (ev.pageUp && (busy || input.length === 0)) {
-      chatScroll.scrollPageUp();
-      return;
-    }
-    if (ev.pageDown && (busy || input.length === 0)) {
-      chatScroll.scrollPageDown();
-      return;
-    }
-    if (ev.end && (busy || input.length === 0)) {
-      chatScroll.jumpToBottom();
-    }
-  }, historyScrollMode === "app");
+    if (!ev.mouseClick || ev.mouseRow === undefined || modalOpen) return;
+    if (!isLoopActive()) return;
+    const cardId = hitTestClickRegion(ev.mouseRow);
+    if (cardId === null || !loop.inflight.has(cardId)) return;
+    loop.cancelToolCall(cardId, "User clicked Stop on the running command");
+    log.pushInfo(
+      `⊗ ${t("common.cancel")} — the running command was force-stopped by user. The conversation continues.`,
+    );
+  });
 
   // Double-Esc — opens the rewind/edit picker when idle with an empty
   // composer. Tracks the prior Esc timestamp; a second Esc inside 500 ms

@@ -358,6 +358,69 @@ describe("CacheFirstLoop (non-streaming)", () => {
     void fetchSpy;
   });
 
+  it("cancelToolCall stops exactly one of two parallel tools (TUI Stop button)", async () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "blocker",
+      parallelSafe: true,
+      description: "blocks until the per-tool cancel signal fires",
+      parameters: { type: "object", properties: {} },
+      fn: async (_args: unknown, ctx: { cancelSignal?: AbortSignal }) => {
+        const sig = ctx.cancelSignal;
+        if (sig) {
+          await new Promise<void>((resolve) => {
+            if (sig.aborted) return resolve();
+            sig.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        return JSON.stringify({ cancelledByUser: true });
+      },
+    });
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          { id: "call_a", type: "function", function: { name: "blocker", arguments: "{}" } },
+          { id: "call_b", type: "function", function: { name: "blocker", arguments: "{}" } },
+        ],
+      },
+      { content: "both done" },
+    ]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 8,
+    });
+
+    const stepPromise = (async () => {
+      const events: { role: string; content?: string }[] = [];
+      for await (const ev of loop.step("go")) {
+        events.push({ role: ev.role, content: ev.content });
+      }
+      return events;
+    })();
+
+    // Both calls are running in parallel — the chunk is inflight.
+    await vi.waitFor(() => expect(loop.inflight.size).toBe(2));
+
+    // A Stop click on call_a must kill only call_a…
+    loop.cancelToolCall("call_a", "Stop");
+    await vi.waitFor(() => expect(loop.inflight.size).toBe(1));
+    expect(loop.inflight.has("call_b")).toBe(true);
+
+    // …and call_b keeps running until its own stop.
+    loop.cancelToolCall("call_b", "Stop");
+    const events = await stepPromise;
+
+    const cancelledTools = events.filter(
+      (e) => e.role === "tool" && (e.content ?? "").includes("cancelledByUser"),
+    );
+    expect(cancelledTools).toHaveLength(2);
+    expect(events[events.length - 1]!.role).toBe("done");
+  });
+
   it("does not bleed the prior turn's abort into the next step", async () => {
     // Regression: a user pressing Esc once would put _turnAbort into
     // an aborted state; the iter-0 abort branch handled it but didn't

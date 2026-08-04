@@ -4,7 +4,9 @@ import stringWidth from "string-width";
 import { t } from "../../../i18n/index.js";
 import { CardRenderer } from "../cards/CardRenderer.js";
 import type { Card } from "../state/cards.js";
+import { isShellToolName } from "../state/cards.js";
 import { useChatScrollActions, useChatScrollState } from "../state/chat-scroll-provider.js";
+import { type ClickRegion, clearClickRegions, setClickRegions } from "../state/click-regions.js";
 import { useAgentState } from "../state/provider.js";
 import { FG, SURFACE, TONE } from "../theme/tokens.js";
 
@@ -84,6 +86,47 @@ export function CardStream({
     () => computeCardStreamItems(visible, cardHeights, scrollRows, outer.height),
     [visible, cardHeights, scrollRows, outer.height],
   );
+
+  // On-screen rows of every visible running shell card's Stop button (the
+  // button is the card's last rendered row). The ScrollIndicator row only
+  // exists when scrolled up, and the inner box is shifted up by scrollRows —
+  // both are reflected so the hit-test lines up with what the user sees.
+  const clickRegions = useMemo(() => {
+    const regions: ClickRegion[] = [];
+    let innerTop = 0;
+    for (const item of items) {
+      if (item.kind === "spacer") {
+        innerTop += item.rows;
+        continue;
+      }
+      const h = cardHeights.get(item.card.id) ?? 0;
+      if (
+        h > 0 &&
+        item.card.kind === "tool" &&
+        isShellToolName(item.card.name) &&
+        !item.card.done &&
+        !item.card.aborted &&
+        !item.card.rejected &&
+        !item.card.cancelled
+      ) {
+        const indicatorRows = scrollRows > 0 ? 1 : 0;
+        regions.push({
+          cardId: item.card.id,
+          row: indicatorRows + 1 + innerTop + h - 1 - scrollRows,
+        });
+      }
+      innerTop += h;
+    }
+    return regions;
+  }, [items, cardHeights, scrollRows]);
+
+  useEffect(() => {
+    setClickRegions(clickRegions);
+  }, [clickRegions]);
+
+  useEffect(() => {
+    return () => clearClickRegions();
+  }, []);
 
   return (
     <>

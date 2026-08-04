@@ -7,6 +7,7 @@ import { Card } from "../primitives/Card.js";
 import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
 import { PULSE_SQUARE, Pulse } from "../primitives/Pulse.js";
 import type { ToolCard as ToolCardData } from "../state/cards.js";
+import { isShellToolName } from "../state/cards.js";
 import { useIsInflight } from "../state/inflight-context.js";
 import { VerboseContext } from "../state/verbose-context.js";
 import { WorkspaceRootContext } from "../state/workspace-root-context.js";
@@ -16,6 +17,8 @@ import { selectToolPreviewLines } from "../tool-summary.js";
 
 const READ_TAIL = 2;
 const OTHER_TAIL = 5;
+/** Danger-button fill for the Stop row on running shell cards — red-600 reads on both themes. */
+const STOP_BUTTON_BG = "#dc2626";
 
 /** Read-style tools dump file/list bodies — short tail is enough; the model already has the full text in context. */
 function tailLinesFor(name: string): number {
@@ -84,11 +87,6 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
         subtitle={argsLabel || undefined}
         meta={meta.length > 0 ? meta : undefined}
       />
-      {status === "running" ? (
-        <Text color={TONE.warn} dim>
-          {t("cardLabels.cancelHint")}
-        </Text>
-      ) : null}
       {fileRef && (
         <Box flexDirection="row">
           <Text color={FG.faint}> ↗ </Text>
@@ -128,6 +126,13 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
             )}
           </>
         ))}
+      {status === "running" && isShellToolName(card.name) ? (
+        <Box flexDirection="row" paddingLeft={1} paddingTop={1}>
+          <Text bold color="#ffffff" backgroundColor={STOP_BUTTON_BG}>
+            {` ⊗ ${t("cardLabels.stop")} `}
+          </Text>
+        </Box>
+      ) : null}
     </Card>
   );
 }

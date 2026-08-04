@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { disableMouseMode, enableMouseMode } from "../src/cli/ui/mouse-mode.js";
+import {
+  beginClickTracking,
+  disableMouseMode,
+  enableMouseMode,
+  endClickTracking,
+  isClickTrackingActive,
+} from "../src/cli/ui/mouse-mode.js";
 
 describe("mouse-mode enable/disable", () => {
   let writes: string[];
@@ -25,6 +31,8 @@ describe("mouse-mode enable/disable", () => {
     delete process.env.TERM_PROGRAM;
     // Reset module state — disable first to clear `active` from any prior test.
     disableMouseMode();
+    // Drain any click-tracking depth a prior test left behind.
+    while (isClickTrackingActive()) endClickTracking();
     writes.length = 0;
   });
 
@@ -133,5 +141,64 @@ describe("mouse-mode enable/disable", () => {
     expect(writes.length).toBe(0);
     disableMouseMode();
     expect(writes.length).toBe(0);
+  });
+
+  it("beginClickTracking flips default mode to SGR and back on end", () => {
+    enableMouseMode(); // native → "off"
+    writes.length = 0;
+    beginClickTracking();
+    expect(writes.join("")).toBe("\u001b[?1000h\u001b[?1006h");
+    expect(isClickTrackingActive()).toBe(true);
+    writes.length = 0;
+    endClickTracking();
+    expect(writes.join("")).toBe("\u001b[?1006l\u001b[?1000l");
+    expect(isClickTrackingActive()).toBe(false);
+  });
+
+  it("overlapping begin/end calls stay balanced (parallel shell tools)", () => {
+    enableMouseMode();
+    writes.length = 0;
+    beginClickTracking(); // depth 1 → SGR on
+    beginClickTracking(); // depth 2 → no write
+    expect(writes.join("")).toBe("\u001b[?1000h\u001b[?1006h");
+    writes.length = 0;
+    endClickTracking(); // depth 1 → still on
+    expect(writes).toEqual([]);
+    endClickTracking(); // depth 0 → SGR off
+    expect(writes.join("")).toBe("\u001b[?1006l\u001b[?1000l");
+  });
+
+  it("click tracking is a no-op when mouse mode was never enabled", () => {
+    // enableMouseMode never called → `active` is false.
+    beginClickTracking();
+    endClickTracking();
+    expect(writes).toEqual([]);
+    expect(isClickTrackingActive()).toBe(false);
+  });
+
+  it("click tracking no-ops when SGR is already active (scroll mode app)", () => {
+    enableMouseMode("app");
+    writes.length = 0;
+    beginClickTracking();
+    expect(writes).toEqual([]);
+    expect(isClickTrackingActive()).toBe(true);
+    endClickTracking();
+    expect(writes).toEqual([]);
+    expect(isClickTrackingActive()).toBe(false);
+  });
+
+  it("disableMouseMode mid-click-tracking still undoes SGR at exit", () => {
+    enableMouseMode(); // off
+    beginClickTracking();
+    writes.length = 0;
+    disableMouseMode();
+    expect(writes.join("")).toBe("\u001b[?1006l\u001b[?1000l");
+  });
+
+  it("end without a matching begin is a no-op", () => {
+    enableMouseMode();
+    writes.length = 0;
+    endClickTracking();
+    expect(writes).toEqual([]);
   });
 });

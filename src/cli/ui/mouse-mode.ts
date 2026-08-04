@@ -29,6 +29,8 @@ const SEQUENCES: Record<Mode, { enable: string; disable: string }> = {
 
 let active = false;
 let activeMode: Mode = "off";
+/** Balanced refcount of click-tracking consumers — flips "off" → SGR while a shell command runs. */
+let clickTrackingDepth = 0;
 
 export function enableMouseMode(historyMode: MouseHistoryMode = "native"): void {
   if (active) return;
@@ -42,6 +44,37 @@ export function enableMouseMode(historyMode: MouseHistoryMode = "native"): void 
 export function disableMouseMode(): void {
   if (!active) return;
   const seq = SEQUENCES[activeMode].disable;
-  if (seq) process.stdout.write(seq);
+  if (activeMode === "off" && clickTrackingDepth > 0) {
+    // Click tracking left SGR on — undo it so the parent shell isn't stuck
+    // in mouse mode after exit.
+    process.stdout.write(SEQUENCES.sgr.disable);
+  } else if (seq) {
+    process.stdout.write(seq);
+  }
   active = false;
+}
+
+/** True while click tracking is on (a shell command is running with SGR mouse active). */
+export function isClickTrackingActive(): boolean {
+  return clickTrackingDepth > 0;
+}
+
+/** Request SGR click events — flipped on while a shell command runs so its Stop
+ *  button is clickable, restored when none runs. No-op when mouse mode was
+ *  never enabled (--no-mouse) or SGR is already active (scroll mode "app"). */
+export function beginClickTracking(): void {
+  if (!active) return;
+  clickTrackingDepth++;
+  if (clickTrackingDepth === 1 && activeMode === "off") {
+    process.stdout.write(SEQUENCES.sgr.enable);
+  }
+}
+
+/** Mirror of beginClickTracking — restores the native mouse state at depth 0. */
+export function endClickTracking(): void {
+  if (clickTrackingDepth === 0) return;
+  clickTrackingDepth--;
+  if (clickTrackingDepth === 0 && activeMode === "off") {
+    process.stdout.write(SEQUENCES.sgr.disable);
+  }
 }

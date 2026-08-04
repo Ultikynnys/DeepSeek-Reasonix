@@ -50,6 +50,11 @@ export interface ToolCard extends CardBase {
   cancelled?: boolean;
 }
 
+/** Shell tools whose running card carries a clickable Stop button. */
+export function isShellToolName(name: string): boolean {
+  return name === "run_command" || name === "run_background";
+}
+
 export interface TaskStep {
   readonly id: string;
   readonly title: string;

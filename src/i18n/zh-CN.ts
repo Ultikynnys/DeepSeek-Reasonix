@@ -1597,7 +1597,7 @@ export const zhCN: TranslationSchema = {
     retries: "次重试",
     reasoningLabel: "推理 · {count} ¶",
     runningLabel: "运行中",
-    cancelHint: "Ctrl+K 停止此命令",
+    stop: "停止",
     workingLabel: "处理中",
     defaultFooter: "↑↓ 选择 · ⏎ 确认 · Esc 取消",
     applyAction: "[a] 应用",

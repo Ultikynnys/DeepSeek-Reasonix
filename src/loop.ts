@@ -186,8 +186,10 @@ export class CacheFirstLoop {
   /** Threaded through HTTP + every tool dispatch so Esc cancels in-flight work, not after. */
   private _turnAbort: AbortController = new AbortController();
   private _discardAbortRequested = false;
-  /** Per-tool-call abort — Ctrl+K / desktop Stop kills the running tool without ending the turn. Rotated per dispatch. */
-  private _toolCancelController: AbortController | null = null;
+  /** Per-tool-call aborts keyed by inflight id — a TUI Stop click cancels exactly the card's own tool. Cleaned in runOneToolCall's finally. */
+  private readonly _toolCancelControllers = new Map<string, AbortController>();
+  /** Most-recently-started controller — Ctrl+K / desktop Stop target "the running tool" without a callId. */
+  private _lastToolCancelController: AbortController | null = null;
   /** Authoritative running-id set — UI cards consult this instead of trusting end-event delivery. Insert at dispatch entry, delete in finally. */
   private readonly _inflight = new InflightSet();
 
@@ -501,7 +503,9 @@ export class CacheFirstLoop {
     const name = call.function?.name ?? "";
     const args = call.function?.arguments ?? "{}";
     const parsedArgs = safeParseToolArgs(args);
-    this._inflight.add(this.inflightIdFor(call));
+    const inflightId = this.inflightIdFor(call);
+    this._inflight.add(inflightId);
+    let cancelController: AbortController | null = null;
     try {
       const preReport = await runHooks({
         hooks: this.hooks,
@@ -529,12 +533,16 @@ export class CacheFirstLoop {
       }
 
       // Rotate the per-tool-call cancel controller so a stale cancel from a
-      // prior tool can't kill the current one. Shell tools merge this with
-      // the turn signal; Ctrl+K / desktop Stop fires only this one.
-      this._toolCancelController = new AbortController();
+      // prior tool can't kill the current one. Keyed by the inflight id so a
+      // TUI Stop click cancels exactly this card's tool even when several run
+      // in parallel. Shell tools merge this with the turn signal; Ctrl+K /
+      // desktop Stop fires only the most recent one.
+      cancelController = new AbortController();
+      this._toolCancelControllers.set(inflightId, cancelController);
+      this._lastToolCancelController = cancelController;
       const result = await this.tools.dispatch(name, args, {
         signal,
-        cancelSignal: this._toolCancelController.signal,
+        cancelSignal: cancelController.signal,
         maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
         confirmationGate: this.confirmationGate,
         readTracker: this.readTracker,
@@ -555,8 +563,13 @@ export class CacheFirstLoop {
 
       return { preWarnings, postWarnings, result };
     } finally {
-      this._inflight.delete(this.inflightIdFor(call));
-      this._toolCancelController = null;
+      this._inflight.delete(inflightId);
+      if (cancelController !== null) {
+        this._toolCancelControllers.delete(inflightId);
+        if (this._lastToolCancelController === cancelController) {
+          this._lastToolCancelController = null;
+        }
+      }
     }
   }
 
@@ -612,11 +625,16 @@ export class CacheFirstLoop {
     this._turnAbort.abort();
   }
 
-  /** Cancel the running tool call without aborting the turn. Ctrl+K / desktop Stop
-   *  kills the subprocess; the tool returns `cancelledByUser:true` and the
-   *  conversation continues. No-op if no tool is running. */
+  /** Cancel the running tool call without aborting the turn. Ctrl+K / desktop
+   *  Stop kills the subprocess; the tool returns `cancelledByUser:true` and
+   *  the conversation continues. Targets the most recent tool; no-op if none. */
   cancelCurrentTool(_reason: string): void {
-    this._toolCancelController?.abort();
+    this._lastToolCancelController?.abort();
+  }
+
+  /** Cancel exactly one running tool call (the TUI Stop button on a shell card). */
+  cancelToolCall(callId: string, _reason: string): void {
+    this._toolCancelControllers.get(callId)?.abort();
   }
 
   private resetAbortState(): void {
