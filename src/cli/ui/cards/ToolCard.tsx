@@ -84,6 +84,11 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
         subtitle={argsLabel || undefined}
         meta={meta.length > 0 ? meta : undefined}
       />
+      {status === "running" ? (
+        <Text color={TONE.warn} dim>
+          {t("cardLabels.cancelHint")}
+        </Text>
+      ) : null}
       {fileRef && (
         <Box flexDirection="row">
           <Text color={FG.faint}> ↗ </Text>

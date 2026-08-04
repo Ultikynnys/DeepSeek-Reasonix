@@ -66,6 +66,12 @@ export function StatusRow({
   const cols = stdout?.columns ?? 80;
   const hasTurn = status.cost > 0;
   const hasSession = status.sessionCost > 0;
+  // A tool card exists but hasn't completed → the loop is executing a tool
+  // right now; surface the per-tool force-stop keybinding where the user is
+  // looking (the running card itself shows it too).
+  const toolRunning = useAgentState((s) =>
+    s.cards.some((c) => c.kind === "tool" && !c.done && !c.aborted && !c.rejected),
+  );
   const hasBalance = typeof status.balance === "number";
   const showWallet =
     cols >= WALLET_MIN_COLS &&
@@ -92,6 +98,16 @@ export function StatusRow({
         <Pill>
           <Text color={FG.sub}>{`${session.id} · ${session.branch}`}</Text>
         </Pill>
+        {toolRunning && (
+          <>
+            <Gap />
+            <Pill>
+              <Text color={TONE.warn} dim>
+                {`⊗ ${t("cardLabels.cancelHint")}`}
+              </Text>
+            </Pill>
+          </>
+        )}
         {hasTurn && statusBar.showTurnCost && (
           <>
             <Gap />

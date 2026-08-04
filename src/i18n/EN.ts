@@ -147,6 +147,10 @@ export const EN: TranslationSchema = {
             { key: "Shift+Tab", text: "edit-gate: toggle review ↔ AUTO mode" },
             { key: "Esc", text: "dismiss picker · abort the running model turn" },
             { key: "Ctrl+C", text: "abort the running model turn (NOT copy — see clipboard)" },
+            {
+              key: "Ctrl+K",
+              text: "force-stop the running tool (shell command) — the conversation continues",
+            },
             { key: "PgUp / PgDn", text: "scroll chat history a page at a time" },
             { key: "End", text: "jump chat to the most recent line" },
             {
@@ -1695,6 +1699,7 @@ export const EN: TranslationSchema = {
     retries: "retries",
     reasoningLabel: "reasoning \u00b7 {count} \u00b6",
     runningLabel: "running",
+    cancelHint: "Ctrl+K stops this command",
     workingLabel: "working",
     defaultFooter: "\u2191\u2193 pick  \u00b7  \u23ce confirm  \u00b7  esc cancel",
     applyAction: "[a] apply",
