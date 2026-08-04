@@ -171,13 +171,70 @@ fn git_status(root: String) -> Result<Vec<GitStatusEntry>, String> {
     Ok(out)
 }
 
+/// Probe whether an editor command resolves and runs — used to auto-detect
+/// a code editor when none is configured. On Windows this goes through
+/// cmd.exe so `.cmd` shims (code.cmd, cursor.cmd) resolve via PATH; a
+/// missing command exits with 9009, so a successful `--version` run is a
+/// reliable probe.
+fn probe_editor(candidate: &str) -> bool {
+    use std::process::{Command, Stdio};
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let probe = Command::new("cmd")
+            .arg("/c")
+            .arg(format!("{candidate} --version"))
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+        return matches!(probe, Ok(out) if out.status.success());
+    }
+    #[cfg(not(windows))]
+    {
+        let probe = Command::new(candidate)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+        return matches!(probe, Ok(out) if out.status.success());
+    }
+}
+
+/// Auto-detect a code editor for the "no editor configured" case. Without
+/// this the frontend falls back to the OS default handler, and on Windows
+/// `.ts` is registered to media players (MPEG transport stream) — so
+/// `loop.ts` would open in the media player instead of an editor. Probes
+/// the editors this app knows understand `-g path:line`, in order.
+fn detect_editor_command() -> Option<String> {
+    for candidate in ["code", "cursor", "windsurf"] {
+        if probe_editor(candidate) {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
 #[tauri::command]
 fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<(), String> {
     use std::process::{Command, Stdio};
     let trimmed = command.trim();
-    if trimmed.is_empty() {
-        return Err("editor command is empty".into());
-    }
+    // Empty command = no editor configured in settings. Auto-detect one
+    // (VS Code / Cursor / Windsurf) so file links never fall through to the
+    // OS default handler (Windows would open `.ts` in the media player).
+    let resolved = if trimmed.is_empty() {
+        match detect_editor_command() {
+            Some(candidate) => candidate,
+            None => {
+                return Err(
+                    "no editor configured and none detected (tried code, cursor, windsurf)".into(),
+                );
+            }
+        }
+    } else {
+        trimmed.to_string()
+    };
     // VS Code / Cursor / Windsurf understand `-g path:line`; harmless for others if `line` is None.
     let mut cmd;
     #[cfg(windows)]
@@ -186,7 +243,7 @@ fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<()
         // Normalize forward slashes to backslashes — cmd.exe doesn't handle them reliably.
         let normalized = path.replace('/', "\\");
         cmd = Command::new("cmd");
-        cmd.arg("/c").arg(trimmed);
+        cmd.arg("/c").arg(&resolved);
         if let Some(l) = line {
             cmd.arg("-g").arg(format!("{}:{}", normalized, l));
         } else {
@@ -198,7 +255,7 @@ fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<()
     }
     #[cfg(not(windows))]
     {
-        cmd = Command::new(trimmed);
+        cmd = Command::new(&resolved);
         if let Some(l) = line {
             cmd.arg("-g").arg(format!("{}:{}", path, l));
         } else {
@@ -206,7 +263,7 @@ fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<()
         }
     }
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    cmd.spawn().map_err(|e| format!("spawn {trimmed}: {e}"))?;
+    cmd.spawn().map_err(|e| format!("spawn {resolved}: {e}"))?;
     Ok(())
 }
 

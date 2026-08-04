@@ -190,7 +190,8 @@ export const zhCN: typeof en = {
     workspaceHint: "agent 工具操作的根目录。切换会写入配置并重载工具。",
     workspaceChange: "更换…",
     editor: "外部编辑器",
-    editorHint: "点击文件路径时用它打开。系统默认 = OS 关联程序，其他需在 PATH 里。",
+    editorHint:
+      "点击文件路径时用它打开。系统默认 = 自动检测 VS Code / Cursor / Windsurf，否则用 OS 关联程序；其他需在 PATH 里。",
     editorSystem: "系统默认",
     editorCustom: "自定义",
     editorPlaceholder: '例如 "code"、"subl" 或可执行文件全路径',

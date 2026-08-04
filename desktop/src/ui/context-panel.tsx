@@ -175,12 +175,19 @@ async function openContextFile(path: string, settings: Settings | null): Promise
       : isWindows
         ? path.replace(/\//g, "\\")
         : path;
-  const editor = settings?.editor?.trim();
-  if (editor) {
-    await invoke("open_in_editor", { command: editor, path: abs, line: null });
-    return;
+  // Same contract as openWithEditor: an empty command makes the Rust side
+  // auto-detect a code editor (code / cursor / windsurf) so `.ts` files
+  // don't fall through to the Windows media player; openPath is only the
+  // no-code-editor-at-all last resort.
+  try {
+    await invoke("open_in_editor", {
+      command: settings?.editor?.trim() ?? "",
+      path: abs,
+      line: null,
+    });
+  } catch {
+    await openPath(abs);
   }
-  await openPath(abs);
 }
 
 function buildSessionTree(files: SessionFile[]): TreeNode[] {

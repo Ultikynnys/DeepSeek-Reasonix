@@ -192,7 +192,7 @@ export const en = {
     workspaceChange: "Change…",
     editor: "Editor",
     editorHint:
-      "Used when you click a file link / path. System default = OS file association. Others must be in PATH.",
+      "Used when you click a file link / path. System default = auto-detect VS Code / Cursor / Windsurf, else OS file association. Others must be in PATH.",
     editorSystem: "System default",
     editorCustom: "custom",
     editorPlaceholder: 'e.g. "code", "subl", or full path to executable',

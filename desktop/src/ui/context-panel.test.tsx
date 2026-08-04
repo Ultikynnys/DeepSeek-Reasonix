@@ -33,10 +33,10 @@ const settings: Settings = {
   version: "0.0.0",
 };
 
-function renderPanel() {
+function renderPanel(overrides: Partial<Settings> = {}) {
   return render(
     <ContextPanel
-      settings={settings}
+      settings={{ ...settings, ...overrides }}
       usage={usage}
       mcpSpecs={[]}
       mcpBridged={false}
@@ -83,14 +83,54 @@ describe("ContextPanel files", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open file: src/new-file.ts" }));
 
-    await waitFor(() => expect(openPath).toHaveBeenCalledWith("/repo/src/new-file.ts"));
-    expect(openPath).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_in_editor", {
+        command: "",
+        path: "/repo/src/new-file.ts",
+        line: null,
+      }),
+    );
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(openPath).not.toHaveBeenCalled();
   });
 
   it("opens the file when the file row itself is clicked", async () => {
     const { container } = renderPanel();
 
     fireEvent.click(container.querySelector('[data-kind="file"]')!);
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_in_editor", {
+        command: "",
+        path: "/repo/src/new-file.ts",
+        line: null,
+      }),
+    );
+    expect(openPath).not.toHaveBeenCalled();
+  });
+
+  it("uses the configured editor command when one is set", async () => {
+    renderPanel({ editor: "cursor --goto" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open file: src/new-file.ts" }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_in_editor", {
+        command: "cursor --goto",
+        path: "/repo/src/new-file.ts",
+        line: null,
+      }),
+    );
+    expect(openPath).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the OS default when no code editor is detected", async () => {
+    vi.mocked(invoke).mockRejectedValue(
+      new Error("no editor configured and none detected (tried code, cursor, windsurf)"),
+    );
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open file: src/new-file.ts" }));
 
     await waitFor(() => expect(openPath).toHaveBeenCalledWith("/repo/src/new-file.ts"));
     expect(openPath).toHaveBeenCalledTimes(1);

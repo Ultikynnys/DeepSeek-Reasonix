@@ -206,7 +206,7 @@ export const de: typeof en = {
     workspaceChange: "Ändern…",
     editor: "Editor",
     editorHint:
-      "Wird beim Klicken auf einen Dateilink/-pfad verwendet. Systemstandard = OS-Dateizuordnung. Andere müssen im PATH sein.",
+      "Wird beim Klicken auf einen Dateilink/-pfad verwendet. Systemstandard = erkennt VS Code / Cursor / Windsurf automatisch, sonst OS-Dateizuordnung. Andere müssen im PATH sein.",
     editorSystem: "Systemstandard",
     editorCustom: "benutzerdefiniert",
     editorPlaceholder: 'z.B. "code", "subl" oder vollständiger Pfad zur ausführbaren Datei',

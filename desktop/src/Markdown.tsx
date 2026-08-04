@@ -24,11 +24,19 @@ export async function openWithEditor(
   abs: string,
   line?: number,
 ): Promise<void> {
-  if (editor && editor.trim()) {
-    await invoke("open_in_editor", { command: editor, path: abs, line: line ?? null });
-    return;
+  // Always route through the Rust command: with an empty command it
+  // auto-detects a code editor (code / cursor / windsurf), so Windows
+  // doesn't hand `.ts` files (MPEG transport stream) to the media player
+  // via the OS default. openPath is only the no-editor-at-all last resort.
+  try {
+    await invoke("open_in_editor", {
+      command: editor?.trim() ?? "",
+      path: abs,
+      line: line ?? null,
+    });
+  } catch {
+    await openPath(abs);
   }
-  await openPath(abs);
 }
 
 type WorkspaceCtx = { dir?: string; editor?: string };
