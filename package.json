@@ -3,27 +3,6 @@
   "version": "0.53.20",
   "description": "Reasonix desktop app — DeepSeek-native coding agent with a cache-first loop, flash-first cost control, and tool-call repair.",
   "type": "module",
-  "bin": {
-    "reasonix": "dist/cli/index.js",
-    "dsnix": "dist/cli/index.js"
-  },
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist",
-    "data/deepseek-tokenizer.json.gz",
-    "patches",
-    "scripts/postinstall.mjs",
-    "README.md",
-    "LICENSE"
-  ],
   "workspaces": [
     "packages/*"
   ],
@@ -35,14 +14,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:mutation": "stryker run",
     "lint": "biome check src tests",
     "lint:fix": "biome check --write src tests",
     "format": "biome format --write src tests",
     "typecheck": "tsc --noEmit",
     "verify": "npm run build && npm run lint && npm run typecheck && npm run test --silent",
-    "prepare": "simple-git-hooks || true",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm run test"
+    "prepare": "simple-git-hooks || true"
   },
   "simple-git-hooks": {
     "pre-commit": "npm run lint",
@@ -86,8 +63,6 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@reasonix/core-utils": "workspace:*",
-    "@stryker-mutator/core": "^9.6.1",
-    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22.9.0",
     "@types/picomatch": "^4.0.3",

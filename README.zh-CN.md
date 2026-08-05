@@ -15,11 +15,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
   <a href="https://github.com/esengine/reasonix/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/reasonix/release.yml?style=flat-square&label=release&labelColor=161b22&logo=githubactions&logoColor=white" alt="Release"/></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
-  <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/dm/reasonix.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
-  <a href="./package.json"><img src="https://img.shields.io/node/v/reasonix.svg?style=flat-square&color=5fa04e&labelColor=161b22&logo=nodedotjs&logoColor=white" alt="node"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/esengine/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
   <a href="https://github.com/esengine/reasonix/stargazers"><img src="https://img.shields.io/github/stars/esengine/reasonix.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
   <a href="https://atomgit.com/esengine/DeepSeek-Reasonix"><img src="https://atomgit.com/esengine/DeepSeek-Reasonix/star/badge.svg" alt="AtomGit stars"/></a>
   <a href="https://github.com/esengine/reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
@@ -30,7 +27,6 @@
 <p align="center">
   <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/9e931d80-2050-4b10-902e-44970cc133ad.svg" alt="oosmetrics — Agents 速度榜 Top 2"/></a>
   <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/556d94b3-61b7-486b-baf2-888b9327deab.svg" alt="oosmetrics — LLMs 速度榜 Top 3"/></a>
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/0f457d4c-efca-4d15-ad2b-139691ff342c.svg" alt="oosmetrics — CLI 速度榜 Top 3"/></a>
 </p>
 
 <br/>
@@ -52,65 +48,22 @@
 
 ### Windows 桌面应用（推荐）
 
-从 [GitHub Releases](https://github.com/esengine/DeepSeek-Reasonix/releases) 下载最新的 Windows 安装包，运行 `Reasonix_x.y.z_x64-setup.exe`。应用自带 Node 运行时和同一份 `~/.reasonix` 配置，与 CLI 共用同一套引擎 —— 多标签会话、右侧栏展示 agent 读写过的文件、底部实时成本 / 缓存 / token 计量。无需 `npm install`、无需装 Node；首次运行粘贴 [DeepSeek API Key →](https://platform.deepseek.com/api_keys) 即可。
+从 [GitHub Releases](https://github.com/esengine/DeepSeek-Reasonix/releases) 下载最新的 Windows 安装包，运行 `Reasonix_x.y.z_x64-setup.exe`。应用自带 Node 运行时和同一份 `~/.reasonix` 配置 —— 多标签会话、右侧栏展示 agent 读写过的文件、底部实时成本 / 缓存 / token 计量。无需 `npm install`、无需装 Node；首次运行粘贴 [DeepSeek API Key →](https://platform.deepseek.com/api_keys) 即可。
 
 - **Windows** — 安装包尚未签名时 SmartScreen 可能提示“未知发布者”：点 **更多信息 → 仍要运行**。
 
-### 终端 CLI（可选）
-
-同一套引擎也以 CLI 形式提供，适合终端和脚本工作流。要求 Node ≥ 22，在 Windows · macOS · Linux 都能跑。
-
-~~~bash
-cd my-project
-npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
-~~~
-
-[去拿 DeepSeek API Key →](https://platform.deepseek.com/api_keys) · 完整 flag 看 `reasonix code --help`。
-
-`npx` 是推荐路径 —— 不用全局安装，每次都拿最新版。如果你天天用、想把 `reasonix` 装到 `PATH`，跑一次 `reasonix update`。
-
-| 命令 | 何时用 |
-|---|---|
-| `reasonix code [dir]` | 编码 agent。**先用这个。** |
-| `reasonix chat` | 纯聊天 —— 不挂文件系统 / shell 工具。 |
-| `reasonix run "task"` | 一次性，结果流到 stdout。适合 shell 管道。 |
-| `reasonix doctor` | 体检：Node 版本、API Key、MCP 接线。 |
-| `reasonix update` | 升级 Reasonix 本身。 |
-
-其他子命令（`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`）在 `reasonix --help` 和 [CLI 参考](https://esengine.github.io/DeepSeek-Reasonix/#cli)。
-
 ### QQ 通道
 
-Reasonix 可以把现有的 `chat`、`code` 或桌面端会话延伸到 QQ 上，作为远程通道使用；它扩展的是当前会话，不是独立的新运行模式。
+Reasonix 可以把现有的桌面端会话延伸到 QQ 上，作为远程通道使用；它扩展的是当前会话，不是独立的新运行模式。
 
 - 桌面端：打开 `设置 -> 通用 -> QQ通道`
-- CLI：先启动会话，再执行 `/qq connect`
 
 连接成功后，QQ 消息可以进入当前会话，助手回复会回到 QQ，后续确认和跟进交互也可以继续在 QQ 上完成。
 
 完整配置、桌面端快速上手与排障说明见：[QQ 连接指南](./docs/qq-connect.zh-CN.md)。
 
 <details>
-<summary><strong>切换工作区 · chat vs. code · 写第一个 Skill</strong></summary>
-
-**切换工作区。** Reasonix 把文件系统工具作用域绑定在启动目录，传 `--dir` 可以指别处。中途切换是有意不支持的（消息日志和 memory 路径会和旧根目录混在一起）—— 退出再启动。
-
-~~~bash
-npx reasonix code --dir /path/to/project
-~~~
-
-**`chat` 还是 `code`？** `code` 是默认入口、唯一带文件系统 / shell 工具和 SEARCH/REPLACE 审阅的模式。`chat` 是更轻量的纯对话壳——想要一个挂着 MCP 但没有磁盘权限的“思路助手”时用它。
-
-| 你拿到什么 | `code` | `chat` |
-|---|---|---|
-| 文件系统工具 + `edit_file` | ✓ | — |
-| SEARCH/REPLACE → `/apply` 审阅 | ✓ | — |
-| Shell 工具（带 gate） | ✓ | — |
-| Plan 模式 · `/todo` · `/skill new` · `/mcp add` | ✓ | — |
-| Memory（`remember` / `recall_memory`） | 项目 + 全局 | 仅全局 |
-| 配置里的 MCP · web 搜索 · `ask_choice` | ✓ | ✓ |
-| 编码导向系统提示词 | ✓ | 通用 |
-| Session 作用域 | 按目录 | 共享默认 |
+<summary><strong>写第一个 Skill</strong></summary>
 
 **写第一个 Skill。** 暂无在线市场——自己写。编辑文件（`description:` frontmatter + 正文），然后 `/skill list` 就能看到。frontmatter 加 `runAs: subagent` 会以隔离 subagent 跑，而不是把正文内联进父 prompt。
 
@@ -131,13 +84,13 @@ npx reasonix code --dir /path/to/project
 
 | 主题 | 速读 |
 |---|---|
-| [MCP 服务器](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#mcp) | stdio · SSE · Streamable HTTP。`config.json` 和 `--mcp` 共用同一种 spec 格式。 |
+| [MCP 服务器](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#mcp) | stdio · SSE · Streamable HTTP。在桌面端设置或 `config.json` 里配置，同一种 spec 格式。 |
 | [Skills](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#skills) | 模型可以调用的 markdown 剧本。`inline` 或 `subagent` 两种模式。 |
 | [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#memory) | 用户私有的知识，钉进前缀。`user` / `feedback` / `project` / `reference` 四类。 |
 | [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#hooks) | 生命周期事件触发的 shell 命令。`PreToolUse`（拦截）· `PostToolUse` · `UserPromptSubmit` · `Stop`。 |
 | [权限](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#permissions) | 按工作区的 shell 白名单，精确前缀匹配。 |
 | [Web 搜索](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#search) | 默认 Mojeek；用 `/search-engine` 可切到自托管的 SearXNG 或 Metaso。 |
-| [语义索引](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#index) | `reasonix index` —— 本地 Ollama，或任何 OpenAI 兼容的 embedding 接口。 |
+| [语义索引](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#index) | 本地 Ollama，或任何 OpenAI 兼容的 embedding 接口。 |
 
 <br/>
 
@@ -180,7 +133,7 @@ npx reasonix code --dir /path/to/project
 
 - [**架构**](./docs/ARCHITECTURE.md) —— 四大支柱、缓存优先循环、思维提取、脚手架
 - [**QQ 连接指南**](./docs/qq-connect.zh-CN.md) —— 桌面端入口、CLI 首次连接流程和 QQ 开放平台凭据
-- [**官方网站**](https://esengine.github.io/DeepSeek-Reasonix/) —— 入门、Dashboard、TUI
+- [**官方网站**](https://esengine.github.io/DeepSeek-Reasonix/) —— 入门、Dashboard
 - [**贡献指南**](./CONTRIBUTING.md) —— 注释规则、错误处理、用现成库不手写
 - [**行为准则**](./CODE_OF_CONDUCT.md) · [**安全策略**](./SECURITY.md)
 
@@ -195,7 +148,6 @@ npx reasonix code --dir /path/to/project
 
 **正在征集意见的 Discussions：**
 
-- [#20 · CLI / TUI 设计](https://github.com/esengine/reasonix/discussions/20) —— 哪里坏了、哪里少东西、哪里你会怎么改？
 - [#21 · Dashboard 设计](https://github.com/esengine/reasonix/discussions/21) —— 对着[设计稿](https://esengine.github.io/DeepSeek-Reasonix/design/agent-dashboard.html)拍砖
 - [#22 · 未来功能愿望单](https://github.com/esengine/reasonix/discussions/22) —— 你希望 Reasonix 长出什么功能？
 
@@ -217,7 +169,7 @@ npx reasonix code --dir /path/to/project
 > Reasonix 是有立场的。有些事它故意 *不做* —— 列在这里方便你为自己的工作挑对工具。
 
 - **多供应商灵活性。** 故意只做 DeepSeek。绑死一个后端是 feature，不是限制。
-- **IDE 集成。** 桌面端优先。Windows 应用是主要形态；CLI 覆盖终端与脚本工作流。仪表盘是伴生工具，不是 Cursor 的替代。
+- **IDE 集成。** 桌面端优先。Windows 应用是主要形态。仪表盘是伴生工具，不是 Cursor 的替代。
 - **追最难的 reasoning 榜单。** Claude Opus 在某些榜单上还是赢家。DeepSeek 在编程任务上有竞争力；如果你的工作是"解一个 PhD 级证明"而不是"修个 auth bug"，先用 Claude。
 - **完全离线 / 永远免费。** Reasonix 需要付费的 DeepSeek API Key。要离线 / 零成本，看 Aider + Ollama 或 [Continue](https://continue.dev)。
 

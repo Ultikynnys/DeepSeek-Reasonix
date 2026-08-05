@@ -10,6 +10,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI: `verify` runs on Windows only, and the release pipeline builds just the Windows installer (NSIS). Removed the unused `issue-labeler.yml` config.
 - Packaging: dropped the Linux/macOS Tauri configs, macOS entitlements and private-API flag, the `.icns` and mobile/store icons, and the macOS/Linux branches of the Node-bundle script. `SIGNING.md` now covers Windows signing only.
 - Docs: README (EN / 简体中文) rewritten with the desktop app as the primary surface and the CLI as the terminal alternative; dead links to removed docs (CLI reference, benchmarks, assets) cleaned up.
+- Repo purge: removed the npm publish surface (`bin` / `exports` / `files` / `prepublishOnly`), stryker mutation testing, and the dev-only probe / benchmark / e2e tooling (`tools/`, `scripts/probe-*`, `scripts/e2e-*`, `scripts/measure-*`, `scripts/smoke-memory.mts`, `scripts/debug-prune.mts`, `scripts/analyze-cpuprofile.mjs`). READMEs (EN / 简体中文) and `src/mcp/README.md` now describe only the desktop app; `tests/bundle-smoke.test.ts` drives the desktop RPC entry instead of the removed `run` subcommand.
 
 **Compaction hardening — the fold now always runs to completion.**
 

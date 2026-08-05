@@ -28,7 +28,7 @@ src/mcp/
 ├── types.ts      JSON-RPC 2.0 + MCP-specific message types
 ├── stdio.ts      McpTransport interface + StdioTransport (spawn child)
 ├── sse.ts        SseTransport (HTTP+SSE for remote/hosted servers)
-├── spec.ts       parseMcpSpec — parses --mcp CLI arg into transport-tagged spec
+├── spec.ts       parseMcpSpec — parses mcp config entries into transport-tagged specs
 ├── catalog.ts    curated list of popular official MCP servers
 ├── client.ts     McpClient: initialize / listTools / callTool
 ├── registry.ts   bridgeMcpTools: MCP → ToolRegistry
@@ -42,98 +42,28 @@ tests/mcp-sse.test.ts — in-process http.Server fake for SSE
 
 | feature | status | note |
 |---|---|---|
-| CLI wiring (`reasonix chat --mcp <cmd>`) | ✅ shipped | see Usage below |
-| Bundled demo server | ✅ shipped | `examples/mcp-server-demo.ts`, exposes echo/add/get_time |
+| Desktop wiring (Settings → MCP, or `config.json`) | ✅ shipped | servers load at app start |
+| Bundled demo server | ✅ shipped | `tests/fixtures/mcp-server-demo.ts`, exposes echo/add/get_time |
 | Real-subprocess integration test | ✅ shipped | `tests/mcp-integration.test.ts` |
 | Resources / `resources/list` / `resources/read` | deferred | Reasonix doesn't surface resources today |
 | Prompts / `prompts/list` | deferred | ditto |
 | Progress notifications | deferred | long-running tool support comes with the CLI work |
 | Streaming results | deferred | current shape returns one CallToolResult per call |
-| SSE transport | ✅ shipped | `src/mcp/sse.ts` — pass `http(s)://…` to `--mcp` |
+| SSE transport | ✅ shipped | `src/mcp/sse.ts` — pass an `http(s)://…` URL in the server spec |
 | Streamable HTTP (2025-03-26 spec) | deferred | waiting for a real server to validate against |
 | MCP server that Reasonix exposes | never | out of scope — Reasonix is a client |
 
-## Usage (CLI)
+## Usage (desktop)
 
-`--mcp` is repeatable — attach one or many MCP servers; their tools become
-first-class citizens of the loop.
-
-```bash
-# Single server, anonymous (tools use native names):
-reasonix chat --mcp "node --import tsx examples/mcp-server-demo.ts"
-
-# Official filesystem server:
-reasonix chat --mcp "npx -y @modelcontextprotocol/server-filesystem /tmp/safe-dir"
-
-# Multiple servers, each namespaced. Syntax: "name=command args..."
-# Tools land in a shared registry as fs_read_file, demo_add, etc.
-reasonix chat \
-  --mcp "fs=npx -y @modelcontextprotocol/server-filesystem /tmp/safe" \
-  --mcp "demo=node --import tsx examples/mcp-server-demo.ts"
-
-# Global prefix (only honored when there's ONE anonymous server):
-reasonix chat \
-  --mcp "npx -y @modelcontextprotocol/server-filesystem /tmp" \
-  --mcp-prefix fs_
-
-# Same flag works with one-shot run:
-reasonix run "list files in /tmp/safe-dir" \
-  --mcp "npx -y @modelcontextprotocol/server-filesystem /tmp/safe-dir"
-```
+MCP servers are configured in the desktop app — `Settings -> MCP`, or the
+`mcp` array in `~/.reasonix/config.json`. Each server's tools become
+first-class citizens of the loop and inherit Reasonix's cache-first prefix
+stability + repair (schema flatten, tool-call scavenge, call-storm break)
+automatically.
 
 Each spec is shell-split (spaces separate args; use quotes for paths with
 spaces). Windows-friendly: backslashes pass through literally outside
-quotes, so `C:\path\to\dir` works. Tools get folded into the
-`ImmutablePrefix` for the model, and every call goes through Reasonix's
-Cache-First loop + tool-call repair (scavenge / flatten / storm)
-automatically.
-
-## Usage (library)
-
-```ts
-import {
-  McpClient,
-  StdioTransport,
-  bridgeMcpTools,
-  CacheFirstLoop,
-  DeepSeekClient,
-  ImmutablePrefix,
-} from "reasonix";
-
-// 1. Spawn + connect to an MCP server
-const transport = new StdioTransport({
-  command: "npx",
-  args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/safe-dir"],
-});
-const mcp = new McpClient({ transport });
-await mcp.initialize();
-
-// 2. Bridge its tools into a Reasonix ToolRegistry
-const { registry } = await bridgeMcpTools(mcp, { namePrefix: "fs_" });
-
-// 3. Use them with the Cache-First Loop — same as any native tool
-const client = new DeepSeekClient();
-const loop = new CacheFirstLoop({
-  client,
-  prefix: new ImmutablePrefix({
-    system: "You can use the filesystem tools to help the user.",
-    toolSpecs: registry.specs(),
-  }),
-  tools: registry,
-});
-
-for await (const ev of loop.step("List the files in /tmp/safe-dir.")) {
-  if (ev.role === "assistant_final") console.log(ev.content);
-}
-
-// 4. Clean up
-await mcp.close();
-```
-
-The payoff: the filesystem server's tools now inherit Reasonix's
-cache-first prefix stability + repair (schema flatten, tool-call
-scavenge, call-storm break) without the MCP server knowing anything
-about it.
+quotes, so `C:\path\to\dir` works.
 
 ## Wire protocol notes (stdio)
 

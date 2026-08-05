@@ -1,6 +1,6 @@
 # QQ channel setup
 
-Reasonix can attach QQ to an existing `chat` or `code` session as a remote channel. QQ is not a third runtime mode.
+Reasonix can attach QQ to an existing desktop session as a remote channel. QQ is not a third runtime mode.
 
 Once connected, QQ can:
 
@@ -35,17 +35,9 @@ The exact QQ Open Platform UI may change, but the flow is usually:
 4. Copy the `App ID`.
 5. Reveal and save the `App Secret`.
 
-## Connect from the CLI
+## Connect from a session
 
-Start a session first:
-
-~~~bash
-reasonix code
-# or
-reasonix chat
-~~~
-
-Then run:
+Start a session in the desktop app, then run:
 
 ~~~text
 /qq connect
@@ -53,11 +45,11 @@ Then run:
 
 First-time behavior:
 
-1. Reasonix asks for the QQ `App ID` in the current TUI.
+1. Reasonix asks for the QQ `App ID` in the current session.
 2. Then it asks for the `App Secret`.
 3. Enter `/cancel` at either step to abort.
 
-The prompts and `/qq` status messages follow the current CLI language.
+The prompts and `/qq` status messages follow the app's interface language.
 
 If credentials are already saved, `/qq connect` reuses them directly.
 
@@ -72,7 +64,7 @@ Other QQ commands:
 - `/qq status`
 - `/qq disconnect`
 
-After the first successful connection, later `chat` and `code` sessions auto-start the QQ channel while it stays enabled.
+After the first successful connection, later desktop sessions auto-start the QQ channel while it stays enabled.
 
 ## Desktop quick start
 
@@ -85,7 +77,7 @@ If you use the desktop client:
 5. Send a message from QQ and check that it appears in the current desktop transcript.
 6. Wait for the desktop reply to route back to QQ.
 
-The desktop app uses the same underlying QQ config as the CLI, but the runtime is attached to the current active desktop tab.
+QQ configuration is shared across the app; the runtime is attached to the current active desktop tab.
 
 That means:
 
@@ -95,13 +87,13 @@ That means:
 
 ## Typical usage
 
-1. Start `reasonix code` or `reasonix chat`.
+1. Start a desktop session.
 2. Connect QQ once.
 3. Send a message from QQ.
 4. Let the local Reasonix session keep running.
 5. Continue replies, approvals, and follow-up interactions from QQ when needed.
 
-QQ extends the current session. It does not replace `chat` or `code`.
+QQ extends the current session.
 
 ## Troubleshooting
 
@@ -138,6 +130,6 @@ Then check:
 - that the current active desktop tab is the one you expect QQ to drive
 - that the local desktop session is still running
 
-### `/qq` commands do not exist in your installed package
+### `/qq` commands do nothing
 
-Your installed npm version is too old. Upgrade to a release that already includes QQ support, or use the current repository `main` branch.
+Your build predates QQ support. Install a current Windows installer, or use the current repository `main` branch.

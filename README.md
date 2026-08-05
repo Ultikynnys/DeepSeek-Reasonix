@@ -15,11 +15,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
   <a href="https://github.com/esengine/reasonix/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/reasonix/release.yml?style=flat-square&label=release&labelColor=161b22&logo=githubactions&logoColor=white" alt="Release"/></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
-  <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/dm/reasonix.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
-  <a href="./package.json"><img src="https://img.shields.io/node/v/reasonix.svg?style=flat-square&color=5fa04e&labelColor=161b22&logo=nodedotjs&logoColor=white" alt="node"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/esengine/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
   <a href="https://github.com/esengine/reasonix/stargazers"><img src="https://img.shields.io/github/stars/esengine/reasonix.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
   <a href="https://atomgit.com/esengine/DeepSeek-Reasonix"><img src="https://atomgit.com/esengine/DeepSeek-Reasonix/star/badge.svg" alt="AtomGit stars"/></a>
   <a href="https://github.com/esengine/reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
@@ -30,7 +27,6 @@
 <p align="center">
   <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/9e931d80-2050-4b10-902e-44970cc133ad.svg" alt="oosmetrics — Top 2 in Agents by velocity"/></a>
   <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/556d94b3-61b7-486b-baf2-888b9327deab.svg" alt="oosmetrics — Top 3 in LLMs by velocity"/></a>
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/0f457d4c-efca-4d15-ad2b-139691ff342c.svg" alt="oosmetrics — Top 3 in CLI by velocity"/></a>
 </p>
 
 <br/>
@@ -55,87 +51,22 @@
 
 ### Desktop app for Windows (recommended)
 
-Download the latest Windows installer from [GitHub Releases](https://github.com/esengine/DeepSeek-Reasonix/releases) and run `Reasonix_x.y.z_x64-setup.exe`. The app bundles its own Node runtime, the same `~/.reasonix` config, and the same loop as the CLI — multi-tab sessions, a right panel listing files the agent read or edited, and the live cost / cache / token meters. No `npm install`, no Node needed; grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) on first run.
+Download the latest Windows installer from [GitHub Releases](https://github.com/esengine/DeepSeek-Reasonix/releases) and run `Reasonix_x.y.z_x64-setup.exe`. The app bundles its own Node runtime and the same `~/.reasonix` config — multi-tab sessions, a right panel listing files the agent read or edited, and the live cost / cache / token meters. No `npm install`, no Node needed; grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) on first run.
 
 - **Windows** — SmartScreen may warn "Unknown publisher" while installers are unsigned: click **More info → Run anyway**.
 
-### Terminal (optional)
-
-The same engine ships as a CLI for terminal and scripting workflows. Requires Node ≥ 22; works on Windows, macOS, and Linux.
-
-Install Reasonix globally if you want the `reasonix` command available on your `PATH`:
-
-~~~bash
-npm install -g reasonix
-reasonix code my-project   # paste a DeepSeek API key on first run; persists after
-~~~
-
-Or run it once without installing globally:
-
-~~~bash
-cd my-project
-npx reasonix code          # always uses the latest package by default
-~~~
-
-Grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reasonix code --help` for flags.
-
-If you use Reasonix daily, global install is the simplest path. If you just want to try it, use `npx`.
-
-**Prefer fewer keystrokes?** The shorter `dsnix` alias resolves to the same CLI:
-
-~~~bash
-npm install -g dsnix       # exposes `dsnix` on PATH, depends on reasonix
-npx dsnix@latest code      # one-shot via the shorter command
-~~~
-
-A global `npm install -g reasonix` also drops a `dsnix` shim on PATH, so the two are interchangeable.
-
-Bare `reasonix` (no subcommand) launches `code` in the current directory — typing `reasonix` and `reasonix code` are equivalent.
-
-| Command | When |
-|---|---|
-| `reasonix` / `reasonix code [dir]` | The coding agent. **Start here.** |
-| `reasonix chat` | Plain chat — no filesystem or shell tools. |
-| `reasonix run "task"` | One-shot, streams to stdout. Good for pipes. |
-| `reasonix doctor` | Health check: Node, API key, MCP wiring. |
-| `reasonix update` | Upgrade Reasonix itself. |
-
-Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`) are in `reasonix --help` and the [CLI reference](https://esengine.github.io/DeepSeek-Reasonix/#cli).
-
 ### QQ channel
 
-QQ can extend an existing `chat`, `code`, or desktop session as a remote channel. It is part of the current session flow, not a separate runtime mode.
+QQ can extend an existing desktop session as a remote channel. It is part of the current session flow, not a separate runtime mode.
 
 - Desktop: open `Settings -> General -> QQ Channel`
-- CLI: start a session, then run `/qq connect`
 
 Once connected, QQ messages can enter the current session, assistant replies route back to QQ, and follow-up interactions can continue remotely.
 
 For full setup, desktop quick start, and troubleshooting, see [QQ channel setup](./docs/qq-connect.md).
 
-The desktop app and the CLI share one engine — anything that works in one works in the other. The desktop is the primary surface; the CLI covers terminal and scripting workflows.
-
 <details>
-<summary><strong>Working in another folder · chat vs. code · author a skill</strong></summary>
-
-**Working in a different folder.** Reasonix scopes filesystem tools to the launch directory; pass `--dir` to retarget. Mid-session switching isn't supported by design (memory paths would tangle with stale roots) — quit and relaunch.
-
-~~~bash
-npx reasonix code --dir /path/to/project
-~~~
-
-**Picking `chat` vs `code`.** `code` is the default and the only mode with filesystem / shell tools and SEARCH/REPLACE review. `chat` is the lighter, tools-off shell — reach for it when you want a thinking partner with MCP attached but no disk access.
-
-| What you get | `code` | `chat` |
-|---|---|---|
-| Filesystem tools + `edit_file` | ✓ | — |
-| SEARCH/REPLACE → `/apply` review | ✓ | — |
-| Shell tool (gated) | ✓ | — |
-| Plan mode · `/todo` · `/skill new` · `/mcp add` | ✓ | — |
-| Memory (`remember` / `recall_memory`) | project + global | global only |
-| MCP servers from config · web search · `ask_choice` | ✓ | ✓ |
-| Coding system prompt | ✓ | generic |
-| Session scope | per-directory | shared default |
+<summary><strong>Author your first skill</strong></summary>
 
 **Author your first skill.** No remote registry — write them directly. Edit the file (`description:` frontmatter + body), then `/skill list`. Add `runAs: subagent` to spawn an isolated subagent loop instead of inlining the body.
 
@@ -163,13 +94,13 @@ One JSON file at `~/.reasonix/config.json` plus per-project overrides under `<pr
 
 | Topic | Quick read |
 |---|---|
-| [MCP servers](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#mcp) | stdio · SSE · Streamable HTTP. One spec format works for both `config.json` and `--mcp`. |
+| [MCP servers](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#mcp) | stdio · SSE · Streamable HTTP. Configured in the desktop Settings or `config.json` — one spec format. |
 | [Skills](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#skills) | Markdown playbooks the model can invoke. `inline` or `subagent` mode. |
 | [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#memory) | User-private knowledge pinned into the prefix. `user` / `feedback` / `project` / `reference` types. |
 | [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#hooks) | Shell commands on lifecycle events. `PreToolUse` (gating) · `PostToolUse` · `UserPromptSubmit` · `Stop`. |
 | [Permissions](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#permissions) | Per-workspace shell allowlist. Exact-prefix match. |
 | [Web search](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#search) | Mojeek by default; switch to self-hosted SearXNG or Metaso with `/search-engine`. |
-| [Semantic index](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#index) | `reasonix index` — local Ollama or any OpenAI-compatible embedding endpoint. |
+| [Semantic index](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#index) | Local Ollama or any OpenAI-compatible embedding endpoint. |
 
 <br/>
 
@@ -214,7 +145,7 @@ Click through to the full architecture writeup → [Pillar 1 — Cache-first loo
 
 - [**Architecture**](./docs/ARCHITECTURE.md) — three pillars: cache-first loop, tool-call repair, cost control
 - [**QQ channel setup**](./docs/qq-connect.md) — desktop entry, CLI first-connect flow, and QQ Open Platform credentials
-- [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard, TUI
+- [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard
 - [**Contributing**](./CONTRIBUTING.md) — comment policy, error-handling rules, library-over-hand-rolled
 - [**Code of Conduct**](./CODE_OF_CONDUCT.md) · [**Security policy**](./SECURITY.md)
 
@@ -229,7 +160,6 @@ Scoped starter tickets — each with background, code pointers, acceptance crite
 
 **Open Discussions — opinions wanted:**
 
-- [#20 · CLI / TUI design](https://github.com/esengine/reasonix/discussions/20) — what's broken, what's missing, what would you change?
 - [#21 · Dashboard design](https://github.com/esengine/reasonix/discussions/21) — react against the [proposed mockup](https://esengine.github.io/DeepSeek-Reasonix/design/agent-dashboard.html)
 - [#22 · Future feature wishlist](https://github.com/esengine/reasonix/discussions/22) — what would you build into Reasonix next?
 
@@ -251,7 +181,7 @@ Scoped starter tickets — each with background, code pointers, acceptance crite
 > Reasonix is opinionated. Some things it deliberately *doesn't* do — listed here so you can pick the right tool for your work.
 
 - **Multi-provider flexibility.** DeepSeek-only on purpose. Coupling to one backend is the feature, not a limitation.
-- **IDE integration.** Desktop-first. The Windows app is the primary surface; the CLI covers terminal and scripting workflows. The dashboard is a companion, not a Cursor replacement.
+- **IDE integration.** Desktop-first. The Windows app is the primary surface. The dashboard is a companion, not a Cursor replacement.
 - **Hardest-leaderboard reasoning.** Claude Opus still wins some benchmarks. DeepSeek is competitive on coding; if your work is "solve this PhD proof" rather than "fix this auth bug," start with Claude.
 - **Air-gapped / fully-free.** Reasonix needs a paid DeepSeek API key. For air-gapped or zero-cost runs see Aider + Ollama or [Continue](https://continue.dev).
 

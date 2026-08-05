@@ -6,7 +6,8 @@ MIT-licensed. Node ≥22 required.
 ## Stack
 
 - **Language** — TS 5.6+, ES2022, ESM (`"type": "module"`)
-- **CLI** — Commander.js + Ink 5 (React 18) TUI
+- **CLI** — Commander.js headless backend (`desktop` JSON-RPC over stdio, no TUI); **no Ink**
+- **Desktop** — Tauri 2 shell (`desktop/`), React 18 UI, Windows NSIS installer
 - **Test** — Vitest 2.x
 - **Lint / Format** — Biome 1.9 (2-space, double quotes, semicolons always, 100 width)
 - **Build** — tsup (bundle), `tsx` (dev runner)
@@ -16,7 +17,7 @@ MIT-licensed. Node ≥22 required.
 
 | Path | What |
 |---|---|
-| `src/cli/` | CLI entry + commands (`chat.tsx`, `code.tsx`, `diff.ts`, etc.) + Ink TUI in `ui/` |
+| `src/cli/` | Desktop backend entry — commander (`index.ts`) + `commands/desktop.ts` (JSON-RPC daemon) |
 | `src/tools/` | Tool defs (filesystem, shell, MCP, plan, subagent, web, workspace) |
 | `src/mcp/` | MCP client, transports (stdio, SSE), registry, spec |
 | `src/repair/` | Tool-call repair pipeline (flatten, scavenge, storm, truncation) |
@@ -25,15 +26,11 @@ MIT-licensed. Node ≥22 required.
 | `src/core/` | Event-log kernel — `events.ts` (Event union), `reducers.ts` (pure projections), `eventize.ts` |
 | `src/ports/` | Port interfaces — ModelClient, ToolHost, EventSink, MemoryStore, HookRunner, CheckpointStore |
 | `src/adapters/` | Concrete adapters for the ports (e.g. `event-sink-jsonl.ts`, `event-source-jsonl.ts`) |
-| `src/frame/` | Frame compiler (cell grid → ANSI) used by the TUI log renderer |
 | `src/memory/` | Project / session / user / runtime memory stores |
-| `src/transcript/` | Transcript log (write), diff, replay |
 | `src/telemetry/` | Usage records + cross-session stats |
-| `src/server/` | Dashboard HTTP server + REST API |
+| `desktop/` | Tauri 2 Windows app — React UI (`src/`), Rust host (`src-tauri/`), NSIS installer |
+| `packages/core-utils/` | Shared utility package |
 | `tests/` | Vitest tests, flat `*.test.ts` |
-| `examples/` | `basic-chat.ts`, `mcp-server-demo.ts`, etc. |
-| `benchmarks/` | Harvest + tau-bench harnesses |
-| `dashboard/` | Compiled dashboard SPA assets |
 | `data/` | Tokenizer data (`deepseek-tokenizer.json.gz`) |
 | `dist/` | Build output — **do not edit** |
 | `.github/` | CI + issue / PR templates |
@@ -42,8 +39,8 @@ MIT-licensed. Node ≥22 required.
 
 ```sh
 npm run build       # tsup → dist/
-npm run dev         # tsx src/cli/index.ts
-npm run chat        # tsx src/cli/index.ts chat
+npm run dev         # tsx src/cli/index.ts desktop (JSON-RPC backend)
+npm run build:desktop # npm --prefix desktop run build (vite frontend)
 npm run test        # vitest run
 npm run test:watch  # vitest
 npm run lint        # biome check src tests
@@ -52,14 +49,12 @@ npm run format      # biome format --write src tests
 npm run typecheck   # tsc --noEmit
 ```
 
-`prepublishOnly`: lint → typecheck → test → build.
-
 ## Conventions
 
 - **Imports** — explicit `import type` for type-only imports (Biome `useImportType: warn`). Direct relative imports within project, no barrel re-exports.
 - **Exports** — named exports only; no `export default`. Entry: `src/index.ts`.
 - **Tests** — vitest `describe`/`it`/`expect`, no globals. Naming: `<module>.test.ts` flat in `tests/`.
-- **JSX** — `.tsx` for Ink components. `jsx: "react"` in tsconfig.
+- **JSX** — `.tsx` for desktop React components (no Ink). `jsx: "react"` in tsconfig.
 - **TypeScript** — `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`. Tools accept `ToolCallContext` (abort signal).
 - **MCP** — All transports implement `McpTransport` interface. Tools registered via registry at startup.
 - **Changelog** — Keep a Changelog format. Semver.

@@ -20,16 +20,16 @@ Only the latest published minor of `reasonix` on npm is actively maintained. If 
 
 **In scope:**
 
-- The published `reasonix` npm package and its CLI / TUI
-- The dashboard SPA shipped under `dashboard/` and the local HTTP server that serves it
+- The Windows desktop app — Tauri 2 shell (`desktop/`) and the Node backend (`src/`)
+- The bundled Node runtime and its resource loading
 - The shell sandbox, edit gate, and tool dispatcher in `src/`
 
 **Out of scope:**
 
-- Third-party MCP servers attached via `--mcp` (report to those projects)
+- Third-party MCP servers attached to the app (report to those projects)
 - Misconfiguration of the user's own DeepSeek API key, environment, or shell profile
 - Vulnerabilities in upstream Node.js or in the DeepSeek API itself
-- Denial-of-service via deliberately oversized prompts or tool inputs (Reasonix is a single-user CLI; there's no multi-tenant boundary to defend)
+- Denial-of-service via deliberately oversized prompts or tool inputs (Reasonix is a single-user desktop app; there's no multi-tenant boundary to defend)
 
 ## Hardening notes
 

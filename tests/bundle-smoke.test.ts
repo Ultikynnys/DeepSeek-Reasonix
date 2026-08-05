@@ -1,8 +1,9 @@
 /** Post-build smoke — confirm bundled `dist/{index,cli/index}.js` resolves the tokenizer data file at package-root. */
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -66,17 +67,21 @@ describe("bundled dist — tokenizer path resolution", () => {
   );
 
   (cliExists ? it : it.skip)("dist/cli/index.js loads tokenizer before the first API fetch", () => {
-    // Spawn the CLI pointed at a bogus local address that fails fetch
-    // fast. In step(), preflight's estimateRequestTokens runs BEFORE
-    // client.chat — so if the bundled layout can't find the
-    // tokenizer data, we see ENOENT in stderr even though the fetch
-    // never happens. If tokenizer loads fine, we see a connection
-    // error instead (and that's OK — we're not testing the network
-    // path, only that the tokenizer path resolution works from
-    // dist/cli/).
-    const result = spawnSync("node", [CLI_BUNDLE, "run", "--no-config", "hi"], {
+    // Spawn the desktop backend pointed at a bogus local address that fails
+    // fetch fast. In runTurn(), preflight's estimateRequestTokens runs BEFORE
+    // client.chat — so if the bundled layout can't find the tokenizer data,
+    // we see ENOENT in stderr even though the fetch never happens. If
+    // tokenizer loads fine, we see a connection error instead (and that's OK
+    // — we're not testing the network path, only that the tokenizer path
+    // resolution works from dist/cli/). The daemon is a long-running server,
+    // so the spawn is killed by the timeout once the turn has failed fast;
+    // the assertions run on the collected output.
+    const smokeDir = mkdtempSync(join(tmpdir(), "reasonix-smoke-"));
+    const result = spawnSync("node", [CLI_BUNDLE, "desktop", "--dir", smokeDir], {
       encoding: "utf8",
       timeout: 10_000,
+      // One user_input turn — the same message the Tauri shell sends.
+      input: '{"cmd":"user_input","text":"hi"}\n',
       env: {
         ...process.env,
         DEEPSEEK_API_KEY: "sk-smoke-test-bogus",
@@ -93,5 +98,8 @@ describe("bundled dist — tokenizer path resolution", () => {
     // Also not a missing-module style ENOENT (network errors are
     // ECONNREFUSED or fetch failure, never ENOENT).
     expect(combined).not.toMatch(/ENOENT.*tokenizer/i);
+    // The daemon must have actually responded (event JSON on stdout) —
+    // a commander error or instant crash would produce no events.
+    expect(result.stdout).toMatch(/"type":\s*"\$/);
   });
 });
