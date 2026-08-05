@@ -942,7 +942,11 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const foldEnd = events.find((e) => e.role === "compaction_end");
     expect(foldEnd).toBeDefined();
     expect(foldEnd!.folded).toBe(true);
-    expect(foldEnd!.beforeMessages).toBe(beforeMessages);
+    // The fold counts the log at fold time, so beforeMessages includes the
+    // tool exchange + wrap-up appended before the compaction card, and the
+    // fold must have actually shrunk the log.
+    expect(foldEnd!.beforeMessages).toBeGreaterThan(beforeMessages);
+    expect(foldEnd!.afterMessages ?? 0).toBeLessThan(foldEnd!.beforeMessages ?? 0);
     // Dispatch-before-fold: the pending tool call completes BEFORE the
     // compaction card starts, so a read isn't blocked behind the summary window.
     const toolIdx = events.findIndex((e) => e.role === "tool" && e.toolName === "probe");
