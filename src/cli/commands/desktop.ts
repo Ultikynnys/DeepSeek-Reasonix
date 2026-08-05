@@ -99,6 +99,7 @@ import {
   DeepSeekClient,
   ImmutablePrefix,
   type LoopAbortOptions,
+  type LoopEvent,
 } from "../../index.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
 import {
@@ -139,6 +140,30 @@ export interface DesktopOptions {
 export function desktopUserAbortLoopOptions(): LoopAbortOptions | undefined {
   // User-facing Abort stops generation; it must not erase a prompt that remains visible in chat.
   return undefined;
+}
+
+/** Race the generator's next event against the aborter — resolves `null` on
+ * abort even while the loop is suspended (the fold is non-interruptible).
+ * Exported for tests. */
+export function raceLoopStep(
+  gen: AsyncGenerator<LoopEvent>,
+  signal: AbortSignal | undefined,
+): Promise<IteratorResult<LoopEvent> | null> {
+  if (signal?.aborted) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => resolve(null);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    gen.next().then(
+      (r) => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve(r);
+      },
+      (err) => {
+        signal?.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }
 
 type InMessage = { tabId?: string } & (
@@ -1755,15 +1780,36 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
     }
     await tabContext.run(tab.id, async () => {
+      // Drive the turn generator manually instead of `for await`: an abort
+      // can land while the generator is suspended inside an await (the
+      // compaction fold is deliberately non-interruptible and can hold it
+      // for minutes). A plain for-await only notices the abort when the
+      // next event arrives, so Send now / Stop during a fold never reached
+      // $turn_complete and the queued-sends drain never ran. raceLoopStep
+      // resolves `null` the moment the aborter fires instead.
+      const gen = rt.loop.step(text);
+      let aborted = false;
+      let lastTurn = -1;
+      let sawAssistantFinal = false;
+      let openCompactionId: string | undefined;
       try {
         let emittedTurnContext = false;
-        for await (const ev of rt.loop.step(text)) {
+        while (true) {
+          const next = await raceLoopStep(gen, tab.aborter?.signal);
+          if (next === null) {
+            aborted = true;
+            break;
+          }
+          if (next.done) break;
+          const ev = next.value;
+          lastTurn = ev.turn;
           if (!emittedTurnContext) {
             emittedTurnContext = true;
             emitCtxBreakdown(tab);
           }
-          if (ev.role === "assistant_final" && ev.content) {
-            lastAssistantText = ev.content;
+          if (ev.role === "assistant_final") {
+            sawAssistantFinal = true;
+            if (ev.content) lastAssistantText = ev.content;
           }
           for (const kev of rt.eventizer.consume(ev, rt.ctx)) emit(kev, tab.id);
           if (ev.role === "assistant_final" || ev.role === "tool") {
@@ -1775,15 +1821,49 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           if (ev.role === "tool" && (ev.toolName === "remember" || ev.toolName === "forget")) {
             emitMemory(tab);
           }
-          if (tab.aborter?.signal.aborted) break;
+          if (ev.role === "compaction_start" && ev.compactionId) {
+            openCompactionId = ev.compactionId;
+          }
+          if (ev.role === "compaction_end") openCompactionId = undefined;
         }
       } catch (err) {
         emit({ type: "$error", message: (err as Error).message }, tab.id);
       } finally {
+        if (aborted) {
+          // Close the suspended generator so its finallys (per-turn abort
+          // state reset) run as soon as the pending await settles — the
+          // fold is non-interruptible, so this must NOT be awaited here.
+          // The loop itself reassigns _turnAbort fresh on the next step(),
+          // so the deferred reset can't clobber the next turn's signal.
+          void gen.return(undefined).catch(() => undefined);
+        }
         tab.aborter = null;
         // If a session switch happened while this turn was running,
         // suppress stale events to avoid UI state corruption (#1217).
         if (!tab.switching) {
+          if (aborted && lastTurn >= 0 && !sawAssistantFinal) {
+            // The loop's own abort path never ran (the generator was
+            // closed mid-await), so settle the still-pending assistant
+            // card here — $turn_complete alone leaves it spinning.
+            emit(rt.eventizer.emitAbortedFinal(lastTurn), tab.id);
+          }
+          if (aborted && openCompactionId && lastTurn >= 0) {
+            // Same for a running compaction card: compaction_end was
+            // never yielded. Report the interruption — the detached fold
+            // keeps running and its merge-at-commit preserves anything
+            // the next turn appends.
+            emit(
+              rt.eventizer.emitCompactionFinished(openCompactionId, {
+                turn: lastTurn,
+                folded: false,
+                beforeMessages: 0,
+                afterMessages: 0,
+                summaryChars: 0,
+                error: "aborted by user",
+              }),
+              tab.id,
+            );
+          }
           if (
             fromQQ &&
             lastAssistantText &&

@@ -223,6 +223,22 @@ export class Eventizer {
     return this.compactionFinishedEvent(compactionId, result);
   }
 
+  /** Synthetic final when a consumer closes the turn generator mid-await on
+   * abort — settles the pending assistant card ($turn_complete alone does
+   * not). */
+  emitAbortedFinal(turn: number): ModelFinalEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: "model.final",
+      content: "[aborted by user — no response produced.]",
+      toolCalls: [],
+      usage: {},
+      costUsd: 0,
+    };
+  }
+
   emitToolConfirmAllow(
     turn: number,
     kind: "run_command" | "run_background",

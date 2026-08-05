@@ -262,4 +262,22 @@ describe("Eventizer.consume", () => {
     expect(start.aggressive).toBeUndefined();
     expect(end.id).toBeGreaterThan(start.id);
   });
+
+  it("emitAbortedFinal settles a pending assistant card with zero usage", () => {
+    // Desktop runTurn closes the turn generator mid-await on abort (the
+    // fold is non-interruptible), so the loop's own assistant_final never
+    // arrives — this synthetic final is what flips the card to settled.
+    const e = new Eventizer();
+    const ev = e.emitAbortedFinal(3);
+    expect(ev).toMatchObject({
+      type: "model.final",
+      turn: 3,
+      content: "[aborted by user — no response produced.]",
+      toolCalls: [],
+      usage: {},
+      costUsd: 0,
+    });
+    expect(ev.id).toBeGreaterThan(0);
+    expect(ev.ts).toBeTruthy();
+  });
 });
