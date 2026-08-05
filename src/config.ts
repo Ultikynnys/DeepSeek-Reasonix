@@ -14,6 +14,7 @@ import {
 } from "./index/config.js";
 import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
 import { normalizeQQAllowlist, normalizeQQOpenId } from "./qq/access.js";
+import { reasonixHome } from "./reasonix-home.js";
 import { type ThemeName, isThemeName, resolveThemeName } from "./theme/tokens.js";
 import {
   type NormalizedToolRateLimitConfig,
@@ -33,7 +34,8 @@ export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
   "deepseek-v4-pro",
 ];
 
-export type ReasoningEffort = "low" | "medium" | "high" | "max";
+import type { ReasoningEffort } from "@reasonix/core-utils";
+export type { ReasoningEffort };
 
 export const REASONING_EFFORT_VALUES: readonly ReasoningEffort[] = ["low", "medium", "high", "max"];
 
@@ -399,7 +401,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_BATCH_SIZE = 10;
 
 export function defaultConfigPath(): string {
-  return join(homedir(), ".reasonix", "config.json");
+  return join(reasonixHome(), "config.json");
 }
 
 const STRING_ARRAY_FIELDS: Array<readonly string[]> = [

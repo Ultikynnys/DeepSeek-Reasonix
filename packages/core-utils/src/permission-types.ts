@@ -23,3 +23,23 @@ export type ChoiceVerdict =
   | { type: "pick"; optionId: string }
   | { type: "text"; text: string }
   | { type: "cancel" };
+
+/** Reasoning effort levels — shared between config, model calls, and desktop UI. */
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
+
+/** A choice option shown in the desktop picker — shared with the ask_choice tool. */
+export type ChoiceOption = {
+  id: string;
+  title: string;
+  summary?: string;
+};
+
+/** A plan step as passed over the wire to the desktop.  The canonical rich
+ *  server-side PlanStep (with targets / acceptance / verification) extends
+ *  this shape in `src/tools/plan-types.ts`. */
+export type PlanStep = {
+  id: string;
+  title: string;
+  action: string;
+  risk?: "low" | "med" | "high";
+};

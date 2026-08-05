@@ -3,6 +3,7 @@
 import { createParser } from "eventsource-parser";
 import { MessageQueue, parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
+import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
 
 export interface StreamableHttpTransportOptions {
@@ -162,14 +163,9 @@ export class StreamableHttpTransport implements McpTransport {
       }
     } catch (err) {
       if (!this.closed) {
-        this.incoming.push({
-          jsonrpc: "2.0",
-          id: null,
-          error: {
-            code: -32000,
-            message: `Streamable HTTP stream error: ${(err as Error).message}`,
-          },
-        });
+        this.incoming.push(
+          syntheticRpcError(`Streamable HTTP stream error: ${(err as Error).message}`),
+        );
       }
     }
   }

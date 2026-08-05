@@ -2,6 +2,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { MessageQueue } from "./message-queue.js";
+import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
 
 export interface McpTransport {

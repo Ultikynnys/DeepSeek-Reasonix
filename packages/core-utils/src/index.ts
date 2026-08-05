@@ -23,6 +23,9 @@ export type {
   CheckpointVerdict,
   RevisionVerdict,
   ChoiceVerdict,
+  ReasoningEffort,
+  ChoiceOption,
+  PlanStep,
 } from "./permission-types.js";
 export {
   toApprovalPrompt,

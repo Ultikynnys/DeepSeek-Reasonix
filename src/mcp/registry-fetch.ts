@@ -1,8 +1,8 @@
 /** Primary: registry.modelcontextprotocol.io. Fallback: registry.smithery.ai. Last resort: bundled MCP_CATALOG. */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { reasonixHome } from "../reasonix-home.js";
 import { MCP_CATALOG } from "./catalog.js";
 import type {
   CacheFile,
@@ -19,7 +19,7 @@ export const FETCH_TIMEOUT_MS = 10_000;
 export const CACHE_SCHEMA_VERSION = 2;
 
 export function defaultCachePath(): string {
-  return join(homedir(), ".reasonix", "mcp-registry-cache.json");
+  return join(reasonixHome(), "mcp-registry-cache.json");
 }
 
 function readCache(path: string): CacheFile | null {

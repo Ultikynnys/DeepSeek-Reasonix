@@ -90,6 +90,72 @@ function fetchStatusError(status: number, url: string): string {
   return t("webErrors.fetchStatus", { status, url });
 }
 
+// Shared fetch helpers for JSON search APIs.
+
+interface SearchApiErrorMap {
+  authError: string;
+  rateLimitError: string;
+  serverError: (status: number) => string;
+}
+
+/** fetch → TypeError→cannotReach → status→error map.  Returns the raw Response
+ *  so callers can choose text()/json()/whatever. */
+async function fetchSearchApi(
+  endpoint: string,
+  init: RequestInit,
+  signal: AbortSignal | undefined,
+  errMap: SearchApiErrorMap,
+): Promise<Response> {
+  let resp: Response;
+  try {
+    resp = await fetch(endpoint, { ...init, signal });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint }));
+    }
+    throw err;
+  }
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) throw new Error(errMap.authError);
+    if (resp.status === 429) throw new Error(errMap.rateLimitError);
+    throw new Error(errMap.serverError(resp.status));
+  }
+  return resp;
+}
+
+/** Guarded `JSON.parse` — throws `engineParseError` on malformed JSON. */
+function parseSearchJson<T>(raw: string, status: number, parseError: string): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error(parseError);
+  }
+}
+
+/** Merge AI answer + citations into SearchResult[] — shared by Perplexity and Exa.
+ *  Citations without a url are skipped. */
+function toAnswerFirstResults(
+  answer: string,
+  citations: Array<{ title?: string; url?: string; snippet?: string }>,
+  topK: number,
+): SearchResult[] {
+  const results: SearchResult[] = [];
+  if (answer) {
+    results.push({ title: answer, url: "", snippet: "", answer });
+  }
+  const count = Math.min(citations.length, topK);
+  for (let i = 0; i < count; i++) {
+    const c = citations[i]!;
+    if (!c.url) continue;
+    results.push({
+      title: c.title || `Source ${i + 1}`,
+      url: c.url,
+      snippet: c.snippet ?? "",
+    });
+  }
+  return results;
+}
+
 function parseIpv4(address: string): number | null {
   const parts = address.split(".");
   if (parts.length !== 4) return null;
@@ -361,46 +427,31 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
   const apiKey = loadMetasoApiKey();
   if (!apiKey) throw new Error(t("webErrors.metasoMissingKey"));
 
-  let resp: Response;
-  try {
-    resp = await fetch(`${METASO_ENDPOINT}/search`, {
+  const resp = await fetchSearchApi(
+    `${METASO_ENDPOINT}/search`,
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        q: query,
-        scope: "webpage",
-        size: topK,
-      }),
-      signal: opts.signal,
-    });
-  } catch (err) {
-    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
-      throw new Error(t("webErrors.cannotReach", { endpoint: METASO_ENDPOINT }));
-    }
-    throw err;
-  }
+      body: JSON.stringify({ q: query, scope: "webpage", size: topK }),
+    },
+    opts.signal,
+    {
+      authError: t("webErrors.metasoUnauthorized"),
+      rateLimitError: t("webErrors.metasoRateLimit"),
+      serverError: (s) => t("webErrors.metasoServerError", { status: s }),
+    },
+  );
 
   const raw = await resp.text();
-  let data: MetasoSearchResponse;
-  try {
-    data = JSON.parse(raw) as MetasoSearchResponse;
-  } catch {
-    throw new Error(t("webErrors.metasoParseError", { status: resp.status }));
-  }
-
-  if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      throw new Error(t("webErrors.metasoUnauthorized"));
-    }
-    if (resp.status === 429) {
-      throw new Error(t("webErrors.metasoRateLimit"));
-    }
-    throw new Error(t("webErrors.metasoServerError", { status: resp.status }));
-  }
+  const data = parseSearchJson<MetasoSearchResponse>(
+    raw,
+    resp.status,
+    t("webErrors.metasoParseError", { status: resp.status }),
+  );
 
   if (data.code === 3003) {
     throw new Error(t("webErrors.metasoDailyLimit"));
@@ -444,14 +495,11 @@ async function searchTavily(query: string, opts: WebSearchOptions = {}): Promise
   const apiKey = loadTavilyApiKey();
   if (!apiKey) throw new Error(t("webErrors.tavilyMissingKey"));
 
-  let resp: Response;
-  try {
-    resp = await fetch(TAVILY_ENDPOINT, {
+  const resp = await fetchSearchApi(
+    TAVILY_ENDPOINT,
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
         api_key: apiKey,
         query,
@@ -461,22 +509,14 @@ async function searchTavily(query: string, opts: WebSearchOptions = {}): Promise
         include_raw_content: false,
         include_images: false,
       }),
-      signal: opts.signal,
-    });
-  } catch (err) {
-    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
-      throw new Error(t("webErrors.cannotReach", { endpoint: TAVILY_ENDPOINT }));
-    }
-    throw err;
-  }
-
-  if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      throw new Error(t("webErrors.tavilyUnauthorized"));
-    }
-    if (resp.status === 429) throw new Error(t("webErrors.tavilyRateLimit"));
-    throw new Error(t("webErrors.tavilyServerError", { status: resp.status }));
-  }
+    },
+    opts.signal,
+    {
+      authError: t("webErrors.tavilyUnauthorized"),
+      rateLimitError: t("webErrors.tavilyRateLimit"),
+      serverError: (s) => t("webErrors.tavilyServerError", { status: s }),
+    },
+  );
 
   let data: TavilySearchResponse;
   try {
@@ -510,75 +550,48 @@ async function searchPerplexity(
   const apiKey = loadPerplexityApiKey();
   if (!apiKey) throw new Error(t("webErrors.perplexityMissingKey"));
 
-  let resp: Response;
-  try {
-    resp = await fetch(PERPLEXITY_ENDPOINT, {
+  const resp = await fetchSearchApi(
+    PERPLEXITY_ENDPOINT,
+    {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "sonar",
         messages: [{ role: "user", content: query }],
         max_tokens: 1024,
         return_related_questions: false,
       }),
-      signal: opts.signal,
-    });
-  } catch (err) {
-    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
-      throw new Error(t("webErrors.cannotReach", { endpoint: PERPLEXITY_ENDPOINT }));
-    }
-    throw err;
-  }
-
-  if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      throw new Error(t("webErrors.perplexityUnauthorized"));
-    }
-    if (resp.status === 429) throw new Error(t("webErrors.perplexityRateLimit"));
-    throw new Error(t("webErrors.perplexityServerError", { status: resp.status }));
-  }
+    },
+    opts.signal,
+    {
+      authError: t("webErrors.perplexityUnauthorized"),
+      rateLimitError: t("webErrors.perplexityRateLimit"),
+      serverError: (s) => t("webErrors.perplexityServerError", { status: s }),
+    },
+  );
 
   const raw = await resp.text();
-  let data: PerplexityResponse;
-  try {
-    data = JSON.parse(raw) as PerplexityResponse;
-  } catch {
-    throw new Error(t("webErrors.perplexityParseError", { status: resp.status }));
-  }
+  const data = parseSearchJson<PerplexityResponse>(
+    raw,
+    resp.status,
+    t("webErrors.perplexityParseError", { status: resp.status }),
+  );
 
   const answer = data.choices?.[0]?.message?.content ?? "";
-  const citations = Array.isArray(data.citations) ? data.citations : [];
-
-  const results: SearchResult[] = [];
-
-  // First entry carries the AI answer
-  if (answer) {
-    results.push({ title: answer, url: "", snippet: "", answer });
-  }
-
-  const count = Math.min(citations.length, topK);
-  for (let i = 0; i < count; i++) {
-    const c = citations[i];
-    if (typeof c === "string") {
-      results.push({ title: `Source ${i + 1}`, url: c, snippet: "" });
-    } else if (
-      c &&
-      typeof c === "object" &&
-      typeof (c as Record<string, unknown>).url === "string"
-    ) {
+  // Perplexity citations may be plain URLs (string) or objects with .url/.title.
+  const rawCitations = Array.isArray(data.citations) ? data.citations : [];
+  const citations = rawCitations.map((c, i) => {
+    if (typeof c === "string") return { url: c, title: `Source ${i + 1}` };
+    if (c && typeof c === "object") {
       const item = c as Record<string, unknown>;
-      results.push({
-        title: typeof item.title === "string" ? item.title : `Source ${i + 1}`,
-        url: item.url as string,
-        snippet: "",
-      });
+      return {
+        url: typeof item.url === "string" ? item.url : undefined,
+        title: typeof item.title === "string" ? (item.title as string) : `Source ${i + 1}`,
+      };
     }
-  }
-
-  return results;
+    return { url: undefined as string | undefined };
+  });
+  return toAnswerFirstResults(answer, citations, topK);
 }
 
 interface ExaCitation {
@@ -598,62 +611,33 @@ async function searchExa(query: string, opts: WebSearchOptions = {}): Promise<Se
   const apiKey = loadExaApiKey();
   if (!apiKey) throw new Error(t("webErrors.exaMissingKey"));
 
-  let resp: Response;
-  try {
-    resp = await fetch(EXA_ENDPOINT, {
+  const resp = await fetchSearchApi(
+    EXA_ENDPOINT,
+    {
       method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
+      headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({ query, text: true }),
-      signal: opts.signal,
-    });
-  } catch (err) {
-    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
-      throw new Error(t("webErrors.cannotReach", { endpoint: EXA_ENDPOINT }));
-    }
-    throw err;
-  }
-
-  if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      throw new Error(t("webErrors.exaUnauthorized"));
-    }
-    if (resp.status === 429) throw new Error(t("webErrors.exaRateLimit"));
-    throw new Error(t("webErrors.exaServerError", { status: resp.status }));
-  }
+    },
+    opts.signal,
+    {
+      authError: t("webErrors.exaUnauthorized"),
+      rateLimitError: t("webErrors.exaRateLimit"),
+      serverError: (s) => t("webErrors.exaServerError", { status: s }),
+    },
+  );
 
   const raw = await resp.text();
-  let data: ExaAnswerResponse;
-  try {
-    data = JSON.parse(raw) as ExaAnswerResponse;
-  } catch {
-    throw new Error(t("webErrors.exaParseError", { status: resp.status }));
-  }
+  const data = parseSearchJson<ExaAnswerResponse>(
+    raw,
+    resp.status,
+    t("webErrors.exaParseError", { status: resp.status }),
+  );
 
-  const answer = data.answer ?? "";
-  const citations = data.citations ?? [];
-
-  const results: SearchResult[] = [];
-
-  // First entry carries the AI answer
-  if (answer) {
-    results.push({ title: answer, url: "", snippet: "", answer });
-  }
-
-  const count = Math.min(citations.length, topK);
-  for (let i = 0; i < count; i++) {
-    const c = citations[i]!;
-    if (!c.url) continue;
-    results.push({
-      title: c.title || `Source ${i + 1}`,
-      url: c.url,
-      snippet: c.text ?? "",
-    });
-  }
-
-  return results;
+  return toAnswerFirstResults(
+    data.answer ?? "",
+    (data.citations ?? []).map((c) => ({ title: c.title, url: c.url, snippet: c.text })),
+    topK,
+  );
 }
 
 interface OllamaSearchItem {
@@ -675,9 +659,9 @@ async function searchOllama(query: string, opts: WebSearchOptions = {}): Promise
     );
   }
 
-  let resp: Response;
-  try {
-    resp = await fetch(OLLAMA_WEB_SEARCH_ENDPOINT, {
+  const resp = await fetchSearchApi(
+    OLLAMA_WEB_SEARCH_ENDPOINT,
+    {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -685,24 +669,14 @@ async function searchOllama(query: string, opts: WebSearchOptions = {}): Promise
         Accept: "application/json",
       },
       body: JSON.stringify({ query, max_results: topK }),
-      signal: opts.signal,
-    });
-  } catch (err) {
-    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
-      throw new Error(t("webErrors.cannotReach", { endpoint: OLLAMA_WEB_SEARCH_ENDPOINT }));
-    }
-    throw err;
-  }
-
-  if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      throw new Error("web_search: Ollama API key rejected — check OLLAMA_API_KEY.");
-    }
-    if (resp.status === 429) {
-      throw new Error("web_search: Ollama web search is rate-limited or quota-limited.");
-    }
-    throw new Error(`web_search: Ollama web search returned HTTP ${resp.status}.`);
-  }
+    },
+    opts.signal,
+    {
+      authError: "web_search: Ollama API key rejected — check OLLAMA_API_KEY.",
+      rateLimitError: "web_search: Ollama web search is rate-limited or quota-limited.",
+      serverError: (s) => `web_search: Ollama web search returned HTTP ${s}.`,
+    },
+  );
 
   let data: OllamaSearchResponse;
   try {
@@ -737,40 +711,29 @@ async function searchBrave(query: string, opts: WebSearchOptions = {}): Promise<
 
   const url = `${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}&count=${topK}`;
 
-  let resp: Response;
-  try {
-    resp = await fetch(url, {
+  const resp = await fetchSearchApi(
+    url,
+    {
       headers: {
         Accept: "application/json",
         "Accept-Encoding": "gzip",
         "X-Subscription-Token": apiKey,
       },
-      signal: opts.signal,
-    });
-  } catch (err) {
-    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
-      throw new Error(t("webErrors.cannotReach", { endpoint: BRAVE_ENDPOINT }));
-    }
-    throw err;
-  }
-
-  if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      throw new Error(t("webErrors.braveUnauthorized"));
-    }
-    if (resp.status === 429) {
-      throw new Error(t("webErrors.braveRateLimit"));
-    }
-    throw new Error(t("webErrors.braveServerError", { status: resp.status }));
-  }
+    },
+    opts.signal,
+    {
+      authError: t("webErrors.braveUnauthorized"),
+      rateLimitError: t("webErrors.braveRateLimit"),
+      serverError: (s) => t("webErrors.braveServerError", { status: s }),
+    },
+  );
 
   const raw = await resp.text();
-  let data: BraveSearchResponse;
-  try {
-    data = JSON.parse(raw) as BraveSearchResponse;
-  } catch {
-    throw new Error(t("webErrors.braveParseError", { status: resp.status }));
-  }
+  const data = parseSearchJson<BraveSearchResponse>(
+    raw,
+    resp.status,
+    t("webErrors.braveParseError", { status: resp.status }),
+  );
 
   const results = data.web?.results ?? [];
   return results.slice(0, topK).map((r) => ({

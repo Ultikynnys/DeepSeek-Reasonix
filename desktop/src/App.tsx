@@ -63,6 +63,7 @@ import type {
   MemoryDetail,
   MemoryEntryInfo,
   OutgoingCommand,
+  PlanStep,
   PlanVerdict,
   RevisionVerdict,
   SettingsPatch,
@@ -214,13 +215,6 @@ export type PendingPlan = {
   steps?: PlanStep[];
   /** YOLO auto-approval window (ms) — the card auto-picks the first option at expiry. */
   countdownMs?: number;
-};
-
-export type PlanStep = {
-  id: string;
-  title: string;
-  action: string;
-  risk?: "low" | "med" | "high";
 };
 
 export type ActivePlan = {

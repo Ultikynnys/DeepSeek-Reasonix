@@ -1,14 +1,10 @@
 /** Branching primitive separate from submit_plan; throws ChoiceRequestedError so the TUI can mount a picker and the model stops. */
 
+import type { ChoiceOption } from "@reasonix/core-utils";
 import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
 import { ToolControlFlowError } from "./control-flow-error.js";
-
-export interface ChoiceOption {
-  id: string;
-  title: string;
-  summary?: string;
-}
+export type { ChoiceOption };
 
 export class ChoiceRequestedError extends ToolControlFlowError {
   readonly question: string;

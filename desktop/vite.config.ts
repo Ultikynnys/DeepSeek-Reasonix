@@ -54,5 +54,12 @@ export default defineConfig({
     target: "es2022",
     minify: "esbuild",
     sourcemap: true,
+    rollupOptions: {
+      // `tildeify.ts` (in @reasonix/core-utils) imports node:os, but the
+      // desktop never calls tildeify.  Externalising the module lets Rollup
+      // parse the file without resolving the named export, and tree-shaking
+      // drops the dead code from the final bundle.
+      external: ["node:os"],
+    },
   },
 });

@@ -3,6 +3,7 @@
 import { createParser } from "eventsource-parser";
 import { MessageQueue, parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
+import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
 
 export interface SseTransportOptions {

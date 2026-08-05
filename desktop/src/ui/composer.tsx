@@ -19,9 +19,8 @@ import {
 } from "./composer-sizing";
 import { fmtElapsed } from "./live";
 import { Shortcut } from "./shortcut";
-
-export type ReasoningEffort = "low" | "medium" | "high" | "max";
-export type EditMode = "review" | "auto" | "yolo" | "plan";
+import type { EditMode, ReasoningEffort } from "../protocol";
+export type { EditMode, ReasoningEffort };
 
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
 

@@ -13,10 +13,10 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Usage } from "../client.js";
 import { parseJsonl, readJsonlLines } from "../core/jsonl.js";
+import { reasonixHome } from "../reasonix-home.js";
 import {
   CLAUDE_SONNET_PRICING,
   DEEPSEEK_PRICING,
@@ -58,7 +58,8 @@ export interface UsageRecord {
 
 /** Where the log lives. Tests override via `opts.path`. */
 export function defaultUsageLogPath(homeDirOverride?: string): string {
-  return join(homeDirOverride ?? homedir(), ".reasonix", "usage.jsonl");
+  const base = homeDirOverride ? join(homeDirOverride, ".reasonix") : reasonixHome();
+  return join(base, "usage.jsonl");
 }
 
 export interface AppendUsageInput {

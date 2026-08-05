@@ -1,9 +1,9 @@
 /** VERSION sourced from package.json so it never drifts from npm; latest-check returns null on any failure. */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { reasonixHome } from "./reasonix-home.js";
 
 /** npm registry endpoint for the `latest` dist-tag of this package. */
 const REGISTRY_URL = "https://registry.npmjs.org/reasonix/latest";
@@ -47,7 +47,8 @@ interface VersionCacheEntry {
 }
 
 function cachePath(homeDirOverride?: string): string {
-  return join(homeDirOverride ?? homedir(), ".reasonix", "version-cache.json");
+  const base = homeDirOverride ? join(homeDirOverride, ".reasonix") : reasonixHome();
+  return join(base, "version-cache.json");
 }
 
 function readCache(homeDirOverride?: string): VersionCacheEntry | null {

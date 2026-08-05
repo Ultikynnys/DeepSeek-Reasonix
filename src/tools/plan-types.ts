@@ -1,9 +1,8 @@
+import type { PlanStep as CorePlanStep } from "@reasonix/core-utils";
+
 export type PlanStepRisk = "low" | "med" | "high";
 
-export interface PlanStep {
-  id: string;
-  title: string;
-  action: string;
+export interface PlanStep extends CorePlanStep {
   risk?: PlanStepRisk;
   targets?: string[];
   acceptance?: string;

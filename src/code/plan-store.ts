@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { fmtRelativeTime } from "../core/relative-time.js";
 import { sanitizeName, sessionsDir } from "../memory/session.js";
 import type { PlanStep, StepCompletion, StepEvidence } from "../tools/plan.js";
 
@@ -156,6 +157,55 @@ export interface PlanArchiveSummary {
   summary?: string;
 }
 
+/** Parsed on-disk plan archive — reusable across listPlanArchives and listAllPlanArchives. */
+interface ParsedPlanArchive {
+  steps: PlanStep[];
+  completedStepIds: string[];
+  completedAt: string;
+  stepCompletions?: Record<string, StepCompletion>;
+  body?: string;
+  summary?: string;
+}
+
+function parsePlanArchiveFile(full: string): ParsedPlanArchive | null {
+  try {
+    const raw = readFileSync(full, "utf8");
+    const parsed = JSON.parse(raw) as Partial<PlanStateOnDisk>;
+    if (parsed.version !== 1 && parsed.version !== 2) return null;
+    if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) return null;
+    const steps = parsed.steps.filter(
+      (s): s is PlanStep =>
+        !!s &&
+        typeof s === "object" &&
+        typeof (s as PlanStep).id === "string" &&
+        typeof (s as PlanStep).title === "string" &&
+        typeof (s as PlanStep).action === "string",
+    );
+    if (steps.length === 0) return null;
+    const completedStepIds = Array.isArray(parsed.completedStepIds)
+      ? parsed.completedStepIds.filter((id): id is string => typeof id === "string" && !!id)
+      : [];
+    // Prefer the file's own updatedAt; fall back to mtime if missing
+    // or unparseable so a hand-edited archive still sorts sensibly.
+    let completedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : "";
+    if (!completedAt || Number.isNaN(Date.parse(completedAt))) {
+      try {
+        completedAt = statSync(full).mtime.toISOString();
+      } catch {
+        completedAt = new Date(0).toISOString();
+      }
+    }
+    const result: ParsedPlanArchive = { steps, completedStepIds, completedAt };
+    const sc = sanitizeStepCompletions(parsed.stepCompletions);
+    if (sc) result.stepCompletions = sc;
+    if (typeof parsed.body === "string" && parsed.body) result.body = parsed.body;
+    if (typeof parsed.summary === "string" && parsed.summary) result.summary = parsed.summary;
+    return result;
+  } catch {
+    return null;
+  }
+}
+
 export function listPlanArchives(sessionName: string): PlanArchiveSummary[] {
   const dir = sessionsDir();
   if (!existsSync(dir)) return [];
@@ -171,42 +221,18 @@ export function listPlanArchives(sessionName: string): PlanArchiveSummary[] {
   for (const name of entries) {
     if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue;
     const full = join(dir, name);
-    try {
-      const raw = readFileSync(full, "utf8");
-      const parsed = JSON.parse(raw) as Partial<PlanStateOnDisk>;
-      if (parsed.version !== 1 && parsed.version !== 2) continue;
-      if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) continue;
-      const steps = parsed.steps.filter(
-        (s): s is PlanStep =>
-          !!s &&
-          typeof s === "object" &&
-          typeof (s as PlanStep).id === "string" &&
-          typeof (s as PlanStep).title === "string" &&
-          typeof (s as PlanStep).action === "string",
-      );
-      if (steps.length === 0) continue;
-      const completedStepIds = Array.isArray(parsed.completedStepIds)
-        ? parsed.completedStepIds.filter((id): id is string => typeof id === "string" && !!id)
-        : [];
-      // Prefer the file's own updatedAt; fall back to mtime if missing
-      // or unparseable so a hand-edited archive still sorts sensibly.
-      let completedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : "";
-      if (!completedAt || Number.isNaN(Date.parse(completedAt))) {
-        try {
-          completedAt = statSync(full).mtime.toISOString();
-        } catch {
-          completedAt = new Date(0).toISOString();
-        }
-      }
-      const entry: PlanArchiveSummary = { path: full, completedAt, steps, completedStepIds };
-      const stepCompletions = sanitizeStepCompletions(parsed.stepCompletions);
-      if (stepCompletions) entry.stepCompletions = stepCompletions;
-      if (typeof parsed.body === "string" && parsed.body) entry.body = parsed.body;
-      if (typeof parsed.summary === "string" && parsed.summary) entry.summary = parsed.summary;
-      summaries.push(entry);
-    } catch {
-      // Skip the corrupt archive entirely.
-    }
+    const parsed = parsePlanArchiveFile(full);
+    if (!parsed) continue;
+    const entry: PlanArchiveSummary = {
+      path: full,
+      completedAt: parsed.completedAt,
+      steps: parsed.steps,
+      completedStepIds: parsed.completedStepIds,
+    };
+    if (parsed.stepCompletions) entry.stepCompletions = parsed.stepCompletions;
+    if (parsed.body) entry.body = parsed.body;
+    if (parsed.summary) entry.summary = parsed.summary;
+    summaries.push(entry);
   }
   summaries.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
   return summaries;
@@ -240,46 +266,19 @@ export function listAllPlanArchives(): PlanArchiveWithSession[] {
     const sessionName = name.slice(0, planIdx);
     if (!sessionName) continue;
     const full = join(dir, name);
-    try {
-      const raw = readFileSync(full, "utf8");
-      const parsed = JSON.parse(raw) as Partial<PlanStateOnDisk>;
-      if (parsed.version !== 1 && parsed.version !== 2) continue;
-      if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) continue;
-      const steps = parsed.steps.filter(
-        (s): s is PlanStep =>
-          !!s &&
-          typeof s === "object" &&
-          typeof (s as PlanStep).id === "string" &&
-          typeof (s as PlanStep).title === "string" &&
-          typeof (s as PlanStep).action === "string",
-      );
-      if (steps.length === 0) continue;
-      const completedStepIds = Array.isArray(parsed.completedStepIds)
-        ? parsed.completedStepIds.filter((id): id is string => typeof id === "string" && !!id)
-        : [];
-      let completedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : "";
-      if (!completedAt || Number.isNaN(Date.parse(completedAt))) {
-        try {
-          completedAt = statSync(full).mtime.toISOString();
-        } catch {
-          completedAt = new Date(0).toISOString();
-        }
-      }
-      const entry: PlanArchiveWithSession = {
-        sessionName,
-        path: full,
-        completedAt,
-        steps,
-        completedStepIds,
-      };
-      const stepCompletions = sanitizeStepCompletions(parsed.stepCompletions);
-      if (stepCompletions) entry.stepCompletions = stepCompletions;
-      if (typeof parsed.body === "string" && parsed.body) entry.body = parsed.body;
-      if (typeof parsed.summary === "string" && parsed.summary) entry.summary = parsed.summary;
-      out.push(entry);
-    } catch {
-      // Skip the corrupt archive entirely.
-    }
+    const parsed = parsePlanArchiveFile(full);
+    if (!parsed) continue;
+    const entry: PlanArchiveWithSession = {
+      sessionName,
+      path: full,
+      completedAt: parsed.completedAt,
+      steps: parsed.steps,
+      completedStepIds: parsed.completedStepIds,
+    };
+    if (parsed.stepCompletions) entry.stepCompletions = parsed.stepCompletions;
+    if (parsed.body) entry.body = parsed.body;
+    if (parsed.summary) entry.summary = parsed.summary;
+    out.push(entry);
   }
   out.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
   return out;
@@ -364,13 +363,7 @@ export function relativeTime(updatedAt: string, now: number = Date.now()): strin
   const t = Date.parse(updatedAt);
   if (Number.isNaN(t)) return updatedAt;
   const diffMs = Math.max(0, now - t);
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
-  return updatedAt.slice(0, 10);
+  const day = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (day >= 7) return updatedAt.slice(0, 10);
+  return fmtRelativeTime(diffMs);
 }

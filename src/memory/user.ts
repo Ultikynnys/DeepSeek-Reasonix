@@ -18,6 +18,7 @@ import {
   resolveSkillPaths,
 } from "../config.js";
 import { parseFrontmatter } from "../frontmatter.js";
+import { reasonixHome } from "../reasonix-home.js";
 import { applySkillsIndex } from "../skills.js";
 import { PROJECT_MEMORY_MAX_CHARS, applyProjectMemory, memoryEnabled } from "./project.js";
 import { readCappedTextFile } from "./read-capped.js";
@@ -139,7 +140,7 @@ export class MemoryStore {
   private readonly projectRoot: string | undefined;
 
   constructor(opts: MemoryStoreOptions = {}) {
-    this.homeDir = opts.homeDir ?? join(homedir(), ".reasonix");
+    this.homeDir = opts.homeDir ?? reasonixHome();
     this.projectRoot = opts.projectRoot ? resolve(opts.projectRoot) : undefined;
   }
 
@@ -293,63 +294,67 @@ export class MemoryStore {
   }
 }
 
+/** Read a capped text file for global-memory ingestion.  Returns null when
+ *  the file is missing, empty, or whitespace-only. */
+function readMemoryFile(filePath: string): {
+  path: string;
+  content: string;
+  originalChars: number;
+  truncated: boolean;
+} | null {
+  const capped = readCappedTextFile(filePath, PROJECT_MEMORY_MAX_CHARS);
+  if (!capped) return null;
+  return { path: filePath, ...capped };
+}
+
+/** Assemble a memory block into the prompt prefix. */
+function applyMemoryBlock(
+  basePrompt: string,
+  heading: string,
+  intro: string,
+  content: string,
+): string {
+  return [basePrompt, "", heading, "", intro, "", "```", content, "```"].join("\n");
+}
+
 /** Freeform `#g` destination, distinct from MEMORY.md's curated index of named files. */
 export function readGlobalReasonixMemory(
-  homeDir: string = join(homedir(), ".reasonix"),
-): { path: string; content: string; originalChars: number; truncated: boolean } | null {
-  const path = join(homeDir, "REASONIX.md");
-  // Reuse the project-memory cap so both freeform files have the same
-  // headroom (8000 chars ≈ 2k tokens). They serve the same purpose at
-  // different scopes.
-  const capped = readCappedTextFile(path, PROJECT_MEMORY_MAX_CHARS);
-  if (!capped) return null;
-  return { path, ...capped };
+  homeDir: string = reasonixHome(),
+): ReturnType<typeof readMemoryFile> {
+  return readMemoryFile(join(homeDir, "REASONIX.md"));
 }
 
 export function applyGlobalReasonixMemory(basePrompt: string, homeDir?: string): string {
   if (!memoryEnabled()) return basePrompt;
-  const dir = homeDir ?? join(homedir(), ".reasonix");
+  const dir = homeDir ?? reasonixHome();
   const mem = readGlobalReasonixMemory(dir);
   if (!mem) return basePrompt;
-  return [
+  return applyMemoryBlock(
     basePrompt,
-    "",
     "# Global memory (~/.reasonix/REASONIX.md)",
-    "",
     "Cross-project notes the user pinned via the `#g` prompt prefix. Treat as authoritative — same level of trust as project memory.",
-    "",
-    "```",
     mem.content,
-    "```",
-  ].join("\n");
+  );
 }
 
 /** Read ~/.claude/CLAUDE.md — cross-project notes from Claude Code migration.
  *  Same cap as global Reasonix memory (PROJECT_MEMORY_MAX_CHARS). */
 export function readGlobalClaudeMemory(
   homeDir: string = homedir(),
-): { path: string; content: string; originalChars: number; truncated: boolean } | null {
-  const path = join(homeDir, ".claude", "CLAUDE.md");
-  const capped = readCappedTextFile(path, PROJECT_MEMORY_MAX_CHARS);
-  if (!capped) return null;
-  return { path, ...capped };
+): ReturnType<typeof readMemoryFile> {
+  return readMemoryFile(join(homeDir, ".claude", "CLAUDE.md"));
 }
 
 export function applyGlobalClaudeMemory(basePrompt: string): string {
   if (!memoryEnabled()) return basePrompt;
   const mem = readGlobalClaudeMemory();
   if (!mem) return basePrompt;
-  return [
+  return applyMemoryBlock(
     basePrompt,
-    "",
     "# Global memory (~/.claude/CLAUDE.md)",
-    "",
     "Cross-project notes from your Claude Code configuration. Treat as authoritative — same level of trust as project memory.",
-    "",
-    "```",
     mem.content,
-    "```",
-  ].join("\n");
+  );
 }
 
 /** Effective priority: entry's own field wins, else the config default for its type, else undefined. */

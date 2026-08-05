@@ -1,8 +1,9 @@
 /** One file per checkpoint (not jsonl) so delete/restore is cheap and a corrupt snapshot only loses itself. */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { fmtRelativeTime } from "../core/relative-time.js";
+import { reasonixHome } from "../reasonix-home.js";
 
 /** One file's state at the time of snapshot. `content === null` → didn't exist. */
 export interface CheckpointFile {
@@ -40,7 +41,7 @@ function sanitizeRoot(rootDir: string): string {
 }
 
 function storeRoot(rootDir: string): string {
-  return join(homedir(), ".reasonix", "sessions", sanitizeRoot(rootDir), "checkpoints");
+  return join(reasonixHome(), "sessions", sanitizeRoot(rootDir), "checkpoints");
 }
 
 function indexPath(rootDir: string): string {
@@ -239,14 +240,5 @@ export function deleteCheckpoint(rootDir: string, id: string): boolean {
 
 /** Format ms-timestamp diff as human-readable relative age. */
 export function fmtAgo(ms: number): string {
-  const now = Date.now();
-  const diff = Math.max(0, now - ms);
-  const s = Math.floor(diff / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
+  return fmtRelativeTime(Math.max(0, Date.now() - ms));
 }

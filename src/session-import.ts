@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
-import { parseJsonl } from "./core/jsonl.js";
+import { readJsonlLines } from "./core/jsonl.js";
 import {
   SESSION_EVENTS_SUFFIX,
   detectGitBranch,
@@ -263,7 +263,7 @@ function importKey(source: ExternalSessionSource, path: string): string {
 }
 
 function parseClaudeSessionFile(path: string): ImportedSession {
-  const records = readJsonl(path) as ClaudeRecord[];
+  const records = readJsonlLines(path) as ClaudeRecord[];
   const messages: ChatMessage[] = [];
   const toolNames = new Map<string, string>();
   let workspace: string | undefined;
@@ -309,7 +309,7 @@ function parseClaudeSessionFile(path: string): ImportedSession {
 }
 
 function parseCodexSessionFile(path: string): ImportedSession {
-  const records = readJsonl(path) as CodexRecord[];
+  const records = readJsonlLines(path) as CodexRecord[];
   const messages: ChatMessage[] = [];
   const fallback: ChatMessage[] = [];
   let workspace: string | undefined;
@@ -492,10 +492,6 @@ function normalizeArbitraryContent(value: unknown): string {
     if (textParts.length > 0) return joinParts(textParts);
   }
   return safeJson(value);
-}
-
-function readJsonl(path: string): unknown[] {
-  return parseJsonl(readFileSync(path, "utf8"));
 }
 
 function normalizeRole(value: unknown): "user" | "assistant" | undefined {

@@ -1,3 +1,24 @@
+import type {
+  ConfirmationChoice,
+  ChoiceVerdict,
+  PlanVerdict,
+  CheckpointVerdict,
+  RevisionVerdict,
+  ChoiceOption,
+  PlanStep,
+  ReasoningEffort,
+} from "@reasonix/core-utils";
+export type {
+  ConfirmationChoice,
+  ChoiceVerdict,
+  PlanVerdict,
+  CheckpointVerdict,
+  RevisionVerdict,
+  ChoiceOption,
+  PlanStep,
+  ReasoningEffort,
+};
+
 export type ReadyEvent = { type: "$ready" };
 export type ProtocolErrorEvent = { type: "$error"; message: string };
 export type TurnCompleteEvent = { type: "$turn_complete" };
@@ -20,17 +41,6 @@ export type ConfirmRequiredEvent = {
   prompt?: import("@reasonix/core-utils").ApprovalPrompt;
 };
 
-export type ConfirmationChoice =
-  | { type: "deny"; denyContext?: string }
-  | { type: "run_once" }
-  | { type: "always_allow"; prefix: string };
-
-export type ChoiceOption = {
-  id: string;
-  title: string;
-  summary?: string;
-};
-
 export type ChoiceRequiredEvent = {
   type: "$choice_required";
   id: number;
@@ -38,11 +48,6 @@ export type ChoiceRequiredEvent = {
   options: ChoiceOption[];
   allowCustom: boolean;
 };
-
-export type ChoiceVerdict =
-  | { type: "pick"; optionId: string }
-  | { type: "text"; text: string }
-  | { type: "cancel" };
 
 export type PlanRequiredEvent = {
   type: "$plan_required";
@@ -52,18 +57,6 @@ export type PlanRequiredEvent = {
   summary?: string;
   /** YOLO auto-approval window (ms) — the card auto-picks the first option at expiry. */
   countdownMs?: number;
-};
-
-export type PlanVerdict =
-  | { type: "approve"; feedback?: string }
-  | { type: "refine"; feedback?: string }
-  | { type: "cancel"; feedback?: string };
-
-export type PlanStep = {
-  id: string;
-  title: string;
-  action: string;
-  risk?: "low" | "med" | "high";
 };
 
 export type CheckpointRequiredEvent = {
@@ -77,11 +70,6 @@ export type CheckpointRequiredEvent = {
   total: number;
 };
 
-export type CheckpointVerdict =
-  | { type: "continue" }
-  | { type: "revise"; feedback?: string }
-  | { type: "stop" };
-
 export type RevisionRequiredEvent = {
   type: "$revision_required";
   id: number;
@@ -91,8 +79,6 @@ export type RevisionRequiredEvent = {
   /** YOLO auto-approval window (ms) — the card auto-picks accept rewrite at expiry. */
   countdownMs?: number;
 };
-
-export type RevisionVerdict = { type: "accepted" } | { type: "rejected" } | { type: "cancelled" };
 
 export type StepCompletedEvent = {
   type: "$step_completed";
@@ -312,8 +298,6 @@ export type NeedsSetupEvent = {
 };
 
 export type EditMode = "review" | "auto" | "yolo" | "plan";
-
-export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 export type WebSearchEngineName = "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa"
   | "brave" | "ollama";

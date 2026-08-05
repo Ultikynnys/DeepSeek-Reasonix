@@ -8,8 +8,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join, parse, relative, resolve } from "node:path";
+import { reasonixHome } from "../reasonix-home.js";
 
 const TRUNCATED_DIR = "truncated-results";
 const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -27,9 +27,7 @@ function useHomeFallback(rootDir: string): boolean {
 
 /** Resolve the absolute storage directory for truncated results. */
 export function storageDir(rootDir: string): string {
-  const base = useHomeFallback(rootDir)
-    ? join(homedir(), ".reasonix")
-    : join(resolve(rootDir), ".reasonix");
+  const base = useHomeFallback(rootDir) ? reasonixHome() : join(resolve(rootDir), ".reasonix");
   return join(base, TRUNCATED_DIR);
 }
 

@@ -1,14 +1,14 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadQQConfig } from "../config.js";
 import { loadDotenv } from "../env.js";
 import { t } from "../i18n/index.js";
+import { reasonixHome } from "../reasonix-home.js";
 import { decideQQAccess, describeQQAccess, redactQQOpenId } from "./access.js";
 import { type C2CMessage, QQBot } from "./bot.js";
 import { formatQQAccessSummary } from "./strings.js";
 
-const QQ_LOCK_FILE = join(homedir(), ".reasonix", "qq-channel.pid");
+const QQ_LOCK_FILE = join(reasonixHome(), "qq-channel.pid");
 const QQ_MAX_CHUNK_BYTES = 1500;
 const NATURAL_SPLIT_MIN_FRACTION = 0.6;
 const QQ_MARKDOWN_WRAPPER_RE = /^```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n```$/i;

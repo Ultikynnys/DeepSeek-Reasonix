@@ -19,6 +19,7 @@ import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
 import { atomicWriteSync } from "../core/atomic-write.js";
 import { parseJsonl } from "../core/jsonl.js";
+import { reasonixHome } from "../reasonix-home.js";
 import type { ChatMessage } from "../types.js";
 
 /** Sidecar file suffix holding the per-session event log. */
@@ -87,7 +88,7 @@ export interface SessionMeta {
 }
 
 export function sessionsDir(): string {
-  return join(homedir(), ".reasonix", "sessions");
+  return join(reasonixHome(), "sessions");
 }
 
 export function sessionPath(name: string): string {
