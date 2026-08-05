@@ -2642,6 +2642,7 @@ function TabRuntime({
                   setDraft("");
                 }}
                 onDequeueSend={(index) => dispatch({ t: "dequeue_send", index })}
+                onSendNow={() => sendRpc({ cmd: "abort" })}
               />
             </>
           )}

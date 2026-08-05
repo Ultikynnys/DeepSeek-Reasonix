@@ -75,6 +75,7 @@ export const en = {
     commands: "commands",
     placeholder: "Ask the agent / describe a task…",
     queueCount: "queued {n}",
+    sendNow: "send now",
     queue: "queue",
     interrupt: "stop",
     mentionFiles: "mention files",

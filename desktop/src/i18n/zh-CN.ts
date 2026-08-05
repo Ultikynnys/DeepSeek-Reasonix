@@ -77,6 +77,7 @@ export const zhCN: typeof en = {
     commands: "命令",
     placeholder: "向 Agent 提问 / 安排任务…",
     queueCount: "排队 {n}",
+    sendNow: "立即发送",
     queue: "排队",
     interrupt: "中断",
     mentionFiles: "提及文件",

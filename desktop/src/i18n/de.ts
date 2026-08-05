@@ -84,6 +84,7 @@ export const de: typeof en = {
     commands: "Befehle",
     placeholder: "Frag den Agenten / beschreibe eine Aufgabe...",
     queueCount: "{n} in Warteschlange",
+    sendNow: "jetzt senden",
     queue: "Warteschlange",
     interrupt: "stopp",
     mentionFiles: "Dateien erwähnen",

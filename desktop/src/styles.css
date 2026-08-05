@@ -4827,6 +4827,25 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   background: var(--border);
   color: var(--fg);
 }
+.composer-queued-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.composer-queued-send:hover {
+  background: var(--border);
+  color: var(--fg);
+}
 
 /* ---- queued tab-row indicator (multiple sessions running) ---- */
 .queue-strip {

@@ -154,6 +154,7 @@ export function Composer({
   queuedSends,
   onQueueWhileBusy,
   onDequeueSend,
+  onSendNow,
 }: {
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -182,6 +183,8 @@ export function Composer({
   /** Called when the user presses Enter while busy with a non-empty draft. Owns clearing the draft. */
   onQueueWhileBusy?: (text: string) => void;
   onDequeueSend?: (index: number) => void;
+  /** Sends the whole queue immediately — the app aborts the running turn so the drain fires on turn-complete. */
+  onSendNow?: () => void;
 }) {
   const [chips, setChips] = useState<Chip[]>([]);
   const [popup, setPopup] = useState<Popup>(null);
@@ -510,6 +513,12 @@ export function Composer({
                 ) : null}
               </span>
             ))}
+            {onSendNow ? (
+              <button type="button" className="composer-queued-send" onClick={onSendNow}>
+                <I.send size={11} />
+                {t("composer.sendNow")}
+              </button>
+            ) : null}
           </div>
         ) : null}
 
