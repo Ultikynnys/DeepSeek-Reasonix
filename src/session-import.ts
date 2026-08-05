@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
+import { parseJsonl } from "./core/jsonl.js";
 import {
+  SESSION_EVENTS_SUFFIX,
   detectGitBranch,
   loadSessionMeta,
   patchSessionMeta,
@@ -246,7 +248,7 @@ function importedPathKeys(): Set<string> {
     return out;
   }
   for (const file of files) {
-    if (!file.endsWith(".jsonl") || file.endsWith(".events.jsonl")) continue;
+    if (!file.endsWith(".jsonl") || file.endsWith(SESSION_EVENTS_SUFFIX)) continue;
     const name = file.replace(/\.jsonl$/, "");
     const meta = loadSessionMeta(name);
     if (meta.importedSource && meta.importedPath) {
@@ -493,18 +495,7 @@ function normalizeArbitraryContent(value: unknown): string {
 }
 
 function readJsonl(path: string): unknown[] {
-  const raw = readFileSync(path, "utf8");
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line)];
-      } catch {
-        return [];
-      }
-    });
+  return parseJsonl(readFileSync(path, "utf8"));
 }
 
 function normalizeRole(value: unknown): "user" | "assistant" | undefined {

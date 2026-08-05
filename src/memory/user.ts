@@ -19,7 +19,8 @@ import {
 } from "../config.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { applySkillsIndex } from "../skills.js";
-import { applyProjectMemory, memoryEnabled } from "./project.js";
+import { PROJECT_MEMORY_MAX_CHARS, applyProjectMemory, memoryEnabled } from "./project.js";
+import { readCappedTextFile } from "./read-capped.js";
 
 export const USER_MEMORY_DIR = "memory";
 export const MEMORY_INDEX_FILE = "MEMORY.md";
@@ -168,20 +169,7 @@ export class MemoryStore {
       MEMORY_INDEX_FILE,
     );
     if (!existsSync(file)) return null;
-    let raw: string;
-    try {
-      raw = readFileSync(file, "utf8");
-    } catch {
-      return null;
-    }
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    const originalChars = trimmed.length;
-    const truncated = originalChars > MEMORY_INDEX_MAX_CHARS;
-    const content = truncated
-      ? `${trimmed.slice(0, MEMORY_INDEX_MAX_CHARS)}\n… (truncated ${originalChars - MEMORY_INDEX_MAX_CHARS} chars)`
-      : trimmed;
-    return { content, originalChars, truncated };
+    return readCappedTextFile(file, MEMORY_INDEX_MAX_CHARS);
   }
 
   /** Read one memory file's body (frontmatter stripped). Throws if missing. */
@@ -310,24 +298,12 @@ export function readGlobalReasonixMemory(
   homeDir: string = join(homedir(), ".reasonix"),
 ): { path: string; content: string; originalChars: number; truncated: boolean } | null {
   const path = join(homeDir, "REASONIX.md");
-  if (!existsSync(path)) return null;
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const originalChars = trimmed.length;
   // Reuse the project-memory cap so both freeform files have the same
   // headroom (8000 chars ≈ 2k tokens). They serve the same purpose at
   // different scopes.
-  const truncated = originalChars > 8000;
-  const content = truncated
-    ? `${trimmed.slice(0, 8000)}\n… (truncated ${originalChars - 8000} chars)`
-    : trimmed;
-  return { path, content, originalChars, truncated };
+  const capped = readCappedTextFile(path, PROJECT_MEMORY_MAX_CHARS);
+  if (!capped) return null;
+  return { path, ...capped };
 }
 
 export function applyGlobalReasonixMemory(basePrompt: string, homeDir?: string): string {
@@ -349,26 +325,14 @@ export function applyGlobalReasonixMemory(basePrompt: string, homeDir?: string):
 }
 
 /** Read ~/.claude/CLAUDE.md — cross-project notes from Claude Code migration.
- *  Same cap as global Reasonix memory (8000 chars). */
+ *  Same cap as global Reasonix memory (PROJECT_MEMORY_MAX_CHARS). */
 export function readGlobalClaudeMemory(
   homeDir: string = homedir(),
 ): { path: string; content: string; originalChars: number; truncated: boolean } | null {
   const path = join(homeDir, ".claude", "CLAUDE.md");
-  if (!existsSync(path)) return null;
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const originalChars = trimmed.length;
-  const truncated = originalChars > 8000;
-  const content = truncated
-    ? `${trimmed.slice(0, 8000)}\n… (truncated ${originalChars - 8000} chars)`
-    : trimmed;
-  return { path, content, originalChars, truncated };
+  const capped = readCappedTextFile(path, PROJECT_MEMORY_MAX_CHARS);
+  if (!capped) return null;
+  return { path, ...capped };
 }
 
 export function applyGlobalClaudeMemory(basePrompt: string): string {

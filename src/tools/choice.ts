@@ -2,6 +2,7 @@
 
 import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
+import { ToolControlFlowError } from "./control-flow-error.js";
 
 export interface ChoiceOption {
   id: string;
@@ -9,28 +10,28 @@ export interface ChoiceOption {
   summary?: string;
 }
 
-export class ChoiceRequestedError extends Error {
+export class ChoiceRequestedError extends ToolControlFlowError {
   readonly question: string;
   readonly options: ChoiceOption[];
   readonly allowCustom: boolean;
   constructor(question: string, options: ChoiceOption[], allowCustom: boolean) {
     super(
-      "ChoiceRequestedError: choice submitted. STOP calling tools now — the TUI has shown the options to the user. Wait for their next message; it will either be 'user picked <id>' (carry on with that branch), 'user answered: <text>' (custom free-form reply; read and proceed), or 'user cancelled the choice' (drop the question and ask what they want instead). Don't call any tools in the meantime.",
+      "ChoiceRequestedError",
+      "choice submitted. STOP calling tools now — the TUI has shown the options to the user. Wait for their next message; it will either be 'user picked <id>' (carry on with that branch), 'user answered: <text>' (custom free-form reply; read and proceed), or 'user cancelled the choice' (drop the question and ask what they want instead). Don't call any tools in the meantime.",
     );
-    this.name = "ChoiceRequestedError";
     this.question = question;
     this.options = options;
     this.allowCustom = allowCustom;
   }
 
-  toToolResult(): {
+  override toToolResult(): {
     error: string;
     question: string;
     options: ChoiceOption[];
     allowCustom: boolean;
   } {
     return {
-      error: `${this.name}: ${this.message}`,
+      ...super.toToolResult(),
       question: this.question,
       options: this.options,
       allowCustom: this.allowCustom,

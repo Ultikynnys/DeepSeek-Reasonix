@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
 import { t } from "./i18n/index.js";
+import { truncateWithMarker } from "./memory/read-capped.js";
 import { NEGATIVE_CLAIM_RULE, TUI_FORMATTING_RULES } from "./prompt-fragments.js";
 
 export const SKILLS_DIRNAME = "skills";
@@ -387,12 +388,7 @@ export function applySkillsIndex(basePrompt: string, opts: SkillStoreOptions = {
     skillIndexLine(s.description ? s : { ...s, description: MISSING_DESCRIPTION_PLACEHOLDER }),
   );
   const joined = lines.join("\n");
-  const truncated =
-    joined.length > SKILLS_INDEX_MAX_CHARS
-      ? `${joined.slice(0, SKILLS_INDEX_MAX_CHARS)}\n… (truncated ${
-          joined.length - SKILLS_INDEX_MAX_CHARS
-        } chars)`
-      : joined;
+  const truncated = truncateWithMarker(joined, SKILLS_INDEX_MAX_CHARS).content;
   return [
     basePrompt,
     "",

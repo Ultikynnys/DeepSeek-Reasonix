@@ -18,7 +18,10 @@ import type { ToolCallContext, ToolRegistry } from "../tools.js";
 import { applyEdit, applyMultiEdit } from "./fs/edit.js";
 import { globFiles } from "./fs/glob.js";
 import { extractOutline, formatOutline } from "./fs/outline.js";
+import { displayRel } from "./fs/rel.js";
 import { searchContent, searchFiles } from "./fs/search.js";
+
+export { displayRel } from "./fs/rel.js";
 
 export { lineDiff } from "./fs/edit.js";
 
@@ -53,10 +56,6 @@ const SKIP_DIR_NAMES: ReadonlySet<string> = new Set(
 
 /** First line of binary defense; NUL-byte sniff is the second (catches mislabeled `.txt`). */
 const BINARY_EXTENSIONS: ReadonlySet<string> = new Set(DEFAULT_INDEX_EXCLUDES.exts);
-
-export function displayRel(rootDir: string, full: string): string {
-  return pathMod.relative(rootDir, full).replaceAll("\\", "/");
-}
 
 /** Windows drive-letter prefixes always count; POSIX absolutes only count when their first segment is a known system root. */
 export function looksLikeAbsoluteSystemPath(raw: string): boolean {

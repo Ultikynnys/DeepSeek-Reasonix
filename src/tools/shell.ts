@@ -4,6 +4,7 @@ import * as pathMod from "node:path";
 import { addProjectShellAllowed } from "../config.js";
 import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
+import { ToolControlFlowError } from "./control-flow-error.js";
 import { JobRegistry, mergeSignals } from "./jobs.js";
 import {
   DEFAULT_MAX_OUTPUT_CHARS,
@@ -58,13 +59,13 @@ export interface ShellToolsOptions {
 }
 
 /** Error thrown by `run_command` when the command isn't allowlisted. */
-export class NeedsConfirmationError extends Error {
+export class NeedsConfirmationError extends ToolControlFlowError {
   readonly command: string;
   constructor(command: string) {
     super(
+      "NeedsConfirmationError",
       `run_command: "${command}" needs the user's approval before it runs. STOP calling tools now — the TUI has already prompted the user to press y (run) or n (deny). Wait for their next message; it will either be the command's output (if they approved) or an instruction to continue without it (if they denied). Don't retry the command or call other shell commands in the meantime.`,
     );
-    this.name = "NeedsConfirmationError";
     this.command = command;
   }
 }

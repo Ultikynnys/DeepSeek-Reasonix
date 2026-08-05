@@ -17,55 +17,17 @@ import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
 import { ToolRegistry } from "../src/tools.js";
 import type { ChatMessage } from "../src/types.js";
+import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
 
 const FOLD_TEST_MODEL = "test-fold-ctx";
 
-interface FakeResponseShape {
-  content?: string;
-  reasoning_content?: string;
-  tool_calls?: any[];
-  usage?: Record<string, number>;
+function makeClient(responses: FakeResponseShape[]): DeepSeekClient {
+  return makeFakeClient(responses, { echoMessages: true }).client;
 }
 
-function fakeFetch(responses: FakeResponseShape[]): typeof fetch {
-  let i = 0;
-  return vi.fn(async (_url: any, init: any) => {
-    const body = init?.body ? JSON.parse(init.body) : {};
-    const resp = responses[i++] ?? responses[responses.length - 1]!;
-    return new Response(
-      JSON.stringify({
-        _echo_messages: body.messages as ChatMessage[],
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: "assistant",
-              content: resp.content ?? "",
-              reasoning_content: resp.reasoning_content ?? null,
-              tool_calls: resp.tool_calls ?? undefined,
-            },
-            finish_reason: resp.tool_calls ? "tool_calls" : "stop",
-          },
-        ],
-        usage: resp.usage ?? {
-          prompt_tokens: 100,
-          completion_tokens: 20,
-          total_tokens: 120,
-          prompt_cache_hit_tokens: 0,
-          prompt_cache_miss_tokens: 100,
-        },
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
-  }) as unknown as typeof fetch;
-}
-
-function makeClient(responses: FakeResponseShape[]) {
-  return new DeepSeekClient({
-    apiKey: "sk-test",
-    fetch: fakeFetch(responses),
-  });
-}
+/** Direct-fetch call sites (prefix-stability / multi-client tests) — same harness as makeClient. */
+const fakeFetch = (responses: FakeResponseShape[]): typeof fetch =>
+  makeFakeClient(responses, { echoMessages: true }).fetchMock as unknown as typeof fetch;
 
 describe("CacheFirstLoop (non-streaming)", () => {
   afterEach(() => {

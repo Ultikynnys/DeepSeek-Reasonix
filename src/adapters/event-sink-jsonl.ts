@@ -1,11 +1,16 @@
-import { type WriteStream, chmodSync, createWriteStream, mkdirSync } from "node:fs";
+import { type WriteStream, createWriteStream, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Event } from "../core/events.js";
-import { sanitizeName, sessionsDir } from "../memory/session.js";
+import {
+  SESSION_EVENTS_SUFFIX,
+  chmodPrivate,
+  sanitizeName,
+  sessionsDir,
+} from "../memory/session.js";
 import type { EventSink } from "../ports/event-sink.js";
 
 export function eventLogPath(sessionName: string): string {
-  return join(sessionsDir(), `${sanitizeName(sessionName)}.events.jsonl`);
+  return join(sessionsDir(), `${sanitizeName(sessionName)}${SESSION_EVENTS_SUFFIX}`);
 }
 
 export class JsonlEventSink implements EventSink {
@@ -39,10 +44,6 @@ export class JsonlEventSink implements EventSink {
 export function openEventSink(path: string): JsonlEventSink {
   mkdirSync(dirname(path), { recursive: true });
   const stream = createWriteStream(path, { flags: "a" });
-  try {
-    chmodSync(path, 0o600);
-  } catch {
-    /* chmod no-op on Windows */
-  }
+  chmodPrivate(path);
   return new JsonlEventSink(stream);
 }

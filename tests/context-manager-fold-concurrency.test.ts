@@ -3,26 +3,10 @@ import { DeepSeekClient } from "../src/client.js";
 import { HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS } from "../src/context-manager.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
-
-function okJsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-function abortableNeverFetch(): typeof fetch {
-  return vi.fn((_url: unknown, init: { signal?: AbortSignal } | undefined) => {
-    const signal = init?.signal;
-    return new Promise<Response>((_resolve, reject) => {
-      if (signal?.aborted) {
-        reject(new Error("aborted"));
-        return;
-      }
-      signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-    });
-  }) as unknown as typeof fetch;
-}
+import {
+  neverResolvingFetch as abortableNeverFetch,
+  jsonOkResponse as okJsonResponse,
+} from "./support/fake-client.js";
 
 function seedTurns(loop: CacheFirstLoop, n: number): void {
   for (let i = 0; i < n; i++) {

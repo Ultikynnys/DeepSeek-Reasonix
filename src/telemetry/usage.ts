@@ -7,7 +7,6 @@ import {
   fstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
   readSync,
   renameSync,
   statSync,
@@ -17,6 +16,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Usage } from "../client.js";
+import { parseJsonl, readJsonlLines } from "../core/jsonl.js";
 import {
   CLAUDE_SONNET_PRICING,
   DEEPSEEK_PRICING,
@@ -103,19 +103,12 @@ function compactUsageLogIfLarge(path: string, now: number): void {
     return;
   }
   const cutoff = now - USAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  const lines = raw.split(/\r?\n/);
   const kept: string[] = [];
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      const rec = JSON.parse(line);
-      if (isValidRecord(rec) && rec.ts >= cutoff) kept.push(line);
-    } catch {
-      /* skip malformed */
-    }
+  for (const rec of parseJsonl(raw, isValidRecord)) {
+    if (rec.ts >= cutoff) kept.push(JSON.stringify(rec));
   }
   // No-op when nothing aged out — avoids rewrite storms on fresh logs.
-  if (kept.length === lines.filter((l) => l.trim()).length) return;
+  if (kept.length === raw.split(/\r?\n/).filter((l) => l.trim()).length) return;
   // Write to a sibling tmp path then rename — atomic from a reader's
   // POV and severs CodeQL's stat→write taint chain. Concurrent
   // appenders during the compaction window lose their entries; we
@@ -161,24 +154,7 @@ export function appendUsage(input: AppendUsageInput): UsageRecord {
 }
 
 export function readUsageLog(path: string = defaultUsageLogPath()): UsageRecord[] {
-  if (!existsSync(path)) return [];
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return [];
-  }
-  const out: UsageRecord[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    try {
-      const rec = JSON.parse(line);
-      if (isValidRecord(rec)) out.push(rec);
-    } catch {
-      /* skip malformed */
-    }
-  }
-  return out;
+  return readJsonlLines(path, isValidRecord);
 }
 
 function isValidRecord(rec: unknown): rec is UsageRecord {

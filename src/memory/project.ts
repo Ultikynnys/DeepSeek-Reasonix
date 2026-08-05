@@ -1,7 +1,8 @@
 /** Reads REASONIX.md → AGENTS.md → AGENT.md (first that exists); writes prefer the file already on disk. */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { readCappedTextFile } from "./read-capped.js";
 
 /** Default WRITE target — created when no candidate exists yet. */
 export const PROJECT_MEMORY_FILE = "REASONIX.md";
@@ -69,22 +70,9 @@ export interface ProjectMemory {
 export function readProjectMemory(rootDir: string): ProjectMemory | null {
   const path = findProjectMemoryPath(rootDir);
   if (!path) return null;
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const originalChars = trimmed.length;
-  const truncated = originalChars > PROJECT_MEMORY_MAX_CHARS;
-  const content = truncated
-    ? `${trimmed.slice(0, PROJECT_MEMORY_MAX_CHARS)}\n… (truncated ${
-        originalChars - PROJECT_MEMORY_MAX_CHARS
-      } chars)`
-    : trimmed;
-  return { path, content, originalChars, truncated };
+  const capped = readCappedTextFile(path, PROJECT_MEMORY_MAX_CHARS);
+  if (!capped) return null;
+  return { path, ...capped };
 }
 
 export function memoryEnabled(): boolean {

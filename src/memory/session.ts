@@ -18,10 +18,14 @@ import { homedir } from "node:os";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
 import { atomicWriteSync } from "../core/atomic-write.js";
+import { parseJsonl } from "../core/jsonl.js";
 import type { ChatMessage } from "../types.js";
 
+/** Sidecar file suffix holding the per-session event log. */
+export const SESSION_EVENTS_SUFFIX = ".events.jsonl";
+
 const SESSION_SIDECAR_EXTS = [
-  ".events.jsonl",
+  SESSION_EVENTS_SUFFIX,
   ".meta.json",
   ".pending.json",
   ".plan.json",
@@ -113,7 +117,9 @@ export function findSessionsByPrefix(prefix: string): string[] {
   if (!existsSync(dir)) return [];
   try {
     const files = readdirSync(dir)
-      .filter((f) => f.endsWith(".jsonl") && !f.endsWith(".events.jsonl") && f.startsWith(prefix))
+      .filter(
+        (f) => f.endsWith(".jsonl") && !f.endsWith(SESSION_EVENTS_SUFFIX) && f.startsWith(prefix),
+      )
       .sort()
       .reverse();
     return files.map((f) => f.replace(/\.jsonl$/, ""));
@@ -171,6 +177,10 @@ export function loadSessionMessages(name: string): ChatMessage[] {
   return backup?.messages ?? live?.messages ?? [];
 }
 
+function isChatMessage(msg: unknown): msg is ChatMessage {
+  return !!msg && typeof msg === "object" && "role" in msg;
+}
+
 function readSessionMessages(
   path: string,
 ): { messages: ChatMessage[]; hadContent: boolean } | null {
@@ -180,29 +190,14 @@ function readSessionMessages(
   } catch {
     return null;
   }
-  const out: ChatMessage[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const msg = JSON.parse(trimmed) as ChatMessage;
-      if (msg && typeof msg === "object" && "role" in msg) out.push(msg);
-    } catch {
-      /* skip malformed line */
-    }
-  }
-  return { messages: out, hadContent: raw.trim().length > 0 };
+  return { messages: parseJsonl(raw, isChatMessage), hadContent: raw.trim().length > 0 };
 }
 
 export function appendSessionMessage(name: string, message: ChatMessage): void {
   const path = sessionPath(name);
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, `${JSON.stringify(message)}\n`, "utf8");
-  try {
-    chmodSync(path, 0o600);
-  } catch {
-    /* chmod not supported on this platform */
-  }
+  chmodPrivate(path);
 }
 
 export function listSessions(opts?: {
@@ -219,7 +214,7 @@ export function listSessions(opts?: {
   try {
     // Exclude `.events.jsonl` sidecars — they share the .jsonl suffix.
     const files = readdirSync(dir).filter(
-      (f) => f.endsWith(".jsonl") && !f.endsWith(".events.jsonl"),
+      (f) => f.endsWith(".jsonl") && !f.endsWith(SESSION_EVENTS_SUFFIX),
     );
     return files
       .flatMap((file) => {
@@ -308,11 +303,7 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
   const p = metaPath(name);
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, JSON.stringify(next), "utf8");
-  try {
-    chmodSync(p, 0o600);
-  } catch {
-    /* chmod not supported */
-  }
+  chmodPrivate(p);
   return next;
 }
 
@@ -437,7 +428,8 @@ function sessionBackupPath(path: string): string {
   return `${path}.bak`;
 }
 
-function chmodPrivate(path: string): void {
+/** Best-effort 0o600 on session files — no-op on platforms without chmod. */
+export function chmodPrivate(path: string): void {
   try {
     chmodSync(path, 0o600);
   } catch {

@@ -1,10 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
 import { type FileEncoding, decodeFileBuffer, encodeFile } from "../../code/file-encoding.js";
-
-function displayRel(rootDir: string, full: string): string {
-  return pathMod.relative(rootDir, full).replaceAll("\\", "/");
-}
+import { displayRel } from "./rel.js";
 
 /** Marker substring in the gate-reject message so tools.ts's repeat-rejection tracker spots a 2nd identical unread-edit and switches to the sharper "stop retrying" hint. */
 export const READ_BEFORE_EDIT_MARKER = "read_file first";

@@ -1,39 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
-import { DeepSeekClient } from "../src/client.js";
+import { describe, expect, it } from "vitest";
+import type { DeepSeekClient } from "../src/client.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
+import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
 
-interface FakeResponseShape {
-  content?: string;
-  reasoning_content?: string;
-}
-
-function fakeFetch(responses: FakeResponseShape[]): typeof fetch {
-  let i = 0;
-  return vi.fn(async (_url: unknown, _init: { body?: string } | undefined) => {
-    const resp = responses[i++] ?? responses[responses.length - 1]!;
-    return new Response(
-      JSON.stringify({
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: "assistant",
-              content: resp.content ?? "",
-              reasoning_content: resp.reasoning_content,
-            },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
-  }) as unknown as typeof fetch;
-}
-
-function makeClient(responses: FakeResponseShape[]) {
-  return new DeepSeekClient({ apiKey: "sk-test", fetch: fakeFetch(responses) });
+function makeClient(responses: FakeResponseShape[]): DeepSeekClient {
+  return makeFakeClient(responses).client;
 }
 
 function seedTurns(loop: CacheFirstLoop, n: number): void {

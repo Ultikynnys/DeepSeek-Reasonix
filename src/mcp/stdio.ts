@@ -1,6 +1,7 @@
 /** MCP stdio = newline-delimited JSON-RPC; transport iface lets tests fake it without spawning. */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { MessageQueue } from "./message-queue.js";
 import type { JsonRpcMessage } from "./types.js";
 
 export interface McpTransport {
@@ -28,8 +29,7 @@ export interface StdioTransportOptions {
 
 export class StdioTransport implements McpTransport {
   private readonly child: ChildProcess;
-  private readonly queue: JsonRpcMessage[] = [];
-  private readonly waiters: Array<(m: JsonRpcMessage | null) => void> = [];
+  private readonly incoming = new MessageQueue();
   private closed = false;
   private stdoutBuffer = "";
 
@@ -72,7 +72,7 @@ export class StdioTransport implements McpTransport {
     this.child.on("error", (err) => {
       // Surface spawn errors as a synthetic JsonRpcError so callers don't
       // hang on a stream that never emits anything.
-      this.push({
+      this.incoming.push({
         jsonrpc: "2.0",
         id: null,
         error: { code: -32000, message: `transport error: ${err.message}` },
@@ -91,26 +91,15 @@ export class StdioTransport implements McpTransport {
     });
   }
 
-  async *messages(): AsyncIterableIterator<JsonRpcMessage> {
-    while (true) {
-      if (this.queue.length > 0) {
-        yield this.queue.shift()!;
-        continue;
-      }
-      if (this.closed) return;
-      const next = await new Promise<JsonRpcMessage | null>((resolve) => {
-        this.waiters.push(resolve);
-      });
-      if (next === null) return; // closed while we were waiting
-      yield next;
-    }
+  messages(): AsyncIterableIterator<JsonRpcMessage> {
+    return this.incoming.messages();
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     // Signal any pending waiters.
-    while (this.waiters.length > 0) this.waiters.shift()!(null);
+    this.incoming.close();
     try {
       this.child.stdin!.end();
     } catch {
@@ -138,7 +127,7 @@ export class StdioTransport implements McpTransport {
       if (!line) continue;
       try {
         const msg = JSON.parse(line) as JsonRpcMessage;
-        this.push(msg);
+        this.incoming.push(msg);
       } catch {
         // Malformed stdout lines are dropped — some servers emit startup
         // banners before the JSON-RPC loop begins. Surface only under
@@ -160,13 +149,7 @@ export class StdioTransport implements McpTransport {
 
   private onClose(): void {
     this.closed = true;
-    while (this.waiters.length > 0) this.waiters.shift()!(null);
-  }
-
-  private push(msg: JsonRpcMessage): void {
-    const waiter = this.waiters.shift();
-    if (waiter) waiter(msg);
-    else this.queue.push(msg);
+    this.incoming.close();
   }
 }
 

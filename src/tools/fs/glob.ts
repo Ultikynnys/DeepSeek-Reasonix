@@ -1,14 +1,11 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
 import picomatch from "picomatch";
+import { displayRel } from "./rel.js";
 
 export interface GlobContext {
   rootDir: string;
   skipDirNames: ReadonlySet<string>;
-}
-
-function displayRel(rootDir: string, full: string): string {
-  return pathMod.relative(rootDir, full).replaceAll("\\", "/");
 }
 
 export async function globFiles(

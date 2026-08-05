@@ -4,13 +4,7 @@ import { pruneStubFor, pruneUnusedFileReads } from "../src/file-prune.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import type { ChatMessage } from "../src/types.js";
-
-function okJsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
-}
+import { jsonOkResponse as okJsonResponse } from "./support/fake-client.js";
 
 function readExchange(path: string, content: string, callId: string): ChatMessage[] {
   return [

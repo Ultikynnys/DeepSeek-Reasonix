@@ -1,44 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
-import { DeepSeekClient } from "../src/client.js";
+import { describe, expect, it } from "vitest";
+import type { DeepSeekClient } from "../src/client.js";
 import { SKILL_PIN_MEMO_HEADER } from "../src/context-manager.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
-import type { ChatMessage } from "../src/types.js";
+import {
+  type CapturedRequest,
+  type FakeResponseShape,
+  makeFakeClient,
+} from "./support/fake-client.js";
 
-interface FakeResponseShape {
-  content?: string;
-}
-
-interface CapturedRequest {
-  messages: ChatMessage[];
-}
-
-function fakeFetch(responses: FakeResponseShape[], captured?: CapturedRequest[]): typeof fetch {
-  let i = 0;
-  return vi.fn(async (_url: unknown, init: { body?: string } | undefined) => {
-    if (captured) {
-      const body = init?.body ? JSON.parse(init.body) : {};
-      captured.push({ messages: (body.messages ?? []) as ChatMessage[] });
-    }
-    const resp = responses[i++] ?? responses[responses.length - 1]!;
-    return new Response(
-      JSON.stringify({
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: resp.content ?? "" },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
-  }) as unknown as typeof fetch;
-}
-
-function makeClient(responses: FakeResponseShape[], captured?: CapturedRequest[]) {
-  return new DeepSeekClient({ apiKey: "sk-test", fetch: fakeFetch(responses, captured) });
+function makeClient(
+  responses: FakeResponseShape[],
+  captured: CapturedRequest[] = [],
+): DeepSeekClient {
+  return makeFakeClient(responses, { capture: (req) => captured.push(req) }).client;
 }
 
 function pin(name: string, body: string): string {

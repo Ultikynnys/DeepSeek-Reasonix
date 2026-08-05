@@ -1,6 +1,6 @@
 /** R1 thinking-mode contract — tool-call reasoning_content must round-trip; stale plain reasoning must age out. */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 import {
   CacheFirstLoop,
@@ -11,6 +11,7 @@ import {
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { ToolRegistry } from "../src/tools.js";
 import type { ChatMessage } from "../src/types.js";
+import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
 
 describe("isThinkingModeModel", () => {
   it("deepseek-reasoner → true (legacy R1 alias)", () => {
@@ -46,61 +47,9 @@ describe("thinkingModeForModel", () => {
   });
 });
 
-interface FakeResponseShape {
-  content?: string;
-  reasoning_content?: string;
-  tool_calls?: any[];
-  usage?: Record<string, number>;
-}
-
-function capturingFetch(responses: FakeResponseShape[]): {
-  fetch: typeof fetch;
-  bodies: Array<{
-    messages: ChatMessage[];
-    extra_body?: { thinking?: { type?: string } };
-    reasoning_effort?: string;
-  }>;
-} {
-  const bodies: Array<{
-    messages: ChatMessage[];
-    extra_body?: { thinking?: { type?: string } };
-    reasoning_effort?: string;
-  }> = [];
-  let i = 0;
-  const fn = vi.fn(async (_url: any, init: any) => {
-    const body = init?.body ? JSON.parse(init.body) : {};
-    bodies.push({
-      messages: body.messages,
-      extra_body: body.extra_body,
-      reasoning_effort: body.reasoning_effort,
-    });
-    const resp = responses[i++] ?? responses[responses.length - 1]!;
-    return new Response(
-      JSON.stringify({
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: "assistant",
-              content: resp.content ?? "",
-              reasoning_content: resp.reasoning_content ?? null,
-              tool_calls: resp.tool_calls ?? undefined,
-            },
-            finish_reason: resp.tool_calls ? "tool_calls" : "stop",
-          },
-        ],
-        usage: resp.usage ?? {
-          prompt_tokens: 100,
-          completion_tokens: 20,
-          total_tokens: 120,
-          prompt_cache_hit_tokens: 0,
-          prompt_cache_miss_tokens: 100,
-        },
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
-  }) as unknown as typeof fetch;
-  return { fetch: fn, bodies };
+function capturingFetch(responses: FakeResponseShape[]) {
+  const { fetchMock, captured } = makeFakeClient(responses);
+  return { fetch: fetchMock as unknown as typeof fetch, bodies: captured };
 }
 
 describe("stampMissingReasoningForThinkingMode (session-load heal)", () => {
@@ -368,7 +317,9 @@ describe("R1 reasoning_content round-trip", () => {
     for await (const _ev of loop.step("hello")) {
       /* drain */
     }
-    expect(bodies[0]!.extra_body?.thinking?.type).toBe("enabled");
+    expect(
+      (bodies[0]!.extra_body as { thinking?: { type?: string } } | undefined)?.thinking?.type,
+    ).toBe("enabled");
     expect(bodies[0]!.reasoning_effort).toBe("max");
   });
 
@@ -384,7 +335,9 @@ describe("R1 reasoning_content round-trip", () => {
     for await (const _ev of loop.step("hello")) {
       /* drain */
     }
-    expect(bodies[0]!.extra_body?.thinking?.type).toBe("disabled");
+    expect(
+      (bodies[0]!.extra_body as { thinking?: { type?: string } } | undefined)?.thinking?.type,
+    ).toBe("disabled");
     expect(bodies[0]!.reasoning_effort).toBe("high");
   });
 

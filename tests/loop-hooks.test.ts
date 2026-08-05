@@ -1,52 +1,15 @@
 /** CacheFirstLoop hook wiring — confirms the loop honors `hooks` and exposes a swappable list for `/hooks reload`. */
 
-import { describe, expect, it, vi } from "vitest";
-import { DeepSeekClient } from "../src/client.js";
+import { describe, expect, it } from "vitest";
+import type { DeepSeekClient } from "../src/client.js";
 import type { ResolvedHook } from "../src/hooks.js";
 import { CacheFirstLoop, type LoopEvent } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { ToolRegistry } from "../src/tools.js";
-import type { ChatMessage } from "../src/types.js";
+import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
 
-interface FakeResponseShape {
-  content?: string;
-  tool_calls?: unknown[];
-}
-
-function fakeFetch(responses: FakeResponseShape[]): typeof fetch {
-  let i = 0;
-  return vi.fn(async (_url: unknown, init: { body?: string } | undefined) => {
-    const body = init?.body ? JSON.parse(init.body) : {};
-    const resp = responses[i++] ?? responses[responses.length - 1]!;
-    return new Response(
-      JSON.stringify({
-        _echo_messages: body.messages as ChatMessage[],
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: "assistant",
-              content: resp.content ?? "",
-              tool_calls: resp.tool_calls ?? undefined,
-            },
-            finish_reason: resp.tool_calls ? "tool_calls" : "stop",
-          },
-        ],
-        usage: {
-          prompt_tokens: 100,
-          completion_tokens: 20,
-          total_tokens: 120,
-          prompt_cache_hit_tokens: 0,
-          prompt_cache_miss_tokens: 100,
-        },
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
-  }) as unknown as typeof fetch;
-}
-
-function makeClient(responses: FakeResponseShape[]) {
-  return new DeepSeekClient({ apiKey: "sk-test", fetch: fakeFetch(responses) });
+function makeClient(responses: FakeResponseShape[]): DeepSeekClient {
+  return makeFakeClient(responses, { echoMessages: true }).client;
 }
 
 describe("CacheFirstLoop hook wiring", () => {

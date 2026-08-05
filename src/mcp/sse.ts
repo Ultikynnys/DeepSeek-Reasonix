@@ -1,6 +1,7 @@
 /** MCP HTTP+SSE transport (spec 2024-11-05) — POST endpoint URL arrives as the first `event: endpoint` SSE frame. */
 
 import { createParser } from "eventsource-parser";
+import { MessageQueue, parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
 import type { JsonRpcMessage } from "./types.js";
 
@@ -14,8 +15,7 @@ export interface SseTransportOptions {
 export class SseTransport implements McpTransport {
   private readonly url: string;
   private readonly headers: Record<string, string>;
-  private readonly queue: JsonRpcMessage[] = [];
-  private readonly waiters: Array<(m: JsonRpcMessage | null) => void> = [];
+  private readonly incoming = new MessageQueue();
   private readonly controller = new AbortController();
   private closed = false;
   private postUrl: string | null = null;
@@ -53,25 +53,14 @@ export class SseTransport implements McpTransport {
     }
   }
 
-  async *messages(): AsyncIterableIterator<JsonRpcMessage> {
-    while (true) {
-      if (this.queue.length > 0) {
-        yield this.queue.shift()!;
-        continue;
-      }
-      if (this.closed) return;
-      const next = await new Promise<JsonRpcMessage | null>((resolve) => {
-        this.waiters.push(resolve);
-      });
-      if (next === null) return;
-      yield next;
-    }
+  messages(): AsyncIterableIterator<JsonRpcMessage> {
+    return this.incoming.messages();
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    while (this.waiters.length > 0) this.waiters.shift()!(null);
+    this.incoming.close();
     // Reject any still-pending send() that was waiting for the endpoint.
     this.rejectEndpoint(new Error("MCP SSE transport closed before endpoint was ready"));
     try {
@@ -128,16 +117,10 @@ export class SseTransport implements McpTransport {
       }
       return;
     }
-    if (type === "message") {
-      try {
-        const parsed = JSON.parse(data) as JsonRpcMessage;
-        this.pushMessage(parsed);
-      } catch {
-        // Malformed JSON-RPC on an SSE frame — drop it, same as stdio.
-      }
-      return;
-    }
-    // Unknown event types (server pings, custom extensions) — ignore.
+    // `message` events carry JSON-RPC; unknown event types (server pings,
+    // custom extensions) are ignored. Malformed JSON is dropped, same as stdio.
+    const msg = parseSseMessageEvent(type, data);
+    if (msg) this.incoming.push(msg);
   }
 
   private failHandshake(reason: string): void {
@@ -146,14 +129,8 @@ export class SseTransport implements McpTransport {
     this.markClosed();
   }
 
-  private pushMessage(msg: JsonRpcMessage): void {
-    const waiter = this.waiters.shift();
-    if (waiter) waiter(msg);
-    else this.queue.push(msg);
-  }
-
   private pushError(message: string): void {
-    this.pushMessage({
+    this.incoming.push({
       jsonrpc: "2.0",
       id: null,
       error: { code: -32000, message },
@@ -163,6 +140,6 @@ export class SseTransport implements McpTransport {
   private markClosed(): void {
     if (this.closed) return;
     this.closed = true;
-    while (this.waiters.length > 0) this.waiters.shift()!(null);
+    this.incoming.close();
   }
 }

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
 import { getRegexRunner } from "./regex-runner.js";
+import { displayRel } from "./rel.js";
 
 export interface SearchContext {
   rootDir: string;
@@ -14,10 +15,6 @@ export interface SearchContext {
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
   throw new DOMException("search aborted by user", "AbortError");
-}
-
-function displayRel(rootDir: string, full: string): string {
-  return pathMod.relative(rootDir, full).replaceAll("\\", "/");
 }
 
 export async function searchFiles(

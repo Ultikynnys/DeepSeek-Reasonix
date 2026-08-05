@@ -1,44 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
-import type { ChatMessage, ToolSpec } from "../src/types.js";
-
-interface CapturedRequest {
-  model: string;
-  messages: ChatMessage[];
-  tools: ToolSpec[] | undefined;
-  thinking: string | undefined;
-  body: Record<string, unknown>;
-}
+import type { ToolSpec } from "../src/types.js";
+import { type CapturedRequest, makeFakeClient } from "./support/fake-client.js";
 
 function fakeFetch(captured: CapturedRequest[], stubContent: string): typeof fetch {
-  return vi.fn(async (_url: unknown, init: { body?: string } | undefined) => {
-    const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
-    const messages = (body.messages ?? []) as ChatMessage[];
-    const tools = body.tools as ToolSpec[] | undefined;
-    const extra = body.extra_body as { thinking?: { type?: string } } | undefined;
-    captured.push({
-      model: body.model as string,
-      messages,
-      tools,
-      thinking: extra?.thinking?.type,
-      body,
-    });
-    return new Response(
-      JSON.stringify({
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: stubContent },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
-  }) as unknown as typeof fetch;
+  return makeFakeClient([{ content: stubContent }], { capture: (req) => captured.push(req) })
+    .fetchMock as unknown as typeof fetch;
 }
 
 const SYSTEM_PROMPT =

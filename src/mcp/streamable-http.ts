@@ -1,6 +1,7 @@
 /** MCP Streamable HTTP transport (2025-03-26) — POST-only; no long-lived GET stream, no Last-Event-ID resume. */
 
 import { createParser } from "eventsource-parser";
+import { MessageQueue, parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
 import type { JsonRpcMessage } from "./types.js";
 
@@ -16,8 +17,7 @@ const SESSION_HEADER = "mcp-session-id";
 export class StreamableHttpTransport implements McpTransport {
   private readonly url: string;
   private readonly extraHeaders: Record<string, string>;
-  private readonly queue: JsonRpcMessage[] = [];
-  private readonly waiters: Array<(m: JsonRpcMessage | null) => void> = [];
+  private readonly incoming = new MessageQueue();
   private readonly controller = new AbortController();
   /** Session id minted by server on (typically) the initialize response. */
   private sessionId: string | null = null;
@@ -92,9 +92,9 @@ export class StreamableHttpTransport implements McpTransport {
         throw new Error(`MCP Streamable HTTP body wasn't valid JSON: ${(err as Error).message}`);
       }
       if (Array.isArray(parsed)) {
-        for (const item of parsed) this.pushMessage(item as JsonRpcMessage);
+        for (const item of parsed) this.incoming.push(item as JsonRpcMessage);
       } else {
-        this.pushMessage(parsed as JsonRpcMessage);
+        this.incoming.push(parsed as JsonRpcMessage);
       }
       return;
     }
@@ -119,25 +119,14 @@ export class StreamableHttpTransport implements McpTransport {
     await res.body?.cancel().catch(() => undefined);
   }
 
-  async *messages(): AsyncIterableIterator<JsonRpcMessage> {
-    while (true) {
-      if (this.queue.length > 0) {
-        yield this.queue.shift()!;
-        continue;
-      }
-      if (this.closed) return;
-      const next = await new Promise<JsonRpcMessage | null>((resolve) => {
-        this.waiters.push(resolve);
-      });
-      if (next === null) return;
-      yield next;
-    }
+  messages(): AsyncIterableIterator<JsonRpcMessage> {
+    return this.incoming.messages();
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    while (this.waiters.length > 0) this.waiters.shift()!(null);
+    this.incoming.close();
     try {
       this.controller.abort();
     } catch {
@@ -159,15 +148,10 @@ export class StreamableHttpTransport implements McpTransport {
       onEvent: (ev) => {
         // Per spec, server-side events use the `message` event type
         // (default if `event:` line is missing). Other event types
-        // (server pings, custom extensions) we silently ignore.
-        const type = ev.event ?? "message";
-        if (type !== "message") return;
-        try {
-          const parsed = JSON.parse(ev.data) as JsonRpcMessage;
-          this.pushMessage(parsed);
-        } catch {
-          /* malformed JSON — drop, mirror SSE behavior */
-        }
+        // (server pings, custom extensions) we silently ignore;
+        // malformed JSON is dropped, mirroring the SSE transport.
+        const msg = parseSseMessageEvent(ev.event ?? "message", ev.data);
+        if (msg) this.incoming.push(msg);
       },
     });
     const decoder = new TextDecoder();
@@ -178,7 +162,7 @@ export class StreamableHttpTransport implements McpTransport {
       }
     } catch (err) {
       if (!this.closed) {
-        this.pushMessage({
+        this.incoming.push({
           jsonrpc: "2.0",
           id: null,
           error: {
@@ -188,11 +172,5 @@ export class StreamableHttpTransport implements McpTransport {
         });
       }
     }
-  }
-
-  private pushMessage(msg: JsonRpcMessage): void {
-    const waiter = this.waiters.shift();
-    if (waiter) waiter(msg);
-    else this.queue.push(msg);
   }
 }

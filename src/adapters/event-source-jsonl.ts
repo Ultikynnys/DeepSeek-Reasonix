@@ -1,6 +1,8 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Event } from "../core/events.js";
+import { readJsonlLines } from "../core/jsonl.js";
+import { SESSION_EVENTS_SUFFIX } from "../memory/session.js";
 import type { EventSource } from "../ports/event-sink.js";
 import { eventLogPath } from "./event-sink-jsonl.js";
 
@@ -18,7 +20,7 @@ export function recentEventFiles(dir: string, now: number, cap = 8, staleDays = 
   const cutoff = now - staleDays * DAY_MS;
   const candidates: Array<{ path: string; mtime: number }> = [];
   for (const name of names) {
-    if (!name.endsWith(".events.jsonl")) continue;
+    if (!name.endsWith(SESSION_EVENTS_SUFFIX)) continue;
     const path = join(dir, name);
     let mtime: number;
     try {
@@ -33,23 +35,13 @@ export function recentEventFiles(dir: string, now: number, cap = 8, staleDays = 
   return candidates.slice(0, cap).map((c) => c.path);
 }
 
+function isEvent(ev: unknown): ev is Event {
+  return !!ev && typeof ev === "object" && typeof (ev as { type?: unknown }).type === "string";
+}
+
 export function readEventLogFile(path: string): Event[] {
   if (!existsSync(path)) return [];
-  const raw = readFileSync(path, "utf8");
-  const out: Event[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const ev = JSON.parse(trimmed) as Event;
-      if (ev && typeof ev === "object" && typeof (ev as { type?: unknown }).type === "string") {
-        out.push(ev);
-      }
-    } catch {
-      /* malformed mid-line write — best-effort skip */
-    }
-  }
-  return out;
+  return readJsonlLines(path, isEvent);
 }
 
 export class JsonlEventSource implements EventSource {

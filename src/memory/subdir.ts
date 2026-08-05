@@ -1,8 +1,9 @@
 /** Module-scoped memory files (#1033). Walks from a file's dir up to rootDir, collecting REASONIX.md (or AGENTS.md / AGENT.md) found along the way. The root's memory is excluded — it's already in the system prompt via applyProjectMemory. */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { PROJECT_MEMORY_FILES, PROJECT_MEMORY_MAX_CHARS } from "./project.js";
+import { readCappedTextFile } from "./read-capped.js";
 
 /** PROJECT_MEMORY_FILES matches inside `absDir` AND its ancestors, walking up to (but not including) `rootDir`. Innermost-first. Returns absolute paths. */
 export function findDirMemory(absDir: string, rootDir: string): string[] {
@@ -35,18 +36,7 @@ export function findSubdirMemoryAncestors(absPath: string, rootDir: string): str
 }
 
 export function readSubdirMemoryContent(path: string): string | null {
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  if (trimmed.length <= PROJECT_MEMORY_MAX_CHARS) return trimmed;
-  return `${trimmed.slice(0, PROJECT_MEMORY_MAX_CHARS)}\n… (truncated ${
-    trimmed.length - PROJECT_MEMORY_MAX_CHARS
-  } chars)`;
+  return readCappedTextFile(path, PROJECT_MEMORY_MAX_CHARS)?.content ?? null;
 }
 
 export function formatSubdirMemorySection(displayPath: string, content: string): string {

@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readCappedTextFile } from "../memory/read-capped.js";
 import { applyMemoryStack } from "../memory/user.js";
 import { TUI_FORMATTING_RULES, escalationContract } from "../prompt-fragments.js";
 
@@ -136,6 +136,9 @@ You have BOTH \`semantic_search\` (vector index) and \`search_content\` (literal
 
 If \`semantic_search\` returns nothing useful (low scores, off-topic), THEN fall back to \`search_content\`. Don't go the other way — grepping a paraphrased question wastes turns.`;
 
+/** Cap on the embedded .gitignore preview. */
+const GITIGNORE_MAX_CHARS = 2000;
+
 export interface CodeSystemPromptOptions {
   /** True when semantic_search is registered for this run. Adds an
    *  explicit routing fragment so the model picks it for intent-style
@@ -159,19 +162,9 @@ export function codeSystemPrompt(rootDir: string, opts: CodeSystemPromptOptions 
   const withMemory = applyMemoryStack(base, rootDir);
   const gitignorePath = join(rootDir, ".gitignore");
   let result = withMemory;
-  if (existsSync(gitignorePath)) {
-    let content: string | undefined;
-    try {
-      content = readFileSync(gitignorePath, "utf8");
-    } catch {}
-    if (content !== undefined) {
-      const MAX = 2000;
-      const truncated =
-        content.length > MAX
-          ? `${content.slice(0, MAX)}\n… (truncated ${content.length - MAX} chars)`
-          : content;
-      result = `${result}\n\n# Project .gitignore\n\nThe user's repo ships this .gitignore — treat every pattern as "don't traverse or edit inside these paths unless explicitly asked":\n\n\`\`\`\n${truncated}\n\`\`\`\n`;
-    }
+  const gitignore = readCappedTextFile(gitignorePath, GITIGNORE_MAX_CHARS);
+  if (gitignore) {
+    result = `${result}\n\n# Project .gitignore\n\nThe user's repo ships this .gitignore — treat every pattern as "don't traverse or edit inside these paths unless explicitly asked":\n\n\`\`\`\n${gitignore.content}\n\`\`\`\n`;
   }
   const appendParts = [opts.systemAppend, opts.systemAppendFile].filter(Boolean);
   if (appendParts.length > 0) {
