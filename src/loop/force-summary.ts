@@ -23,7 +23,7 @@ export interface ForceSummaryContext {
 export async function* forceSummaryAfterIterLimit(
   ctx: ForceSummaryContext,
   opts: { reason: ForceSummaryReason },
-): AsyncGenerator<LoopEvent> {
+): AsyncGenerator<LoopEvent, string> {
   try {
     // Status bridges the silence — summary call is non-streaming, 30-60s typical.
     yield { turn: ctx.turn, role: "status", content: t("summary.status") };
@@ -62,6 +62,9 @@ export async function* forceSummaryAfterIterLimit(
       forcedSummary: true,
     };
     yield { turn: ctx.turn, role: "done", content: summary };
+    // Returns the raw summary text (without the reason prefix) so the caller can
+    // fill the compaction card's summaryChars without re-parsing the event.
+    return summary;
   } catch (err) {
     const label = errorLabelFor(opts.reason);
     const message = t("summary.failedAfterReason", { label, message: (err as Error).message });
@@ -78,5 +81,6 @@ export async function* forceSummaryAfterIterLimit(
       },
     };
     yield { turn: ctx.turn, role: "done", content: "" };
+    return "";
   }
 }

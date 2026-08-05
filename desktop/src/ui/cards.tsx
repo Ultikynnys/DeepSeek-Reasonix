@@ -375,6 +375,7 @@ export function ShellCard({
 export function CompactionCard({
   state = "done",
   reason,
+  compactionKind,
   aggressive,
   beforeMessages,
   afterMessages,
@@ -387,6 +388,8 @@ export function CompactionCard({
   /** running → spinner; done → folded result; failed → error; idle → nothing to fold. */
   state?: "running" | "done" | "failed" | "idle";
   reason?: "user" | "auto-context-pressure";
+  /** "force-summary" = context-guard / stuck trim + summarize in place (log not folded). */
+  compactionKind?: "fold" | "force-summary";
   aggressive?: boolean;
   beforeMessages?: number;
   afterMessages?: number;
@@ -402,7 +405,12 @@ export function CompactionCard({
   const running = state === "running";
   const failed = state === "failed";
   const idle = state === "idle";
-  const name = running ? t("cards.compactionRunningName") : t("cards.compactionName");
+  const name =
+    !running && compactionKind === "force-summary"
+      ? t("cards.compactionForcedName")
+      : running
+        ? t("cards.compactionRunningName")
+        : t("cards.compactionName");
   const meta = (
     <>
       {running ? (

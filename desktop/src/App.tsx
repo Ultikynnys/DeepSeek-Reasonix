@@ -145,6 +145,8 @@ export type AssistantSegment =
       /** running → spinner; done → folded result; failed → error; idle → nothing to fold. */
       state: "running" | "done" | "failed" | "idle";
       reason: "user" | "auto-context-pressure";
+      /** "fold" = head folded into a summary message; "force-summary" = context-guard / stuck trim + summarize in place. */
+      compactionKind?: "fold" | "force-summary";
       aggressive?: boolean;
       beforeMessages?: number;
       afterMessages?: number;
@@ -1278,6 +1280,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         id: ev.compactionId,
         state: "running",
         reason: ev.reason,
+        ...(ev.kind ? { compactionKind: ev.kind } : {}),
         ...(ev.aggressive ? { aggressive: true } : {}),
       };
       let attached = false;
@@ -1296,7 +1299,10 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         if (s.kind !== "compaction" || s.id !== ev.compactionId) return s;
         return {
           ...s,
-          state: ev.error ? "failed" : ev.folded ? "done" : "idle",
+          // force-summary DID summarize (in place) — "idle" (nothing to fold)
+          // would be a lie, so it lands on "done" like a successful fold.
+          state: ev.error ? "failed" : ev.folded || ev.kind === "force-summary" ? "done" : "idle",
+          ...(ev.kind ? { compactionKind: ev.kind } : {}),
           beforeMessages: ev.beforeMessages,
           afterMessages: ev.afterMessages,
           summaryChars: ev.summaryChars,

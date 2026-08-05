@@ -708,6 +708,64 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(summary!.content).toMatch(/context budget running low/);
   });
 
+  it("context-guard force-summary runs inside the compaction card lifecycle (fold-equivalent events)", async () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    const responses: FakeResponseShape[] = [
+      {
+        content: "",
+        tool_calls: [{ id: "c", type: "function", function: { name: "probe", arguments: "{}" } }],
+        usage: {
+          prompt_tokens: 900_000,
+          completion_tokens: 50,
+          total_tokens: 900_050,
+          prompt_cache_hit_tokens: 700_000,
+          prompt_cache_miss_tokens: 200_000,
+        },
+      },
+      // Forced-summary response (no tools).
+      { content: "based on what I saw, X." },
+    ];
+    const client = makeClient(responses);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 64,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("analyze the repo")) events.push(ev);
+
+    // The forced summary is a COMPACTION action — it must render the same
+    // compaction_start → compaction_end card pair as a fold, not just a warning.
+    const start = events.find((e) => e.role === "compaction_start");
+    const end = events.find((e) => e.role === "compaction_end");
+    expect(start).toMatchObject({
+      compactionReason: "auto-context-pressure",
+      compactionKind: "force-summary",
+    });
+    expect(end).toMatchObject({
+      compactionKind: "force-summary",
+      folded: false, // the log isn't folded — it's trimmed + summarized in place
+      summaryChars: "based on what I saw, X.".length,
+    });
+    // The trim removed the trailing in-flight assistant-with-tool_calls, then
+    // the summary message was appended — before == after in this shape.
+    expect(end!.beforeMessages).toBe(end!.afterMessages);
+    // No replacement snapshot for a force-summary — nothing was folded.
+    expect((end as { replacementMessages?: unknown }).replacementMessages).toBeUndefined();
+    // The forced summary message still lands as the annotated assistant final.
+    const finals = events.filter((e) => e.role === "assistant_final");
+    expect(finals[finals.length - 1]!.forcedSummary).toBe(true);
+  });
+
   it("force-summary calls the active model, not a hard-coded one (third-party endpoint compat)", async () => {
     const seenModels: string[] = [];
     const responses: FakeResponseShape[] = [
@@ -831,6 +889,49 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const result = await loop.compactHistory({ keepRecentTokens: 10_000 });
     expect(result.folded).toBe(false);
     expect(loop.log.length).toBe(4);
+  });
+
+  it("compactHistoryWithEvents yields the same card lifecycle as auto folds (user /compact path)", async () => {
+    const responses: FakeResponseShape[] = [
+      { content: "User explored auth and billing modules; landed on session refactor plan." },
+    ];
+    const client = makeClient(responses);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    for (let i = 0; i < 6; i++) {
+      loop.log.append({
+        role: "user",
+        content: `question number ${i} with some words to weigh it`,
+      });
+      loop.log.append({ role: "assistant", content: `answer number ${i} with similar bulk` });
+    }
+    expect(loop.log.length).toBe(12);
+
+    const events: LoopEvent[] = [];
+    const gen = loop.compactHistoryWithEvents({ keepRecentTokens: 60 });
+    for await (const ev of gen) events.push(ev);
+
+    // Compaction card pair — same shape the auto folds yield, user-tagged.
+    expect(events.map((e) => e.role)).toEqual(["compaction_start", "compaction_end"]);
+    expect(events[0]).toMatchObject({
+      compactionReason: "user",
+      compactionKind: "fold",
+    });
+    const end = events[1];
+    expect(end).toMatchObject({
+      compactionKind: "fold",
+      folded: true,
+      beforeMessages: 12,
+    });
+    expect(end!.afterMessages).toBeLessThan(12);
+    expect(end!.summaryChars).toBeGreaterThan(0);
+    // The post-fold log snapshot rides the end event so the eventizer can emit
+    // session.compacted — the kernel conversation view stays replayable.
+    expect((end as { replacementMessages?: unknown[] }).replacementMessages).toBeDefined();
+    expect(loop.log.length).toBe(end!.afterMessages);
   });
 
   it("auto-folds history when promptTokens crosses the normal fold threshold", async () => {

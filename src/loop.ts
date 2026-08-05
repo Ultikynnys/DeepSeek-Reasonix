@@ -23,7 +23,11 @@ import {
   isDeepSeekHost,
   probeDeepSeekReachable,
 } from "./loop/errors.js";
-import { type ForceSummaryContext, forceSummaryAfterIterLimit } from "./loop/force-summary.js";
+import {
+  type ForceSummaryContext,
+  type ForceSummaryReason,
+  forceSummaryAfterIterLimit,
+} from "./loop/force-summary.js";
 import {
   fixToolCallPairing,
   healLoadedMessages,
@@ -342,6 +346,21 @@ export class CacheFirstLoop {
     protectActiveExchange?: boolean;
   }): Promise<FoldResult> {
     return this.context.fold(this.model, opts);
+  }
+
+  /** User-triggered /compact — same compaction card lifecycle as auto folds,
+   *  consumed through the SAME LoopEvent stream as tool / reasoning / shell
+   *  actions so every compaction form shares one pipeline. */
+  async *compactHistoryWithEvents(opts?: {
+    keepRecentTokens?: number;
+  }): AsyncGenerator<LoopEvent, FoldResult, void> {
+    return yield* this.compactionEvents(
+      `compaction-${++this._compactionSeq}`,
+      "user",
+      "fold",
+      undefined,
+      () => this.foldRun({ keepRecentTokens: opts?.keepRecentTokens }),
+    );
   }
 
   /** Real-time token count of the current log — forwarded to Desktop for meter refresh. */
@@ -875,35 +894,16 @@ export class CacheFirstLoop {
         this.model,
       );
       if (turnStart.ratio > TURN_START_FOLD_THRESHOLD) {
-        // Compaction card lifecycle — the UI renders this as a card in the same
-        // queue as tool calls (running spinner → folded result), not a status
-        // row that never clears.
-        const compactionId = `compaction-${++this._compactionSeq}`;
-        yield {
-          turn: this._turn,
-          role: "compaction_start",
-          content: "",
-          compactionId,
-          compactionReason: "auto-context-pressure",
-        };
-        const result = await this.context.fold(this.model, {
-          requireTailBoundary: true,
-        });
+        // Compaction card lifecycle — same queue as tool cards, emitted through
+        // the ONE compactionEvents helper every compaction form shares.
+        const result = yield* this.compactionEvents(
+          `compaction-${++this._compactionSeq}`,
+          "auto-context-pressure",
+          "fold",
+          undefined,
+          () => this.foldRun({ requireTailBoundary: true }),
+        );
         if (result.folded) this._foldedThisTurn = true;
-        yield {
-          turn: this._turn,
-          role: "compaction_end",
-          content: "",
-          compactionId,
-          folded: result.folded,
-          beforeMessages: result.beforeMessages,
-          afterMessages: result.afterMessages,
-          summaryChars: result.summaryChars,
-          ...(result.summary ? { summary: result.summary } : {}),
-          ...(result.error ? { foldError: result.error } : {}),
-          ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
-          ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
-        };
       }
     }
 
@@ -1168,8 +1168,11 @@ export class CacheFirstLoop {
             pct: Math.round((before / ctxMax) * 100),
           }),
         };
-        this.context.trimTrailingToolCalls();
-        yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "context-guard" });
+        // The context guard is a COMPACTION action, not just a warning: it trims
+        // the trailing in-flight tool call and summarizes in place — same card
+        // lifecycle as a fold, so the UI renders one compaction shape and the
+        // event log records the trim + summary as one action.
+        yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "context-guard");
         this._steerQueue.length = 0;
         return;
       }
@@ -1192,7 +1195,9 @@ export class CacheFirstLoop {
           continue;
         }
         if (allSuppressed) {
-          yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
+          // Same compaction card lifecycle as the context-guard path — the
+          // stuck-state force-summary is also a compaction action.
+          yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
           this._steerQueue.length = 0;
           return;
         }
@@ -1239,23 +1244,44 @@ export class CacheFirstLoop {
     aggressive: boolean,
   ): AsyncGenerator<LoopEvent, FoldResult, void> {
     this._foldedThisTurn = true;
+    return yield* this.compactionEvents(
+      compactionId,
+      "auto-context-pressure",
+      "fold",
+      aggressive,
+      () => this.foldRun({ keepRecentTokens: tailBudget, protectActiveExchange: true }),
+    );
+  }
+
+  /** THE one compaction card lifecycle — every compaction form (fold, user
+   *  /compact, forced summary) yields the same compaction_start → compaction_end
+   *  pair; a successful fold snapshots the post-fold log for session.compacted. */
+  private async *compactionEvents(
+    compactionId: string,
+    reason: "user" | "auto-context-pressure",
+    kind: "fold" | "force-summary",
+    aggressive: boolean | undefined,
+    run: () => Promise<FoldResult> | AsyncGenerator<LoopEvent, FoldResult, void>,
+  ): AsyncGenerator<LoopEvent, FoldResult, void> {
     yield {
       turn: this._turn,
       role: "compaction_start",
       content: "",
       compactionId,
-      compactionReason: "auto-context-pressure",
+      compactionReason: reason,
+      compactionKind: kind,
       ...(aggressive ? { aggressive: true } : {}),
     };
-    const result = await this.compactHistory({
-      keepRecentTokens: tailBudget,
-      protectActiveExchange: true,
-    });
+    const runner = run();
+    // Plain promise (fold paths) or generator (the forced summary forwards its
+    // own status/assistant_final/done events through the card).
+    const result = runner instanceof Promise ? await runner : yield* runner;
     yield {
       turn: this._turn,
       role: "compaction_end",
       content: "",
       compactionId,
+      compactionKind: kind,
       folded: result.folded,
       beforeMessages: result.beforeMessages,
       afterMessages: result.afterMessages,
@@ -1264,8 +1290,61 @@ export class CacheFirstLoop {
       ...(result.error ? { foldError: result.error } : {}),
       ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
       ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
+      // Post-fold log snapshot — the fold swapped the array in place, so the
+      // live entries ARE the replacement (merge-at-commit preserved any
+      // mid-summary appends).
+      ...(result.folded ? { replacementMessages: this.log.entries } : {}),
     };
     return result;
+  }
+
+  /** Force-summary card lifecycle — the context guard (or stuck state) trims the
+   *  trailing in-flight tool call and summarizes in place; same card shape as a
+   *  fold, but the log isn't folded (trim + summary append, folded: false). */
+  private async *forcedSummaryEvents(
+    compactionId: string,
+    reason: ForceSummaryReason,
+  ): AsyncGenerator<LoopEvent, FoldResult, void> {
+    return yield* this.compactionEvents(
+      compactionId,
+      "auto-context-pressure",
+      "force-summary",
+      undefined,
+      () => this.forceSummaryRun(reason),
+    );
+  }
+
+  /** Runs the fold itself — promise-returning; the forced-summary path passes
+   *  a generator instead to forward its own events through the card. */
+  private foldRun(opts: {
+    keepRecentTokens?: number;
+    protectActiveExchange?: boolean;
+    requireTailBoundary?: boolean;
+  }): Promise<FoldResult> {
+    return this.context.fold(this.model, opts);
+  }
+
+  /** Runs the forced summary — trims the trailing in-flight assistant-with-
+   *  tool_calls, forwards the summary call's events through the compaction card,
+   *  and returns the FoldResult-shaped outcome (summary text stays in the message). */
+  private async *forceSummaryRun(
+    reason: ForceSummaryReason,
+  ): AsyncGenerator<LoopEvent, FoldResult, void> {
+    const beforeMessages = this.log.length;
+    this.context.trimTrailingToolCalls();
+    let summary = "";
+    try {
+      summary = yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason });
+    } catch {
+      summary = "";
+    }
+    return {
+      folded: false,
+      beforeMessages,
+      afterMessages: this.log.length,
+      summaryChars: summary.length,
+      ...(summary.length === 0 ? { error: "forced summary failed" } : {}),
+    };
   }
 
   private summaryContext(): ForceSummaryContext {

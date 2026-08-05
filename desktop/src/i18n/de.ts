@@ -555,6 +555,7 @@ export const de: typeof en = {
     reasoningName: "Denken",
     reasoningComplete: "Abgeschlossen",
     compactionName: "Komprimierter Verlauf",
+    compactionForcedName: "Erzwungene Zusammenfassung",
     compactionRunningName: "Komprimiere Verlauf",
     compactionRunning: "Wird komprimiert…",
     compactionRunningBody: "Ältere Turns werden zu einer Zusammenfassung gefaltet — Esc unterbricht dies nicht.",

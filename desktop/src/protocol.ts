@@ -489,6 +489,8 @@ export type CompactionStartedEvent = {
   /** Stable id pairing start with its finished event — the UI keys the card by it. */
   compactionId: string;
   reason: "user" | "auto-context-pressure";
+  /** "fold" = head folded into a summary message; "force-summary" = context-guard / stuck trim + summarize in place. */
+  kind?: "fold" | "force-summary";
   aggressive?: boolean;
 };
 
@@ -499,6 +501,8 @@ export type CompactionFinishedEvent = {
   turn: number;
   /** Same compactionId as the matching started event. */
   compactionId: string;
+  /** "fold" = head folded into a summary message; "force-summary" = context-guard / stuck trim + summarize in place. */
+  kind?: "fold" | "force-summary";
   folded: boolean;
   beforeMessages: number;
   afterMessages: number;

@@ -524,6 +524,7 @@ export const en = {
     reasoningName: "Thinking",
     reasoningComplete: "Complete",
     compactionName: "Compacted history",
+    compactionForcedName: "Forced summary",
     compactionRunningName: "Compacting history",
     compactionRunning: "Compacting…",
     compactionRunningBody: "Folding older turns into a summary — Esc won't interrupt this.",

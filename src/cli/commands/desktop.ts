@@ -3100,36 +3100,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         );
         return;
       }
-      // Compaction card lifecycle — same queue as tool cards: emit
-      // compaction.started, run the fold, emit compaction.finished so the UI
-      // shows a running spinner → folded-result card instead of a silent
-      // multi-minute wait with nothing on screen.
+      // Compaction card lifecycle — routed through the SAME LoopEvent stream as
+      // tool / reasoning / shell actions: the loop yields compaction_start →
+      // compaction_end (plus session.compacted when the fold commits) and the
+      // eventizer converts them, so user /compact renders the identical card
+      // shape and records the identical kernel events as auto folds.
       const rt = tab.runtime;
-      const compactionId = `compaction-${Date.now()}`;
-      const turn = rt.loop.currentTurn;
-      emit(rt.eventizer.emitCompactionStarted(turn, compactionId, "user"), tab.id);
-      void rt.loop
-        .compactHistory()
-        .then((result) => {
-          emit(
-            rt.eventizer.emitCompactionFinished(compactionId, {
-              turn,
-              folded: result.folded,
-              beforeMessages: result.beforeMessages,
-              afterMessages: result.afterMessages,
-              summaryChars: result.summaryChars,
-              ...(result.summary ? { summary: result.summary } : {}),
-              ...(result.error ? { error: result.error } : {}),
-              ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
-              ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
-            }),
-            tab.id,
-          );
+      void (async () => {
+        try {
+          for await (const ev of rt.loop.compactHistoryWithEvents()) {
+            for (const kev of rt.eventizer.consume(ev, rt.ctx)) emit(kev, tab.id);
+          }
           emitCtxBreakdown(tab);
-        })
-        .catch((err: Error) => {
-          emit({ type: "$error", message: `/compact failed: ${err.message}` }, tab.id);
-        });
+        } catch (err) {
+          emit({ type: "$error", message: `/compact failed: ${(err as Error).message}` }, tab.id);
+        }
+      })();
       return;
     }
     if (msg.cmd === "retry") {

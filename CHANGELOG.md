@@ -32,6 +32,22 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Compaction status row now states it may take a minute or two and that Esc
   won't interrupt it.
 
+**Compaction is one pipeline — fold, forced summary, and /compact now share the same action shape.**
+
+- Every compaction form flows through the same LoopEvent → eventizer → kernel
+  event path as tool / reasoning / shell actions. One shared card lifecycle
+  (`compaction_start` → `compaction_end`) replaced the three copy-pasted
+  implementations, and user-triggered `/compact` now runs through the loop
+  instead of emitting kernel events directly from the desktop handler.
+- The context-guard / stuck forced summary was previously just a warning plus a
+  silent log trim — it now renders the same compaction card as a fold, tagged
+  `kind: "force-summary"` so the card reads "Forced summary" and settles in the
+  done state instead of a misleading "nothing to fold".
+- `session.compacted` is finally emitted: a successful fold snapshots the
+  post-fold log on `compaction_end`, so replaying the events sidecar yields the
+  REPLACED conversation instead of the pre-fold one (the reducer branch and the
+  eventizer helper existed but were never wired).
+
 ## [0.53.2] — 2026-05-27
 
 **TUI crash fix — `useBoxMetrics` no longer trips React's max-update-depth.**

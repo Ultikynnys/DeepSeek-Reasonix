@@ -48,7 +48,15 @@ export class Eventizer {
     if (ev.turn !== this.lastTurn) {
       this.lastTurn = ev.turn;
       this.announcedToolIdx.clear();
-      out.push(this.turnStartedEvent(ev.turn, ctx));
+      // Compaction events can arrive OUTSIDE a model turn — a user-triggered
+      // /compact runs between turns or right after a session load, where a
+      // synthesized model.turn.started would leave a phantom pending assistant
+      // card that never settles. Only an auto fold that opens a brand-new turn
+      // (the turn-start pre-iter fold) gets the turn-started card.
+      const isUserCompaction =
+        (ev.role === "compaction_start" || ev.role === "compaction_end") &&
+        ev.compactionReason === "user";
+      if (!isUserCompaction) out.push(this.turnStartedEvent(ev.turn, ctx));
     }
     switch (ev.role) {
       case "assistant_delta":
@@ -107,6 +115,7 @@ export class Eventizer {
             ev.turn,
             ev.compactionId ?? `compaction-${++this.nextCompactionSeq}`,
             ev.compactionReason ?? "auto-context-pressure",
+            ev.compactionKind,
             ev.aggressive,
           ),
         );
@@ -116,6 +125,7 @@ export class Eventizer {
         out.push(
           this.compactionFinishedEvent(compactionId, {
             turn: ev.turn,
+            kind: ev.compactionKind,
             folded: ev.folded ?? false,
             beforeMessages: ev.beforeMessages ?? 0,
             afterMessages: ev.afterMessages ?? 0,
@@ -124,6 +134,21 @@ export class Eventizer {
             error: ev.foldError,
           }),
         );
+        // The fold REPLACED the live log — record the replacement so the kernel
+        // conversation projection stays replayable after compaction, exactly like
+        // tool results and assistant finals are. The reducer swaps its message
+        // list on this event (the one event that doesn't append).
+        if (ev.folded && ev.replacementMessages) {
+          out.push(
+            this.sessionCompactedEvent(
+              ev.turn,
+              ev.beforeMessages ?? 0,
+              ev.afterMessages ?? 0,
+              ev.compactionReason ?? "auto-context-pressure",
+              ev.replacementMessages,
+            ),
+          );
+        }
         break;
       }
       // `done` / `branch_*` intentionally drop — no kernel-level event.
@@ -165,7 +190,7 @@ export class Eventizer {
     };
   }
 
-  emitSessionCompacted(
+  private sessionCompactedEvent(
     turn: number,
     before: number,
     after: number,
@@ -195,21 +220,13 @@ export class Eventizer {
     };
   }
 
-  /** User-triggered /compact card start — sidecar emits this around loop.compactHistory(). */
-  emitCompactionStarted(
-    turn: number,
-    compactionId: string,
-    reason: "user" | "auto-context-pressure",
-    aggressive?: boolean,
-  ): CompactionStartedEvent {
-    return this.compactionStartedEvent(turn, compactionId, reason, aggressive);
-  }
-
-  /** User-triggered /compact card end — sidecar emits this after loop.compactHistory() resolves. */
+  /** Synthetic compaction card end when compaction_end never arrives (desktop
+   *  closes the turn generator mid-await on abort). Mirrors emitAbortedFinal. */
   emitCompactionFinished(
     compactionId: string,
     result: {
       turn: number;
+      kind?: "fold" | "force-summary";
       folded: boolean;
       beforeMessages: number;
       afterMessages: number;
@@ -412,6 +429,7 @@ export class Eventizer {
     turn: number,
     compactionId: string,
     reason: "user" | "auto-context-pressure",
+    kind?: "fold" | "force-summary",
     aggressive?: boolean,
   ): CompactionStartedEvent {
     return {
@@ -421,6 +439,7 @@ export class Eventizer {
       type: "compaction.started",
       compactionId,
       reason,
+      ...(kind ? { kind } : {}),
       ...(aggressive ? { aggressive: true } : {}),
     };
   }
@@ -429,6 +448,7 @@ export class Eventizer {
     compactionId: string,
     result: {
       turn: number;
+      kind?: "fold" | "force-summary";
       folded: boolean;
       beforeMessages: number;
       afterMessages: number;
@@ -445,6 +465,7 @@ export class Eventizer {
       turn: result.turn,
       type: "compaction.finished",
       compactionId,
+      ...(result.kind ? { kind: result.kind } : {}),
       folded: result.folded,
       beforeMessages: result.beforeMessages,
       afterMessages: result.afterMessages,

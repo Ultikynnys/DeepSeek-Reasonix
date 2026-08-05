@@ -175,6 +175,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                 key={i}
                 state={s.state}
                 reason={s.reason}
+                compactionKind={s.compactionKind}
                 aggressive={s.aggressive}
                 beforeMessages={s.beforeMessages}
                 afterMessages={s.afterMessages}

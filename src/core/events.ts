@@ -201,6 +201,9 @@ export interface CompactionStartedEvent extends EventBase {
   /** Stable id pairing start with its finished event — the UI keys the card by it. */
   compactionId: string;
   reason: "user" | "auto-context-pressure";
+  /** What kind of compaction runs — "fold" (head folded into a summary message) vs
+   *  "force-summary" (log trimmed + summarized in place under the context guard). */
+  kind?: "fold" | "force-summary";
   /** True when the fold is in the 70-85% aggressive band — user-facing messaging. */
   aggressive?: boolean;
 }
@@ -209,6 +212,8 @@ export interface CompactionFinishedEvent extends EventBase {
   type: "compaction.finished";
   /** Same compactionId as the matching started event. */
   compactionId: string;
+  /** What kind of compaction ran — see CompactionStartedEvent.kind. */
+  kind?: "fold" | "force-summary";
   folded: boolean;
   beforeMessages: number;
   afterMessages: number;

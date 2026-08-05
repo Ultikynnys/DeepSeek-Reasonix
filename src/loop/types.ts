@@ -1,5 +1,6 @@
 import type { RepairReport } from "../repair/index.js";
 import type { TurnStats } from "../telemetry/stats.js";
+import type { ChatMessage } from "../types.js";
 
 export type EventRole =
   | "assistant_delta"
@@ -61,6 +62,14 @@ export interface LoopEvent {
   compactionId?: string;
   /** Why the fold runs — "user" = /compact, "auto-context-pressure" = loop-internal fold. */
   compactionReason?: "user" | "auto-context-pressure";
+  /** What kind of compaction runs — "fold" (head folded into a summary message) vs
+   *  "force-summary" (log trimmed + summarized in place under the context guard).
+   *  Carried on both compaction_start and compaction_end. */
+  compactionKind?: "fold" | "force-summary";
+  /** compaction_end with folded=true: the post-fold message log — lets the eventizer
+   *  emit session.compacted so the kernel conversation view stays replayable after
+   *  the log replacement. */
+  replacementMessages?: ReadonlyArray<ChatMessage>;
   /** True when the fold is in the 70-85% aggressive band — user-facing messaging. */
   aggressive?: boolean;
   /** compaction_end: whether the fold actually replaced the log. */

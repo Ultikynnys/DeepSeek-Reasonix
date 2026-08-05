@@ -543,6 +543,7 @@ export const zhCN: typeof en = {
     reasoningName: "思考",
     reasoningComplete: "完成",
     compactionName: "已压缩历史",
+    compactionForcedName: "强制摘要",
     compactionRunningName: "正在压缩历史",
     compactionRunning: "压缩中…",
     compactionRunningBody: "正在将较旧的轮次折叠为摘要 — Esc 不会中断此操作。",

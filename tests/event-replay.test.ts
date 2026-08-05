@@ -73,6 +73,62 @@ describe("event-log replay round-trip", () => {
     expect(projections.session.currentTurn).toBe(1);
   });
 
+  it("fold replays as compaction card + session.compacted — the conversation view is replaced", async () => {
+    const path = join(dir, "fold.events.jsonl");
+    const sink = openEventSink(path);
+    const eventizer = new Eventizer();
+
+    // Turn 1: a real exchange that the fold will summarize away.
+    sink.append(eventizer.emitSessionOpened(0, "fold", 0));
+    sink.append(eventizer.emitUserMessage(1, "list files in src"));
+    for (const out of eventizer.consume(
+      lev({ turn: 1, role: "assistant_final", content: "Let me check." }),
+      ctx,
+    ))
+      sink.append(out);
+
+    // Turn-start fold of turn 2: the loop yields the card pair and snapshots
+    // the post-fold log; the eventizer must emit session.compacted so replay
+    // sees the REPLACED conversation, not the pre-fold one.
+    const replacement = [
+      { role: "assistant", content: "[compaction summary] recap of earlier turns" },
+      { role: "user", content: "list files in src" },
+    ];
+    for (const out of eventizer.consume(
+      lev({
+        turn: 2,
+        role: "compaction_start",
+        compactionId: "c1",
+        compactionReason: "auto-context-pressure",
+        compactionKind: "fold",
+      }),
+      ctx,
+    ))
+      sink.append(out);
+    for (const out of eventizer.consume(
+      lev({
+        turn: 2,
+        role: "compaction_end",
+        compactionId: "c1",
+        compactionKind: "fold",
+        folded: true,
+        beforeMessages: 3,
+        afterMessages: 2,
+        summaryChars: 45,
+        summary: "recap of earlier turns",
+        replacementMessages: replacement,
+      }),
+      ctx,
+    ))
+      sink.append(out);
+    await sink.close();
+
+    const projections = replay(readEventLogFile(path));
+    expect(projections.conversation.messages).toEqual(replacement);
+    expect(projections.conversation.pendingToolCalls).toEqual([]);
+    expect(projections.session.currentTurn).toBe(2);
+  });
+
   it("error-shaped tool result reduces with ok=false in the conversation", async () => {
     const path = join(dir, "err.events.jsonl");
     const sink = openEventSink(path);
