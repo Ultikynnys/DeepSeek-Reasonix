@@ -531,6 +531,7 @@ export const en = {
     compactionAggressive: "(aggressive fold)",
     compactionDoneMeta: "{before} → {after} messages · {chars} chars",
     compactionPruned: "{files} unused files pruned · ~{tokens} tokens",
+    compactionDropped: "{count} files dropped from context",
     compactionNothingToFold: "Nothing to fold — context already within budget.",
     compactionFailedBody: "Compaction failed — continuing with the conversation un-folded.",
     compactionManual: "manual",

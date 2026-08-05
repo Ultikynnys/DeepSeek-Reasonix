@@ -1314,6 +1314,7 @@ export class CacheFirstLoop {
       ...(result.error ? { foldError: result.error } : {}),
       ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
       ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
+      ...(result.droppedFiles?.length ? { droppedFiles: result.droppedFiles } : {}),
       // Post-fold log snapshot — the fold swapped the array in place, so the
       // live entries ARE the replacement (merge-at-commit preserved any
       // mid-summary appends).

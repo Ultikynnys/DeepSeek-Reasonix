@@ -48,6 +48,27 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   REPLACED conversation instead of the pre-fold one (the reducer branch and the
   eventizer helper existed but were never wired).
 
+**Compaction step 3 — the fold now asks the agent which files still matter.**
+
+- The desktop "Files in context" panel was an add-only set: every file a tool
+  call ever touched accumulated for the life of the session and no compaction
+  could reduce it. The fold now runs a file-relevance triage step after the
+  summary — one small flash call (no tools, no head re-prefill; prompt = the
+  fresh summary + the session's file list) that classifies each path as
+  keep/drop against the user's original objective.
+- Drops flow to the UI (`compaction.finished` now carries `droppedFiles`) and
+  the panel count shrinks; the decision is also persisted as a
+  `<files-dropped-from-context>` marker in the fold's summary message, so a
+  session reload re-derives the same reduced list and the model knows which
+  files were cleared.
+- Fail-open by design: unmentioned paths are kept, unknown drop entries are
+  ignored, and any triage parse/timeout/API failure leaves the fold intact
+  with zero drops. The step runs before the merge-at-commit guard, so the
+  fold-concurrency invariant (never clobber mid-summary appends) still holds.
+- Bonus fix: `prunedFiles` / `prunedTokens` from the fold's prune step were
+  swallowed on the eventizer's `compaction_end` consume path — they now reach
+  the UI card as originally intended.
+
 **Session edits are one pipeline too — retry, rewind, and abort-discard now record the truncation.**
 
 - `retryLastUser`, `rewindToUserTurn` and the abort-discard paths truncated the

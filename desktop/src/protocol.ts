@@ -515,6 +515,9 @@ export type CompactionFinishedEvent = {
   prunedFiles?: number;
   /** Tokens saved by the prune step. */
   prunedTokens?: number;
+  /** File paths the fold's triage step classified as no longer relevant — the
+   *  "Files in context" panel drops them. */
+  droppedFiles?: string[];
 };
 
 export type WarningEvent = {

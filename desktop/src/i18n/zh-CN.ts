@@ -550,6 +550,7 @@ export const zhCN: typeof en = {
     compactionAggressive: "（激进折叠）",
     compactionDoneMeta: "{before} → {after} 条消息 · {chars} 字符",
     compactionPruned: "已清理 {files} 个未使用文件 · 约 {tokens} tokens",
+    compactionDropped: "已从上下文中移除 {count} 个文件",
     compactionNothingToFold: "无需折叠 — 上下文已在预算内。",
     compactionFailedBody: "压缩失败 — 继续使用未折叠的对话。",
     compactionManual: "手动",

@@ -133,6 +133,12 @@ export class Eventizer {
             summaryChars: ev.summaryChars ?? 0,
             summary: ev.summary,
             error: ev.foldError,
+            // The prune + triage payloads arrive on compaction_end; forward
+            // them so the UI can render the card meta and drop files from the
+            // "Files in context" panel (previously swallowed on this path).
+            prunedFiles: ev.prunedFiles,
+            prunedTokens: ev.prunedTokens,
+            droppedFiles: ev.droppedFiles,
           }),
         );
         // The fold REPLACED the live log — record the replacement so the kernel
@@ -504,6 +510,7 @@ export class Eventizer {
       error?: string;
       prunedFiles?: number;
       prunedTokens?: number;
+      droppedFiles?: string[];
     },
   ): CompactionFinishedEvent {
     return {
@@ -521,6 +528,7 @@ export class Eventizer {
       ...(result.error ? { error: result.error } : {}),
       ...(result.prunedFiles !== undefined ? { prunedFiles: result.prunedFiles } : {}),
       ...(result.prunedTokens !== undefined ? { prunedTokens: result.prunedTokens } : {}),
+      ...(result.droppedFiles !== undefined ? { droppedFiles: result.droppedFiles } : {}),
     };
   }
 

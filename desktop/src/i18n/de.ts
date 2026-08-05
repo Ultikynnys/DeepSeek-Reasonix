@@ -562,6 +562,7 @@ export const de: typeof en = {
     compactionAggressive: "(aggressives Falten)",
     compactionDoneMeta: "{before} → {after} Nachrichten · {chars} Zeichen",
     compactionPruned: "{files} ungenutzte Dateien entfernt · ~{tokens} Tokens",
+    compactionDropped: "{count} Dateien aus dem Kontext entfernt",
     compactionNothingToFold: "Nichts zu falten — Kontext bereits im Budget.",
     compactionFailedBody: "Komprimierung fehlgeschlagen — Gespräch wird ungefaltet fortgesetzt.",
     compactionManual: "manuell",

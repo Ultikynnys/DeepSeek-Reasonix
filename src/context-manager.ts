@@ -1,7 +1,12 @@
-import { COMPACTION_SUMMARY_MARKER } from "@reasonix/core-utils";
+import { COMPACTION_SUMMARY_MARKER, buildFilesDroppedMarker } from "@reasonix/core-utils";
 import type { DeepSeekClient } from "./client.js";
 import { Usage } from "./client.js";
 import { pruneUnusedFileReads } from "./file-prune.js";
+import {
+  buildFileTriageInstruction,
+  collectContextFilePaths,
+  parseFileTriage,
+} from "./file-triage.js";
 import { healLoadedMessages } from "./loop.js";
 import { stripHallucinatedToolMarkup } from "./loop.js";
 import { buildAssistantMessage } from "./loop/messages.js";
@@ -59,6 +64,13 @@ export const HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS = 300_000;
 export const HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS = 2;
 /** Pause between fold-summary attempts — matches the "wait 30s and retry" user hint. */
 export const HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS = 30_000;
+// Compaction step 3 (file relevance triage) — one small flash call per fold,
+// only when the log carries file-path-bearing tool calls. Fixed deadline: the
+// prompt is the fresh summary + path list, NOT the folded head, so a hung
+// request can't stall the fold for long. Fail-open: a triage timeout/error
+// yields zero drops and the fold commits as if the step never ran.
+export const FILE_TRIAGE_TIMEOUT_MS = 20_000;
+export const FILE_TRIAGE_MODEL = "deepseek-v4-flash";
 /** Prepended to fold summary content so the model knows it's a synthesized recap.
  *  Re-export of the shared constant so existing imports keep resolving. */
 export const HISTORY_FOLD_MARKER = COMPACTION_SUMMARY_MARKER;
@@ -107,6 +119,9 @@ export interface FoldResult {
   prunedFiles?: number;
   /** Tokens saved by the prune step (content tokens − stub tokens). */
   prunedTokens?: number;
+  /** File paths the triage step classified as no longer relevant — the UI drops
+   *  them from "Files in context". Absent when the triage kept everything. */
+  droppedFiles?: string[];
 }
 
 // Per-message token cost includes tool_calls JSON and reasoning_content;
@@ -356,6 +371,23 @@ export class ContextManager {
       return noop;
     }
 
+    // Step 3 — agent-driven file relevance triage. Steps 1-2 shrink the LOG;
+    // this step shrinks the session's "Files in context" list: the model
+    // classifies every path the session touched as keep/drop against the fresh
+    // summary. Drops surface to the UI (FoldResult.droppedFiles) and are
+    // persisted as a marker in the summary message so a session reload
+    // re-derives the same reduced list. Runs BEFORE the merge-at-commit
+    // identity check, so the fold-concurrency guard covers messages appended
+    // during this call too. Fail-open: any triage failure (parse, timeout,
+    // model error) leaves the fold intact with zero drops. Skipped entirely
+    // when the log has no file tool calls — nothing to classify.
+    const allPaths = collectContextFilePaths(all);
+    const triage =
+      allPaths.length > 0
+        ? await this.triageFilesForFold(summary.content, allPaths)
+        : { keep: allPaths, drop: [] };
+    const droppedFiles = triage.drop;
+
     const memoTail =
       pinnedBodies.length > 0 ? `\n\n${SKILL_PIN_MEMO_HEADER}\n\n${pinnedBodies.join("\n\n")}` : "";
     const constraints = extractPinnedConstraints(this.deps.getSystemPrompt());
@@ -367,8 +399,10 @@ export class ContextManager {
     // next API call 400s with "must be passed back" (#1042). Stamp uses
     // the SESSION model so an empty placeholder is added even when the
     // summarizer call somehow returned no reasoning.
+    const droppedMarker =
+      droppedFiles.length > 0 ? `\n\n${buildFilesDroppedMarker(droppedFiles)}` : "";
     const summaryMsg = buildAssistantMessage(
-      HISTORY_FOLD_MARKER + summary.content + memoTail + constraintTail,
+      HISTORY_FOLD_MARKER + summary.content + droppedMarker + memoTail + constraintTail,
       [],
       model,
       summary.reasoningContent,
@@ -410,6 +444,7 @@ export class ContextManager {
       ...(pruned.prunedFiles.length > 0
         ? { prunedFiles: pruned.prunedFiles.length, prunedTokens: pruned.tokensSaved }
         : {}),
+      ...(droppedFiles.length > 0 ? { droppedFiles } : {}),
     };
   }
 
@@ -515,6 +550,44 @@ export class ContextManager {
     }
     // Unreachable — every attempt returns or continues past the last one.
     return { content: "", reasoningContent: "", error: "summary request failed" };
+  }
+
+  /** Compaction step 3 — the file relevance triage call: minimal system prompt
+   *  + fresh fold summary + path list (no head re-prefill), own AbortController
+   *  with FILE_TRIAGE_TIMEOUT_MS cap, fail-open — any failure keeps every file. */
+  private async triageFilesForFold(
+    summary: string,
+    allPaths: string[],
+  ): Promise<{ keep: string[]; drop: string[] }> {
+    const messages: ChatMessage[] = [
+      {
+        role: "system",
+        content:
+          "You are a file-relevance classifier. You reply only with the JSON object the user's instruction asks for.",
+      },
+      { role: "user", content: buildFileTriageInstruction(summary, allPaths) },
+    ];
+    const triageCtrl = new AbortController();
+    const timeout = setTimeout(() => triageCtrl.abort(), FILE_TRIAGE_TIMEOUT_MS);
+    try {
+      const resp = await this.deps.client.chat({
+        model: FILE_TRIAGE_MODEL,
+        messages,
+        signal: triageCtrl.signal,
+        thinking: "disabled",
+      });
+      this.deps.stats.record(
+        this.deps.getCurrentTurn(),
+        FILE_TRIAGE_MODEL,
+        resp.usage ?? new Usage(),
+      );
+      return parseFileTriage(resp.content, allPaths);
+    } catch {
+      // Fail-open: relevance is advisory — the fold proceeds with no drops.
+      return { keep: allPaths, drop: [] };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private persistRewrite(messages: ChatMessage[]): void {

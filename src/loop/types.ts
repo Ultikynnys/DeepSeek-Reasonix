@@ -94,4 +94,7 @@ export interface LoopEvent {
   prunedFiles?: number;
   /** compaction_end: tokens saved by the prune step. */
   prunedTokens?: number;
+  /** compaction_end: file paths the triage step classified as no longer
+   *  relevant — the UI drops them from "Files in context". */
+  droppedFiles?: string[];
 }

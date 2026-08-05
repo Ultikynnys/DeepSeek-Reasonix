@@ -289,11 +289,14 @@ describe("fold integration — the prune step", () => {
   }
 
   it("summarizer receives the pruned head; result reports the prune step", async () => {
-    let capturedBody: { messages: ChatMessage[] } | null = null;
+    // One body per request — the fold now runs the file-triage step as a
+    // SECOND call, so capturing a single slot would let the triage request
+    // clobber the summary body under assertion.
+    const capturedBodies: Array<{ messages: ChatMessage[] }> = [];
     const client = new DeepSeekClient({
       apiKey: "sk-test",
       fetch: vi.fn(async (_url: unknown, init: { body?: string } | undefined) => {
-        capturedBody = JSON.parse(init?.body ?? "{}") as { messages: ChatMessage[] };
+        capturedBodies.push(JSON.parse(init?.body ?? "{}") as { messages: ChatMessage[] });
         return okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] });
       }),
     });
@@ -357,11 +360,12 @@ describe("fold integration — the prune step", () => {
     expect(result.prunedTokens).toBeGreaterThan(0);
 
     // The summarizer never saw the dead file body — only the stub.
-    const deadInRequest = capturedBody?.messages.find((m) => m.tool_call_id === "call-dead");
+    // (capturedBodies[0] is the summary request; [1] is the file-triage step.)
+    const deadInRequest = capturedBodies[0]?.messages.find((m) => m.tool_call_id === "call-dead");
     expect(deadInRequest?.content).toContain("[file pruned: src/dead.ts");
     expect(deadInRequest?.content).not.toContain("DEAD BODY");
     // The live read is in the tail, not the head — the summarizer never sees it.
-    const liveInRequest = capturedBody?.messages.find((m) => m.tool_call_id === "call-live");
+    const liveInRequest = capturedBodies[0]?.messages.find((m) => m.tool_call_id === "call-live");
     expect(liveInRequest).toBeUndefined();
 
     // Committed log: summary first, live exchange survives untouched.

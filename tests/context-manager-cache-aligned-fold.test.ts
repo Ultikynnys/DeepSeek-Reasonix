@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
-import type { ToolSpec } from "../src/types.js";
-import { type CapturedRequest, makeFakeClient } from "./support/fake-client.js";
+import type { ChatMessage, ToolSpec } from "../src/types.js";
+import { type CapturedRequest, jsonOkResponse, makeFakeClient } from "./support/fake-client.js";
 
 function fakeFetch(captured: CapturedRequest[], stubContent: string): typeof fetch {
   return makeFakeClient([{ content: stubContent }], { capture: (req) => captured.push(req) })
@@ -230,5 +230,139 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     // no separator / wrapper that would push the cache-miss boundary inward.
     expect(secondLast).toBeDefined();
     expect(secondLast.role === "assistant" || secondLast.role === "tool").toBe(true);
+  });
+
+  it("file relevance triage runs as its own step after the summary", async () => {
+    const captured: CapturedRequest[] = [];
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: makeFakeClient(
+        [
+          { content: "compact prose summary." },
+          {
+            content: JSON.stringify({
+              keep: ["src/keep.ts"],
+              drop: ["src/drop.ts", "ghost.ts"],
+            }),
+          },
+        ],
+        { capture: (req) => captured.push(req) },
+      ).fetchMock as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: SYSTEM_PROMPT, toolSpecs: TOOLS }),
+      model: "deepseek-v4-flash",
+      stream: false,
+    });
+    seedTurns(loop, 6);
+    loop.log.append({ role: "user", content: "work on these files" });
+    loop.log.append({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "r1",
+          type: "function",
+          function: { name: "read_file", arguments: JSON.stringify({ path: "src/keep.ts" }) },
+        },
+      ],
+    });
+    loop.log.append({
+      role: "tool",
+      tool_call_id: "r1",
+      name: "read_file",
+      content: "keep contents ".repeat(200),
+    });
+    loop.log.append({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "r2",
+          type: "function",
+          function: { name: "read_file", arguments: JSON.stringify({ path: "src/drop.ts" }) },
+        },
+      ],
+    });
+    loop.log.append({
+      role: "tool",
+      tool_call_id: "r2",
+      name: "read_file",
+      content: "drop contents ".repeat(200),
+    });
+
+    const result = await loop.compactHistory({ keepRecentTokens: 40 });
+    expect(result.folded).toBe(true);
+    // Summary request + triage request — exactly two model calls.
+    expect(captured).toHaveLength(2);
+
+    // Step 3 is a SMALL request: no tools, minimal system prompt, no head
+    // re-prefill — the prompt is the fresh summary + the path list.
+    const triageReq = captured[1]!;
+    expect(triageReq.model).toBe("deepseek-v4-flash");
+    expect(triageReq.thinking).toBe("disabled");
+    expect(triageReq.tools).toBeUndefined();
+    expect(triageReq.messages).toHaveLength(2);
+    expect(triageReq.messages[0]!.role).toBe("system");
+    const instruction = triageReq.messages[1]!.content as string;
+    expect(instruction).toContain("compact prose summary.");
+    expect(instruction).toContain("- src/keep.ts");
+    expect(instruction).toContain("- src/drop.ts");
+
+    // Drop lands on FoldResult for the UI, unknown paths are ignored, and the
+    // decision is persisted as a marker in the summary message so a session
+    // reload re-derives the same reduced list.
+    expect(result.droppedFiles).toEqual(["src/drop.ts"]);
+    const summaryContent = loop.log.entries[0]!.content as string;
+    expect(summaryContent).toContain("<files-dropped-from-context>");
+    expect(summaryContent).toContain("src/drop.ts");
+    expect(summaryContent).not.toContain("ghost.ts");
+  });
+
+  it("triage failure fails open — the fold commits with no drops", async () => {
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: (async (_url: unknown, init: { body?: string } | undefined) => {
+        const body = init?.body ? (JSON.parse(init.body) as { messages?: ChatMessage[] }) : {};
+        const last = body.messages?.[body.messages.length - 1];
+        const content = typeof last?.content === "string" ? last.content : "";
+        if (content.includes("[FILES TO CLASSIFY]")) {
+          throw new Error("triage model unavailable");
+        }
+        return jsonOkResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+      }) as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: SYSTEM_PROMPT, toolSpecs: TOOLS }),
+      model: "deepseek-v4-flash",
+      stream: false,
+    });
+    seedTurns(loop, 6);
+    loop.log.append({ role: "user", content: "read these" });
+    loop.log.append({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "r1",
+          type: "function",
+          function: { name: "read_file", arguments: JSON.stringify({ path: "src/a.ts" }) },
+        },
+      ],
+    });
+    loop.log.append({
+      role: "tool",
+      tool_call_id: "r1",
+      name: "read_file",
+      content: "a contents ".repeat(200),
+    });
+
+    const result = await loop.compactHistory({ keepRecentTokens: 40 });
+    // The fold still commits — relevance is advisory, never a fold-killer.
+    expect(result.folded).toBe(true);
+    expect(result.droppedFiles).toBeUndefined();
+    expect(loop.log.entries[0]!.content as string).not.toContain("<files-dropped-from-context>");
   });
 });

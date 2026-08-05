@@ -382,6 +382,7 @@ export function CompactionCard({
   summaryChars,
   prunedFiles,
   prunedTokens,
+  droppedFiles,
   summary,
   error,
 }: {
@@ -398,6 +399,8 @@ export function CompactionCard({
   prunedFiles?: number;
   /** Tokens saved by the prune step. */
   prunedTokens?: number;
+  /** File paths the fold's triage step classified as no longer relevant. */
+  droppedFiles?: string[];
   summary?: string;
   error?: string;
 }) {
@@ -436,6 +439,12 @@ export function CompactionCard({
                 files: prunedFiles.toLocaleString(),
                 tokens: (prunedTokens ?? 0).toLocaleString(),
               })}
+            </>
+          ) : null}
+          {droppedFiles?.length ? (
+            <>
+              {" · "}
+              {t("cards.compactionDropped", { count: droppedFiles.length.toLocaleString() })}
             </>
           ) : null}
         </span>

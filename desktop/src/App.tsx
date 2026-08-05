@@ -9,6 +9,11 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
+import {
+  extractPathsFromArgs,
+  isFilePathTool,
+  parseFilesDroppedMarker,
+} from "@reasonix/core-utils";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
 import { WorkspaceProvider } from "./Markdown";
@@ -157,6 +162,8 @@ export type AssistantSegment =
       prunedFiles?: number;
       /** Tokens saved by the prune step. */
       prunedTokens?: number;
+      /** File paths the fold's triage step classified as no longer relevant. */
+      droppedFiles?: string[];
     };
 
 export type SkillOrigin = {
@@ -625,9 +632,6 @@ export function reduce(state: State, action: Action): State {
   }
 }
 
-const READING_TOOLS = new Set(["read_file"]);
-const MODIFYING_TOOLS = new Set(["edit_file", "write_file"]);
-
 type FileStat = { filename: string; added: number; removed: number };
 type FileStats = { entries: FileStat[]; totalAdded: number; totalRemoved: number };
 
@@ -706,29 +710,14 @@ function DiffStats({ stats }: { stats: FileStats }) {
 }
 
 function extractToolFiles(name: string, args: string): SessionFile[] {
-  try {
-    const parsed = JSON.parse(args) as { path?: unknown; edits?: unknown };
-    if (READING_TOOLS.has(name) && typeof parsed?.path === "string") {
-      return [{ path: parsed.path, status: "c" }];
-    }
-    if (MODIFYING_TOOLS.has(name) && typeof parsed?.path === "string") {
-      return [{ path: parsed.path, status: "m" }];
-    }
-    if (name === "multi_edit" && Array.isArray(parsed?.edits)) {
-      const out: SessionFile[] = [];
-      const seen = new Set<string>();
-      for (const e of parsed.edits as Array<{ path?: unknown }>) {
-        if (typeof e?.path === "string" && !seen.has(e.path)) {
-          seen.add(e.path);
-          out.push({ path: e.path, status: "m" });
-        }
-      }
-      return out;
-    }
-  } catch {
-    // malformed args — skip; tool will error on the real side anyway
+  if (!isFilePathTool(name)) return [];
+  const paths = extractPathsFromArgs(args);
+  if (paths.length === 0) return [];
+  if (name !== "read_file") {
+    // multi_edit edits[] can repeat a path — the panel lists each file once.
+    return [...new Set(paths)].map((path) => ({ path, status: "m" }));
   }
-  return [];
+  return paths.map((path) => ({ path, status: "c" }));
 }
 
 function mergeSessionFiles(existing: SessionFile[], adds: SessionFile[]): SessionFile[] {
@@ -752,6 +741,18 @@ function mergeSessionFiles(existing: SessionFile[], adds: SessionFile[]): Sessio
     changed = true;
   }
   return changed ? next : existing;
+}
+
+/** Path-key used for context-file comparisons — Windows separators normalize to "/". */
+function contextPathKey(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+/** Remove the paths the fold's triage step classified as no longer relevant. */
+function pruneSessionFiles(existing: SessionFile[], dropped: readonly string[]): SessionFile[] {
+  if (dropped.length === 0) return existing;
+  const droppedSet = new Set(dropped.map(contextPathKey));
+  return existing.filter((f) => !droppedSet.has(contextPathKey(f.path)));
 }
 
 function zeroUsage(): UsageStats {
@@ -1071,6 +1072,21 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           sessionFiles = mergeSessionFiles(sessionFiles, extractToolFiles(s.name, s.args));
         }
       }
+      // Files the fold's triage step dropped stay dropped across reloads: the
+      // decision is persisted as a marker in the folded summary message.
+      const droppedFromMarkers = new Set<string>();
+      for (const m of loaded) {
+        if (m.kind !== "assistant") continue;
+        for (const s of m.segments) {
+          if (s.kind !== "text") continue;
+          for (const p of parseFilesDroppedMarker(s.text)) {
+            droppedFromMarkers.add(contextPathKey(p));
+          }
+        }
+      }
+      if (droppedFromMarkers.size > 0) {
+        sessionFiles = sessionFiles.filter((f) => !droppedFromMarkers.has(contextPathKey(f.path)));
+      }
       return {
         ...state,
         busy: false,
@@ -1310,10 +1326,12 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           ...(ev.error ? { error: ev.error } : {}),
           ...(ev.prunedFiles ? { prunedFiles: ev.prunedFiles } : {}),
           ...(ev.prunedTokens ? { prunedTokens: ev.prunedTokens } : {}),
+          ...(ev.droppedFiles?.length ? { droppedFiles: ev.droppedFiles } : {}),
         };
       };
       return {
         ...state,
+        sessionFiles: pruneSessionFiles(state.sessionFiles, ev.droppedFiles ?? []),
         messages: state.messages.map((m) =>
           m.kind === "assistant" ? { ...m, segments: m.segments.map(patch) } : m,
         ),

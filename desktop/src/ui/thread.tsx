@@ -182,6 +182,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                 summaryChars={s.summaryChars}
                 prunedFiles={s.prunedFiles}
                 prunedTokens={s.prunedTokens}
+                droppedFiles={s.droppedFiles}
                 summary={s.summary}
                 error={s.error}
               />

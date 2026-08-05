@@ -1,8 +1,18 @@
 export {
   COMPACTION_SUMMARY_MARKER,
+  FILES_DROPPED_MARKER_REGEX,
+  FILES_DROPPED_TAG,
+  buildFilesDroppedMarker,
   isCompactionSummary,
+  parseFilesDroppedMarker,
   stripCompactionMarker,
 } from "./compaction.js";
+export {
+  FILE_PATH_TOOLS,
+  extractPathsFromArgs,
+  isFilePathTool,
+} from "./tool-paths.js";
+export type { FilePathTool } from "./tool-paths.js";
 export { derivePrefix } from "./derive-prefix.js";
 export { tildeify } from "./tildeify.js";
 export { toolKindFor } from "./tool-kind.js";

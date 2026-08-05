@@ -224,6 +224,11 @@ describe("Eventizer.consume", () => {
         afterMessages: 63,
         summaryChars: 2912,
         summary: "recap text",
+        // Prune + triage payloads ride the same event — the UI card meta and
+        // the "Files in context" panel depend on them arriving.
+        prunedFiles: 7,
+        prunedTokens: 4200,
+        droppedFiles: ["src/dead.ts", "src/old.ts"],
         // The post-fold log snapshot — the fold replaced the live log.
         replacementMessages: [
           { role: "assistant", content: "[compaction summary] recap text" },
@@ -242,6 +247,9 @@ describe("Eventizer.consume", () => {
       afterMessages: 63,
       summaryChars: 2912,
       summary: "recap text",
+      prunedFiles: 7,
+      prunedTokens: 4200,
+      droppedFiles: ["src/dead.ts", "src/old.ts"],
     });
     // A folded log REPLACES the conversation view — the kernel records it so
     // the projection stays replayable after compaction.

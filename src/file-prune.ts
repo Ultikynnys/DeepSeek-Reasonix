@@ -1,5 +1,6 @@
+import { extractPathsFromArgs } from "@reasonix/core-utils";
 import { countTokensBounded } from "./tokenizer.js";
-import type { ChatMessage, ToolCall } from "./types.js";
+import type { ChatMessage } from "./types.js";
 
 // Compaction step 2: drop `read_file` contents that nothing references anymore.
 //
@@ -66,7 +67,7 @@ export function pruneUnusedFileReads(messages: readonly ChatMessage[]): FilePrun
     if (msg.role !== "assistant" || !Array.isArray(msg.tool_calls)) continue;
     const refs: string[] = [];
     for (const call of msg.tool_calls) {
-      const callRefs = pathsFromCallArgs(call);
+      const callRefs = extractPathsFromArgs(call.function?.arguments);
       refs.push(...callRefs);
       const id = call.id ?? "";
       const name = call.function?.name ?? "";
@@ -146,28 +147,4 @@ export function pruneUnusedFileReads(messages: readonly ChatMessage[]): FilePrun
     prunedFiles: [...new Set(prunedFiles)],
     tokensSaved,
   };
-}
-
-/** Extract path references from a tool call's JSON args: `path` and `edits[].path`. */
-function pathsFromCallArgs(call: ToolCall): string[] {
-  const raw = call.function?.arguments;
-  if (typeof raw !== "string" || raw.length === 0) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
-  const out: string[] = [];
-  const args = parsed as Record<string, unknown>;
-  if (typeof args.path === "string" && args.path.length > 0) out.push(args.path);
-  if (Array.isArray(args.edits)) {
-    for (const edit of args.edits) {
-      if (!edit || typeof edit !== "object") continue;
-      const p = (edit as Record<string, unknown>).path;
-      if (typeof p === "string" && p.length > 0) out.push(p);
-    }
-  }
-  return out;
 }

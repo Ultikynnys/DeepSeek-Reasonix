@@ -593,3 +593,121 @@ describe("Desktop App reducer — compaction card lifecycle", () => {
     expect(segs[1]).toMatchObject({ kind: "compaction", id: "c-2", state: "idle" });
   });
 });
+
+describe("Desktop App reducer — compaction file triage", () => {
+  it("compaction.finished drops triaged files from sessionFiles", () => {
+    const base = {
+      ...initialState(),
+      sessionFiles: [
+        { path: "src/keep.ts", status: "c" as const },
+        { path: "src/drop.ts", status: "c" as const },
+        { path: "src/old.ts", status: "m" as const },
+      ],
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          segments: [
+            {
+              kind: "compaction" as const,
+              id: "c-1",
+              state: "running" as const,
+              reason: "auto-context-pressure" as const,
+            },
+          ],
+          pending: false,
+        },
+      ],
+    };
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "compaction.finished",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        compactionId: "c-1",
+        folded: true,
+        beforeMessages: 243,
+        afterMessages: 63,
+        summaryChars: 2912,
+        droppedFiles: ["src/drop.ts", "src/old.ts"],
+      },
+    });
+    expect(next.sessionFiles).toEqual([{ path: "src/keep.ts", status: "c" }]);
+    // The card segment records the dropped paths too (thread renders the meta).
+    const seg = next.messages[0]?.kind === "assistant" ? next.messages[0].segments[0] : null;
+    expect(seg).toMatchObject({
+      kind: "compaction",
+      state: "done",
+      droppedFiles: ["src/drop.ts", "src/old.ts"],
+    });
+  });
+
+  it("compaction.finished without drops leaves sessionFiles untouched", () => {
+    const base = {
+      ...initialState(),
+      sessionFiles: [{ path: "src/a.ts", status: "c" as const }],
+    };
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "compaction.finished",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        compactionId: "c-1",
+        folded: true,
+        beforeMessages: 5,
+        afterMessages: 2,
+        summaryChars: 100,
+      },
+    });
+    expect(next.sessionFiles).toEqual([{ path: "src/a.ts", status: "c" }]);
+  });
+
+  it("$session_loaded excludes paths persisted in the files-dropped marker", () => {
+    const base = initialState();
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "$session_loaded",
+        name: "sess-1",
+        messages: [
+          {
+            kind: "assistant",
+            turn: 1,
+            segments: [
+              {
+                kind: "text",
+                text: "[compaction summary] recap\n\n<files-dropped-from-context>\nsrc/drop.ts\nsrc/old.ts\n</files-dropped-from-context>",
+              },
+              {
+                kind: "tool",
+                callId: "c1",
+                name: "read_file",
+                args: JSON.stringify({ path: "src/drop.ts" }),
+              },
+              {
+                kind: "tool",
+                callId: "c2",
+                name: "read_file",
+                args: JSON.stringify({ path: "src/keep.ts" }),
+              },
+            ],
+            pending: false,
+          },
+        ],
+        carryover: {
+          totalCostUsd: 0,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          totalCompletionTokens: 0,
+        },
+      },
+    });
+    // The dropped paths would be re-derived from the surviving tool segment —
+    // the marker keeps them out of the panel across reloads.
+    expect(next.sessionFiles).toEqual([{ path: "src/keep.ts", status: "c" }]);
+  });
+});
