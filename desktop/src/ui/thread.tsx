@@ -27,6 +27,7 @@ import {
   parseEditResult,
 } from "./cards";
 import { ApprovalCard, TaskCard, type TaskStepView } from "./extra-cards";
+import { useAutoApproveCountdown } from "./auto-countdown";
 
 export function TurnDivider({ label }: { label: string }) {
   return (
@@ -41,12 +42,16 @@ export const UserMsg = memo(function UserMsg({
   text,
   time,
   skill,
-  onEdit,
+  turn,
+  disabled,
+  onRewind,
 }: {
   text: string;
   time?: string;
   skill?: SkillOrigin;
-  onEdit?: (text: string) => void;
+  turn?: number;
+  disabled?: boolean;
+  onRewind?: (turn: number, text: string) => void;
 }) {
   useLang();
   const [copied, setCopied] = useState(false);
@@ -77,14 +82,15 @@ export const UserMsg = memo(function UserMsg({
         </div>
         <div className="msg-text">{text}</div>
         <div className="msg-actions">
-          {onEdit ? (
+          {onRewind ? (
             <button
               type="button"
-              className="edit-btn"
-              onClick={() => onEdit(text)}
-              title={t("thread.editMessage")}
+              className="rewind-btn"
+              disabled={disabled}
+              onClick={() => onRewind(turn!, text)}
+              title={t("cards.checkpointRewind")}
             >
-              <I.pencil size={11} />
+              <I.rotate size={11} />
             </button>
           ) : null}
           <button
@@ -160,6 +166,23 @@ export const AssistantMsg = memo(function AssistantMsg({
                 key={i}
                 text={s.text}
                 streaming={pending && i === segments.length - 1}
+              />
+            );
+          }
+          if (s.kind === "compaction") {
+            return (
+              <CompactionCard
+                key={i}
+                state={s.state}
+                reason={s.reason}
+                aggressive={s.aggressive}
+                beforeMessages={s.beforeMessages}
+                afterMessages={s.afterMessages}
+                summaryChars={s.summaryChars}
+                prunedFiles={s.prunedFiles}
+                prunedTokens={s.prunedTokens}
+                summary={s.summary}
+                error={s.error}
               />
             );
           }
@@ -335,6 +358,7 @@ export function PlanApprovalCard({
   useLang();
   const stepCount = p.steps?.length ?? 0;
   const sub = stepCount > 0 ? t("thread.planStepCount", { count: stepCount }) : undefined;
+  const remaining = useAutoApproveCountdown(p.countdownMs, onApprove);
   return (
     <ApprovalCard
       kind={t("thread.planConfirmationKind")}
@@ -343,6 +367,11 @@ export function PlanApprovalCard({
       sub={sub}
       body={
         <>
+          {remaining !== null ? (
+            <div style={{ marginBottom: 6, fontSize: 11.5, color: "var(--tone-warn)" }}>
+              {t("thread.autoApproveIn", { n: remaining })}
+            </div>
+          ) : null}
           {p.summary ? <div style={{ marginBottom: 6 }}>{p.summary}</div> : null}
           <div style={{ whiteSpace: "pre-wrap" }}>{p.plan}</div>
         </>
@@ -405,6 +434,7 @@ export function RevisionApprovalCard({
   onReject: () => void;
 }) {
   useLang();
+  const remaining = useAutoApproveCountdown(r.countdownMs, onAccept);
   return (
     <ApprovalCard
       kind={t("thread.planRevisionKind")}
@@ -413,6 +443,11 @@ export function RevisionApprovalCard({
       sub={t("thread.keepSteps", { n: r.remainingSteps.length })}
       body={
         <>
+          {remaining !== null ? (
+            <div style={{ marginBottom: 8, fontSize: 11.5, color: "var(--tone-warn)" }}>
+              {t("thread.autoApproveIn", { n: remaining })}
+            </div>
+          ) : null}
           <div style={{ marginBottom: 8 }}>{r.reason}</div>
           {r.summary ? (
             <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>

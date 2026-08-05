@@ -544,6 +544,7 @@ export const zhCN: TranslationSchema = {
     detailHeader: "计划详情",
     detailWindow: "显示第 {start}-{end} 行，共 {total} 行",
     detailScrollHint: "PgUp/PgDn 滚动详情 · Home/End 跳转",
+    autoApproveIn: "{n} 秒后自动批准 — 默认选第一个选项",
     reviseTitle: "修改计划",
     reviseSteps: "{count} 个步骤",
     reviseFooter:
@@ -660,21 +661,11 @@ export const zhCN: TranslationSchema = {
     budget80Pct: "▲ 预算已用 80% — ${spent} / ${cap}。下一两轮可能就触顶。",
     proArmed: "⇧ /pro 已装备 — 本轮使用 deepseek-v4-pro（一次性 · 本轮后自动解除）",
     toolUploadStatus: "工具结果已上传 · 模型在生成下一条响应前思考中…",
-    turnStartFoldStatus: "回合开始：上下文接近上限，正在压缩历史…",
-    turnStartFolded:
-      "回合开始：请求约 {estimate}/{ctxMax} tokens（{pct}%）— 已压缩 {beforeMessages} 条消息 → {afterMessages}。发送中。",
     harvestStatus: "正在从推理过程提取计划状态…",
     repeatToolCallWarning: "拦截到重复工具调用 — 让模型察觉问题并换种方式重试。",
     stormStuck:
       "已停止卡死的重试循环 — 模型在自纠提示后仍以相同参数重复调用同一工具。请尝试 /retry、换种说法，或排查底层阻塞。",
     stormSuppressed: "已抑制 {count} 次重复工具调用 — 同一名称 + 参数触发 3 次以上。",
-    compactingHistoryStatus: "正在压缩历史{aggressiveTag}…可能需要一两分钟 — Esc 不会中断",
-    aggressiveTag: "（激进）",
-    compactFailed: "压缩失败 — {reason}。继续对话，历史未折叠。",
-    foldedHistory:
-      "上下文 {before}/{ctxMax}（{pct}%）— 已折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。继续。",
-    aggressivelyFoldedHistory:
-      "上下文 {before}/{ctxMax}（{pct}%）— 已激进折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。继续。",
     forcingSummary:
       "上下文 {before}/{ctxMax}（{pct}%）— 基于已收集到的内容强制总结。请运行 /compact、/clear 或 /new 重置。",
   },
@@ -1730,6 +1721,7 @@ export const zhCN: TranslationSchema = {
     acceptHint: "用新步骤替换剩余计划。已完成的步骤不变。",
     rejectLabel: "拒绝 — 保留原计划",
     rejectHint: "放弃修改。模型继续按原步骤执行。",
+    autoApproveIn: "{n} 秒后自动批准 — 默认选第一个选项",
   },
   diffApp: {
     title: "reasonix diff",

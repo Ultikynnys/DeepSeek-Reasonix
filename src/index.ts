@@ -187,32 +187,6 @@ export type { SessionInfo } from "./memory/session.js";
 
 export { loadDotenv } from "./env.js";
 
-export {
-  openTranscriptFile,
-  parseTranscript,
-  readTranscript,
-  recordFromLoopEvent,
-  writeMeta,
-  writeRecord,
-} from "./transcript/log.js";
-export type { TranscriptRecord, TranscriptMeta, ReadTranscriptResult } from "./transcript/log.js";
-
-export { computeReplayStats, replayFromFile } from "./transcript/replay.js";
-export type { ReplayStats } from "./transcript/replay.js";
-
-export {
-  diffTranscripts,
-  renderMarkdown as renderDiffMarkdown,
-  renderSummaryTable as renderDiffSummary,
-  similarity,
-} from "./transcript/diff.js";
-export type {
-  DiffReport,
-  DiffSide,
-  TurnPair,
-  RenderOptions as DiffRenderOptions,
-} from "./transcript/diff.js";
-
 export { McpClient } from "./mcp/client.js";
 export type { McpClientOptions } from "./mcp/client.js";
 export { StdioTransport } from "./mcp/stdio.js";

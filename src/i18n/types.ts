@@ -289,17 +289,10 @@ export interface TranslationSchema {
     budget80Pct: string;
     proArmed: string;
     toolUploadStatus: string;
-    turnStartFoldStatus: string;
-    turnStartFolded: string;
     harvestStatus: string;
     repeatToolCallWarning: string;
     stormStuck: string;
     stormSuppressed: string;
-    compactingHistoryStatus: string;
-    aggressiveTag: string;
-    compactFailed: string;
-    foldedHistory: string;
-    aggressivelyFoldedHistory: string;
     forcingSummary: string;
   };
   errors: {
@@ -397,6 +390,7 @@ export interface TranslationSchema {
     detailHeader: string;
     detailWindow: string;
     detailScrollHint: string;
+    autoApproveIn: string;
     picker: {
       accept: string;
       acceptHint: string;
@@ -921,6 +915,7 @@ export interface TranslationSchema {
     acceptHint: string;
     rejectLabel: string;
     rejectHint: string;
+    autoApproveIn: string;
   };
   diffApp: {
     title: string;

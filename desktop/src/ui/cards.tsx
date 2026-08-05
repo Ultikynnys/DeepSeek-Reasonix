@@ -372,22 +372,97 @@ export function ShellCard({
 
 // ---- Compaction ----
 
-export function CompactionCard({ summary }: { summary: string }) {
+export function CompactionCard({
+  state = "done",
+  reason,
+  aggressive,
+  beforeMessages,
+  afterMessages,
+  summaryChars,
+  prunedFiles,
+  prunedTokens,
+  summary,
+  error,
+}: {
+  /** running → spinner; done → folded result; failed → error; idle → nothing to fold. */
+  state?: "running" | "done" | "failed" | "idle";
+  reason?: "user" | "auto-context-pressure";
+  aggressive?: boolean;
+  beforeMessages?: number;
+  afterMessages?: number;
+  summaryChars?: number;
+  /** Unique file paths whose read results were pruned by the fold's prune step. */
+  prunedFiles?: number;
+  /** Tokens saved by the prune step. */
+  prunedTokens?: number;
+  summary?: string;
+  error?: string;
+}) {
   useLang();
-  const charCount = summary.length;
+  const running = state === "running";
+  const failed = state === "failed";
+  const idle = state === "idle";
+  const name = running ? t("cards.compactionRunningName") : t("cards.compactionName");
+  const meta = (
+    <>
+      {running ? (
+        <StatusIcon state="running" label={t("cards.compactionRunning")} />
+      ) : failed ? (
+        <StatusIcon state="failed" label={t("cards.failed")} />
+      ) : idle ? (
+        <StatusIcon state="waiting" label={t("cards.compactionNothingToFold")} />
+      ) : (
+        <StatusIcon state="done" label={t("cards.done")} />
+      )}
+      {!running && !idle && beforeMessages !== undefined ? (
+        <span className="meta-dur">
+          {t("cards.compactionDoneMeta", {
+            before: beforeMessages.toLocaleString(),
+            after: (afterMessages ?? 0).toLocaleString(),
+            chars: (summaryChars ?? 0).toLocaleString(),
+          })}
+          {prunedFiles ? (
+            <>
+              {" · "}
+              {t("cards.compactionPruned", {
+                files: prunedFiles.toLocaleString(),
+                tokens: (prunedTokens ?? 0).toLocaleString(),
+              })}
+            </>
+          ) : null}
+        </span>
+      ) : null}
+      {!running && reason === "user" ? <span className="meta-label">{t("cards.compactionManual")}</span> : null}
+    </>
+  );
+  const body = running ? (
+    <div className="compaction-body">
+      {t("cards.compactionRunningBody")}
+      {aggressive ? ` ${t("cards.compactionAggressive")}` : ""}
+    </div>
+  ) : failed ? (
+    <div className="compaction-body">
+      {t("cards.compactionFailedBody")}
+      {error ? ` — ${error}` : ""}
+    </div>
+  ) : idle ? (
+    <div className="compaction-body">{t("cards.compactionNothingToFold")}</div>
+  ) : summary ? (
+    <div className="compaction-body">
+      <Markdown source={summary} />
+    </div>
+  ) : null;
   return (
     <Card
-      tone="default"
+      tone={failed ? "danger" : "default"}
       icon={<I.archive size={12} />}
       kind="compaction"
-      name={t("cards.compactionName")}
-      meta={<span>{t("cards.compactionMeta", { chars: charCount.toLocaleString() })}</span>}
-      defaultOpen={false}
+      name={name}
+      meta={meta}
+      defaultOpen={running}
       compact
     >
-      <div className="compaction-body">
-        <Markdown source={summary} />
-      </div>
+      {body}
     </Card>
   );
 }

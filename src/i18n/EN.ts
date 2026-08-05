@@ -567,6 +567,7 @@ export const EN: TranslationSchema = {
     detailHeader: "Plan details",
     detailWindow: "showing lines {start}-{end} of {total}",
     detailScrollHint: "PgUp/PgDn scroll details · Home/End jump",
+    autoApproveIn: "auto-approving in {n}s — first option picks itself",
     reviseTitle: "Revise plan",
     reviseSteps: "{count} steps",
     reviseFooter:
@@ -688,23 +689,12 @@ export const EN: TranslationSchema = {
     budget80Pct: "▲ budget 80% used — ${spent} of ${cap}. Next turn or two likely trips the cap.",
     proArmed: "⇧ /pro armed — this turn runs on deepseek-v4-pro (one-shot · disarms after turn)",
     toolUploadStatus: "tool result uploaded · model thinking before next response…",
-    turnStartFoldStatus: "turn start: context approaching limit, compacting history…",
-    turnStartFolded:
-      "turn start: request ~{estimate}/{ctxMax} tokens ({pct}%) — compacted {beforeMessages} messages → {afterMessages}. Sending.",
     harvestStatus: "extracting plan state from reasoning…",
     repeatToolCallWarning:
       "Caught a repeated tool call — let the model see the issue and retry with a different approach.",
     stormStuck:
       "Stopped a stuck retry loop — the model kept calling the same tool with identical args after a self-correction nudge. Try /retry, rephrase, or rule out the underlying blocker.",
     stormSuppressed: "Suppressed {count} repeated tool call(s) — same name + args fired 3+ times.",
-    compactingHistoryStatus:
-      "compacting history{aggressiveTag}… may take a minute or two — Esc won't interrupt",
-    aggressiveTag: " (aggressive)",
-    compactFailed: "compaction failed — {reason}. Continuing with the conversation un-folded.",
-    foldedHistory:
-      "context {before}/{ctxMax} ({pct}%) — folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Continuing.",
-    aggressivelyFoldedHistory:
-      "context {before}/{ctxMax} ({pct}%) — aggressively folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Continuing.",
     forcingSummary:
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
   },
@@ -1841,6 +1831,7 @@ export const EN: TranslationSchema = {
     acceptHint: "Replaces the remaining plan with the proposed steps. Done steps are untouched.",
     rejectLabel: "Reject - keep the original plan",
     rejectHint: "Drops the proposal. Model continues with the original remaining steps.",
+    autoApproveIn: "auto-approving in {n}s — first option picks itself",
   },
   diffApp: {
     title: "reasonix diff",

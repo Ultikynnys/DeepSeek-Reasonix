@@ -15,6 +15,12 @@ vi.mock("./theme", () => ({
   FONT_SCALE: 1,
   FONT_SCALE_ZOOM: 1,
   THEME: "dark",
+  THEME_STYLE: {
+    GRAPHITE: "graphite",
+    SANDSTONE: "sandstone",
+    PORCELAIN: "porcelain",
+    MIDNIGHT: "midnight",
+  },
   defaultStyleForTheme: vi.fn(() => ({
     bg: "#000",
     surface: "#111",
@@ -351,6 +357,84 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
   });
 });
 
+describe("Desktop App reducer — yolo plan countdown", () => {
+  it("stores countdownMs on pending plans when $plan_required carries it", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$plan_required",
+        id: 9,
+        plan: "Step 1\nStep 2",
+        steps: [{ id: "s1", title: "one", action: "edit" }],
+        summary: "do it",
+        countdownMs: 10_000,
+      },
+    });
+    expect(next.pendingPlans).toHaveLength(1);
+    expect(next.pendingPlans[0]).toMatchObject({
+      id: 9,
+      countdownMs: 10_000,
+    });
+  });
+
+  it("leaves countdownMs undefined when $plan_required has none (review mode)", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: { type: "$plan_required", id: 10, plan: "Step 1" },
+    });
+    expect(next.pendingPlans[0]?.countdownMs).toBeUndefined();
+  });
+
+  it("stores countdownMs on pending revisions when $revision_required carries it", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$revision_required",
+        id: 11,
+        reason: "scope changed",
+        remainingSteps: [{ id: "s2", title: "two", action: "run" }],
+        summary: "rev",
+        countdownMs: 10_000,
+      },
+    });
+    expect(next.pendingRevisions).toHaveLength(1);
+    expect(next.pendingRevisions[0]).toMatchObject({
+      id: 11,
+      countdownMs: 10_000,
+    });
+  });
+});
+
+describe("Desktop App reducer — rewind", () => {
+  it("drops messages after the rewound turn and restores the text", () => {
+    const state = {
+      ...initialState(),
+      messages: [
+        { kind: "user" as const, text: "q1", clientId: "1", turn: 1 },
+        { kind: "assistant" as const, turn: 1, segments: [], pending: false },
+        { kind: "user" as const, text: "q2", clientId: "2", turn: 2 },
+        { kind: "assistant" as const, turn: 2, segments: [], pending: false },
+        { kind: "user" as const, text: "q3", clientId: "3", turn: 3 },
+        { kind: "assistant" as const, turn: 3, segments: [], pending: false },
+        { kind: "status" as const, text: "connecting…" },
+      ],
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: { type: "$rewind_result", turn: 2, text: "q3" },
+    });
+
+    // Turns 1-2 survive; turn 3 (the rewound point) and after are dropped.
+    expect(next.messages.map((m) => ("turn" in m ? m.turn : 0))).toEqual([1, 1, 2, 2]);
+    // Non-turn chrome (status/warning/error) is cleared — the thread mirrors
+    // the truncated log, same as $session_loaded.
+    expect(next.messages.some((m) => m.kind === "status")).toBe(false);
+    // The dropped message text lands in the composer via the retry path.
+    expect(next.retryText).toBe("q3");
+    expect(next.retryNonce).toBe(1);
+  });
+});
+
 describe("desktop thread layout", () => {
   it("recomputes the thread cap from the latest viewport width", () => {
     const side = 244;
@@ -365,5 +449,147 @@ describe("desktop thread layout", () => {
     expect(
       getThreadMaxWidth({ viewportWidth: 1800, visibleSide: side, visibleCtx: ctx }),
     ).toBe(1120);
+  });
+});
+
+describe("Desktop App reducer — compaction card lifecycle", () => {
+  it("mounts a running compaction card on the last assistant message", () => {
+    const state = {
+      ...initialState(),
+      messages: [
+        { kind: "user" as const, text: "q1", clientId: "1", turn: 1 },
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          segments: [{ kind: "text" as const, text: "answer" }],
+          pending: false,
+        },
+      ],
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "compaction.started",
+        id: 1,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        compactionId: "compaction-1",
+        reason: "auto-context-pressure",
+      },
+    });
+    const assistant = next.messages.find((m) => m.kind === "assistant");
+    expect(assistant?.kind === "assistant" && assistant.segments.at(-1)).toMatchObject({
+      kind: "compaction",
+      id: "compaction-1",
+      state: "running",
+      reason: "auto-context-pressure",
+    });
+  });
+
+  it("creates an assistant message when no assistant exists (idle /compact)", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "compaction.started",
+        id: 1,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 3,
+        compactionId: "compaction-u1",
+        reason: "user",
+      },
+    });
+    expect(next.messages).toHaveLength(1);
+    expect(next.messages[0]?.kind).toBe("assistant");
+    expect(
+      next.messages[0]?.kind === "assistant" && next.messages[0].segments[0],
+    ).toMatchObject({ kind: "compaction", id: "compaction-u1", state: "running", reason: "user" });
+  });
+
+  it("fills the card on compaction.finished — done state carries the fold numbers", () => {
+    const state = {
+      ...initialState(),
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          segments: [{ kind: "compaction" as const, id: "compaction-1", state: "running" as const, reason: "auto-context-pressure" as const }],
+          pending: false,
+        },
+      ],
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "compaction.finished",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        compactionId: "compaction-1",
+        folded: true,
+        beforeMessages: 243,
+        afterMessages: 63,
+        summaryChars: 2912,
+        summary: "recap",
+      },
+    });
+    const seg =
+      next.messages[0]?.kind === "assistant" ? next.messages[0].segments[0] : undefined;
+    expect(seg).toMatchObject({
+      kind: "compaction",
+      state: "done",
+      beforeMessages: 243,
+      afterMessages: 63,
+      summaryChars: 2912,
+      summary: "recap",
+    });
+  });
+
+  it("marks the card failed when the fold reports an error, idle when nothing to fold", () => {
+    const base = {
+      ...initialState(),
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          segments: [
+            { kind: "compaction" as const, id: "c-1", state: "running" as const, reason: "user" as const },
+            { kind: "compaction" as const, id: "c-2", state: "running" as const, reason: "auto-context-pressure" as const },
+          ],
+          pending: false,
+        },
+      ],
+    };
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "compaction.finished",
+        id: 3,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        compactionId: "c-1",
+        folded: false,
+        beforeMessages: 12,
+        afterMessages: 12,
+        summaryChars: 0,
+        error: "summary request timed out",
+      },
+    });
+    const next2 = reduce(next, {
+      t: "incoming",
+      event: {
+        type: "compaction.finished",
+        id: 4,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        compactionId: "c-2",
+        folded: false,
+        beforeMessages: 12,
+        afterMessages: 12,
+        summaryChars: 0,
+      },
+    });
+    const segs = next2.messages[0]?.kind === "assistant" ? next2.messages[0].segments : [];
+    expect(segs[0]).toMatchObject({ kind: "compaction", id: "c-1", state: "failed", error: "summary request timed out" });
+    expect(segs[1]).toMatchObject({ kind: "compaction", id: "c-2", state: "idle" });
   });
 });

@@ -14,14 +14,9 @@ Thumbs.db
 .idea/
 .vscode/
 *.tsbuildinfo
-transcripts/
 sessions/
 *.jsonl
 !tests/**/*.jsonl
-# Committed reference transcripts so readers can reasonix replay / diff
-# the v0.1 bench results without an API key.
-!benchmarks/tau-bench/transcripts/
-!benchmarks/tau-bench/transcripts/*.jsonl
 .turbo/
 # Local-only Claude Code settings — personal overrides, never committed.
 .claude/settings.local.json
@@ -32,8 +27,6 @@ sessions/
 .reasonix/sessions/
 .reasonix/semantic-skip
 .reasonix/truncated-results/
-# Scratch entry regenerated each time scripts/bundle-codemirror.mjs runs.
-scripts/.cm-entry.mjs
 # Personal bun lockfile — project uses npm officially.
 bun.lock
 

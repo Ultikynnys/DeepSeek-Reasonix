@@ -50,6 +50,8 @@ export type PlanRequiredEvent = {
   plan: string;
   steps?: unknown[];
   summary?: string;
+  /** YOLO auto-approval window (ms) — the card auto-picks the first option at expiry. */
+  countdownMs?: number;
 };
 
 export type PlanVerdict =
@@ -86,6 +88,8 @@ export type RevisionRequiredEvent = {
   reason: string;
   remainingSteps: PlanStep[];
   summary?: string;
+  /** YOLO auto-approval window (ms) — the card auto-picks accept rewrite at expiry. */
+  countdownMs?: number;
 };
 
 export type RevisionVerdict = { type: "accepted" } | { type: "rejected" } | { type: "cancelled" };
@@ -242,6 +246,8 @@ export type MemoryExportEvent = {
 export type RetryResultEvent = { type: "$retry_result"; text: string };
 
 export type BtwResultEvent = { type: "$btw_result"; question: string; answer: string };
+
+export type RewindResultEvent = { type: "$rewind_result"; turn: number; text: string };
 
 export type JobInfo = {
   id: number;
@@ -475,6 +481,38 @@ export type StatusEvent = {
   text: string;
 };
 
+export type CompactionStartedEvent = {
+  type: "compaction.started";
+  id: number;
+  ts: string;
+  turn: number;
+  /** Stable id pairing start with its finished event — the UI keys the card by it. */
+  compactionId: string;
+  reason: "user" | "auto-context-pressure";
+  aggressive?: boolean;
+};
+
+export type CompactionFinishedEvent = {
+  type: "compaction.finished";
+  id: number;
+  ts: string;
+  turn: number;
+  /** Same compactionId as the matching started event. */
+  compactionId: string;
+  folded: boolean;
+  beforeMessages: number;
+  afterMessages: number;
+  summaryChars: number;
+  /** The synthesized summary text — lets the card render the recap inline. */
+  summary?: string;
+  /** Why the fold didn't happen, when the summarizer failed (timeout / API error). */
+  error?: string;
+  /** Unique file paths whose read results were pruned by the fold's prune step. */
+  prunedFiles?: number;
+  /** Tokens saved by the prune step. */
+  prunedTokens?: number;
+};
+
 export type WarningEvent = {
   type: "warning";
   id: number;
@@ -534,10 +572,13 @@ export type IncomingEvent = { tabId?: string } & (
   | ToolIntentEvent
   | ToolResultEvent
   | StatusEvent
+  | CompactionStartedEvent
+  | CompactionFinishedEvent
   | WarningEvent
   | KernelErrorEvent
   | RetryResultEvent
   | BtwResultEvent
+  | RewindResultEvent
 );
 
 export type OutgoingCommand = { tabId?: string } & (
@@ -585,5 +626,6 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "jobs_stop_all" }
   | { cmd: "compact_history" }
   | { cmd: "retry" }
+  | { cmd: "rewind"; userTurn: number }
   | { cmd: "btw"; text: string }
 );

@@ -2,6 +2,8 @@ import type { LoopEvent } from "../loop.js";
 import type { ChatMessage, RawUsage, ToolCall } from "../types.js";
 import { redactEventValue } from "./event-redaction.js";
 import type {
+  CompactionFinishedEvent,
+  CompactionStartedEvent,
   Event,
   ErrorEvent as KernelErrorEvent,
   ModelDeltaEvent,
@@ -32,6 +34,8 @@ export class Eventizer {
   private nextId = 0;
   private lastTurn = -1;
   private nextToolSeq = 0;
+  /** Fallback ids for compaction events that arrive without a loop-generated compactionId. */
+  private nextCompactionSeq = 0;
   /** Tool calls announced via tool_call_delta but not yet dispatched. FIFO upgraded by tool_start. */
   private preparingCallIds: string[] = [];
   /** Tool calls dispatched but not yet finished. FIFO popped by tool result. */
@@ -97,6 +101,31 @@ export class Eventizer {
       case "status":
         out.push(this.statusEvent(ev.turn, ev.content));
         break;
+      case "compaction_start":
+        out.push(
+          this.compactionStartedEvent(
+            ev.turn,
+            ev.compactionId ?? `compaction-${++this.nextCompactionSeq}`,
+            ev.compactionReason ?? "auto-context-pressure",
+            ev.aggressive,
+          ),
+        );
+        break;
+      case "compaction_end": {
+        const compactionId = ev.compactionId ?? `compaction-${++this.nextCompactionSeq}`;
+        out.push(
+          this.compactionFinishedEvent(compactionId, {
+            turn: ev.turn,
+            folded: ev.folded ?? false,
+            beforeMessages: ev.beforeMessages ?? 0,
+            afterMessages: ev.afterMessages ?? 0,
+            summaryChars: ev.summaryChars ?? 0,
+            summary: ev.summary,
+            error: ev.foldError,
+          }),
+        );
+        break;
+      }
       // `done` / `branch_*` intentionally drop — no kernel-level event.
       default:
         break;
@@ -164,6 +193,34 @@ export class Eventizer {
       name,
       args: redactEventValue(args),
     };
+  }
+
+  /** User-triggered /compact card start — sidecar emits this around loop.compactHistory(). */
+  emitCompactionStarted(
+    turn: number,
+    compactionId: string,
+    reason: "user" | "auto-context-pressure",
+    aggressive?: boolean,
+  ): CompactionStartedEvent {
+    return this.compactionStartedEvent(turn, compactionId, reason, aggressive);
+  }
+
+  /** User-triggered /compact card end — sidecar emits this after loop.compactHistory() resolves. */
+  emitCompactionFinished(
+    compactionId: string,
+    result: {
+      turn: number;
+      folded: boolean;
+      beforeMessages: number;
+      afterMessages: number;
+      summaryChars: number;
+      summary?: string;
+      error?: string;
+      prunedFiles?: number;
+      prunedTokens?: number;
+    },
+  ): CompactionFinishedEvent {
+    return this.compactionFinishedEvent(compactionId, result);
   }
 
   emitToolConfirmAllow(
@@ -332,6 +389,54 @@ export class Eventizer {
       turn,
       type: "status",
       text,
+    };
+  }
+
+  private compactionStartedEvent(
+    turn: number,
+    compactionId: string,
+    reason: "user" | "auto-context-pressure",
+    aggressive?: boolean,
+  ): CompactionStartedEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: "compaction.started",
+      compactionId,
+      reason,
+      ...(aggressive ? { aggressive: true } : {}),
+    };
+  }
+
+  private compactionFinishedEvent(
+    compactionId: string,
+    result: {
+      turn: number;
+      folded: boolean;
+      beforeMessages: number;
+      afterMessages: number;
+      summaryChars: number;
+      summary?: string;
+      error?: string;
+      prunedFiles?: number;
+      prunedTokens?: number;
+    },
+  ): CompactionFinishedEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn: result.turn,
+      type: "compaction.finished",
+      compactionId,
+      folded: result.folded,
+      beforeMessages: result.beforeMessages,
+      afterMessages: result.afterMessages,
+      summaryChars: result.summaryChars,
+      ...(result.summary ? { summary: result.summary } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.prunedFiles !== undefined ? { prunedFiles: result.prunedFiles } : {}),
+      ...(result.prunedTokens !== undefined ? { prunedTokens: result.prunedTokens } : {}),
     };
   }
 

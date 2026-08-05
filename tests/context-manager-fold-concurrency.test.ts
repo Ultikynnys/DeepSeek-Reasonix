@@ -77,6 +77,8 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
 
     const result = await loop.compactHistory({ keepRecentTokens: 40 });
     expect(result.folded).toBe(true);
+    // The synthesized summary travels on FoldResult so the UI card can render it.
+    expect(result.summary).toBe("SUMMARY");
 
     const msgs = loop.log.entries;
     expect(msgs[0]?.content).toContain("SUMMARY");
@@ -178,6 +180,80 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
     // The folded log is committed even though the turn was aborted.
     expect(loop.log.entries[0]?.content).toContain("SUMMARY");
     expect(loop.log.length).toBeLessThan(13);
+  });
+
+  it("protectActiveExchange keeps the last user→assistant exchange in the tail when tool results blow the budget", async () => {
+    // Post-response fold runs AFTER dispatch: the log ends with a COMPLETED
+    // exchange [user, assistant(tool_calls), tool(result)]. A large result can
+    // blow the tail budget before the walk reaches the user message — without
+    // protectActiveExchange the whole exchange (including the read result)
+    // lands in the summarized head and the model never sees the read.
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () => okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] })),
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    seedTurns(loop, 6);
+    loop.log.append({ role: "user", content: "read src/loop.ts" });
+    loop.log.append({
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        { id: "call-1", type: "function", function: { name: "read_file", arguments: "{}" } },
+      ],
+    });
+    // Completed read result (~200 tokens) — far past the 40-token tail budget.
+    loop.log.append({
+      role: "tool",
+      tool_call_id: "call-1",
+      name: "read_file",
+      content: "y".repeat(800),
+    });
+
+    // Without the flag the boundary stays at all.length → everything (including
+    // the active exchange) collapses into the summary.
+    const unguarded = await loop.compactHistory({ keepRecentTokens: 40 });
+    expect(unguarded.folded).toBe(true);
+    expect(unguarded.afterMessages).toBe(1);
+
+    // Rebuild the same log for the guarded fold.
+    loop.log.compactInPlace([]);
+    seedTurns(loop, 6);
+    loop.log.append({ role: "user", content: "read src/loop.ts" });
+    loop.log.append({
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        { id: "call-1", type: "function", function: { name: "read_file", arguments: "{}" } },
+      ],
+    });
+    loop.log.append({
+      role: "tool",
+      tool_call_id: "call-1",
+      name: "read_file",
+      content: "y".repeat(800),
+    });
+
+    const guarded = await loop.compactHistory({
+      keepRecentTokens: 40,
+      protectActiveExchange: true,
+    });
+    expect(guarded.folded).toBe(true);
+    expect(guarded.beforeMessages).toBe(loop.log.length);
+    const msgs = loop.log.entries;
+    expect(msgs[0]?.content).toContain("SUMMARY");
+    // The active exchange survives into the tail — the model still sees the read.
+    const tail = msgs.slice(1);
+    const parent = tail.find(
+      (m) => m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length === 1,
+    );
+    expect(parent).toBeDefined();
+    expect(tail.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call-1" });
+    expect((tail.at(-1) as { content: string }).content).toBe("y".repeat(800));
   });
 
   it("refuses to clobber a log that was replaced while the summary was in flight", async () => {

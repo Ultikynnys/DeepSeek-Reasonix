@@ -11,7 +11,7 @@ import {
 } from "./mcp/registry.js";
 
 import { createCheckpoint, restoreCheckpoint } from "./code/checkpoints.js";
-import { ContextManager, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
+import { ContextManager, type FoldResult, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
 import { dispatchToolCallsChunked } from "./loop/dispatch.js";
@@ -222,6 +222,8 @@ export class CacheFirstLoop {
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
   private context!: ContextManager;
+  /** Stable ids for compaction card events — pairs compaction_start with compaction_end. */
+  private _compactionSeq = 0;
 
   /** Subscribe API so UI hooks can derive `running` from finally-guaranteed insertions. */
   get inflight(): InflightSet {
@@ -335,13 +337,10 @@ export class CacheFirstLoop {
   }
 
   /** Replace older turns with one summary message; keep tail within keepRecentTokens budget. */
-  async compactHistory(opts?: { keepRecentTokens?: number }): Promise<{
-    folded: boolean;
-    beforeMessages: number;
-    afterMessages: number;
-    summaryChars: number;
-    error?: string;
-  }> {
+  async compactHistory(opts?: {
+    keepRecentTokens?: number;
+    protectActiveExchange?: boolean;
+  }): Promise<FoldResult> {
     return this.context.fold(this.model, opts);
   }
 
@@ -876,37 +875,35 @@ export class CacheFirstLoop {
         this.model,
       );
       if (turnStart.ratio > TURN_START_FOLD_THRESHOLD) {
+        // Compaction card lifecycle — the UI renders this as a card in the same
+        // queue as tool calls (running spinner → folded result), not a status
+        // row that never clears.
+        const compactionId = `compaction-${++this._compactionSeq}`;
         yield {
           turn: this._turn,
-          role: "status",
-          content: t("loop.turnStartFoldStatus"),
+          role: "compaction_start",
+          content: "",
+          compactionId,
+          compactionReason: "auto-context-pressure",
         };
         const result = await this.context.fold(this.model, {
           requireTailBoundary: true,
         });
-        if (result.folded) {
-          this._foldedThisTurn = true;
-          yield {
-            turn: this._turn,
-            role: "warning",
-            content: t("loop.turnStartFolded", {
-              estimate: turnStart.estimateTokens.toLocaleString(),
-              ctxMax: turnStart.ctxMax.toLocaleString(),
-              pct: Math.round(turnStart.ratio * 100),
-              beforeMessages: result.beforeMessages,
-              afterMessages: result.afterMessages,
-            }),
-          };
-        } else if (result.error) {
-          // The summary call failed (timeout / API error) — the status above
-          // must not be the last word. Warn so the user knows the compaction
-          // didn't happen instead of the conversation silently continuing.
-          yield {
-            turn: this._turn,
-            role: "warning",
-            content: t("loop.compactFailed", { reason: result.error }),
-          };
-        }
+        if (result.folded) this._foldedThisTurn = true;
+        yield {
+          turn: this._turn,
+          role: "compaction_end",
+          content: "",
+          compactionId,
+          folded: result.folded,
+          beforeMessages: result.beforeMessages,
+          afterMessages: result.afterMessages,
+          summaryChars: result.summaryChars,
+          ...(result.summary ? { summary: result.summary } : {}),
+          ...(result.error ? { foldError: result.error } : {}),
+          ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
+          ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
+        };
       }
     }
 
@@ -1150,53 +1147,16 @@ export class CacheFirstLoop {
       // Must run BEFORE the repairedCalls.length === 0 early-return so
       // text-only responses also benefit from auto-fold / force-summary.
       const decision = this.context.decideAfterUsage(usage, this.model, this._foldedThisTurn);
-      if (decision.kind === "fold") {
-        this._foldedThisTurn = true;
-        const before = decision.promptTokens;
-        const ctxMax = decision.ctxMax;
-        const aggressiveTag = decision.aggressive ? t("loop.aggressiveTag") : "";
-        yield {
-          turn: this._turn,
-          role: "status",
-          content: t("loop.compactingHistoryStatus", { aggressiveTag }),
-        };
-        const result = await this.compactHistory({ keepRecentTokens: decision.tailBudget });
-        // Esc/Stop during compaction: the fold is deliberately non-interruptible
-        // (see summarizeForFold), so a stop request that landed mid-summary is
-        // consumed here when the turn is finishing — there's nothing left to
-        // stop. Without the reset, the aborted controller would carry into the
-        // next step() (carryAbort) and instantly abort the user's next message.
-        // When tool calls are still pending the abort is left intact: the
-        // dispatch below cancels them and the next iter-top check runs the
-        // normal abort path (discard or synthetic + reset).
-        if (signal.aborted && repairedCalls.length === 0) this.resetAbortState();
-        if (result.folded) {
-          yield {
-            turn: this._turn,
-            role: "warning",
-            content: t(
-              decision.aggressive ? "loop.aggressivelyFoldedHistory" : "loop.foldedHistory",
-              {
-                before: before.toLocaleString(),
-                ctxMax: ctxMax.toLocaleString(),
-                pct: Math.round((before / ctxMax) * 100),
-                beforeMessages: result.beforeMessages,
-                afterMessages: result.afterMessages,
-                summaryChars: result.summaryChars,
-              },
-            ),
-          };
-        } else if (result.error) {
-          // The summary call failed (timeout / API error) — surface it so the
-          // "compacting history…" status isn't the last word and the turn
-          // doesn't look like it silently stopped.
-          yield {
-            turn: this._turn,
-            role: "warning",
-            content: t("loop.compactFailed", { reason: result.error }),
-          };
-        }
-      } else if (decision.kind === "exit-with-summary") {
+      // Compaction runs in the same queue as the tool calls: the fold emits a
+      // compaction card (compaction_start → compaction_end) like a tool card,
+      // and pending tool calls dispatch BEFORE the fold so an in-flight read
+      // isn't blocked behind the multi-minute summary window (the "read called,
+      // then force compaction — neither finishes" stall). ContextManager clamps
+      // the fold boundary to the last user exchange (protectActiveExchange) so
+      // the completed tool results survive into the tail.
+      const foldPlan = decision.kind === "fold" ? decision : null;
+      const compactionId = foldPlan ? `compaction-${++this._compactionSeq}` : null;
+      if (decision.kind === "exit-with-summary") {
         const before = decision.promptTokens;
         const ctxMax = decision.ctxMax;
         yield {
@@ -1215,6 +1175,19 @@ export class CacheFirstLoop {
       }
 
       if (repairedCalls.length === 0) {
+        if (foldPlan && compactionId) {
+          yield* this.foldWithEvents(
+            compactionId,
+            foldPlan.tailBudget ?? 0,
+            foldPlan.aggressive ?? false,
+          );
+          // Esc/Stop during compaction: the fold is deliberately non-interruptible
+          // (see summarizeForFold), so a stop request that landed mid-summary is
+          // consumed here when the turn is finishing — there's nothing left to
+          // stop. Without the reset, the aborted controller would carry into the
+          // next step() (carryAbort) and instantly abort the user's next message.
+          if (signal.aborted) this.resetAbortState();
+        }
         if (this._steerQueue.length > 0) {
           continue;
         }
@@ -1238,11 +1211,61 @@ export class CacheFirstLoop {
         appendAndPersist: (m) => this.appendAndPersist(m),
         rateLimitState,
       });
+      // The current iter's tool calls have settled — fold now, so the compaction
+      // card follows the tool cards in the queue instead of blocking them behind
+      // the multi-minute summary window.
+      if (foldPlan && compactionId) {
+        yield* this.foldWithEvents(
+          compactionId,
+          foldPlan.tailBudget ?? 0,
+          foldPlan.aggressive ?? false,
+        );
+      }
     }
     // Unreachable — the for-loop above is unbounded. The model exits the
     // loop via return statements when it produces no more tool calls,
     // when the context guard fires, when an abort fires, or when a fatal
     // error escapes the inner try blocks.
+  }
+
+  /** Compaction card lifecycle — emitted by every fold path so UIs render the
+   *  fold as a card in the same queue as tool calls (running spinner → folded
+   *  result / failure reason) instead of a status row that never clears.
+   *  protectActiveExchange is always on: this helper only runs post-response,
+   *  where the current iter's tool results must survive into the tail. */
+  private async *foldWithEvents(
+    compactionId: string,
+    tailBudget: number,
+    aggressive: boolean,
+  ): AsyncGenerator<LoopEvent, FoldResult, void> {
+    this._foldedThisTurn = true;
+    yield {
+      turn: this._turn,
+      role: "compaction_start",
+      content: "",
+      compactionId,
+      compactionReason: "auto-context-pressure",
+      ...(aggressive ? { aggressive: true } : {}),
+    };
+    const result = await this.compactHistory({
+      keepRecentTokens: tailBudget,
+      protectActiveExchange: true,
+    });
+    yield {
+      turn: this._turn,
+      role: "compaction_end",
+      content: "",
+      compactionId,
+      folded: result.folded,
+      beforeMessages: result.beforeMessages,
+      afterMessages: result.afterMessages,
+      summaryChars: result.summaryChars,
+      ...(result.summary ? { summary: result.summary } : {}),
+      ...(result.error ? { foldError: result.error } : {}),
+      ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
+      ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
+    };
+    return result;
   }
 
   private summaryContext(): ForceSummaryContext {

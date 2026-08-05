@@ -704,9 +704,6 @@ export const de: TranslationSchema = {
     proArmed:
       "⇧ /pro aktiviert — dieser Turn läuft auf deepseek-v4-pro (einmalig · deaktiviert nach dem Turn)",
     toolUploadStatus: "Tool-Ergebnis hochgeladen – Modell denkt vor der nächsten Antwort...",
-    turnStartFoldStatus: "Turn-Start: Kontext nähert sich Grenze, komprimiere Verlauf...",
-    turnStartFolded:
-      "Turn-Start: Anfrage ~{estimate}/{ctxMax} Tokens ({pct}%) — {beforeMessages} Nachrichten → {afterMessages} komprimiert. Sende.",
     harvestStatus: "Planstatus wird aus dem Reasoning extrahiert...",
     repeatToolCallWarning:
       "Wiederholten Tool-Aufruf erkannt — lasse das Modell das Problem sehen und es mit einem anderen Ansatz erneut versuchen.",
@@ -714,13 +711,6 @@ export const de: TranslationSchema = {
       "Festgefahrene Wiederholungsschleife gestoppt — das Modell rief dasselbe Tool mit identischen Argumenten auf, selbst nach einem Selbstkorrektur-Hinweis. Versuche /retry, umformulieren oder schließe den zugrunde liegenden Blocker aus.",
     stormSuppressed:
       "{count} wiederholte Tool-Aufrufe unterdrückt — gleicher Name + Argumente 3+ Mal gesendet.",
-    compactingHistoryStatus:
-      "Komprimiere Verlauf{aggressiveTag}... kann ein bis zwei Minuten dauern — Esc unterbricht nicht",
-    aggressiveTag: " (aggressiv)",
-    foldedHistory:
-      "Kontext {before}/{ctxMax} ({pct}%) — {beforeMessages} Nachrichten → {afterMessages} gefaltet (Zusammenfassung {summaryChars} Zeichen). Fahre fort.",
-    aggressivelyFoldedHistory:
-      "Kontext {before}/{ctxMax} ({pct}%) — {beforeMessages} Nachrichten → {afterMessages} aggressiv gefaltet (Zusammenfassung {summaryChars} Zeichen). Fahre fort.",
     forcingSummary:
       "Kontext {before}/{ctxMax} ({pct}%) — erzwinge Zusammenfassung aus dem Gesammelten. Führe /compact, /clear oder /new aus, um zurückzusetzen.",
   },

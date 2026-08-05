@@ -21,11 +21,10 @@
     "outDir": "dist",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "ink": ["packages/ink/src/index.ts"]
+      "@/*": ["src/*"]
     },
     "types": ["node"]
   },
-  "include": ["src/**/*", "packages/ink/src/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests", "examples", "benchmarks"]
 }

@@ -1,4 +1,6 @@
 import { normalizeMcpConfig, readConfig } from "../../config.js";
+import { type McpLifecycleEvent, formatMcpLifecycleEvent } from "../../desktop/mcp-lifecycle.js";
+import { formatMcpSlowToast } from "../../desktop/mcp-toast.js";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
@@ -7,12 +9,10 @@ import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { type McpClientHost, bridgeMcpTools } from "../../mcp/registry.js";
 import { overlayMatchedSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import { buildMcpServerSummary } from "../../mcp/summary.js";
+import type { McpServerSummary } from "../../mcp/summary.js";
 import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 import type { ToolRegistry } from "../../tools.js";
 import type { ToolSpec } from "../../types.js";
-import { type McpLifecycleEvent, formatMcpLifecycleEvent } from "../ui/mcp-lifecycle.js";
-import { formatMcpSlowToast } from "../ui/mcp-toast.js";
-import type { McpServerSummary } from "../ui/slash.js";
 
 export interface ProgressInfo {
   toolName: string;

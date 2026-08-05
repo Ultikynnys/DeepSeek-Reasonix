@@ -12,6 +12,7 @@ import {
 } from "../src/context-manager.js";
 import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { CacheFirstLoop } from "../src/loop.js";
+import type { LoopEvent } from "../src/loop/types.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
 import { ToolRegistry } from "../src/tools.js";
@@ -929,16 +930,25 @@ describe("CacheFirstLoop (non-streaming)", () => {
     }
     const beforeMessages = loop.log.length;
 
-    const events: { role: string; content?: string }[] = [];
+    const events: LoopEvent[] = [];
     for await (const ev of loop.step("continue")) {
-      events.push({ role: ev.role, content: ev.content });
+      events.push(ev);
     }
 
-    const foldWarn = events.find(
-      (e) => e.role === "warning" && /folded \d+ messages/.test(e.content ?? ""),
-    );
-    expect(foldWarn).toBeDefined();
-    expect(foldWarn!.content).toMatch(/folded \d+ messages/);
+    // The fold now renders as a card in the tool queue: compaction_start →
+    // compaction_end (no more permanent warning divider).
+    const foldStart = events.find((e) => e.role === "compaction_start");
+    expect(foldStart).toBeDefined();
+    const foldEnd = events.find((e) => e.role === "compaction_end");
+    expect(foldEnd).toBeDefined();
+    expect(foldEnd!.folded).toBe(true);
+    expect(foldEnd!.beforeMessages).toBe(beforeMessages);
+    // Dispatch-before-fold: the pending tool call completes BEFORE the
+    // compaction card starts, so a read isn't blocked behind the summary window.
+    const toolIdx = events.findIndex((e) => e.role === "tool" && e.toolName === "probe");
+    const compactIdx = events.findIndex((e) => e.role === "compaction_start");
+    expect(toolIdx).toBeGreaterThanOrEqual(0);
+    expect(compactIdx).toBeGreaterThan(toolIdx);
     expect(loop.log.length).toBeLessThan(beforeMessages);
   }, 30_000);
 
@@ -991,20 +1001,19 @@ describe("CacheFirstLoop (non-streaming)", () => {
       loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 100)}` });
     }
 
-    const events: { role: string; content?: string }[] = [];
+    const events: LoopEvent[] = [];
     for await (const ev of loop.step("continue")) {
-      events.push({ role: ev.role, content: ev.content });
+      events.push(ev);
     }
 
-    // The warning should call out the aggressive tier explicitly.
-    const foldWarn = events.find(
-      (e) => e.role === "warning" && /aggressively folded/.test(e.content ?? ""),
-    );
-    expect(foldWarn).toBeDefined();
-    // And the status line should advertise it too, so users know why
-    // recent context got trimmed harder than usual.
-    const status = events.find((e) => e.role === "status" && /aggressive/.test(e.content ?? ""));
-    expect(status).toBeDefined();
+    // The compaction card advertises the aggressive tier on the start event so
+    // users know why recent context got trimmed harder than usual.
+    const foldStart = events.find((e) => e.role === "compaction_start");
+    expect(foldStart).toBeDefined();
+    expect(foldStart!.aggressive).toBe(true);
+    const foldEnd = events.find((e) => e.role === "compaction_end");
+    expect(foldEnd).toBeDefined();
+    expect(foldEnd!.folded).toBe(true);
   }, 30_000);
 
   it("pre-clips new tool results at dispatch so they never enter the log oversized", async () => {

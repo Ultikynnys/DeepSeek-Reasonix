@@ -1,6 +1,7 @@
 import { COMPACTION_SUMMARY_MARKER } from "@reasonix/core-utils";
 import type { DeepSeekClient } from "./client.js";
 import { Usage } from "./client.js";
+import { pruneUnusedFileReads } from "./file-prune.js";
 import { healLoadedMessages } from "./loop.js";
 import { stripHallucinatedToolMarkup } from "./loop.js";
 import { buildAssistantMessage } from "./loop/messages.js";
@@ -98,8 +99,34 @@ export interface FoldResult {
   beforeMessages: number;
   afterMessages: number;
   summaryChars: number;
+  /** The synthesized summary text (marker already stripped) — lets UIs render the recap inline. */
+  summary?: string;
   /** Why the fold didn't happen, when the summarizer failed (as opposed to a legit nothing-to-fold noop). */
   error?: string;
+  /** Unique file paths whose read results were stubbed by the prune step. */
+  prunedFiles?: number;
+  /** Tokens saved by the prune step (content tokens − stub tokens). */
+  prunedTokens?: number;
+}
+
+/** Per-message token cost includes tool_calls JSON and reasoning_content;
+ *  otherwise heavy tool-call arguments slip through the tail-budget check and
+ *  the boundary slides past the active tool turn. reasoning_content counts
+ *  against API promptTokens and must be passed back round-trip — ignoring it
+ *  causes the fold to underestimate usage by thousands of tokens in
+ *  thinking-mode sessions. No chat-template wrapper here — that would
+ *  double-count. */
+function countMessageTokens(m: ChatMessage): number {
+  let n = countTokensBounded(typeof m.content === "string" ? m.content : "");
+  if (m.role === "assistant") {
+    if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+      n += countTokensBounded(JSON.stringify(m.tool_calls));
+    }
+    if (m.reasoning_content && (m.reasoning_content as string).length > 0) {
+      n += countTokensBounded(m.reasoning_content as string);
+    }
+  }
+  return n;
 }
 
 function buildFoldSummaryInstruction(pinnedSkillNames: string[]): string {
@@ -159,16 +186,7 @@ export class ContextManager {
     const entries = this.deps.log.toMessages();
     let total = 0;
     for (const e of entries) {
-      const content = typeof e.content === "string" ? e.content : "";
-      total += countTokensBounded(content);
-      if (e.role === "assistant") {
-        if (Array.isArray(e.tool_calls) && e.tool_calls.length > 0) {
-          total += countTokensBounded(JSON.stringify(e.tool_calls));
-        }
-        if (e.reasoning_content && (e.reasoning_content as string).length > 0) {
-          total += countTokensBounded(e.reasoning_content as string);
-        }
-      }
+      total += countMessageTokens(e);
     }
     return total;
   }
@@ -220,7 +238,16 @@ export class ContextManager {
 
   async fold(
     model: string,
-    opts?: { keepRecentTokens?: number; requireTailBoundary?: boolean },
+    opts?: {
+      keepRecentTokens?: number;
+      requireTailBoundary?: boolean;
+      /** Never let the fold summarize the most recent user→assistant exchange away —
+       *  clamps the boundary to the last user message even when tool results blew
+       *  the tail budget. Used by the post-response fold, which now runs AFTER
+       *  the current iter's tool dispatch (the exchange is complete but must
+       *  survive into the tail so the model still sees the tool results). */
+      protectActiveExchange?: boolean;
+    },
   ): Promise<FoldResult> {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
     const tailBudget = opts?.keepRecentTokens ?? Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
@@ -237,33 +264,30 @@ export class ContextManager {
     };
     if (all.length === 0) return noop;
 
-    // Per-message token cost includes tool_calls JSON and reasoning_content;
-    // otherwise heavy tool-call arguments slip through the tail-budget check and
-    // the boundary slides past the active tool turn. reasoning_content counts
-    // against API promptTokens and must be passed back round-trip — ignoring it
-    // causes the fold to underestimate usage by thousands of tokens in
-    // thinking-mode sessions. No chat-template wrapper here — that would
-    // double-count.
-    const tokenCounts = all.map((m) => {
-      let n = countTokensBounded(typeof m.content === "string" ? m.content : "");
-      if (m.role === "assistant") {
-        if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-          n += countTokensBounded(JSON.stringify(m.tool_calls));
-        }
-        if (m.reasoning_content && (m.reasoning_content as string).length > 0) {
-          n += countTokensBounded(m.reasoning_content as string);
-        }
-      }
-      return n;
-    });
+    const tokenCounts = all.map(countMessageTokens);
     const totalTokens = tokenCounts.reduce((a, b) => a + b, 0);
 
     let cumTokens = 0;
     let boundary = all.length;
+    // Absolute index of the most recent user message — independent of the budget
+    // walk below (the walk can break before reaching it when tool results are huge).
+    let lastUserIdx = -1;
     for (let i = all.length - 1; i >= 0; i--) {
+      if (lastUserIdx < 0 && all[i]!.role === "user") lastUserIdx = i;
       if (cumTokens + tokenCounts[i]! > tailBudget) break;
       cumTokens += tokenCounts[i]!;
       if (all[i]!.role === "user") boundary = i;
+    }
+    // protectActiveExchange: the post-response fold runs AFTER this iter's tool
+    // dispatch, so the log's tail is [user, assistant(tool_calls), tool results…].
+    // Oversized results can blow the tail budget before the walk reaches the
+    // user message — without the clamp the active exchange would land in the
+    // head, get summarized away, and the model would never see the tool results.
+    // Clamp the boundary to the last user message and recompute the tail cost.
+    if (opts?.protectActiveExchange && lastUserIdx > 0 && boundary > lastUserIdx) {
+      boundary = lastUserIdx;
+      cumTokens = 0;
+      for (let i = boundary; i < all.length; i++) cumTokens += tokenCounts[i]!;
     }
     if (boundary <= 0) return noop;
     // Preflight-only: refuse when no user landed in tail — the active tool turn
@@ -297,13 +321,27 @@ export class ContextManager {
       }
     }
 
-    const head = all.slice(0, boundary);
-    const tail = all.slice(boundary);
     const headTokens = totalTokens - cumTokens;
     if (headTokens < totalTokens * HISTORY_FOLD_MIN_SAVINGS_FRACTION) return noop;
 
-    const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(head);
-    const summary = await this.summarizeForFold(head, pinnedNames, headTokens);
+    // Step 2 — prune unused files. read_file results whose path is never
+    // referenced again are the bulk of long-session heads; stubbing them (a)
+    // shrinks the summarizer request — the step that used to ship every dead
+    // file body and time out on 240k-token heads — and (b) keeps the
+    // surviving tail from carrying dead cache bytes into the next turn.
+    // Runs on a copy; the log is only touched if the fold commits below.
+    // Message count is preserved, so the merge-at-commit slice below stays
+    // valid. Active-exchange reads (after the last user message) are exempt.
+    const pruned = pruneUnusedFileReads(all);
+    const prunedHead = pruned.messages.slice(0, boundary);
+    const prunedTail = pruned.messages.slice(boundary);
+    // Deadline scales with what the summarizer actually ships — the pruned
+    // head — not the original, so dead file bodies no longer inflate the
+    // fold window.
+    const prunedHeadTokens = prunedHead.reduce((acc, m) => acc + countMessageTokens(m), 0);
+
+    const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(prunedHead);
+    const summary = await this.summarizeForFold(prunedHead, pinnedNames, prunedHeadTokens);
     if (!summary.content) {
       // Summarizer failure — surface it so the loop can warn instead of the
       // "compacting history…" status silently no-opping. Turn aborts are
@@ -350,7 +388,7 @@ export class ContextManager {
       };
     }
     const liveAppends = liveEntries.slice(all.length);
-    const replacement = [summaryMsg, ...tail, ...liveAppends];
+    const replacement = [summaryMsg, ...prunedTail, ...liveAppends];
     this.deps.log.compactInPlace(replacement);
     // Sync commit ordering: in-memory swap first, then the full-file atomic
     // rewrite. Both are synchronous, so this method cannot resolve until the
@@ -363,6 +401,10 @@ export class ContextManager {
       beforeMessages: all.length,
       afterMessages: replacement.length,
       summaryChars: summary.content.length,
+      summary: summary.content,
+      ...(pruned.prunedFiles.length > 0
+        ? { prunedFiles: pruned.prunedFiles.length, prunedTokens: pruned.tokensSaved }
+        : {}),
     };
   }
 

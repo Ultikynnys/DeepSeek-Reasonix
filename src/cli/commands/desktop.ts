@@ -102,12 +102,15 @@ import {
 } from "../../index.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
 import {
+  type ModelPrefs,
+  type SessionMeta,
   deleteSession,
   listSessionsForWorkspace,
   loadSessionMessages,
   loadSessionMeta,
   patchSessionMeta,
   patchSessionWorkspaceIfMissing,
+  resolveSessionModelPrefs,
   sessionPath,
   timestampSuffix,
 } from "../../memory/session.js";
@@ -224,6 +227,7 @@ type InMessage = { tabId?: string } & (
   | { cmd: "retry" }
   | { cmd: "btw"; text: string }
   | { cmd: "desktop_resync" }
+  | { cmd: "rewind"; userTurn: number }
   | { cmd: "cancel_tool" }
 );
 
@@ -553,6 +557,12 @@ interface BtwResultEvent {
   answer: string;
 }
 
+interface RewindResultEvent {
+  type: "$rewind_result";
+  turn: number;
+  text: string;
+}
+
 /** Direct fd write — bypasses Node's stream layer (and its piped-output
  *  block buffering) so every JSON line reaches Rust the moment it's
  *  produced, not whenever the next 8 KB flushes. */
@@ -582,6 +592,7 @@ type EmittableEvent =
   | MentionPreviewEvent
   | RetryResultEvent
   | BtwResultEvent
+  | RewindResultEvent
   | TabOpenedEvent
   | TabClosedEvent
   | McpSpecsEvent
@@ -759,7 +770,7 @@ function emitSettings(tab: Tab): void {
   emit(
     {
       type: "$settings",
-      reasoningEffort: loadReasoningEffort(),
+      reasoningEffort: tab.currentReasoningEffort,
       editMode,
       budgetUsd: tab.runtime?.loop.budgetUsd ?? null,
       baseUrl: ep.baseUrl,
@@ -850,6 +861,9 @@ function loadSessionIntoTab(
   actions.cancelPendingGates(tab);
   tab.currentSession = name;
   actions.persistOpenTabs();
+  // Rebind model + effort to the conversation's stored pair before the
+  // runtime rebuild, so the loop is constructed with the right model.
+  restoreSessionModelPrefs(tab, meta);
   if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
   const loadedMessages = buildLoadedMessages(records);
   if (loadedMessages.length === 0) {
@@ -879,6 +893,7 @@ function loadSessionIntoTab(
     tab.id,
   );
   emitCtxBreakdown(tab);
+  emitSettings(tab);
   if (backfilledWorkspace) emitSessions(tab);
 }
 
@@ -1013,6 +1028,8 @@ interface Tab {
   rootDir: string;
   currentSession: string;
   currentModel: string;
+  /** Per-tab reasoning effort — restored from the session's meta on load so a config reset doesn't flip it back to the global default. */
+  currentReasoningEffort: import("../../config.js").ReasoningEffort;
   budgetUsd: number | undefined;
   /** null while the tab is bootstrapping — see `initTabToolset`. UI gates input on `$ready`, which only fires once this is set. */
   toolset: Awaited<ReturnType<typeof buildCodeToolset>> | null;
@@ -1045,14 +1062,68 @@ function nextTabId(): string {
   return `t${tabCounter}`;
 }
 
-function mintSessionFor(rootDir: string): string {
+function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
   const name = `desktop-${timestampSuffix()}-${tabCounter}`;
   try {
-    patchSessionMeta(name, { workspace: rootDir });
+    patchSessionMeta(name, prefs ? { workspace: rootDir, ...prefs } : { workspace: rootDir });
   } catch {
     // session meta is for filtering only — failure shouldn't block chat
   }
   return name;
+}
+
+/** The user changed the model/effort enum in the desktop UI — persist the new
+ *  pair into the open conversation's meta so a resume (even after a reinstall
+ *  wiped the config) restores it. */
+function persistSessionModelPrefs(tab: Tab): void {
+  if (!tab.currentSession) return;
+  try {
+    patchSessionMeta(tab.currentSession, {
+      model: tab.currentModel,
+      reasoningEffort: tab.currentReasoningEffort,
+    });
+  } catch {
+    /* meta is best-effort — failure shouldn't block the settings change */
+  }
+}
+
+/** Record the conversation's model/effort on its first turn — but never
+ *  overwrite what's already stored: only an explicit UI change
+ *  (settings_save) or a freshly minted session writes after that. */
+function stampSessionModelPrefs(tab: Tab): void {
+  if (!tab.currentSession) return;
+  try {
+    const meta = loadSessionMeta(tab.currentSession);
+    if (meta.model !== undefined && meta.reasoningEffort !== undefined) return;
+    patchSessionMeta(tab.currentSession, {
+      model: meta.model ?? tab.currentModel,
+      reasoningEffort: meta.reasoningEffort ?? tab.currentReasoningEffort,
+    });
+  } catch {
+    /* meta is best-effort */
+  }
+}
+
+/** Rebind the tab's model + effort to the conversation's stored pair — a
+ *  reinstall wiped the global config, but the conversation comes back on the
+ *  model it was using. Sessions without stored prefs keep the tab's pair. */
+function restoreSessionModelPrefs(tab: Tab, meta: SessionMeta): void {
+  const prefs = resolveSessionModelPrefs(meta, {
+    model: tab.currentModel,
+    reasoningEffort: tab.currentReasoningEffort,
+  });
+  if (prefs.model !== tab.currentModel) {
+    tab.currentModel = prefs.model;
+    // The system prompt embeds the model id — refresh it when the model
+    // changes so tool guidance matches the restored model.
+    if (tab.toolset) {
+      tab.system = codeSystemPrompt(tab.rootDir, {
+        hasSemanticSearch: tab.toolset.semantic.enabled,
+        modelId: tab.currentModel,
+      });
+    }
+  }
+  tab.currentReasoningEffort = prefs.reasoningEffort;
 }
 
 function buildRuntimeFor(tab: Tab): RuntimeState {
@@ -1062,7 +1133,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   const ep = loadEndpoint();
   const client = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
-  const reasoningEffort = loadReasoningEffort();
+  const reasoningEffort = tab.currentReasoningEffort;
   const loop = new CacheFirstLoop({
     client,
     prefix,
@@ -1505,6 +1576,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       rootDir: dir,
       currentSession: "",
       currentModel: model,
+      currentReasoningEffort: loadReasoningEffort(),
       budgetUsd: opts.budgetUsd,
       toolset: null,
       system: "",
@@ -1524,7 +1596,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       switching: false,
       hooks: loadHooks({ projectRoot: dir }),
     };
-    tab.currentSession = mintSessionFor(dir);
+    tab.currentSession = mintSessionFor(dir, {
+      model: tab.currentModel,
+      reasoningEffort: tab.currentReasoningEffort,
+    });
     tabs.set(tab.id, tab);
     return tab;
   }
@@ -1643,6 +1718,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   async function runTurn(tab: Tab, text: string, fromQQ = false): Promise<void> {
     if (!tab.runtime) return;
     const rt = tab.runtime;
+    // First turn of a fresh conversation records the model/effort it runs
+    // with; a later resume restores them even after a reinstall wiped the
+    // config. Never overwrites an existing stored pair (see stampSessionModelPrefs).
+    stampSessionModelPrefs(tab);
     tab.aborter = new AbortController();
     if (fromQQ) markQQTurnStarted(qqRuntime.routing, tab.id);
     let lastAssistantText = "";
@@ -1909,7 +1988,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // still run BEFORE we emit any UI event, otherwise the surface flickers
     // a card that we'd immediately tear down.
     const auto = autoResolveVerdict(req, loadEditMode());
-    if (auto !== null) {
+    if (auto?.kind === "instant") {
       // plan_checkpoint specifically needs the step-completed signal to flow
       // through so the rail progress ticks. Emit it before resolving.
       if (req.kind === "plan_checkpoint") {
@@ -1941,9 +2020,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
       }
       if (tab) tab.pendingGateIds.delete(req.id);
-      pauseGate.resolve(req.id, auto);
+      pauseGate.resolve(req.id, auto.verdict);
       return;
     }
+    // YOLO plan gates: surface the picker with a countdown — the frontend
+    // auto-selects the first option (approve / accept rewrite) at expiry via
+    // the normal plan_response / revision_response path.
+    const countdownMs = auto?.kind === "countdown" ? auto.ms : undefined;
     if (req.kind === "run_command" || req.kind === "run_background") {
       const payload = req.payload as {
         command?: string;
@@ -2032,6 +2115,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           plan: payload.plan,
           steps: payload.steps,
           summary: payload.summary,
+          ...(countdownMs !== undefined ? { countdownMs } : {}),
         },
         tabId,
       );
@@ -2089,6 +2173,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           reason: payload.reason,
           remainingSteps: payload.remainingSteps,
           summary: payload.summary,
+          ...(countdownMs !== undefined ? { countdownMs } : {}),
         },
         tabId,
       );
@@ -2125,6 +2210,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           const msgs = buildLoadedMessages(loadSessionMessages(restore.session));
           if (msgs.length > 0) {
             tab.currentSession = restore.session;
+            // Restore the conversation's stored model/effort so the system
+            // prompt + runtime (built by initTabToolset) use them.
+            restoreSessionModelPrefs(tab, loadSessionMeta(tab.currentSession));
             restoredMessages = msgs;
           }
         }
@@ -2642,7 +2730,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       if (tab.aborter) tab.switching = true;
       abortTurn(tab);
       cancelPendingGates(tab);
-      tab.currentSession = mintSessionFor(tab.rootDir);
+      tab.currentSession = mintSessionFor(tab.rootDir, {
+        model: tab.currentModel,
+        reasoningEffort: tab.currentReasoningEffort,
+      });
       persistOpenTabs();
       if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
       emitSessions(tab);
@@ -2660,7 +2751,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         if (msg.reasoningEffort !== undefined && isReasoningEffort(msg.reasoningEffort)) {
           saveReasoningEffort(msg.reasoningEffort);
+          tab.currentReasoningEffort = msg.reasoningEffort;
           tab.runtime?.loop.configure({ reasoningEffort: msg.reasoningEffort });
+          persistSessionModelPrefs(tab);
         }
         if (msg.editMode !== undefined) {
           saveEditMode(msg.editMode);
@@ -2721,6 +2814,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           if (next) {
             tab.currentModel = next;
             saveModel(next);
+            persistSessionModelPrefs(tab);
             if (tab.toolset) {
               tab.system = codeSystemPrompt(tab.rootDir, {
                 hasSemanticSearch: tab.toolset.semantic.enabled,
@@ -2926,9 +3020,33 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         );
         return;
       }
-      void tab.runtime.loop
+      // Compaction card lifecycle — same queue as tool cards: emit
+      // compaction.started, run the fold, emit compaction.finished so the UI
+      // shows a running spinner → folded-result card instead of a silent
+      // multi-minute wait with nothing on screen.
+      const rt = tab.runtime;
+      const compactionId = `compaction-${Date.now()}`;
+      const turn = rt.loop.currentTurn;
+      emit(rt.eventizer.emitCompactionStarted(turn, compactionId, "user"), tab.id);
+      void rt.loop
         .compactHistory()
-        .then(() => emitCtxBreakdown(tab))
+        .then((result) => {
+          emit(
+            rt.eventizer.emitCompactionFinished(compactionId, {
+              turn,
+              folded: result.folded,
+              beforeMessages: result.beforeMessages,
+              afterMessages: result.afterMessages,
+              summaryChars: result.summaryChars,
+              ...(result.summary ? { summary: result.summary } : {}),
+              ...(result.error ? { error: result.error } : {}),
+              ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
+              ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
+            }),
+            tab.id,
+          );
+          emitCtxBreakdown(tab);
+        })
         .catch((err: Error) => {
           emit({ type: "$error", message: `/compact failed: ${err.message}` }, tab.id);
         });
@@ -2939,6 +3057,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       const prev = tab.runtime.loop.retryLastUser();
       if (prev) {
         emit({ type: "$retry_result", text: prev }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "rewind") {
+      if (!tab.runtime) return;
+      const prev = tab.runtime.loop.rewindToUserTurn(msg.userTurn);
+      if (prev) {
+        emit({ type: "$rewind_result", turn: msg.userTurn, text: prev }, tab.id);
       }
       return;
     }

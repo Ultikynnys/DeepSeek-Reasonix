@@ -189,4 +189,77 @@ describe("Eventizer.consume", () => {
     expect(s.args).toBe("off");
     expect(s.id).toBeGreaterThan(u.id);
   });
+
+  it("maps compaction_start / compaction_end into card lifecycle events", () => {
+    const e = new Eventizer();
+    e.consume(lev({ turn: 1 }), ctx); // burn turn-start
+    const start = e.consume(
+      lev({
+        turn: 1,
+        role: "compaction_start",
+        compactionId: "compaction-1",
+        compactionReason: "auto-context-pressure",
+        aggressive: true,
+      }),
+      ctx,
+    );
+    expect(start.length).toBe(1);
+    expect(start[0]).toMatchObject({
+      type: "compaction.started",
+      compactionId: "compaction-1",
+      reason: "auto-context-pressure",
+      aggressive: true,
+    });
+
+    const end = e.consume(
+      lev({
+        turn: 1,
+        role: "compaction_end",
+        compactionId: "compaction-1",
+        folded: true,
+        beforeMessages: 243,
+        afterMessages: 63,
+        summaryChars: 2912,
+        summary: "recap text",
+      }),
+      ctx,
+    );
+    expect(end.length).toBe(1);
+    expect(end[0]).toMatchObject({
+      type: "compaction.finished",
+      compactionId: "compaction-1",
+      folded: true,
+      beforeMessages: 243,
+      afterMessages: 63,
+      summaryChars: 2912,
+      summary: "recap text",
+    });
+  });
+
+  it("routes user-triggered compaction through the emit helpers with a shared compactionId", () => {
+    const e = new Eventizer();
+    e.consume(lev({ turn: 1 }), ctx); // burn turn-start
+    const start = e.emitCompactionStarted(1, "compaction-u1", "user");
+    const end = e.emitCompactionFinished("compaction-u1", {
+      turn: 1,
+      folded: false,
+      beforeMessages: 12,
+      afterMessages: 12,
+      summaryChars: 0,
+    });
+    expect(start).toMatchObject({
+      type: "compaction.started",
+      compactionId: "compaction-u1",
+      reason: "user",
+    });
+    expect(end).toMatchObject({
+      type: "compaction.finished",
+      compactionId: "compaction-u1",
+      folded: false,
+      beforeMessages: 12,
+      afterMessages: 12,
+    });
+    expect(start.aggressive).toBeUndefined();
+    expect(end.id).toBeGreaterThan(start.id);
+  });
 });

@@ -15,7 +15,12 @@ export type EventRole =
   /** Transient indicator for silent phases; UI clears on next primary event. */
   | "status"
   /** Mid-turn steer injected as queued user guidance without aborting the current turn. */
-  | "steer";
+  | "steer"
+  /** Compaction card lifecycle — mirrors tool_start/tool so UIs can render a
+   *  compaction card in the same queue as tool cards. Start carries the reason,
+   *  end carries the FoldResult. Never emitted without a matching end. */
+  | "compaction_start"
+  | "compaction_end";
 
 /** "low" = chatty / self-correcting / counter — Desktop+Dashboard filter these out by default.
  *  Undefined / "high" = real event the user should see (compaction, abort, budget, rate-limit, etc.).
@@ -52,4 +57,26 @@ export interface LoopEvent {
   };
   /** Display-only — code-mode applier MUST skip SEARCH/REPLACE in forced-summary text. */
   forcedSummary?: boolean;
+  /** Stable id pairing compaction_start with its compaction_end — the UI keys the card by it. */
+  compactionId?: string;
+  /** Why the fold runs — "user" = /compact, "auto-context-pressure" = loop-internal fold. */
+  compactionReason?: "user" | "auto-context-pressure";
+  /** True when the fold is in the 70-85% aggressive band — user-facing messaging. */
+  aggressive?: boolean;
+  /** compaction_end: whether the fold actually replaced the log. */
+  folded?: boolean;
+  /** compaction_end: message count before the fold. */
+  beforeMessages?: number;
+  /** compaction_end: message count after the fold. */
+  afterMessages?: number;
+  /** compaction_end: length of the synthesized summary, in characters. */
+  summaryChars?: number;
+  /** compaction_end: the synthesized summary text (marker already stripped by the fold). */
+  summary?: string;
+  /** compaction_end: why the fold didn't happen, when the summarizer failed. */
+  foldError?: string;
+  /** compaction_end: unique file paths whose read results were pruned by the fold's prune step. */
+  prunedFiles?: number;
+  /** compaction_end: tokens saved by the prune step. */
+  prunedTokens?: number;
 }

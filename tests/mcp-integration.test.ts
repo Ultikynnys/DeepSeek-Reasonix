@@ -11,7 +11,7 @@ import { ToolRegistry } from "../src/tools.js";
 // works everywhere Node 22+ is installed (which is our engines target) and
 // avoids the Windows `.cmd` resolution gotcha in child_process.spawn.
 const NODE_CMD = process.execPath;
-const DEMO_SERVER_ARGS = ["--import", "tsx", "examples/mcp-server-demo.ts"];
+const DEMO_SERVER_ARGS = ["--import", "tsx", "tests/fixtures/mcp-server-demo.ts"];
 
 describe("MCP integration — real subprocess against bundled demo server", () => {
   let client: McpClient | null = null;

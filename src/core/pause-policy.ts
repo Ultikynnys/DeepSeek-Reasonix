@@ -3,21 +3,33 @@
 import type { EditMode } from "../config.js";
 import type { PauseRequest } from "./pause-gate.js";
 
+/** YOLO plan gates wait this long for the user to pick before auto-selecting the first option. */
+export const YOLO_PLAN_COUNTDOWN_MS = 10_000;
+
 /** Mirrors shell.ts's allowAll bypass: only review still pauses on checkpoints. */
 export function shouldAutoResolveCheckpoint(editMode: EditMode): boolean {
   return editMode === "auto" || editMode === "yolo";
 }
 
-/** null = surface to user; non-null = resolve gate immediately with this verdict. */
-export function autoResolveVerdict(req: PauseRequest, editMode: EditMode): unknown | null {
+export type AutoResolveOutcome =
+  | { kind: "instant"; verdict: unknown }
+  | { kind: "countdown"; verdict: unknown; ms: number };
+
+/** null = surface to user indefinitely; instant = resolve gate immediately;
+ *  countdown = surface the picker — the UI shows a countdown and resolves with
+ *  `verdict` (the first option) when it expires without a user pick. */
+export function autoResolveVerdict(
+  req: PauseRequest,
+  editMode: EditMode,
+): AutoResolveOutcome | null {
   if (req.kind === "plan_checkpoint" && shouldAutoResolveCheckpoint(editMode)) {
-    return { type: "continue" };
+    return { kind: "instant", verdict: { type: "continue" } };
   }
   // yolo mirrors shell.ts's allowAll bypass — outside-sandbox reads/writes pass
   // through too. Stays "run_once" rather than "always_allow" so the YOLO session
   // doesn't pollute the on-disk allowlist with every transient path it touched.
   if (req.kind === "path_access" && editMode === "yolo") {
-    return { type: "run_once" };
+    return { kind: "instant", verdict: { type: "run_once" } };
   }
   // Shell commands in YOLO: shell.ts's `allowAll` callback should already have
   // skipped gate.ask for these, but the closure reads on-disk config via
@@ -27,14 +39,19 @@ export function autoResolveVerdict(req: PauseRequest, editMode: EditMode): unkno
   // `run_once` matches shell.ts's behavior — don't pollute the persistent
   // allowlist with every transient command.
   if ((req.kind === "run_command" || req.kind === "run_background") && editMode === "yolo") {
-    return { type: "run_once" };
+    return { kind: "instant", verdict: { type: "run_once" } };
   }
-  // YOLO: plan_proposed — the plan gate would strand the loop on an approval
-  // picker nobody is watching (headless/ACP/YOLO). Auto-approve so the model
-  // can execute the plan without blocking. plan_checkpoint below is already
-  // auto-continued; this closes the remaining interaction gap.
+  // YOLO: plan_proposed — instead of approving instantly, surface the picker
+  // with a countdown so a watching user can still cancel/refine; the first
+  // option (approve) is auto-selected when the window elapses.
   if (req.kind === "plan_proposed" && editMode === "yolo") {
-    return { type: "approve" };
+    return { kind: "countdown", verdict: { type: "approve" }, ms: YOLO_PLAN_COUNTDOWN_MS };
+  }
+  // YOLO: plan_revision — without this the rewrite gate surfaces and stalls
+  // forever (nobody is watching in headless/YOLO). Same countdown semantics:
+  // the first option (accept rewrite) is auto-selected after the window.
+  if (req.kind === "plan_revision" && editMode === "yolo") {
+    return { kind: "countdown", verdict: { type: "accepted" }, ms: YOLO_PLAN_COUNTDOWN_MS };
   }
   // YOLO: an ask_choice branch question would strand the loop on a picker
   // nobody is watching (headless/ACP runs especially) — auto-pick the first
@@ -44,8 +61,10 @@ export function autoResolveVerdict(req: PauseRequest, editMode: EditMode): unkno
     const payload = req.payload as { options?: unknown[] };
     const first = Array.isArray(payload.options) ? payload.options[0] : undefined;
     const id = first && typeof first === "object" ? (first as { id?: unknown }).id : undefined;
-    if (typeof id === "string" && id.length > 0) return { type: "pick", optionId: id };
-    return { type: "cancel" };
+    if (typeof id === "string" && id.length > 0) {
+      return { kind: "instant", verdict: { type: "pick", optionId: id } };
+    }
+    return { kind: "instant", verdict: { type: "cancel" } };
   }
   return null;
 }

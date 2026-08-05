@@ -5,7 +5,6 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
-import { type ThemeName, isThemeName, resolveThemeName } from "./cli/ui/theme/tokens.js";
 import { atomicWriteSync } from "./core/atomic-write.js";
 import type { LanguageCode } from "./i18n/types.js";
 import {
@@ -15,6 +14,7 @@ import {
 } from "./index/config.js";
 import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
 import { normalizeQQAllowlist, normalizeQQOpenId } from "./qq/access.js";
+import { type ThemeName, isThemeName, resolveThemeName } from "./theme/tokens.js";
 import {
   type NormalizedToolRateLimitConfig,
   type ToolRateLimitConfig,

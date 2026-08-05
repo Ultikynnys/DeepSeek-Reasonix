@@ -2314,7 +2314,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   opacity: 1;
 }
 .msg-actions .copy-btn,
-.msg-actions .edit-btn {
+.msg-actions .rewind-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2329,9 +2329,14 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   box-shadow: var(--shadow-sm);
 }
 .msg-actions .copy-btn:hover,
-.msg-actions .edit-btn:hover {
+.msg-actions .rewind-btn:hover {
   color: var(--fg-2);
   border-color: var(--border-strong);
+}
+.msg-actions .rewind-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
 }
 .msg-actions .copy-btn.done {
   color: var(--success);

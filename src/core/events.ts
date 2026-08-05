@@ -196,6 +196,33 @@ export interface SessionCompactedEvent extends EventBase {
   replacementMessages: ReadonlyArray<ChatMessage>;
 }
 
+export interface CompactionStartedEvent extends EventBase {
+  type: "compaction.started";
+  /** Stable id pairing start with its finished event — the UI keys the card by it. */
+  compactionId: string;
+  reason: "user" | "auto-context-pressure";
+  /** True when the fold is in the 70-85% aggressive band — user-facing messaging. */
+  aggressive?: boolean;
+}
+
+export interface CompactionFinishedEvent extends EventBase {
+  type: "compaction.finished";
+  /** Same compactionId as the matching started event. */
+  compactionId: string;
+  folded: boolean;
+  beforeMessages: number;
+  afterMessages: number;
+  summaryChars: number;
+  /** The synthesized summary text — lets the card render the recap inline. */
+  summary?: string;
+  /** Why the fold didn't happen, when the summarizer failed (timeout / API error). */
+  error?: string;
+  /** Unique file paths whose read results were pruned by the fold's prune step. */
+  prunedFiles?: number;
+  /** Tokens saved by the prune step. */
+  prunedTokens?: number;
+}
+
 export interface CapabilityRegisteredEvent extends EventBase {
   type: "capability.registered";
   name: string;
@@ -259,6 +286,8 @@ export type Event =
   | EscalatedEvent
   | SessionOpenedEvent
   | SessionCompactedEvent
+  | CompactionStartedEvent
+  | CompactionFinishedEvent
   | CapabilityRegisteredEvent
   | CapabilityRemovedEvent
   | StatusEvent

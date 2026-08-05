@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
+import { type ReasoningEffort, isReasoningEffort } from "../config.js";
 import { atomicWriteSync } from "../core/atomic-write.js";
 import type { ChatMessage } from "../types.js";
 
@@ -71,6 +72,10 @@ export interface SessionMeta {
   lastPromptTokens?: number;
   /** True when the session filename/summary was generated from conversation content. */
   autoTitleGenerated?: boolean;
+  /** Model the conversation last ran with — restored on resume so a reinstall / config reset doesn't silently switch an ongoing conversation's model. Only the desktop UI's model enum writes this. */
+  model?: string;
+  /** Reasoning effort the conversation last ran with — same resume semantics as `model`. */
+  reasoningEffort?: ReasoningEffort;
   /** Source app when the session was imported from another local AI client. */
   importedSource?: "claude" | "codex";
   /** Absolute path of the source transcript used for import. */
@@ -309,6 +314,23 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
     /* chmod not supported */
   }
   return next;
+}
+
+export interface ModelPrefs {
+  model: string;
+  reasoningEffort: ReasoningEffort;
+}
+
+/** Pick the conversation's stored model/effort pair, validated against the
+ *  stored types; anything missing or malformed falls back to the caller's
+ *  current defaults. Kept pure so desktop restore logic is testable. */
+export function resolveSessionModelPrefs(meta: SessionMeta, fallback: ModelPrefs): ModelPrefs {
+  return {
+    model: typeof meta.model === "string" && meta.model.trim() ? meta.model.trim() : fallback.model,
+    reasoningEffort: isReasoningEffort(meta.reasoningEffort)
+      ? meta.reasoningEffort
+      : fallback.reasoningEffort,
+  };
 }
 
 /** Renames the JSONL plus all known sidecars together; returns false if target already exists. */

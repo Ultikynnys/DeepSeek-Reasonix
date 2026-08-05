@@ -37,10 +37,15 @@ import {
   defaultStyleForTheme,
   isFontFamily,
   isFontScale,
-  isTheme,
-  isThemeStyle,
   themeForStyle,
 } from "./theme";
+import {
+  DEFAULT_TAB_THEME,
+  type TabTheme,
+  clearTabTheme,
+  readTabTheme,
+  writeTabTheme,
+} from "./tab-theme";
 import type {
   CheckpointVerdict,
   ChoiceVerdict,
@@ -132,6 +137,24 @@ export type AssistantSegment =
       result?: string;
       ok?: boolean;
       durationMs?: number;
+    }
+  | {
+      kind: "compaction";
+      /** compactionId pairing the started event with its finished event. */
+      id: string;
+      /** running → spinner; done → folded result; failed → error; idle → nothing to fold. */
+      state: "running" | "done" | "failed" | "idle";
+      reason: "user" | "auto-context-pressure";
+      aggressive?: boolean;
+      beforeMessages?: number;
+      afterMessages?: number;
+      summaryChars?: number;
+      summary?: string;
+      error?: string;
+      /** Unique file paths whose read results were pruned by the fold's prune step. */
+      prunedFiles?: number;
+      /** Tokens saved by the prune step. */
+      prunedTokens?: number;
     };
 
 export type SkillOrigin = {
@@ -180,6 +203,8 @@ export type PendingPlan = {
   plan: string;
   summary?: string;
   steps?: PlanStep[];
+  /** YOLO auto-approval window (ms) — the card auto-picks the first option at expiry. */
+  countdownMs?: number;
 };
 
 export type PlanStep = {
@@ -212,6 +237,8 @@ export type PendingRevision = {
   reason: string;
   remainingSteps: PlanStep[];
   summary?: string;
+  /** YOLO auto-approval window (ms) — the card auto-picks accept rewrite at expiry. */
+  countdownMs?: number;
 };
 
 export type UsageStats = {
@@ -834,7 +861,13 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ...state,
         pendingPlans: [
           ...state.pendingPlans,
-          { id: ev.id, plan: ev.plan, summary: ev.summary, ...(steps ? { steps } : {}) },
+          {
+            id: ev.id,
+            plan: ev.plan,
+            summary: ev.summary,
+            countdownMs: ev.countdownMs,
+            ...(steps ? { steps } : {}),
+          },
         ],
       };
     }
@@ -864,6 +897,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
             reason: ev.reason,
             remainingSteps: ev.remainingSteps,
             summary: ev.summary,
+            countdownMs: ev.countdownMs,
           },
         ],
       };
@@ -1234,8 +1268,60 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           return mutated ? { ...m, segments: segs } : m;
         }),
       };
+    case "compaction.started": {
+      // Compaction card joins the assistant queue like a tool card — attached to
+      // the last assistant message (the running turn for auto folds; the previous
+      // turn for user-triggered /compact while idle). Creates a message if none
+      // exists yet.
+      const seg: AssistantSegment = {
+        kind: "compaction",
+        id: ev.compactionId,
+        state: "running",
+        reason: ev.reason,
+        ...(ev.aggressive ? { aggressive: true } : {}),
+      };
+      let attached = false;
+      const messages = state.messages.map((m) => {
+        if (attached || m.kind !== "assistant") return m;
+        attached = true;
+        return { ...m, segments: [...m.segments, seg] };
+      });
+      if (!attached) {
+        messages.push({ kind: "assistant", turn: ev.turn, segments: [seg], pending: false });
+      }
+      return { ...state, messages };
+    }
+    case "compaction.finished": {
+      const patch = (s: AssistantSegment): AssistantSegment => {
+        if (s.kind !== "compaction" || s.id !== ev.compactionId) return s;
+        return {
+          ...s,
+          state: ev.error ? "failed" : ev.folded ? "done" : "idle",
+          beforeMessages: ev.beforeMessages,
+          afterMessages: ev.afterMessages,
+          summaryChars: ev.summaryChars,
+          ...(ev.summary ? { summary: ev.summary } : {}),
+          ...(ev.error ? { error: ev.error } : {}),
+          ...(ev.prunedFiles ? { prunedFiles: ev.prunedFiles } : {}),
+          ...(ev.prunedTokens ? { prunedTokens: ev.prunedTokens } : {}),
+        };
+      };
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.kind === "assistant" ? { ...m, segments: m.segments.map(patch) } : m,
+        ),
+      };
+    }
     case "$retry_result":
       return { ...state, retryText: ev.text, retryNonce: state.retryNonce + 1 };
+    case "$rewind_result":
+      return {
+        ...state,
+        messages: state.messages.filter((m) => "turn" in m && m.turn <= ev.turn),
+        retryText: ev.text,
+        retryNonce: state.retryNonce + 1,
+      };
     case "$btw_result":
       return {
         ...state,
@@ -1281,6 +1367,10 @@ function formatConversationMarkdown(messages: ChatMessage[], userLabel: string):
               const arg = s.args ? `\n\n\`\`\`json\n${s.args}\n\`\`\`` : "";
               const res = s.result ? `\n\n\`\`\`\n${s.result}\n\`\`\`` : "";
               return `> **${t("app.exportToolLabel")} · \`${s.name}\`**${arg}${res}`;
+            }
+            if (s.kind === "compaction") {
+              if (s.state !== "done" || s.beforeMessages === undefined) return "";
+              return `> **${t("cards.compactionName")}** — ${s.beforeMessages} → ${s.afterMessages} messages`;
             }
             return "";
           })
@@ -1739,10 +1829,16 @@ function TabRuntime({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.retryNonce]);
 
-  const onEditUserMsg = useCallback((t: string) => {
-    setDraft(t);
-    composerRef.current?.focus();
-  }, []);
+  const onRewindUserMsg = useCallback(
+    (turn: number, text: string) => {
+      // Rewinding mid-stream would truncate the log under a running turn.
+      if (state.busy) return;
+      setDraft(text);
+      composerRef.current?.focus();
+      sendRpc({ cmd: "rewind", userTurn: turn - 1 });
+    },
+    [sendRpc, state.busy],
+  );
 
   useEffect(() => {
     if (state.busy || !state.ready || state.queuedSends.length === 0) return;
@@ -2347,7 +2443,13 @@ function TabRuntime({
                       return (
                         <div key={`u-${i}`} data-turn={m.turn}>
                           {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
-                          <UserMsg text={m.text} skill={m.skill} onEdit={onEditUserMsg} />
+                          <UserMsg
+                            text={m.text}
+                            skill={m.skill}
+                            turn={m.turn}
+                            disabled={state.busy}
+                            onRewind={onRewindUserMsg}
+                          />
                         </div>
                       );
                     }
@@ -3392,18 +3494,10 @@ export function App() {
     const v = localStorage.getItem("reasonix.currency");
     return v === "USD" ? "USD" : "CNY";
   });
-  const [theme, setTheme] = useState<Theme>(() => {
-    const v = localStorage.getItem("reasonix.theme");
-    const style = localStorage.getItem("reasonix.themeStyle");
-    if (isThemeStyle(style)) return themeForStyle(style);
-    return isTheme(v) ? v : THEME.DARK;
-  });
-  const [themeStyle, setThemeStyle] = useState<ThemeStyle>(() => {
-    const style = localStorage.getItem("reasonix.themeStyle");
-    if (isThemeStyle(style)) return style;
-    const storedTheme = localStorage.getItem("reasonix.theme");
-    return defaultStyleForTheme(isTheme(storedTheme) ? storedTheme : THEME.DARK);
-  });
+  // Per-tab theme map — each tab keeps its own theme/style so switching tabs
+  // never mixes them up. Entries are seeded on $tab_opened and dropped on
+  // $tab_closed; the active tab's entry drives document.documentElement.
+  const [tabThemes, setTabThemes] = useState<Record<string, TabTheme>>({});
   const [fontScale, setFontScale] = useState<FontScale>(() => {
     const v = localStorage.getItem("reasonix.fontScale");
     return isFontScale(v) ? v : FONT_SCALE.MEDIUM;
@@ -3435,12 +3529,16 @@ export function App() {
   const visibleCtx = ctxCollapsed ? 0 : ctxWidth;
   const threadMaxWidth = getThreadMaxWidth({ viewportWidth, visibleSide, visibleCtx });
 
+  const activeTabTheme = activeTabId ? tabThemes[activeTabId] : undefined;
+
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.dataset.themeStyle = themeStyle;
-    localStorage.setItem("reasonix.theme", theme);
-    localStorage.setItem("reasonix.themeStyle", themeStyle);
-  }, [theme, themeStyle]);
+    // Chrome outside the per-tab .app subtree (update overlay, startup
+    // failure) follows the active tab's theme; each tab's own subtree is
+    // themed by its own data-theme attributes.
+    if (!activeTabTheme) return;
+    document.documentElement.dataset.theme = activeTabTheme.theme;
+    document.documentElement.dataset.themeStyle = activeTabTheme.themeStyle;
+  }, [activeTabTheme]);
 
   // Sync --composer-max-width to .app (separate from inline style to avoid React override)
   const composerRef = useRef<HTMLElement | null>(null);
@@ -3621,6 +3719,18 @@ export function App() {
                   ? prev
                   : [...prev, { id: tabId, workspaceDir: ev.workspaceDir }],
               );
+              // Seed the tab's own theme: its stored keys first, then the
+              // legacy global keys (migration), then inherit whatever the
+              // active tab was showing. Persist immediately so an inherited
+              // theme survives restarts.
+              setTabThemes((prev) => {
+                if (prev[tabId]) return prev;
+                const stored = readTabTheme(localStorage, tabId);
+                const inherit = prev[activeTabId] ?? DEFAULT_TAB_THEME;
+                const next = stored ?? inherit;
+                writeTabTheme(localStorage, tabId, next);
+                return { ...prev, [tabId]: next };
+              });
               // Focus the tab the backend marked active (user-opened, or the
               // restored focused tab); otherwise keep focus, but make sure
               // *some* tab is active during a multi-tab restore.
@@ -3633,6 +3743,12 @@ export function App() {
                 if (prev !== tabId) return prev;
                 const remaining = tabsRef.current.filter((t) => t.id !== tabId);
                 return remaining[0]?.id ?? "";
+              });
+              setTabThemes((prev) => {
+                if (!prev[tabId]) return prev;
+                const { [tabId]: _dropped, ...rest } = prev;
+                clearTabTheme(localStorage, tabId);
+                return rest;
               });
               dispatchersRef.current.delete(tabId);
               pendingEventsRef.current.delete(tabId);
@@ -3802,18 +3918,35 @@ export function App() {
   }, [openTab, closeTab, activeTabId, tabs, onToggleCtx, onToggleSide]);
 
   const onSetTheme = useCallback((nextTheme: Theme) => {
-    setTheme(nextTheme);
-    setThemeStyle(defaultStyleForTheme(nextTheme));
-  }, []);
+    setTabThemes((prev) => {
+      const cur = prev[activeTabId];
+      if (!cur) return prev;
+      const next: TabTheme = { theme: nextTheme, themeStyle: defaultStyleForTheme(nextTheme) };
+      writeTabTheme(localStorage, activeTabId, next);
+      return { ...prev, [activeTabId]: next };
+    });
+  }, [activeTabId]);
 
   const onSetThemeStyle = useCallback((nextStyle: ThemeStyle) => {
-    setThemeStyle(nextStyle);
-    setTheme(themeForStyle(nextStyle));
-  }, []);
+    setTabThemes((prev) => {
+      const cur = prev[activeTabId];
+      if (!cur) return prev;
+      const next: TabTheme = { theme: themeForStyle(nextStyle), themeStyle: nextStyle };
+      writeTabTheme(localStorage, activeTabId, next);
+      return { ...prev, [activeTabId]: next };
+    });
+  }, [activeTabId]);
 
   const onToggleTheme = useCallback(() => {
-    onSetTheme(theme === THEME.DARK ? THEME.LIGHT : THEME.DARK);
-  }, [onSetTheme, theme]);
+    setTabThemes((prev) => {
+      const cur = prev[activeTabId];
+      if (!cur) return prev;
+      const nextTheme: Theme = cur.theme === THEME.DARK ? THEME.LIGHT : THEME.DARK;
+      const next: TabTheme = { theme: nextTheme, themeStyle: defaultStyleForTheme(nextTheme) };
+      writeTabTheme(localStorage, activeTabId, next);
+      return { ...prev, [activeTabId]: next };
+    });
+  }, [activeTabId]);
 
   const onToggleCurrency = useCallback(() => {
     setCurrency((c) => {
@@ -3840,8 +3973,8 @@ export function App() {
           onNewTab={openTab}
           onCloseTab={() => closeTab(t.id)}
           canCloseTab={tabs.length > 1}
-          theme={theme}
-          themeStyle={themeStyle}
+          theme={tabThemes[t.id]?.theme ?? DEFAULT_TAB_THEME.theme}
+          themeStyle={tabThemes[t.id]?.themeStyle ?? DEFAULT_TAB_THEME.themeStyle}
           onSetTheme={onSetTheme}
           onSetThemeStyle={onSetThemeStyle}
           onToggleTheme={onToggleTheme}
