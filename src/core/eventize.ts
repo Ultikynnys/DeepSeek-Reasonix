@@ -11,6 +11,7 @@ import type {
   ModelTurnStartedEvent,
   SessionCompactedEvent,
   SessionOpenedEvent,
+  SessionRetractedEvent,
   SlashInvokedEvent,
   StatusEvent,
   ToolCallEvent,
@@ -151,6 +152,20 @@ export class Eventizer {
         }
         break;
       }
+      // session_retracted: an abort-discard truncated the live log mid-turn —
+      // record the replacement so the kernel conversation projection stays
+      // replayable (same swap semantics as session.compacted).
+      case "session_retracted":
+        out.push(
+          this.sessionRetractedEvent(
+            ev.turn,
+            ev.sessionRetractedKind ?? "abort-discard",
+            ev.beforeMessages ?? 0,
+            ev.afterMessages ?? 0,
+            ev.replacementMessages ?? [],
+          ),
+        );
+        break;
       // `done` / `branch_*` intentionally drop — no kernel-level event.
       default:
         break;
@@ -205,6 +220,38 @@ export class Eventizer {
       beforeMessages: before,
       afterMessages: after,
       reason,
+      replacementMessages,
+    };
+  }
+
+  /** Session edits (retry / rewind from the desktop handler) truncate the live
+   *  log outside the turn stream — emit the kernel replacement directly, like
+   *  emitCompactionFinished: a side-channel for non-turn-stream actions. */
+  emitSessionRetracted(
+    turn: number,
+    kind: "retry" | "rewind" | "abort-discard",
+    before: number,
+    after: number,
+    replacementMessages: ReadonlyArray<ChatMessage>,
+  ): SessionRetractedEvent {
+    return this.sessionRetractedEvent(turn, kind, before, after, replacementMessages);
+  }
+
+  private sessionRetractedEvent(
+    turn: number,
+    kind: "retry" | "rewind" | "abort-discard",
+    before: number,
+    after: number,
+    replacementMessages: ReadonlyArray<ChatMessage>,
+  ): SessionRetractedEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: "session.retracted",
+      kind,
+      beforeMessages: before,
+      afterMessages: after,
       replacementMessages,
     };
   }

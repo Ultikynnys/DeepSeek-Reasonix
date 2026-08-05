@@ -48,6 +48,20 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   REPLACED conversation instead of the pre-fold one (the reducer branch and the
   eventizer helper existed but were never wired).
 
+**Session edits are one pipeline too — retry, rewind, and abort-discard now record the truncation.**
+
+- `retryLastUser`, `rewindToUserTurn` and the abort-discard paths truncated the
+  live log through the same side channel compaction used to: no kernel event,
+  so replaying the events sidecar kept showing the retracted messages. A new
+  `session.retracted` kernel event (kind `retry` | `rewind` | `abort-discard`)
+  carries the post-truncation log — same replace-semantics in the conversation
+  reducer as `session.compacted`.
+- The desktop `/retry` and `/rewind` handlers emit it via the eventizer
+  (`emitSessionRetracted`) right beside the existing `$retry_result` /
+  `$rewind_result` protocol messages; the abort-discard paths yield a
+  `session_retracted` LoopEvent through the turn stream, so the kernel event
+  pipeline is the single recorder for every form of log replacement.
+
 ## [0.53.2] — 2026-05-27
 
 **TUI crash fix — `useBoxMetrics` no longer trips React's max-update-depth.**

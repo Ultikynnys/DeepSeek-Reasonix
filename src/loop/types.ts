@@ -21,7 +21,11 @@ export type EventRole =
    *  compaction card in the same queue as tool cards. Start carries the reason,
    *  end carries the FoldResult. Never emitted without a matching end. */
   | "compaction_start"
-  | "compaction_end";
+  | "compaction_end"
+  /** Session edit (abort-discard) truncated the log mid-turn — carries the
+   *  post-truncation log so the eventizer can emit session.retracted and the
+   *  kernel conversation view stays replayable. */
+  | "session_retracted";
 
 /** "low" = chatty / self-correcting / counter — Desktop+Dashboard filter these out by default.
  *  Undefined / "high" = real event the user should see (compaction, abort, budget, rate-limit, etc.).
@@ -78,6 +82,8 @@ export interface LoopEvent {
   beforeMessages?: number;
   /** compaction_end: message count after the fold. */
   afterMessages?: number;
+  /** session_retracted: which session edit truncated the log. */
+  sessionRetractedKind?: "retry" | "rewind" | "abort-discard";
   /** compaction_end: length of the synthesized summary, in characters. */
   summaryChars?: number;
   /** compaction_end: the synthesized summary text (marker already stripped by the fold). */

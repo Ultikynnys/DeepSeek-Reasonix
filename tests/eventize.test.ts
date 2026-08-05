@@ -359,4 +359,47 @@ describe("Eventizer.consume", () => {
     expect(ev.id).toBeGreaterThan(0);
     expect(ev.ts).toBeTruthy();
   });
+
+  it("maps session_retracted into a kernel session.retracted with the truncated log", () => {
+    const e = new Eventizer();
+    e.consume(lev({ turn: 1 }), ctx); // burn turn-start
+    const out = e.consume(
+      lev({
+        turn: 1,
+        role: "session_retracted",
+        sessionRetractedKind: "abort-discard",
+        beforeMessages: 9,
+        afterMessages: 2,
+        replacementMessages: [
+          { role: "user", content: "kept" },
+          { role: "assistant", content: "kept too" },
+        ],
+      }),
+      ctx,
+    );
+    expect(out.length).toBe(1);
+    expect(out[0]).toMatchObject({
+      type: "session.retracted",
+      kind: "abort-discard",
+      beforeMessages: 9,
+      afterMessages: 2,
+    });
+    expect((out[0] as { replacementMessages: unknown[] }).replacementMessages).toHaveLength(2);
+    // Same turn — no phantom turn.started for the mid-turn truncation.
+    expect(out.find((x) => x.type === "model.turn.started")).toBeUndefined();
+  });
+
+  it("emitSessionRetracted records retry/rewind truncations outside the turn stream", () => {
+    const e = new Eventizer();
+    const ev = e.emitSessionRetracted(4, "retry", 7, 2, [{ role: "user", content: "kept" }]);
+    expect(ev).toMatchObject({
+      type: "session.retracted",
+      turn: 4,
+      kind: "retry",
+      beforeMessages: 7,
+      afterMessages: 2,
+    });
+    expect(ev.id).toBeGreaterThan(0);
+    expect(ev.ts).toBeTruthy();
+  });
 });

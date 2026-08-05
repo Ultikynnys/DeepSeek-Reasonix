@@ -117,6 +117,29 @@ describe("conversation reducer", () => {
     expect(v.messages).toEqual([{ role: "system", content: "summary" }]);
     expect(v.pendingToolCalls).toEqual([]);
   });
+
+  it("session.retracted REPLACES messages and clears pending (retry/rewind/discard)", () => {
+    let v = emptyConversation();
+    v = conversation(v, ev<Event>({ type: "user.message", ts, turn: 1, text: "old" }));
+    v = conversation(
+      v,
+      ev<Event>({ type: "tool.intent", ts, turn: 1, callId: "c1", name: "shell", args: "" }),
+    );
+    v = conversation(
+      v,
+      ev<Event>({
+        type: "session.retracted",
+        ts,
+        turn: 2,
+        kind: "retry",
+        beforeMessages: 4,
+        afterMessages: 1,
+        replacementMessages: [{ role: "user", content: "kept" }],
+      }),
+    );
+    expect(v.messages).toEqual([{ role: "user", content: "kept" }]);
+    expect(v.pendingToolCalls).toEqual([]);
+  });
 });
 
 describe("budget reducer", () => {

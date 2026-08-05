@@ -106,6 +106,7 @@ export const conversation: Reducer<ConversationView> = (v, ev) => {
       };
     }
     case "session.compacted":
+    case "session.retracted":
       return { messages: [...ev.replacementMessages], pendingToolCalls: [] };
     default:
       return v;

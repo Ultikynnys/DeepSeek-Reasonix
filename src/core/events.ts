@@ -196,6 +196,19 @@ export interface SessionCompactedEvent extends EventBase {
   replacementMessages: ReadonlyArray<ChatMessage>;
 }
 
+/** A session edit truncated the live log (retry / rewind / abort-discard). Like
+ *  session.compacted: the one event that REPLACES the conversation view, so
+ *  replaying the events sidecar yields the truncated conversation. */
+export interface SessionRetractedEvent extends EventBase {
+  type: "session.retracted";
+  /** What session edit truncated the log. */
+  kind: "retry" | "rewind" | "abort-discard";
+  beforeMessages: number;
+  afterMessages: number;
+  /** Post-truncation message list — REPLACES the conversation view. */
+  replacementMessages: ReadonlyArray<ChatMessage>;
+}
+
 export interface CompactionStartedEvent extends EventBase {
   type: "compaction.started";
   /** Stable id pairing start with its finished event — the UI keys the card by it. */
@@ -291,6 +304,7 @@ export type Event =
   | EscalatedEvent
   | SessionOpenedEvent
   | SessionCompactedEvent
+  | SessionRetractedEvent
   | CompactionStartedEvent
   | CompactionFinishedEvent
   | CapabilityRegisteredEvent

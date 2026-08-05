@@ -129,6 +129,33 @@ describe("event-log replay round-trip", () => {
     expect(projections.session.currentTurn).toBe(2);
   });
 
+  it("retry replays as session.retracted — the conversation view is truncated to the kept log", async () => {
+    const path = join(dir, "retry.events.jsonl");
+    const sink = openEventSink(path);
+    const eventizer = new Eventizer();
+
+    // Turn 1: exchange that a /retry will drop (last user message + answer).
+    sink.append(eventizer.emitSessionOpened(0, "retry", 0));
+    sink.append(eventizer.emitUserMessage(1, "first ask"));
+    for (const out of eventizer.consume(
+      lev({ turn: 1, role: "assistant_final", content: "first answer" }),
+      ctx,
+    ))
+      sink.append(out);
+    sink.append(eventizer.emitUserMessage(2, "second ask"));
+
+    // Desktop /retry: loop truncates, handler emits the kernel replacement —
+    // replay must see the kept log only, with the dropped exchange gone.
+    const kept = [{ role: "user", content: "first ask" }];
+    sink.append(eventizer.emitSessionRetracted(2, "retry", 3, 1, kept));
+    await sink.close();
+
+    const projections = replay(readEventLogFile(path));
+    expect(projections.conversation.messages).toEqual(kept);
+    expect(projections.conversation.pendingToolCalls).toEqual([]);
+    expect(projections.session.currentTurn).toBe(2);
+  });
+
   it("error-shaped tool result reduces with ok=false in the conversation", async () => {
     const path = join(dir, "err.events.jsonl");
     const sink = openEventSink(path);

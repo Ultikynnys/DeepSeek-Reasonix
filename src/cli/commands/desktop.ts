@@ -3120,17 +3120,43 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "retry") {
       if (!tab.runtime) return;
+      // Retry truncates the log outside the turn stream — record the
+      // replacement in the kernel event log (session.retracted) so replaying
+      // the events sidecar yields the truncated conversation, same as
+      // session.compacted after a fold.
+      const before = tab.runtime.loop.log.length;
       const prev = tab.runtime.loop.retryLastUser();
       if (prev) {
         emit({ type: "$retry_result", text: prev }, tab.id);
+        emit(
+          tab.runtime.eventizer.emitSessionRetracted(
+            tab.runtime.loop.currentTurn,
+            "retry",
+            before,
+            tab.runtime.loop.log.length,
+            tab.runtime.loop.log.entries,
+          ),
+          tab.id,
+        );
       }
       return;
     }
     if (msg.cmd === "rewind") {
       if (!tab.runtime) return;
+      const before = tab.runtime.loop.log.length;
       const prev = tab.runtime.loop.rewindToUserTurn(msg.userTurn);
       if (prev) {
         emit({ type: "$rewind_result", turn: msg.userTurn, text: prev }, tab.id);
+        emit(
+          tab.runtime.eventizer.emitSessionRetracted(
+            tab.runtime.loop.currentTurn,
+            "rewind",
+            before,
+            tab.runtime.loop.log.length,
+            tab.runtime.loop.log.entries,
+          ),
+          tab.id,
+        );
       }
       return;
     }

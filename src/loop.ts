@@ -920,7 +920,19 @@ export class CacheFirstLoop {
             ? "[aborted by user (Esc) — interrupted turn discarded. Ask again when ready.]"
             : "[aborted by user (Esc) — no summary produced. Ask again or /retry when ready; prior tool output is still in the log.]";
           if (discardTurn) {
+            const beforeDiscard = this.log.length;
             this.discardLogFrom(turnStartLogIndex);
+            // The truncated log REPLACES the conversation — record it so the
+            // kernel view stays replayable (same swap as session.compacted).
+            yield {
+              turn: this._turn,
+              role: "session_retracted",
+              content: "",
+              sessionRetractedKind: "abort-discard",
+              beforeMessages: beforeDiscard,
+              afterMessages: this.log.length,
+              replacementMessages: this.log.entries,
+            };
           } else {
             this.appendAndPersist(buildSyntheticAssistantMessage(stoppedMsg, this.model));
           }
@@ -1024,7 +1036,19 @@ export class CacheFirstLoop {
           // if the consumer breaks the for-await before draining `done`,
           // generator.return() would skip a bare post-yield reset and
           // leave carryAbort locked on the next step().
-          if (this._discardAbortRequested) this.discardLogFrom(turnStartLogIndex);
+          if (this._discardAbortRequested) {
+            const beforeDiscard = this.log.length;
+            this.discardLogFrom(turnStartLogIndex);
+            yield {
+              turn: this._turn,
+              role: "session_retracted",
+              content: "",
+              sessionRetractedKind: "abort-discard",
+              beforeMessages: beforeDiscard,
+              afterMessages: this.log.length,
+              replacementMessages: this.log.entries,
+            };
+          }
           try {
             yield { turn: this._turn, role: "done", content: "" };
           } finally {
