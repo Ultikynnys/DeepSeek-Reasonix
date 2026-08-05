@@ -4296,6 +4296,20 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   background: var(--border);
   color: var(--fg);
 }
+.composer-queue-chip .force {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--accent);
+}
+.composer-queue-chip .force:hover {
+  background: var(--border);
+  color: var(--fg);
+}
 
 /* ---- queued tab-row indicator (multiple sessions running) ---- */
 .queue-strip {

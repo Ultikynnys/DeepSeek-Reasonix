@@ -1031,6 +1031,7 @@ export const zhCN = {
     commands: "命令",
     commandsLabel: "命令",
     confirm: "确认",
+    forceSend: "立即发送",
     imageFilterName: "图片",
     insertFile: "插入文件",
     insertImage: "插入图片",

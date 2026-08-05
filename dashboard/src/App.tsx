@@ -288,6 +288,7 @@ type Action =
   | { t: "mention_results"; results: MentionResults }
   | { t: "mention_preview"; preview: MentionPreviewState }
   | { t: "enqueue_send"; text: string }
+  | { t: "enqueue_send_front"; text: string }
   | { t: "dequeue_send"; index: number }
   | { t: "shift_queued_send" };
 
@@ -472,6 +473,8 @@ function reduce(state: State, action: Action): State {
       return { ...state, mentionPreview: action.preview };
     case "enqueue_send":
       return { ...state, queuedSends: [...state.queuedSends, action.text] };
+    case "enqueue_send_front":
+      return { ...state, queuedSends: [action.text, ...state.queuedSends] };
     case "dequeue_send":
       return {
         ...state,
@@ -1429,6 +1432,24 @@ function TabRuntime({
 
   const abort = useCallback(() => sendRpc({ cmd: "abort" }), [sendRpc]);
 
+  // Queue-chip "force send": interrupt the current turn and put this message
+  // at the head of the queue so it ships the moment the turn drains — lets the
+  // user correct live behavior instead of waiting for the turn to finish.
+  const forceSend = useCallback(
+    (index: number) => {
+      const text = state.queuedSends[index];
+      if (!text) return;
+      dispatch({ t: "dequeue_send", index });
+      if (state.busy) {
+        abort();
+        dispatch({ t: "enqueue_send_front", text });
+      } else {
+        send(text);
+      }
+    },
+    [state.busy, state.queuedSends, abort, send],
+  );
+
   // When /retry returns the last user text, set it as the composer draft
   useEffect(() => {
     if (state.retryNonce > 0 && state.retryText) {
@@ -2138,6 +2159,7 @@ function TabRuntime({
                   setDraft("");
                 }}
                 onDequeueSend={(index) => dispatch({ t: "dequeue_send", index })}
+                onForceSend={forceSend}
               />
             </>
           )}

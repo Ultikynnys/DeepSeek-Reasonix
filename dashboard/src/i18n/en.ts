@@ -1056,6 +1056,7 @@ export const en = {
     commands: "Commands",
     commandsLabel: "Commands",
     confirm: "Confirm",
+    forceSend: "Force send",
     imageFilterName: "Images",
     insertFile: "Insert File",
     insertImage: "Insert Image",

@@ -137,6 +137,7 @@ export function Composer({
   queuedSends,
   onQueueWhileBusy,
   onDequeueSend,
+  onForceSend,
 }: {
   draft: string;
   setDraft: (s: string) => void;
@@ -165,6 +166,8 @@ export function Composer({
   /** Called when the user presses Enter while busy with a non-empty draft. Owns clearing the draft. */
   onQueueWhileBusy?: (text: string) => void;
   onDequeueSend?: (index: number) => void;
+  /** Queue-chip force send: interrupt the current turn and ship this message next. */
+  onForceSend?: (index: number) => void;
 }) {
   const [chips, setChips] = useState<Chip[]>([]);
   const [popup, setPopup] = useState<Popup>(null);
@@ -405,6 +408,15 @@ export function Composer({
             {queuedSends.map((text, i) => (
               <span key={i} className="composer-queue-chip" title={text}>
                 <span className="text">{text}</span>
+                {onForceSend ? (
+                  <span
+                    className="force"
+                    title={t("composer.forceSend")}
+                    onClick={() => onForceSend(i)}
+                  >
+                    <I.send size={10} />
+                  </span>
+                ) : null}
                 {onDequeueSend ? (
                   <span className="x" onClick={() => onDequeueSend(i)}>
                     <I.x size={10} />

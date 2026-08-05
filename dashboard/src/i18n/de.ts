@@ -1094,6 +1094,7 @@ export const de: typeof en = {
     commands: "Befehle",
     commandsLabel: "Befehle",
     confirm: "Bestätigen",
+    forceSend: "Sofort senden",
     imageFilterName: "Bilder",
     insertFile: "Datei einfügen",
     insertImage: "Bild einfügen",
