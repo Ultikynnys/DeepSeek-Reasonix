@@ -5,6 +5,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Desktop-first reorientation — the repo now centers the Windows desktop app.**
+
+- CI: `verify` runs on Windows only, and the release pipeline builds just the Windows installer (NSIS). Removed the unused `issue-labeler.yml` config.
+- Packaging: dropped the Linux/macOS Tauri configs, macOS entitlements and private-API flag, the `.icns` and mobile/store icons, and the macOS/Linux branches of the Node-bundle script. `SIGNING.md` now covers Windows signing only.
+- Docs: README (EN / 简体中文) rewritten with the desktop app as the primary surface and the CLI as the terminal alternative; dead links to removed docs (CLI reference, benchmarks, assets) cleaned up.
+
 **Compaction hardening — the fold now always runs to completion.**
 
 - Esc / Stop no longer aborts a running compaction. The fold summary request

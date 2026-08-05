@@ -1,7 +1,8 @@
-// Pulls Node 22 from nodejs.org into desktop/src-tauri/binaries/.
-// Mac always produces a universal Mach-O so Intel + Apple Silicon ship from one .dmg (issue #1234).
+// Pulls the Node 22 runtime for Windows into desktop/src-tauri/binaries/.
+// The Windows installer bundles node.exe alongside the app (see
+// tauri.windows.conf.json). Other platforms aren't packaged.
 import { execSync } from "node:child_process";
-import { chmodSync, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import https from "node:https";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,68 +12,17 @@ const NODE_VERSION = "22.13.0";
 const here = dirname(fileURLToPath(import.meta.url));
 const binDir = join(here, "..", "src-tauri", "binaries");
 
-const PLAT = process.platform;
-const ARCH_RAW = process.arch;
-const HOST_ARCH = ARCH_RAW === "arm64" ? "arm64" : ARCH_RAW === "x64" ? "x64" : null;
-
-if (!HOST_ARCH || !["win32", "darwin", "linux"].includes(PLAT)) {
-  console.error(`Unsupported host: ${PLAT}/${ARCH_RAW}. Supported: win32 / darwin / linux × x64 / arm64.`);
+if (process.platform !== "win32") {
+  console.error("Windows-only: run this script on win32 (the release workflow does).");
   process.exit(1);
 }
 
-const isWin = PLAT === "win32";
-const targetExe = join(binDir, isWin ? "node.exe" : "node");
-
-function adhocSignMac(binPath) {
-  // #1611: child node needs com.apple.security.inherit so it inherits the
-  // parent .app's TCC grants (Documents folder etc.) instead of re-prompting
-  // on every spawn. Ad-hoc is enough for TCC; CI later overlays Developer ID.
-  const ents = join(here, "..", "src-tauri", "entitlements", "node-helper.plist");
-  if (!existsSync(ents)) {
-    throw new Error(`entitlements missing: ${ents}`);
-  }
-  execSync(
-    `codesign --force --sign - --options runtime --entitlements "${ents}" "${binPath}"`,
-    { stdio: "inherit" },
-  );
-  if (!hasMacTccInheritance(binPath)) {
-    throw new Error(`codesign did not apply com.apple.security.inherit to ${binPath}`);
-  }
-}
-
-function hasMacTccInheritance(binPath) {
-  try {
-    const out = execSync(`codesign -d --entitlements :- "${binPath}" 2>&1`, { encoding: "utf8" });
-    return out.includes("com.apple.security.inherit") && out.includes("<true/>");
-  } catch {
-    return false;
-  }
-}
+const targetExe = join(binDir, "node.exe");
 
 if (existsSync(targetExe) && statSync(targetExe).size > 1024 * 1024) {
-  if (PLAT === "darwin") {
-    try {
-      const archs = execSync(`lipo -archs "${targetExe}"`, { encoding: "utf8" }).trim();
-      if (archs.includes("arm64") && archs.includes("x86_64")) {
-        if (!hasMacTccInheritance(targetExe)) {
-          console.log(`${targetExe} universal but missing TCC inheritance — applying ad-hoc sign`);
-          adhocSignMac(targetExe);
-        } else {
-          console.log(`${targetExe} already universal + TCC-inheriting (${archs}) — delete to refetch`);
-        }
-        process.exit(0);
-      }
-      console.log(`${targetExe} present but not universal (${archs}) — rebuilding`);
-      rmSync(targetExe);
-    } catch {
-      console.log(`${targetExe} present but not verifiable as Mach-O — rebuilding`);
-      rmSync(targetExe);
-    }
-  } else {
-    const mb = (statSync(targetExe).size / 1024 / 1024).toFixed(1);
-    console.log(`${targetExe} already present (${mb} MB) — delete to refetch`);
-    process.exit(0);
-  }
+  const mb = (statSync(targetExe).size / 1024 / 1024).toFixed(1);
+  console.log(`${targetExe} already present (${mb} MB) — delete to refetch`);
+  process.exit(0);
 }
 
 mkdirSync(binDir, { recursive: true });
@@ -109,15 +59,13 @@ function follow(url, dest, redirects = 5) {
   });
 }
 
-async function fetchAndExtract(arch) {
-  const triple =
-    PLAT === "win32" ? `win-${arch}` : PLAT === "darwin" ? `darwin-${arch}` : `linux-${arch}`;
-  const archiveExt = PLAT === "win32" ? "zip" : PLAT === "darwin" ? "tar.gz" : "tar.xz";
-  const archiveBase = `node-v${NODE_VERSION}-${triple}`;
-  const archiveFile = `${archiveBase}.${archiveExt}`;
+async function fetchAndExtract() {
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const archiveBase = `node-v${NODE_VERSION}-win-${arch}`;
+  const archiveFile = `${archiveBase}.zip`;
   const url = `https://nodejs.org/dist/v${NODE_VERSION}/${archiveFile}`;
   const archivePath = join(binDir, archiveFile);
-  const extractDir = join(binDir, `_extract_${arch}`);
+  const extractDir = join(binDir, "_extract");
 
   console.log(`Downloading ${archiveFile} ...`);
   await follow(url, archivePath);
@@ -126,19 +74,13 @@ async function fetchAndExtract(arch) {
   rmSync(extractDir, { recursive: true, force: true });
   mkdirSync(extractDir, { recursive: true });
 
-  console.log(`Extracting ${arch} ...`);
-  if (isWin) {
-    execSync(
-      `powershell -NoProfile -Command "Expand-Archive -Force -Path '${archivePath}' -DestinationPath '${extractDir}'"`,
-      { stdio: "inherit" },
-    );
-  } else {
-    execSync(`tar -xf "${archivePath}" -C "${extractDir}"`, { stdio: "inherit" });
-  }
+  console.log("Extracting ...");
+  execSync(
+    `powershell -NoProfile -Command "Expand-Archive -Force -Path '${archivePath}' -DestinationPath '${extractDir}'"`,
+    { stdio: "inherit" },
+  );
 
-  const inner = isWin
-    ? join(extractDir, archiveBase, "node.exe")
-    : join(extractDir, archiveBase, "bin", "node");
+  const inner = join(extractDir, archiveBase, "node.exe");
   if (!existsSync(inner)) {
     console.error(`Extracted binary not found at expected path: ${inner}`);
     process.exit(1);
@@ -148,36 +90,11 @@ async function fetchAndExtract(arch) {
   return { inner, extractDir };
 }
 
-if (PLAT === "darwin") {
-  const [arm, x64] = await Promise.all([fetchAndExtract("arm64"), fetchAndExtract("x64")]);
+const { inner, extractDir } = await fetchAndExtract();
 
-  console.log("Creating universal binary with lipo ...");
-  if (existsSync(targetExe)) rmSync(targetExe);
-  execSync(`lipo -create "${arm.inner}" "${x64.inner}" -output "${targetExe}"`, { stdio: "inherit" });
-  chmodSync(targetExe, 0o755);
+if (existsSync(targetExe)) rmSync(targetExe);
+renameSync(inner, targetExe);
+rmSync(extractDir, { recursive: true, force: true });
 
-  rmSync(arm.extractDir, { recursive: true, force: true });
-  rmSync(x64.extractDir, { recursive: true, force: true });
-
-  adhocSignMac(targetExe);
-
-  const archs = execSync(`lipo -archs "${targetExe}"`, { encoding: "utf8" }).trim();
-  const mb = (statSync(targetExe).size / 1024 / 1024).toFixed(1);
-  console.log(`Done: ${targetExe} (${mb} MB, archs: ${archs})`);
-} else {
-  const { inner, extractDir } = await fetchAndExtract(HOST_ARCH);
-
-  if (existsSync(targetExe)) rmSync(targetExe);
-  renameSync(inner, targetExe);
-  if (!isWin) {
-    try {
-      chmodSync(targetExe, 0o755);
-    } catch {
-      /* ignore */
-    }
-  }
-  rmSync(extractDir, { recursive: true, force: true });
-
-  const mb = (statSync(targetExe).size / 1024 / 1024).toFixed(1);
-  console.log(`Done: ${targetExe} (${mb} MB)`);
-}
+const mb = (statSync(targetExe).size / 1024 / 1024).toFixed(1);
+console.log(`Done: ${targetExe} (${mb} MB)`);

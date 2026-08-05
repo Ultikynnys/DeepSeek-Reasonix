@@ -1,7 +1,7 @@
 name: Release
 
-# The ONLY workflow in this repo. Every push to main is verified (lint,
-# typecheck, build, tests) and then released: the patch version is bumped
+# The ONLY workflow in this repo. Every push to main is verified on Windows
+# (lint, typecheck, build, tests) and then released: the patch version is bumped
 # from package.json, a `vX.Y.Z` tag + `chore(release)` commit are pushed
 # (via GITHUB_TOKEN, which does NOT re-trigger workflows), the Windows
 # installer is built and attached to a draft GitHub Release.
@@ -29,12 +29,11 @@ concurrency:
 
 jobs:
   verify:
-    name: verify (${{ matrix.os }} · node ${{ matrix.node }})
-    runs-on: ${{ matrix.os }}
+    name: verify (windows · node ${{ matrix.node }})
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
         node: ["22"]
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +72,7 @@ jobs:
           test -n "$WEBHOOK_URL" || { echo "DISCORD_CI_WEBHOOK unset, skipping"; exit 0; }
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -sS -X POST -H "Content-Type: application/json" \
-            -d "{\"content\":\"❌ CI failed on \`${{ github.ref_name }}\` (${{ matrix.os }}) — ${{ github.actor }}\n${RUN_URL}\"}" \
+            -d "{\"content\":\"❌ CI failed on \`${{ github.ref_name }}\` (windows-latest) — ${{ github.actor }}\n${RUN_URL}\"}" \
             "$WEBHOOK_URL"
 
   release:

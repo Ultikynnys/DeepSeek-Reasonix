@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/logo.svg" alt="Reasonix" width="640"/>
-</p>
+<h1 align="center">Reasonix</h1>
 
 <p align="center">
   <strong>English</strong>
@@ -13,14 +11,12 @@
   &nbsp;·&nbsp;
   <a href="./docs/ARCHITECTURE.md">Architecture</a>
   &nbsp;·&nbsp;
-  <a href="./benchmarks/">Benchmarks</a>
-  &nbsp;·&nbsp;
   <strong><a href="https://discord.gg/XF78rEME2D">Discord</a></strong>
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
-  <a href="https://github.com/esengine/reasonix/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/reasonix/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
+  <a href="https://github.com/esengine/reasonix/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/reasonix/release.yml?style=flat-square&label=release&labelColor=161b22&logo=githubactions&logoColor=white" alt="Release"/></a>
   <a href="./LICENSE"><img src="https://img.shields.io/npm/l/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/dm/reasonix.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
   <a href="./package.json"><img src="https://img.shields.io/node/v/reasonix.svg?style=flat-square&color=5fa04e&labelColor=161b22&logo=nodedotjs&logoColor=white" alt="node"/></a>
@@ -39,14 +35,8 @@
 
 <br/>
 
-<h3 align="center">A DeepSeek-native AI coding agent for your terminal.</h3>
+<h3 align="center">A DeepSeek-native AI coding agent for your desktop.</h3>
 <p align="center">Engineered around prefix-cache stability — so token costs stay low across long sessions, and you can leave it running.</p>
-
-<br/>
-
-<p align="center">
-  <img src="docs/assets/hero-terminal.svg" alt="Reasonix code mode — assistant proposes a SEARCH/REPLACE edit; nothing on disk until /apply" width="860"/>
-</p>
 
 <br/>
 
@@ -54,7 +44,7 @@
 > **Cache stability isn't a feature you turn on; it's an invariant the loop is designed around.** That's the whole reason Reasonix is DeepSeek-only — every layer is tuned to the byte-stable prefix-cache mechanic.
 
 > [!NOTE]
-> **Real user, single day (2026-05-01):** 435M input tokens, **99.82% cache hit**, ~$12 instead of the ~$61 the same workload would cost with no cache on `v4-flash` — see the [case study](./benchmarks/real-world-cache/README.md). DeepSeek provides the cacheable bytes; the four mechanisms in [Pillar 1](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) are how Reasonix keeps them cacheable across long sessions.
+> **Real user, single day (2026-05-01):** 435M input tokens, **99.82% cache hit**, ~$12 instead of the ~$61 the same workload would cost with no cache on `v4-flash`. DeepSeek provides the cacheable bytes; the four mechanisms in [Pillar 1](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) are how Reasonix keeps them cacheable across long sessions.
 
 > [!IMPORTANT]
 > **Community · 加入社区** — bilingual Discord with channels for setup help (`#help` / `#求助`), workflow showcases, feature ideas, and contributor-only PR coordination. Verify your GitHub in-server to get the **Contributor** role automatically. → **<https://discord.gg/XF78rEME2D>**
@@ -63,7 +53,15 @@
 
 ## Install
 
-Requires Node ≥ 22. Works on macOS · Linux · Windows (PowerShell · Git Bash · Windows Terminal).
+### Desktop app for Windows (recommended)
+
+Download the latest Windows installer from [GitHub Releases](https://github.com/esengine/DeepSeek-Reasonix/releases) and run `Reasonix_x.y.z_x64-setup.exe`. The app bundles its own Node runtime, the same `~/.reasonix` config, and the same loop as the CLI — multi-tab sessions, a right panel listing files the agent read or edited, and the live cost / cache / token meters. No `npm install`, no Node needed; grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) on first run.
+
+- **Windows** — SmartScreen may warn "Unknown publisher" while installers are unsigned: click **More info → Run anyway**.
+
+### Terminal (optional)
+
+The same engine ships as a CLI for terminal and scripting workflows. Requires Node ≥ 22; works on Windows, macOS, and Linux.
 
 Install Reasonix globally if you want the `reasonix` command available on your `PATH`:
 
@@ -108,24 +106,14 @@ Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp`
 
 QQ can extend an existing `chat`, `code`, or desktop session as a remote channel. It is part of the current session flow, not a separate runtime mode.
 
-- CLI: start a session, then run `/qq connect`
 - Desktop: open `Settings -> General -> QQ Channel`
+- CLI: start a session, then run `/qq connect`
 
 Once connected, QQ messages can enter the current session, assistant replies route back to QQ, and follow-up interactions can continue remotely.
 
 For full setup, desktop quick start, and troubleshooting, see [QQ channel setup](./docs/qq-connect.md).
 
-### Desktop client (prerelease)
-
-A native Tauri client for users who want a GUI over the same loop. Multi-tab, the right-panel shows files the agent has read or edited this session, the same cost / cache / token meters live at the bottom. Same DeepSeek API key, same `~/.reasonix` config — the desktop bundles its own Node runtime, no separate `npm install` step.
-
-Download platform installers from [GitHub Releases](https://github.com/esengine/DeepSeek-Reasonix/releases). The desktop ships as a **prerelease**: the loop and protocol are the same as the CLI, but the UI is still being polished and the installers aren't code-signed yet.
-
-- **macOS** — first launch hits Gatekeeper. One-time fix: `xattr -dr com.apple.quarantine /Applications/Reasonix.app` (or right-click → Open → confirm).
-- **Windows** — SmartScreen warns "Unknown publisher". Click **More info → Run anyway**.
-- **Linux** — `.deb` and `.AppImage` ship plain, no extra step.
-
-The CLI remains the canonical surface. Anything that lands in the CLI is also available from the desktop's composer.
+The desktop app and the CLI share one engine — anything that works in one works in the other. The desktop is the primary surface; the CLI covers terminal and scripting workflows.
 
 <details>
 <summary><strong>Working in another folder · chat vs. code · author a skill</strong></summary>
@@ -199,9 +187,9 @@ Click through to the full architecture writeup → [Pillar 1 — Cache-first loo
 
 ## Capabilities
 
-<p align="center">
-  <img src="docs/assets/feature-grid.svg" alt="Reasonix capabilities — cell-diff renderer, MCP, plan mode, permissions, dashboard, persistent sessions, hooks/skills/memory, semantic search, auto-checkpoints, /effort knob, transcript replay, event log" width="880"/>
-</p>
+- Cell-diff renderer (SEARCH/REPLACE review) · MCP servers · plan mode · permissions
+- Persistent sessions · hooks / skills / memory · semantic search · auto-checkpoints
+- `/effort` knob · transcript replay · event log · embedded web dashboard
 
 <br/>
 
@@ -220,17 +208,13 @@ Click through to the full architecture writeup → [Pillar 1 — Cache-first loo
 | Web search (Mojeek + SearXNG + Metaso)   | yes              | yes               | yes                 | yes                |
 | Open community development        | yes              | —                 | —                   | yes                |
 
-For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmarks/) — the numbers move with model pricing, so they live with the harness, not in the README.
-
 <br/>
 
 ## Documentation
 
 - [**Architecture**](./docs/ARCHITECTURE.md) — three pillars: cache-first loop, tool-call repair, cost control
-- [**CLI Reference**](./docs/CLI-REFERENCE.md) — every shell subcommand, every slash command, every keybinding
-- [**QQ channel setup**](./docs/qq-connect.md) — CLI first-connect flow, desktop entry, and QQ Open Platform credentials
-- [**Benchmarks**](./benchmarks/) — τ-bench-lite harness, transcripts, cost methodology
-- [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard mockup, TUI mockup
+- [**QQ channel setup**](./docs/qq-connect.md) — desktop entry, CLI first-connect flow, and QQ Open Platform credentials
+- [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard, TUI
 - [**Contributing**](./CONTRIBUTING.md) — comment policy, error-handling rules, library-over-hand-rolled
 - [**Code of Conduct**](./CODE_OF_CONDUCT.md) · [**Security policy**](./SECURITY.md)
 
@@ -267,7 +251,7 @@ Scoped starter tickets — each with background, code pointers, acceptance crite
 > Reasonix is opinionated. Some things it deliberately *doesn't* do — listed here so you can pick the right tool for your work.
 
 - **Multi-provider flexibility.** DeepSeek-only on purpose. Coupling to one backend is the feature, not a limitation.
-- **IDE integration.** Terminal-first. The diff lives in `git diff`, the file tree in `ls`. The dashboard is a companion, not a Cursor replacement.
+- **IDE integration.** Desktop-first. The Windows app is the primary surface; the CLI covers terminal and scripting workflows. The dashboard is a companion, not a Cursor replacement.
 - **Hardest-leaderboard reasoning.** Claude Opus still wins some benchmarks. DeepSeek is competitive on coding; if your work is "solve this PhD proof" rather than "fix this auth bug," start with Claude.
 - **Air-gapped / fully-free.** Reasonix needs a paid DeepSeek API key. For air-gapped or zero-cost runs see Aider + Ollama or [Continue](https://continue.dev).
 
@@ -316,8 +300,7 @@ of importance.** The full contributor graph is on
 - [**wviana**](https://github.com/wviana) (Wesley Viana)
 
 Also a separate thank-you to [**Bernardxu123**](https://github.com/Bernardxu123)
-for designing the project logo (see [`docs/brand/`](./docs/brand/)), and to
-[AIGC Link](https://xhslink.com/m/80ngts127cA) for promoting the project on XiaoHongShu.
+for designing the project logo, and to [AIGC Link](https://xhslink.com/m/80ngts127cA) for promoting the project on XiaoHongShu.
 
 <p align="center">
   <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">

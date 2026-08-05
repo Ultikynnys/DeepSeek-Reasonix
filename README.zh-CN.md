@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/logo.svg" alt="Reasonix" width="640"/>
-</p>
+<h1 align="center">Reasonix</h1>
 
 <p align="center">
   <a href="./README.md">English</a>
@@ -13,14 +11,12 @@
   &nbsp;·&nbsp;
   <a href="./docs/ARCHITECTURE.md">架构文档</a>
   &nbsp;·&nbsp;
-  <a href="./benchmarks/">基准测试</a>
-  &nbsp;·&nbsp;
   <strong><a href="https://discord.gg/XF78rEME2D">Discord</a></strong>
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
-  <a href="https://github.com/esengine/reasonix/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/reasonix/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
+  <a href="https://github.com/esengine/reasonix/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/reasonix/release.yml?style=flat-square&label=release&labelColor=161b22&logo=githubactions&logoColor=white" alt="Release"/></a>
   <a href="./LICENSE"><img src="https://img.shields.io/npm/l/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/dm/reasonix.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
   <a href="./package.json"><img src="https://img.shields.io/node/v/reasonix.svg?style=flat-square&color=5fa04e&labelColor=161b22&logo=nodedotjs&logoColor=white" alt="node"/></a>
@@ -39,14 +35,8 @@
 
 <br/>
 
-<h3 align="center">DeepSeek 原生的终端 AI 编程代理。</h3>
+<h3 align="center">DeepSeek 原生的桌面端 AI 编程代理。</h3>
 <p align="center">围绕前缀缓存稳定性设计 —— 长会话下 token 成本始终低位运行，可以一直开着。</p>
-
-<br/>
-
-<p align="center">
-  <img src="docs/assets/hero-terminal.zh-CN.svg" alt="Reasonix code 模式预览 — 助手提出 SEARCH/REPLACE 编辑，未 /apply 不落盘" width="860"/>
-</p>
 
 <br/>
 
@@ -60,12 +50,22 @@
 
 ## 安装
 
+### Windows 桌面应用（推荐）
+
+从 [GitHub Releases](https://github.com/esengine/DeepSeek-Reasonix/releases) 下载最新的 Windows 安装包，运行 `Reasonix_x.y.z_x64-setup.exe`。应用自带 Node 运行时和同一份 `~/.reasonix` 配置，与 CLI 共用同一套引擎 —— 多标签会话、右侧栏展示 agent 读写过的文件、底部实时成本 / 缓存 / token 计量。无需 `npm install`、无需装 Node；首次运行粘贴 [DeepSeek API Key →](https://platform.deepseek.com/api_keys) 即可。
+
+- **Windows** — 安装包尚未签名时 SmartScreen 可能提示“未知发布者”：点 **更多信息 → 仍要运行**。
+
+### 终端 CLI（可选）
+
+同一套引擎也以 CLI 形式提供，适合终端和脚本工作流。要求 Node ≥ 22，在 Windows · macOS · Linux 都能跑。
+
 ~~~bash
 cd my-project
 npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 ~~~
 
-要求 Node ≥ 22。在 macOS · Linux · Windows（PowerShell · Git Bash · Windows Terminal）都跑得顺。[去拿 DeepSeek API Key →](https://platform.deepseek.com/api_keys) · 完整 flag 看 `reasonix code --help`。
+[去拿 DeepSeek API Key →](https://platform.deepseek.com/api_keys) · 完整 flag 看 `reasonix code --help`。
 
 `npx` 是推荐路径 —— 不用全局安装，每次都拿最新版。如果你天天用、想把 `reasonix` 装到 `PATH`，跑一次 `reasonix update`。
 
@@ -83,8 +83,8 @@ npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 
 Reasonix 可以把现有的 `chat`、`code` 或桌面端会话延伸到 QQ 上，作为远程通道使用；它扩展的是当前会话，不是独立的新运行模式。
 
-- CLI：先启动会话，再执行 `/qq connect`
 - 桌面端：打开 `设置 -> 通用 -> QQ通道`
+- CLI：先启动会话，再执行 `/qq connect`
 
 连接成功后，QQ 消息可以进入当前会话，助手回复会回到 QQ，后续确认和跟进交互也可以继续在 QQ 上完成。
 
@@ -155,9 +155,9 @@ npx reasonix code --dir /path/to/project
 
 ## 能力一览
 
-<p align="center">
-  <img src="docs/assets/feature-grid.zh-CN.svg" alt="Reasonix 能力一览 — cell-diff 渲染器、MCP、计划模式、权限、仪表盘、持久化会话、Hooks/Skills/Memory、语义检索、自动 checkpoint、/effort 旋钮、transcript 重放、事件日志" width="880"/>
-</p>
+- cell-diff 渲染器（SEARCH/REPLACE 审阅）· MCP 服务器 · 计划模式 · 权限
+- 持久化会话 · Hooks / Skills / Memory · 语义检索 · 自动 checkpoint
+- `/effort` 旋钮 · transcript 重放 · 事件日志 · 内嵌 web 仪表盘
 
 <br/>
 
@@ -174,17 +174,13 @@ npx reasonix code --dir /path/to/project
 | 计划模式 · MCP · Hooks     | 支持              | 支持              | 支持                | 部分               |
 | 开放社区共建               | 支持              | —                 | —                   | 支持               |
 
-实测缓存命中率、成本、方法论看 [`benchmarks/`](./benchmarks/) —— 这些数会随模型定价变化，所以归在 harness 里，不进 README。
-
 <br/>
 
 ## 文档
 
 - [**架构**](./docs/ARCHITECTURE.md) —— 四大支柱、缓存优先循环、思维提取、脚手架
-- [**CLI 参考**](./docs/CLI-REFERENCE.md) —— 每个 shell 子命令、每个 slash 命令、每个快捷键
-- [**QQ 连接指南**](./docs/qq-connect.zh-CN.md) —— CLI 首次连接流程、桌面端入口和 QQ 开放平台凭据
-- [**基准测试**](./benchmarks/) —— τ-bench-lite harness、transcript、成本方法论
-- [**官方网站**](https://esengine.github.io/DeepSeek-Reasonix/) —— 入门、Dashboard 设计稿、TUI 设计稿
+- [**QQ 连接指南**](./docs/qq-connect.zh-CN.md) —— 桌面端入口、CLI 首次连接流程和 QQ 开放平台凭据
+- [**官方网站**](https://esengine.github.io/DeepSeek-Reasonix/) —— 入门、Dashboard、TUI
 - [**贡献指南**](./CONTRIBUTING.md) —— 注释规则、错误处理、用现成库不手写
 - [**行为准则**](./CODE_OF_CONDUCT.md) · [**安全策略**](./SECURITY.md)
 
@@ -221,7 +217,7 @@ npx reasonix code --dir /path/to/project
 > Reasonix 是有立场的。有些事它故意 *不做* —— 列在这里方便你为自己的工作挑对工具。
 
 - **多供应商灵活性。** 故意只做 DeepSeek。绑死一个后端是 feature，不是限制。
-- **IDE 集成。** 终端优先。diff 在 `git diff`，文件树在 `ls`。仪表盘是 TUI 的伴生，不是 Cursor 的替代。
+- **IDE 集成。** 桌面端优先。Windows 应用是主要形态；CLI 覆盖终端与脚本工作流。仪表盘是伴生工具，不是 Cursor 的替代。
 - **追最难的 reasoning 榜单。** Claude Opus 在某些榜单上还是赢家。DeepSeek 在编程任务上有竞争力；如果你的工作是"解一个 PhD 级证明"而不是"修个 auth bug"，先用 Claude。
 - **完全离线 / 永远免费。** Reasonix 需要付费的 DeepSeek API Key。要离线 / 零成本，看 Aider + Ollama 或 [Continue](https://continue.dev)。
 
@@ -268,8 +264,7 @@ npx reasonix code --dir /path/to/project
 - [**wade19990814-hue**](https://github.com/wade19990814-hue)
 - [**wviana**](https://github.com/wviana)（Wesley Viana）
 
-另外特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo
-（见 [`docs/brand/`](./docs/brand/)），以及 [AIGC Link](https://xhslink.com/m/80ngts127cA) 在小红书上的推广。
+另外特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo，以及 [AIGC Link](https://xhslink.com/m/80ngts127cA) 在小红书上的推广。
 
 <p align="center">
   <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">
