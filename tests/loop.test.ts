@@ -529,6 +529,73 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(finals[0]!.content).toBe("second turn ran cleanly");
   });
 
+  it("does not bleed an abort landing in the normal-completion tail (consumer break at assistant_final)", async () => {
+    // Desktop runTurn's Stop path: abortTurn() fires loop.abort() while
+    // the turn is completing NORMALLY (the model already answered, so no
+    // abort path ever runs), and the consumer breaks at the
+    // assistant_final yield. generator.return() skips the tail
+    // straight-line code, so nothing resets _turnAbort. The next step()
+    // used to carry the stale abort and instantly kill the user's next
+    // message — the "send it a second time" bug.
+    const firstAnswer = { content: "first turn done", tool_calls: [] };
+    const secondAnswer = { content: "second turn ran cleanly", tool_calls: [] };
+    const client = makeClient([firstAnswer, secondAnswer]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+
+    let aborted = false;
+    for await (const ev of loop.step("first")) {
+      if (!aborted && ev.role === "assistant_final") {
+        aborted = true;
+        loop.abort();
+        break;
+      }
+    }
+
+    const turn2Events: { role: string; content?: string }[] = [];
+    for await (const ev of loop.step("second")) {
+      turn2Events.push({ role: ev.role, content: ev.content });
+    }
+
+    const finals = turn2Events.filter((e) => e.role === "assistant_final");
+    expect(finals).toHaveLength(1);
+    expect(finals[0]!.content).toBe("second turn ran cleanly");
+  });
+
+  it("does not bleed an abort fired after the previous turn completed (Stop-hook teardown window)", async () => {
+    // TUI window: the generator has fully completed (the answer is
+    // rendered) but the App is still busy running Stop hooks / teardown.
+    // Esc in that window aborts the dead turn's controller; the next
+    // message used to be cancelled and require a re-send.
+    const firstAnswer = { content: "first turn done", tool_calls: [] };
+    const secondAnswer = { content: "second turn ran cleanly", tool_calls: [] };
+    const client = makeClient([firstAnswer, secondAnswer]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+
+    // Turn 1 — drain to completion, THEN abort (as if Esc landed while
+    // the App was still tearing the turn down).
+    for await (const _ev of loop.step("first")) {
+      // drain
+    }
+    loop.abort();
+
+    const turn2Events: { role: string; content?: string }[] = [];
+    for await (const ev of loop.step("second")) {
+      turn2Events.push({ role: ev.role, content: ev.content });
+    }
+
+    const finals = turn2Events.filter((e) => e.role === "assistant_final");
+    expect(finals).toHaveLength(1);
+    expect(finals[0]!.content).toBe("second turn ran cleanly");
+  });
+
   it("first all-suppressed storm self-corrects in-turn instead of stopping", async () => {
     const reg = new ToolRegistry();
     reg.register({

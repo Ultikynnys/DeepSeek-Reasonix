@@ -185,6 +185,10 @@ export class CacheFirstLoop {
   private _streamPreference: boolean;
   /** Threaded through HTTP + every tool dispatch so Esc cancels in-flight work, not after. */
   private _turnAbort: AbortController = new AbortController();
+  /** True once the first step() iteration has begun. Distinguishes a carry-worthy
+   *  pre-first-step abort (subagent attach race) from a stale post-completion abort
+   *  that belonged to an already-finished turn and must be dropped. */
+  private _stepStarted = false;
   private _discardAbortRequested = false;
   /** Per-tool-call aborts keyed by inflight id — a TUI Stop click cancels exactly the card's own tool. Cleaned in runOneToolCall's finally. */
   private readonly _toolCancelControllers = new Map<string, AbortController>();
@@ -731,6 +735,25 @@ export class CacheFirstLoop {
   }
 
   async *step(userInput: string): AsyncGenerator<LoopEvent> {
+    // Per-turn abort-state guarantee: whenever this generator completes —
+    // normally, via an abort path, or because the consumer broke the
+    // for-await (generator.return() delegates through `yield*`, so this
+    // finally runs in every case) — a turn that ended with its own
+    // controller still aborted must reset it. Leaks come from aborts
+    // landing in the turn's tail: suspended at a final assistant_final /
+    // done yield, swallowed by the force-summary helper's catch, or a
+    // desktop Stop that breaks the for-await right after the model's
+    // answer. Without the reset, the next step() carries the stale
+    // abort forward (carryAbort) and instantly kills the user's next
+    // message — the "have to send it a second time" bug.
+    try {
+      yield* this.stepTurn(userInput);
+    } finally {
+      if (this._turnAbort.signal.aborted) this.resetAbortState();
+    }
+  }
+
+  private async *stepTurn(userInput: string): AsyncGenerator<LoopEvent> {
     // Reset per-turn flags.
     this._steerConsumed = false;
 
@@ -813,7 +836,17 @@ export class CacheFirstLoop {
     // is load-bearing for subagents: the parent's onParentAbort
     // listener calls childLoop.abort(), which can fire before
     // childLoop.step() has reached the `for await` line below.
-    const carryAbort = this._turnAbort.signal.aborted;
+    //
+    // Carry ONLY when the abort predates the loop's first step. Once a
+    // step has started, an aborted controller here is stale: step()'s
+    // wrapper finally resets any abort that fired during a turn, so the
+    // only way to see one is an abort() that landed after the previous
+    // generator completed (Esc during the TUI's Stop-hook teardown,
+    // desktop Stop at the tail). That abort belonged to the dead turn —
+    // carrying it would cancel the user's fresh message and force a
+    // re-send.
+    const carryAbort = this._turnAbort.signal.aborted && !this._stepStarted;
+    this._stepStarted = true;
     this._turnAbort = new AbortController();
     if (carryAbort) this._turnAbort.abort();
     const signal = this._turnAbort.signal;
