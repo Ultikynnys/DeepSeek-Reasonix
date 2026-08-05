@@ -1228,11 +1228,11 @@ export class CacheFirstLoop {
     // error escapes the inner try blocks.
   }
 
-  /** Compaction card lifecycle — emitted by every fold path so UIs render the
-   *  fold as a card in the same queue as tool calls (running spinner → folded
-   *  result / failure reason) instead of a status row that never clears.
-   *  protectActiveExchange is always on: this helper only runs post-response,
-   *  where the current iter's tool results must survive into the tail. */
+  // Compaction card lifecycle — emitted by every fold path so UIs render the
+  // fold as a card in the same queue as tool calls (running spinner → folded
+  // result / failure reason) instead of a status row that never clears.
+  // protectActiveExchange is always on: this helper only runs post-response,
+  // where the current iter's tool results must survive into the tail.
   private async *foldWithEvents(
     compactionId: string,
     tailBudget: number,

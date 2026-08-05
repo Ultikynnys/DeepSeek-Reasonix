@@ -1,27 +1,26 @@
 import { countTokensBounded } from "./tokenizer.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
-/** Compaction step 2: drop `read_file` contents that nothing references anymore.
- *
- *  Long sessions accumulate full file bodies in the log (each read result can
- *  be tens of KiB). By the time a fold runs, most of them were read once and
- *  never referenced again — yet the fold ships the ENTIRE head to the
- *  summarizer and the surviving tail keeps the dead bytes until the next
- *  fold. This pass stubs those results so the summarizer request and the
- *  post-fold context stop carrying the cache.
- *
- *  A read is "unused" iff ALL of:
- *   1. its content is longer than the stub (stubbing actually saves tokens),
- *   2. no LATER tool call in the log references the same path (any path-bearing
- *      tool — read/edit/write/search/list/symbol), and
- *   3. it is not part of the active exchange (message index at or after the
- *      last user message). Without this guard the post-response fold would
- *      stub the very tool results protectActiveExchange exists to preserve.
- *
- *  Pure: returns a new message array, never mutates the input. Message count
- *  is preserved (only content is replaced), so fold boundary math and the
- *  merge-at-commit slice stay valid. tool_call pairing is untouched.
- */
+// Compaction step 2: drop `read_file` contents that nothing references anymore.
+//
+// Long sessions accumulate full file bodies in the log (each read result can
+// be tens of KiB). By the time a fold runs, most of them were read once and
+// never referenced again — yet the fold ships the ENTIRE head to the
+// summarizer and the surviving tail keeps the dead bytes until the next
+// fold. This pass stubs those results so the summarizer request and the
+// post-fold context stop carrying the cache.
+//
+// A read is "unused" iff ALL of:
+//   1. its content is longer than the stub (stubbing actually saves tokens),
+//   2. no LATER tool call in the log references the same path (any path-bearing
+//      tool — read/edit/write/search/list/symbol), and
+//   3. it is not part of the active exchange (message index at or after the
+//      last user message). Without this guard the post-response fold would
+//      stub the very tool results protectActiveExchange exists to preserve.
+//
+// Pure: returns a new message array, never mutates the input. Message count
+// is preserved (only content is replaced), so fold boundary math and the
+// merge-at-commit slice stay valid. tool_call pairing is untouched.
 
 export interface FilePruneResult {
   messages: ChatMessage[];

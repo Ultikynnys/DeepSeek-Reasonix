@@ -109,13 +109,13 @@ export interface FoldResult {
   prunedTokens?: number;
 }
 
-/** Per-message token cost includes tool_calls JSON and reasoning_content;
- *  otherwise heavy tool-call arguments slip through the tail-budget check and
- *  the boundary slides past the active tool turn. reasoning_content counts
- *  against API promptTokens and must be passed back round-trip — ignoring it
- *  causes the fold to underestimate usage by thousands of tokens in
- *  thinking-mode sessions. No chat-template wrapper here — that would
- *  double-count. */
+// Per-message token cost includes tool_calls JSON and reasoning_content;
+// otherwise heavy tool-call arguments slip through the tail-budget check and
+// the boundary slides past the active tool turn. reasoning_content counts
+// against API promptTokens and must be passed back round-trip — ignoring it
+// causes the fold to underestimate usage by thousands of tokens in
+// thinking-mode sessions. No chat-template wrapper here — that would
+// double-count.
 function countMessageTokens(m: ChatMessage): number {
   let n = countTokensBounded(typeof m.content === "string" ? m.content : "");
   if (m.role === "assistant") {
@@ -241,11 +241,11 @@ export class ContextManager {
     opts?: {
       keepRecentTokens?: number;
       requireTailBoundary?: boolean;
-      /** Never let the fold summarize the most recent user→assistant exchange away —
-       *  clamps the boundary to the last user message even when tool results blew
-       *  the tail budget. Used by the post-response fold, which now runs AFTER
-       *  the current iter's tool dispatch (the exchange is complete but must
-       *  survive into the tail so the model still sees the tool results). */
+      // Never let the fold summarize the most recent user→assistant exchange away —
+      // clamps the boundary to the last user message even when tool results blew
+      // the tail budget. Used by the post-response fold, which now runs AFTER
+      // the current iter's tool dispatch (the exchange is complete but must
+      // survive into the tail so the model still sees the tool results).
       protectActiveExchange?: boolean;
     },
   ): Promise<FoldResult> {
@@ -273,7 +273,12 @@ export class ContextManager {
     // walk below (the walk can break before reaching it when tool results are huge).
     let lastUserIdx = -1;
     for (let i = all.length - 1; i >= 0; i--) {
-      if (lastUserIdx < 0 && all[i]!.role === "user") lastUserIdx = i;
+      if (all[i]!.role === "user") {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    for (let i = all.length - 1; i >= 0; i--) {
       if (cumTokens + tokenCounts[i]! > tailBudget) break;
       cumTokens += tokenCounts[i]!;
       if (all[i]!.role === "user") boundary = i;

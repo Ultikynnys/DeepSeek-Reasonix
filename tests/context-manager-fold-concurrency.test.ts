@@ -238,12 +238,16 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
       content: "y".repeat(800),
     });
 
+    const beforeMessages = loop.log.length;
     const guarded = await loop.compactHistory({
       keepRecentTokens: 40,
       protectActiveExchange: true,
     });
     expect(guarded.folded).toBe(true);
-    expect(guarded.beforeMessages).toBe(loop.log.length);
+    // The fold counts the whole log — the guard keeps the active exchange in
+    // the tail instead of dropping it (and the read result) into the summary.
+    expect(guarded.beforeMessages).toBe(beforeMessages);
+    expect(guarded.afterMessages).toBeLessThan(beforeMessages);
     const msgs = loop.log.entries;
     expect(msgs[0]?.content).toContain("SUMMARY");
     // The active exchange survives into the tail — the model still sees the read.
