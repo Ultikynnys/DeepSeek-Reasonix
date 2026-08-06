@@ -14,8 +14,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { DAY_MS, formatBytes } from "@reasonix/core-utils";
 import type { Usage } from "../client.js";
-import { countJsonlLines, parseJsonl, readJsonlLines } from "../core/jsonl.js";
+import { appendJsonlLine, countJsonlLines, parseJsonl, readJsonlLines } from "../core/jsonl.js";
 import { reasonixHome } from "../reasonix-home.js";
 import {
   CLAUDE_SONNET_PRICING,
@@ -102,7 +103,7 @@ function compactUsageLogIfLarge(path: string, now: number): void {
   } catch {
     return;
   }
-  const cutoff = now - USAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const cutoff = now - USAGE_RETENTION_DAYS * DAY_MS;
   const kept: string[] = [];
   for (const rec of parseJsonl(raw, isValidRecord)) {
     if (rec.ts >= cutoff) kept.push(JSON.stringify(rec));
@@ -144,8 +145,7 @@ export function appendUsage(input: AppendUsageInput): UsageRecord {
 
   const path = input.path ?? defaultUsageLogPath();
   try {
-    mkdirSync(dirname(path), { recursive: true });
-    appendFileSync(path, `${JSON.stringify(record)}\n`, "utf8");
+    appendJsonlLine(path, record);
     compactUsageLogIfLarge(path, record.ts);
   } catch {
     /* best-effort — disk failure shouldn't break the chat */
@@ -260,7 +260,7 @@ export function aggregateUsage(
   opts: AggregateOptions = {},
 ): UsageAggregate {
   const now = opts.now ?? Date.now();
-  const day = 24 * 60 * 60 * 1000;
+  const day = DAY_MS;
   const today = emptyBucket("today", now - day);
   const week = emptyBucket("week", now - 7 * day);
   const month = emptyBucket("month", now - 30 * day);
@@ -335,11 +335,7 @@ export function aggregateUsage(
 export function formatLogSize(path: string = defaultUsageLogPath()): string {
   if (!existsSync(path)) return "";
   try {
-    const s = statSync(path);
-    const bytes = s.size;
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return formatBytes(statSync(path).size);
   } catch {
     return "";
   }

@@ -4,6 +4,7 @@ import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process"
 import { constants, closeSync, lstatSync, openSync, realpathSync } from "node:fs";
 import { devNull } from "node:os";
 import * as pathMod from "node:path";
+import { pathIsUnder } from "@reasonix/core-utils/path-utils";
 import { isDqEscape, killProcessTree, prepareSpawn, smartDecodeOutput } from "./shell.js";
 
 export type ChainOp = "|" | "||" | "&&" | ";";
@@ -359,11 +360,6 @@ export function isNullDeviceAlias(target: string): boolean {
   if (lower === "/dev/null") return true;
   if (process.platform === "win32" && lower === "nul") return true;
   return false;
-}
-
-function pathIsUnder(child: string, parent: string): boolean {
-  const rel = pathMod.relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !pathMod.isAbsolute(rel));
 }
 
 function openFlags(mode: "r" | "w" | "a"): number {

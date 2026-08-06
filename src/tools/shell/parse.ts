@@ -1,5 +1,7 @@
-import { homedir } from "node:os";
 import * as pathMod from "node:path";
+import { expandTilde } from "@reasonix/core-utils/expand-tilde";
+import { pathIsUnder } from "@reasonix/core-utils/path-utils";
+import { splitShellTokens } from "../../mcp/shell-split.js";
 import {
   type CommandChain,
   chainAllowed,
@@ -69,91 +71,28 @@ export const BUILTIN_ALLOWLIST: ReadonlyArray<string> = [
   "mypy",
 ];
 
-/** Inside `"…"` only `\"` and `\\` are escapes — `\X` otherwise stays literal so Windows paths like `"C:\Users\foo\.bar"` survive tokenization. */
-export function isDqEscape(prev: string, next: string | undefined): boolean {
-  return prev === "\\" && (next === '"' || next === "\\");
-}
-
 /** No env / glob / backtick / `$(…)` expansion — prevents bypass of allowlist via concatenation. */
 export function tokenizeCommand(cmd: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let quote: '"' | "'" | null = null;
-  for (let i = 0; i < cmd.length; i++) {
-    const ch = cmd[i]!;
-    if (quote) {
-      if (ch === quote) {
-        quote = null;
-      } else if (quote === '"' && isDqEscape(ch, cmd[i + 1])) {
-        cur += cmd[++i];
-      } else {
-        cur += ch;
-      }
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (ch === " " || ch === "\t") {
-      if (cur.length > 0) {
-        out.push(cur);
-        cur = "";
-      }
-      continue;
-    }
-    cur += ch;
-  }
-  if (quote) throw new Error(`unclosed ${quote} in command`);
-  if (cur.length > 0) out.push(cur);
-  return out;
+  const r = splitShellTokens(cmd, "quote-and-backslash");
+  if ("unterminated" in r) throw new Error(`unclosed ${r.unterminated} in command`);
+  return r.tokens.map((t) => t.text);
 }
 
 /** Up-front detection — without it, `dir | findstr foo` quotes `|` literal and pipe silently fails. */
+const OP_PREFIX = /^(?:2>&1|&>|\|{1,2}|&{1,2}|2>{1,2}|>{1,2}|<{1,2})/;
+
 export function detectShellOperator(cmd: string): string | null {
-  const opPrefix = /^(?:2>&1|&>|\|{1,2}|&{1,2}|2>{1,2}|>{1,2}|<{1,2})/;
-  let cur = "";
-  let curQuoted = false;
-  let quote: '"' | "'" | null = null;
-  const check = (): string | null => {
-    if (cur.length === 0 && !curQuoted) return null;
-    if (!curQuoted) {
-      const m = opPrefix.exec(cur);
-      if (m) return m[0] ?? null;
-    }
-    return null;
-  };
-  for (let i = 0; i < cmd.length; i++) {
-    const ch = cmd[i]!;
-    if (quote) {
-      if (ch === quote) {
-        quote = null;
-      } else if (quote === '"' && isDqEscape(ch, cmd[i + 1])) {
-        cur += cmd[++i];
-        curQuoted = true;
-      } else {
-        cur += ch;
-        curQuoted = true;
-      }
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      curQuoted = true;
-      continue;
-    }
-    if (ch === " " || ch === "\t") {
-      const op = check();
-      if (op) return op;
-      cur = "";
-      curQuoted = false;
-      continue;
-    }
-    cur += ch;
+  const r = splitShellTokens(cmd, "quote-and-backslash");
+  if ("unterminated" in r) return null; // let tokenizeCommand throw the unclosed-quote error
+  for (const tok of r.tokens) {
+    if (tok.quoted) continue;
+    const m = OP_PREFIX.exec(tok.text);
+    if (m) return m[0] ?? null;
   }
-  if (quote) return null; // let tokenizeCommand throw the unclosed-quote error
-  return check();
+  return null;
 }
+
+export { isDqEscape } from "../../mcp/shell-split.js";
 
 /** Per-prefix demotion: an otherwise-allowlisted match falls back to the confirm gate when one of these tokens appears in the tail. Issue #257: `git branch -D` skipped review. Each token also matches its `--flag=value` form. */
 const RISKY_ARGS: Readonly<Record<string, ReadonlyArray<string>>> = {
@@ -224,13 +163,13 @@ function resolveSensitivePath(token: string, projectRoot: string): string | null
     return null;
   let expanded = token;
   if (expanded.startsWith("~")) {
-    expanded = pathMod.join(homedir(), expanded.slice(1));
+    expanded = expandTilde(expanded);
   }
   return pathMod.resolve(projectRoot, expanded);
 }
 
 function expandPrefix(prefix: string): string {
-  if (prefix.startsWith("~")) return pathMod.join(homedir(), prefix.slice(1));
+  if (prefix.startsWith("~")) return expandTilde(prefix);
   return pathMod.resolve(prefix);
 }
 
@@ -273,11 +212,6 @@ export function hasSensitivePathArgs(
     }
   }
   return false;
-}
-
-function pathIsUnder(child: string, parent: string): boolean {
-  const rel = pathMod.relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !pathMod.isAbsolute(rel));
 }
 
 function redirectTargets(chain: CommandChain): string[] {

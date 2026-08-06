@@ -1,7 +1,12 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
-import { clipText, flattenText } from "@reasonix/core-utils";
+import {
+  type ExternalSessionApp,
+  type ExternalSessionSource,
+  clipText,
+  flattenText,
+} from "@reasonix/core-utils";
 import { readJsonlLines } from "./core/jsonl.js";
 import {
   SESSION_EVENTS_SUFFIX,
@@ -14,7 +19,7 @@ import {
 } from "./memory/session.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
-export type ExternalSessionSource = "claude" | "codex";
+export type { ExternalSessionApp, ExternalSessionSource };
 
 export interface ImportedSession {
   messages: ChatMessage[];
@@ -40,15 +45,6 @@ export interface ImportExternalSessionResult {
   workspace?: string;
   summary?: string;
   branch?: string;
-}
-
-export interface ExternalSessionApp {
-  source: ExternalSessionSource;
-  label: string;
-  root: string;
-  available: boolean;
-  sessionCount: number;
-  latestMtime?: string;
 }
 
 export interface ImportExternalSessionsResult {

@@ -22,9 +22,6 @@ import {
   normalizeToolRateLimitConfig,
 } from "./tools/rate-limit.js";
 
-/** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates; plan blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch. */
-export type EditMode = "review" | "auto" | "yolo" | "plan";
-
 export const DEFAULT_MODEL = "deepseek-v4-flash";
 
 /** Models the official api.deepseek.com endpoint currently accepts. v3-era
@@ -34,8 +31,11 @@ export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
   "deepseek-v4-pro",
 ];
 
-import type { ReasoningEffort } from "@reasonix/core-utils";
-export type { ReasoningEffort };
+import type { EditMode, ReasoningEffort } from "@reasonix/core-utils";
+import { expandTilde } from "@reasonix/core-utils/expand-tilde";
+
+/** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates; plan blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch. */
+export type { EditMode, ReasoningEffort };
 
 export const REASONING_EFFORT_VALUES: readonly ReasoningEffort[] = ["low", "medium", "high", "max"];
 
@@ -811,9 +811,7 @@ function skillPathKey(path: string): string {
 }
 
 function expandCurrentUserHome(path: string): string {
-  if (path === "~") return homedir();
-  if (path.startsWith("~/") || path.startsWith("~\\")) return join(homedir(), path.slice(2));
-  return path;
+  return expandTilde(path);
 }
 
 export function loadSkillPaths(

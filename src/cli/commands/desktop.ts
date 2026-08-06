@@ -5,6 +5,49 @@ import { isAbsolute, join, resolve } from "node:path";
 import { stdin } from "node:process";
 import { createInterface } from "node:readline";
 import { flattenText, toApprovalPrompt } from "@reasonix/core-utils";
+import type {
+  BalanceEvent,
+  BalanceInfoItem,
+  BtwResultEvent,
+  CheckpointRequiredEvent,
+  ChoiceRequiredEvent,
+  ConfirmRequiredEvent,
+  CtxBreakdownEvent,
+  JobInfo,
+  JobsEvent,
+  LoadedMessage,
+  LoadedSegment,
+  McpSpecInfo,
+  McpSpecStatus,
+  McpSpecsEvent,
+  MemoryDetailEvent,
+  MemoryEvent,
+  MemoryExportEvent,
+  MemoryResultEvent,
+  MentionPreviewEvent,
+  MentionResultsEvent,
+  NeedsSetupEvent,
+  PathAccessRequiredEvent,
+  PlanClearedEvent,
+  PlanRequiredEvent,
+  PlanStep,
+  QQSettingsEvent,
+  RetryResultEvent,
+  RevisionRequiredEvent,
+  RewindResultEvent,
+  SessionCompactedEvent,
+  SessionEmptyEvent,
+  SessionImportResultEvent,
+  SessionImportSourcesEvent,
+  SessionLoadedEvent,
+  SessionsEvent,
+  SettingsEvent,
+  SkillInfo,
+  SkillsEvent,
+  StepCompletedEvent,
+  TabClosedEvent,
+  TabOpenedEvent,
+} from "@reasonix/core-utils";
 import {
   type FileWithStats,
   listDirectory,
@@ -18,7 +61,6 @@ import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
 import {
   DEFAULT_MODEL,
   type DesktopOpenTab,
-  type EditMode,
   bridgeEndpointEnv,
   isPlausibleKey,
   isReasoningEffort,
@@ -61,7 +103,6 @@ import type { Event as KernelEvent } from "../../core/events.js";
 import {
   type CheckpointVerdict,
   type ChoiceVerdict,
-  type ConfirmationChoice,
   type PlanVerdict,
   type RevisionVerdict,
   pauseGate,
@@ -117,7 +158,6 @@ import {
 } from "../../memory/session.js";
 import { QQChannel } from "../../qq/channel.js";
 import {
-  type ExternalSessionSource,
   discoverExternalSessionApps,
   importExternalSession,
   importExternalSessions,
@@ -166,417 +206,7 @@ export function raceLoopStep(
   });
 }
 
-type InMessage = { tabId?: string } & (
-  | { cmd: "user_input"; text: string }
-  | { cmd: "abort" }
-  | { cmd: "confirm_response"; id: number; response: ConfirmationChoice }
-  | { cmd: "choice_response"; id: number; response: ChoiceVerdict }
-  | { cmd: "plan_response"; id: number; response: PlanVerdict }
-  | { cmd: "checkpoint_response"; id: number; response: CheckpointVerdict }
-  | { cmd: "revision_response"; id: number; response: RevisionVerdict }
-  | { cmd: "session_list" }
-  | { cmd: "session_delete"; name: string }
-  | { cmd: "session_load"; name: string }
-  | { cmd: "session_rename"; name: string; title: string }
-  | { cmd: "session_import"; source: ExternalSessionSource; path: string; name?: string }
-  | { cmd: "session_import_scan" }
-  | { cmd: "session_import_bulk"; sources: ExternalSessionSource[] }
-  | { cmd: "memory_read"; path: string }
-  | {
-      cmd: "memory_write";
-      scope: "global" | "project";
-      name: string;
-      description: string;
-      body: string;
-      type?: string;
-      priority?: "low" | "medium" | "high";
-    }
-  | { cmd: "memory_delete"; path: string }
-  | { cmd: "memory_export" }
-  | { cmd: "memory_import"; json: string }
-  | { cmd: "new_chat" }
-  | { cmd: "setup_save_key"; key: string }
-  | { cmd: "settings_get" }
-  | {
-      cmd: "settings_save";
-      reasoningEffort?: import("../../config.js").ReasoningEffort;
-      editMode?: EditMode;
-      budgetUsd?: number | null;
-      baseUrl?: string;
-      workspaceDir?: string;
-      model?: string;
-      editor?: string;
-      webSearchEngine?:
-        | "bing"
-        | "searxng"
-        | "metaso"
-        | "tavily"
-        | "perplexity"
-        | "exa"
-        | "brave"
-        | "ollama";
-      webSearchEndpoint?: string | null;
-      metasoApiKey?: string | null;
-      tavilyApiKey?: string | null;
-      perplexityApiKey?: string | null;
-      exaApiKey?: string | null;
-      ollamaApiKey?: string | null;
-      braveApiKey?: string | null;
-      subagentModels?: Record<string, "flash" | "pro">;
-      showSystemEvents?: boolean;
-    }
-  | { cmd: "qq_status_get" }
-  | { cmd: "qq_connect" }
-  | { cmd: "qq_disconnect" }
-  | {
-      cmd: "qq_config_save";
-      appId?: string;
-      appSecret?: string;
-      sandbox: boolean;
-    }
-  | { cmd: "mention_query"; query: string; nonce: number }
-  | { cmd: "mention_preview"; path: string; nonce: number }
-  | { cmd: "mention_picked"; path: string }
-  | { cmd: "tab_open"; workspaceDir?: string }
-  | { cmd: "tab_close" }
-  | { cmd: "tab_activate"; tabId: string }
-  | { cmd: "mcp_specs_get" }
-  | { cmd: "mcp_specs_add"; spec: string }
-  | { cmd: "mcp_specs_remove"; spec: string }
-  | { cmd: "skills_get" }
-  | { cmd: "skill_run"; name: string; args?: string }
-  | { cmd: "jobs_list" }
-  | { cmd: "jobs_stop"; jobId: number }
-  | { cmd: "jobs_stop_all" }
-  | { cmd: "compact_history" }
-  | { cmd: "retry" }
-  | { cmd: "btw"; text: string }
-  | { cmd: "desktop_resync" }
-  | { cmd: "rewind"; userTurn: number }
-  | { cmd: "cancel_tool" }
-);
-
-interface NeedsSetupEvent {
-  type: "$needs_setup";
-  reason: "no_api_key";
-}
-
-interface SettingsEvent {
-  type: "$settings";
-  reasoningEffort: import("../../config.js").ReasoningEffort;
-  editMode: EditMode;
-  budgetUsd: number | null;
-  baseUrl?: string;
-  apiKeyPrefix?: string;
-  workspaceDir: string;
-  recentWorkspaces: string[];
-  model: string;
-  editor?: string;
-  webSearchEngine?:
-    | "bing"
-    | "searxng"
-    | "metaso"
-    | "tavily"
-    | "perplexity"
-    | "exa"
-    | "brave"
-    | "ollama";
-  webSearchEndpoint?: string;
-  webSearchApiKeys?: {
-    metaso?: string;
-    tavily?: string;
-    perplexity?: string;
-    exa?: string;
-    ollama?: string;
-  };
-  subagentModels?: Record<string, "flash" | "pro">;
-  showSystemEvents?: boolean;
-  version: string;
-}
-
-interface QQSettingsEvent {
-  type: "$qq_settings";
-  appId?: string;
-  appSecret?: string;
-  sandbox: boolean;
-  enabled: boolean;
-  configured: boolean;
-  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
-  lastError?: string;
-  appIdPreview?: string;
-  access: string;
-}
-
-interface BalanceInfoItem {
-  currency: string;
-  total: number;
-  granted?: number;
-  toppedUp?: number;
-}
-
-interface BalanceEvent {
-  type: "$balance";
-  currency: string;
-  total: number;
-  isAvailable: boolean;
-  balanceInfos: BalanceInfoItem[];
-}
-
-interface PlanRequiredEvent {
-  type: "$plan_required";
-  id: number;
-  plan: string;
-  steps?: unknown[];
-  summary?: string;
-}
-
-interface SessionsEvent {
-  type: "$sessions";
-  items: {
-    name: string;
-    messageCount: number;
-    mtime: string;
-    summary?: string;
-    workspaceStatus?: "matched" | "legacy_missing_meta";
-  }[];
-}
-
-interface SessionImportSourcesEvent {
-  type: "$session_import_sources";
-  apps: ReturnType<typeof discoverExternalSessionApps>;
-}
-
-interface SessionImportResultEvent {
-  type: "$session_import_result";
-  imported: number;
-  skipped: number;
-  failed: number;
-}
-
-interface MentionResultsEvent {
-  type: "$mention_results";
-  nonce: number;
-  query: string;
-  results: string[];
-}
-
-interface MentionPreviewEvent {
-  type: "$mention_preview";
-  nonce: number;
-  path: string;
-  head: string;
-  totalLines: number;
-}
-
-interface TabOpenedEvent {
-  type: "$tab_opened";
-  workspaceDir: string;
-  /** True when the frontend should focus this tab (user-opened, or the restored focused tab). */
-  active?: boolean;
-}
-
-interface TabClosedEvent {
-  type: "$tab_closed";
-}
-
-type LoadedSegment =
-  | { kind: "text"; text: string }
-  | { kind: "reasoning"; text: string }
-  | {
-      kind: "tool";
-      callId: string;
-      name: string;
-      args: string;
-      result?: string;
-      ok?: boolean;
-    };
-
-type LoadedMessage =
-  | { kind: "user"; text: string }
-  | {
-      kind: "assistant";
-      turn: number;
-      segments: LoadedSegment[];
-      pending: false;
-    };
-
-interface SessionLoadedEvent {
-  type: "$session_loaded";
-  name: string;
-  messages: LoadedMessage[];
-  carryover: {
-    totalCostUsd: number;
-    cacheHitTokens: number;
-    cacheMissTokens: number;
-    totalCompletionTokens: number;
-  };
-}
-
-/** session.compacted as shipped to the frontend: the kernel event with the
- *  replacement converted from ChatMessage[] into the LoadedMessage[] wire
- *  shape the App's $session_loaded consumer already understands. */
-interface SessionCompactedWireEvent {
-  type: "session.compacted";
-  id: number;
-  ts: string;
-  turn: number;
-  beforeMessages: number;
-  afterMessages: number;
-  reason: "user" | "auto-context-pressure";
-  replacementMessages: LoadedMessage[];
-}
-
-interface SessionEmptyEvent {
-  type: "$session_empty";
-  name: string;
-  sizeBytes: number;
-}
-
-interface ConfirmRequiredEvent {
-  type: "$confirm_required";
-  id: number;
-  kind: "run_command" | "run_background";
-  command: string;
-  prompt?: import("@reasonix/core-utils").ApprovalPrompt;
-}
-
-interface PathAccessRequiredEvent {
-  type: "$path_access_required";
-  id: number;
-  path: string;
-  intent: "read" | "write";
-  toolName: string;
-  sandboxRoot: string;
-  allowPrefix: string;
-  prompt?: import("@reasonix/core-utils").ApprovalPrompt;
-}
-
-interface ChoiceRequiredEvent {
-  type: "$choice_required";
-  id: number;
-  question: string;
-  options: ChoiceOption[];
-  allowCustom: boolean;
-}
-
-interface PlanStepLite {
-  id: string;
-  title: string;
-  action: string;
-  risk?: "low" | "med" | "high";
-}
-
-interface CheckpointRequiredEvent {
-  type: "$checkpoint_required";
-  id: number;
-  stepId: string;
-  title?: string;
-  result: string;
-  notes?: string;
-  completed: number;
-  total: number;
-}
-
-interface RevisionRequiredEvent {
-  type: "$revision_required";
-  id: number;
-  reason: string;
-  remainingSteps: PlanStepLite[];
-  summary?: string;
-}
-
-interface StepCompletedEvent {
-  type: "$step_completed";
-  stepId: string;
-  title?: string;
-  result: string;
-  notes?: string;
-}
-
-interface PlanClearedEvent {
-  type: "$plan_cleared";
-}
-
-type McpSpecStatus = "configured" | "handshake" | "connected" | "failed" | "disabled";
-
-interface McpSpecInfo {
-  raw: string;
-  name: string | null;
-  transport: "stdio" | "sse" | "streamable-http";
-  summary: string;
-  parseError?: string;
-  status: McpSpecStatus;
-  statusReason?: string;
-  toolCount?: number;
-}
-
-interface McpSpecsEvent {
-  type: "$mcp_specs";
-  specs: McpSpecInfo[];
-  bridged: boolean;
-}
-
-interface CtxBreakdownEvent {
-  type: "$ctx_breakdown";
-  reservedTokens: number;
-  /** Current log token count (real-time) — sent after /compact to refresh the meter. */
-  logTokens?: number;
-  /** Model context cap — denominator + compaction-limit ticks for the meter. */
-  ctxMax?: number;
-}
-
-interface MemoryEvent {
-  type: "$memory";
-  entries: MemoryEntryInfo[];
-}
-
-interface MemoryDetailEvent {
-  type: "$memory_detail";
-  detail: MemoryEntryDetail;
-}
-
-interface MemoryResultEvent {
-  type: "$memory_result";
-  ok: boolean;
-  message: string;
-}
-
-interface MemoryExportEvent {
-  type: "$memory_export";
-  text: string;
-}
-
-interface SkillInfo {
-  name: string;
-  description: string;
-  scope: "project" | "custom" | "global" | "builtin";
-  path: string;
-  runAs: "inline" | "subagent";
-  model?: string;
-}
-
-interface SkillsEvent {
-  type: "$skills";
-  items: SkillInfo[];
-}
-
-interface JobInfoPayload {
-  id: number;
-  tabId: string;
-  sessionLabel: string;
-  command: string;
-  pid: number | null;
-  running: boolean;
-  exitCode: number | null;
-  startedAt: number;
-  outputTail: string;
-  spawnError?: string;
-}
-
-interface JobsEvent {
-  type: "$jobs";
-  items: JobInfoPayload[];
-}
+type InMessage = import("@reasonix/core-utils").OutgoingCommand;
 
 const desktopQqRuntimeSnapshot: {
   runtimeState: "disconnected" | "connecting" | "connected" | "failed";
@@ -585,29 +215,12 @@ const desktopQqRuntimeSnapshot: {
   runtimeState: "disconnected",
 };
 
-interface RetryResultEvent {
-  type: "$retry_result";
-  text: string;
-}
-
-interface BtwResultEvent {
-  type: "$btw_result";
-  question: string;
-  answer: string;
-}
-
-interface RewindResultEvent {
-  type: "$rewind_result";
-  turn: number;
-  text: string;
-}
-
 /** Direct fd write — bypasses Node's stream layer (and its piped-output
  *  block buffering) so every JSON line reaches Rust the moment it's
  *  produced, not whenever the next 8 KB flushes. */
 type EmittableEvent =
   | KernelEvent
-  | SessionCompactedWireEvent
+  | SessionCompactedEvent
   | { type: "$ready" }
   | { type: "$error"; message: string }
   | { type: "$turn_complete" }
@@ -693,7 +306,7 @@ function emit(ev: EmittableEvent, tabId?: string): void {
  *  shape so the App reducer can swap in the post-fold conversation. */
 function emitKernelEvent(kev: KernelEvent, tabId?: string): void {
   if (kev.type === "session.compacted") {
-    const wire: SessionCompactedWireEvent = {
+    const wire: SessionCompactedEvent = {
       type: "session.compacted",
       id: kev.id,
       ts: kev.ts,
@@ -2012,7 +1625,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   function emitJobs(): void {
-    const items: JobInfoPayload[] = [];
+    const items: JobInfo[] = [];
     for (const t of tabs.values()) {
       const reg = t.toolset?.jobs;
       if (!reg) continue;
@@ -2218,7 +1831,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (req.kind === "plan_proposed") {
-      const payload = req.payload as { plan: string; steps?: PlanStepLite[]; summary?: string };
+      const payload = req.payload as { plan: string; steps?: PlanStep[]; summary?: string };
       if (tab) {
         tab.completedStepIds.clear();
         tab.planTotalSteps = payload.steps?.length ?? 0;
@@ -2278,7 +1891,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (req.kind === "plan_revision") {
       const payload = req.payload as {
         reason: string;
-        remainingSteps: PlanStepLite[];
+        remainingSteps: PlanStep[];
         summary?: string;
       };
       if (tab) setQQPendingInteraction(qqRuntime.routing, tab.id, req.id, req.kind, payload);

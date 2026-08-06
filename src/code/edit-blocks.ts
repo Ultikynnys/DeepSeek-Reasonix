@@ -16,7 +16,8 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { looksLikeAbsoluteSystemPath, pathIsUnder } from "@reasonix/core-utils/path-utils";
 import { type FileEncoding, decodeFileBuffer, encodeFile } from "./file-encoding.js";
 
 export interface EditBlock {
@@ -73,7 +74,7 @@ export function parseEditBlocks(text: string): EditBlock[] {
 
 function resolveEditPath(rootDir: string, rawPath: string): string {
   const absRoot = resolve(rootDir);
-  if (/^[A-Za-z]:[\\/]/.test(rawPath) || looksLikeAbsoluteSystemPath(rawPath)) {
+  if (looksLikeAbsoluteSystemPath(rawPath)) {
     return resolve(rawPath);
   }
   let rooted = rawPath;
@@ -81,17 +82,6 @@ function resolveEditPath(rootDir: string, rawPath: string): string {
     rooted = rooted.slice(1);
   }
   return resolve(absRoot, rooted || ".");
-}
-
-function looksLikeAbsoluteSystemPath(rawPath: string): boolean {
-  return /^\/(?:home|Users|etc|var|opt|tmp|usr|mnt|Library|Volumes|proc|sys|dev|run|srv|media|Applications|System|root|boot|private)(?:[/\\]|$)/.test(
-    rawPath,
-  );
-}
-
-function pathIsUnder(child: string, parent: string): boolean {
-  const rel = relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 function writeAllSync(fd: number, buf: Buffer): void {
@@ -232,28 +222,22 @@ export function applyEditBlock(block: EditBlock, rootDir: string): ApplyResult {
       }
       const { text: content, encoding } = decodeFileBuffer(inBuf.subarray(0, readBytes));
       const le = lineEndingOf(content);
-      const adaptedSearch = block.search.replace(/\r?\n/g, le);
-      const adaptedReplace = block.replace.replace(/\r?\n/g, le);
-      const idx = content.indexOf(adaptedSearch);
-      if (idx === -1) {
+      const m = locateSingleMatch(content, block.search, block.replace, le);
+      if ("failure" in m) {
         return {
           path: block.path,
           status: "not-found",
-          message: "SEARCH text does not match the current file content exactly",
-        };
-      }
-      const nextIdx = content.indexOf(adaptedSearch, idx + 1);
-      if (nextIdx !== -1) {
-        return {
-          path: block.path,
-          status: "not-found",
-          message: "SEARCH text appears multiple times; include more context to disambiguate",
+          message:
+            m.failure === "ambiguous"
+              ? "SEARCH text appears multiple times; include more context to disambiguate"
+              : "SEARCH text does not match the current file content exactly",
         };
       }
       // Apply one unambiguous occurrence. Auto-expanding to replace-all is
       // a footgun when the same string legitimately appears in several
       // unrelated places.
-      const replaced = `${content.slice(0, idx)}${adaptedReplace}${content.slice(idx + adaptedSearch.length)}`;
+      const { adaptedSearch, adaptedReplace, firstIdx } = m.match;
+      const replaced = `${content.slice(0, firstIdx)}${adaptedReplace}${content.slice(firstIdx + adaptedSearch.length)}`;
       closeSync(fd);
       fd = undefined;
       atomicReplaceFileSync(writeTarget, encodeFile(replaced, encoding), stat.mode);
@@ -352,6 +336,32 @@ export function restoreSnapshots(snapshots: EditSnapshot[], rootDir: string): Ap
   });
 }
 
-function lineEndingOf(text: string): string {
+export function lineEndingOf(text: string): string {
   return text.includes("\r\n") ? "\r\n" : "\n";
+}
+
+export interface SingleMatch {
+  adaptedSearch: string;
+  adaptedReplace: string;
+  firstIdx: number;
+}
+
+export type SingleMatchFailure = "not-found" | "ambiguous";
+
+/** Locate the unique occurrence of `search` (line-endings adapted to `le`) —
+ *  adapted strings + index, or the failure reason. Shared by the edit gate
+ *  and the edit_file/multi_edit tools so both enforce identical semantics. */
+export function locateSingleMatch(
+  text: string,
+  search: string,
+  replace: string,
+  le: string,
+): { match: SingleMatch } | { failure: SingleMatchFailure } {
+  const adaptedSearch = search.replace(/\r?\n/g, le);
+  const adaptedReplace = replace.replace(/\r?\n/g, le);
+  const firstIdx = text.indexOf(adaptedSearch);
+  if (firstIdx < 0) return { failure: "not-found" };
+  const nextIdx = text.indexOf(adaptedSearch, firstIdx + 1);
+  if (nextIdx >= 0) return { failure: "ambiguous" };
+  return { match: { adaptedSearch, adaptedReplace, firstIdx } };
 }

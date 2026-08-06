@@ -1,6 +1,7 @@
-/** Shared JSONL parsing — session logs, event logs, and the usage log all re-implemented split → trim → parse → validate. */
+/** Shared JSONL parsing + appending — session logs, event logs, and the usage log all re-implemented split → trim → parse → validate (read) and mkdir → append (write). */
 
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 function acceptAll<T>(_raw: unknown): _raw is T {
   return true;
@@ -46,4 +47,10 @@ export function countJsonlLines(raw: string): number {
     if (line.trim()) count++;
   }
   return count;
+}
+
+/** Append one JSON value as a JSONL line, creating the parent dir if needed. */
+export function appendJsonlLine(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, `${JSON.stringify(value)}\n`, "utf8");
 }

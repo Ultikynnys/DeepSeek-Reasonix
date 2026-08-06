@@ -16,9 +16,10 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
+import { DAY_MS } from "@reasonix/core-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
 import { atomicWriteSync } from "../core/atomic-write.js";
-import { parseJsonl } from "../core/jsonl.js";
+import { appendJsonlLine, parseJsonl } from "../core/jsonl.js";
 import { reasonixHome } from "../reasonix-home.js";
 import type { ChatMessage } from "../types.js";
 
@@ -195,8 +196,7 @@ function readSessionMessages(
 
 export function appendSessionMessage(name: string, message: ChatMessage): void {
   const path = sessionPath(name);
-  mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, `${JSON.stringify(message)}\n`, "utf8");
+  appendJsonlLine(path, message);
   chmodPrivate(path);
 }
 
@@ -349,7 +349,7 @@ export function renameSession(oldName: string, newName: string): boolean {
 
 /** Best-effort: per-file delete errors are swallowed so partial pruning still finishes. */
 export function pruneStaleSessions(daysOld = 90): string[] {
-  const cutoff = Date.now() - daysOld * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - daysOld * DAY_MS;
   const deleted: string[] = [];
   for (const s of listSessions()) {
     if (s.mtime.getTime() < cutoff) {

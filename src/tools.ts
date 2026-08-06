@@ -246,7 +246,7 @@ export class ToolRegistry {
     // Plan-mode enforcement — runs AFTER arg parsing so a tool with a
     // runtime `readOnlyCheck` can inspect the actual args (e.g.
     // `run_command` is read-only iff the command matches its allowlist).
-    if (this._planMode && !isReadOnlyCall(tool, args)) {
+    if (this._planMode && !isReadOnlyTool(tool, args)) {
       return JSON.stringify({
         error: `${name}: unavailable in plan mode — this is a read-only exploration phase. Use read_file / list_directory / search_files / directory_tree / web_search / allowlisted shell commands to investigate. Call submit_plan with your proposed plan when you're ready for the user's review.`,
         rejectedReason: "plan-mode",
@@ -459,18 +459,22 @@ function rejectionRecoveryHint(reason: string): string {
   }
 }
 
-function isReadOnlyCall(tool: InternalTool, args: Record<string, unknown>): boolean {
-  if (tool.readOnlyCheck) {
+/** True when a tool def is read-only for these args: the static `readOnly` flag, or a dynamic `readOnlyCheck` that returns true. A throwing check downgrades to "may mutate" so a bug can't silently bypass plan-mode / storm gating. Single source for tools.ts and loop.ts. */
+export function isReadOnlyTool(
+  def: { name: string; readOnly?: boolean; readOnlyCheck?: (args: never) => unknown },
+  args: Record<string, unknown>,
+): boolean {
+  if (def.readOnlyCheck) {
     try {
-      return Boolean(tool.readOnlyCheck(args as never));
+      return Boolean(def.readOnlyCheck(args as never));
     } catch (err) {
       // A buggy readOnlyCheck silently downgrades to "may mutate" — log it so
       // the bug doesn't hide behind plan-mode refusals or storm-breaker noise.
-      process.stderr.write(`readOnlyCheck for ${tool.name} threw: ${(err as Error).message}\n`);
+      process.stderr.write(`readOnlyCheck for ${def.name} threw: ${(err as Error).message}\n`);
       return false;
     }
   }
-  return tool.readOnly === true;
+  return def.readOnly === true;
 }
 
 function hasDotKey(obj: Record<string, unknown>): boolean {

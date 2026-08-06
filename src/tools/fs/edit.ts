@@ -1,28 +1,11 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
+import { lineEndingOf, locateSingleMatch } from "../../code/edit-blocks.js";
 import { type FileEncoding, decodeFileBuffer, encodeFile } from "../../code/file-encoding.js";
 import { displayRel } from "./rel.js";
 
 /** Marker substring in the gate-reject message so tools.ts's repeat-rejection tracker spots a 2nd identical unread-edit and switches to the sharper "stop retrying" hint. */
 export const READ_BEFORE_EDIT_MARKER = "read_file first";
-
-/** Locate a unique occurrence of `search` (line-endings adapted to `le`) in `text`, throwing via the caller's error factories on not-found/ambiguous. Shared by edit_file and multi_edit so both enforce identical matching semantics. */
-function locateSingleMatch(
-  text: string,
-  search: string,
-  replace: string,
-  le: string,
-  notFound: () => Error,
-  ambiguous: () => Error,
-): { adaptedSearch: string; adaptedReplace: string; firstIdx: number } {
-  const adaptedSearch = search.replace(/\r?\n/g, le);
-  const adaptedReplace = replace.replace(/\r?\n/g, le);
-  const firstIdx = text.indexOf(adaptedSearch);
-  if (firstIdx < 0) throw notFound();
-  const nextIdx = text.indexOf(adaptedSearch, firstIdx + 1);
-  if (nextIdx >= 0) throw ambiguous();
-  return { adaptedSearch, adaptedReplace, firstIdx };
-}
 
 export async function applyEdit(
   rootDir: string,
@@ -40,18 +23,16 @@ export async function applyEdit(
   }
   const beforeBuf = await fs.readFile(abs);
   const { text: before, encoding } = decodeFileBuffer(beforeBuf);
-  const le = before.includes("\r\n") ? "\r\n" : "\n";
-  const { adaptedSearch, adaptedReplace, firstIdx } = locateSingleMatch(
-    before,
-    args.search,
-    args.replace,
-    le,
-    () => new Error(`edit_file: search text not found in ${displayRel(rootDir, abs)}`),
-    () =>
-      new Error(
-        `edit_file: search text appears multiple times in ${displayRel(rootDir, abs)} — include more context to disambiguate`,
-      ),
-  );
+  const le = lineEndingOf(before);
+  const m = locateSingleMatch(before, args.search, args.replace, le);
+  if ("failure" in m) {
+    throw m.failure === "not-found"
+      ? new Error(`edit_file: search text not found in ${displayRel(rootDir, abs)}`)
+      : new Error(
+          `edit_file: search text appears multiple times in ${displayRel(rootDir, abs)} — include more context to disambiguate`,
+        );
+  }
+  const { adaptedSearch, adaptedReplace, firstIdx } = m.match;
   const after =
     before.slice(0, firstIdx) + adaptedReplace + before.slice(firstIdx + adaptedSearch.length);
   await fs.writeFile(abs, encodeFile(after, encoding));
@@ -123,22 +104,19 @@ export async function applyMultiEdit(
           `multi_edit: edit #${i + 1} cannot read ${rel}: ${(err as Error).message} (no edits applied)`,
         );
       }
-      const le = before.includes("\r\n") ? "\r\n" : "\n";
+      const le = lineEndingOf(before);
       state = { before, buf: before, le, hunks: [], deltaChars: 0, touched: 0, encoding };
       filesByPath.set(e.abs, state);
     }
-    const { adaptedSearch, adaptedReplace, firstIdx } = locateSingleMatch(
-      state.buf,
-      e.search,
-      e.replace,
-      state.le,
-      () =>
-        new Error(`multi_edit: edit #${i + 1} search text not found in ${rel} — no edits applied`),
-      () =>
-        new Error(
-          `multi_edit: edit #${i + 1} search text appears multiple times in ${rel} — include more context to disambiguate (no edits applied)`,
-        ),
-    );
+    const m = locateSingleMatch(state.buf, e.search, e.replace, state.le);
+    if ("failure" in m) {
+      throw m.failure === "not-found"
+        ? new Error(`multi_edit: edit #${i + 1} search text not found in ${rel} — no edits applied`)
+        : new Error(
+            `multi_edit: edit #${i + 1} search text appears multiple times in ${rel} — include more context to disambiguate (no edits applied)`,
+          );
+    }
+    const { adaptedSearch, adaptedReplace, firstIdx } = m.match;
     const startLine = state.buf.slice(0, firstIdx).split(/\r?\n/).length;
     state.buf =
       state.buf.slice(0, firstIdx) +

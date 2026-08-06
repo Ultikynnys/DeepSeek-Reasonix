@@ -31,22 +31,7 @@ export function formatEditBlockDiff(block: EditBlock, opts: DiffPreviewOptions =
   }
 
   // Common leading / trailing lines — shared context we can collapse.
-  let leading = 0;
-  while (
-    leading < search.length &&
-    leading < replace.length &&
-    search[leading] === replace[leading]
-  ) {
-    leading++;
-  }
-  let trailing = 0;
-  while (
-    trailing < search.length - leading &&
-    trailing < replace.length - leading &&
-    search[search.length - 1 - trailing] === replace[replace.length - 1 - trailing]
-  ) {
-    trailing++;
-  }
+  const { leading, trailing } = trimSharedContext(search, replace);
 
   const searchMiddle = search.slice(leading, search.length - trailing);
   const replaceMiddle = replace.slice(leading, replace.length - trailing);
@@ -134,23 +119,8 @@ export function formatEditBlockSplit(
   }
 
   // Trim shared leading + trailing context — same logic as the
-  // unified diff renderer, kept in lockstep so both stay accurate.
-  let leading = 0;
-  while (
-    leading < search.length &&
-    leading < replace.length &&
-    search[leading] === replace[leading]
-  ) {
-    leading++;
-  }
-  let trailing = 0;
-  while (
-    trailing < search.length - leading &&
-    trailing < replace.length - leading &&
-    search[search.length - 1 - trailing] === replace[replace.length - 1 - trailing]
-  ) {
-    trailing++;
-  }
+  // unified diff renderer.
+  const { leading, trailing } = trimSharedContext(search, replace);
 
   const searchMiddle = search.slice(leading, search.length - trailing);
   const replaceMiddle = replace.slice(leading, replace.length - trailing);
@@ -224,6 +194,30 @@ function capRows(rows: SplitDiffRow[], maxRows: number): SplitDiffRow[] {
 function renderAllPlus(lines: string[], indent: string, maxLines: number): string[] {
   const out = lines.map((l) => `${indent}+ ${l}`);
   return capLines(out, maxLines, indent);
+}
+
+/** Trim shared leading + trailing context — identical logic for the unified and split renderers. */
+function trimSharedContext(
+  search: string[],
+  replace: string[],
+): { leading: number; trailing: number } {
+  let leading = 0;
+  while (
+    leading < search.length &&
+    leading < replace.length &&
+    search[leading] === replace[leading]
+  ) {
+    leading++;
+  }
+  let trailing = 0;
+  while (
+    trailing < search.length - leading &&
+    trailing < replace.length - leading &&
+    search[search.length - 1 - trailing] === replace[replace.length - 1 - trailing]
+  ) {
+    trailing++;
+  }
+  return { leading, trailing };
 }
 
 function capLines(lines: string[], maxLines: number, indent: string): string[] {

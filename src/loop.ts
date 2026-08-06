@@ -61,7 +61,7 @@ import {
 } from "./memory/session.js";
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
-import { ToolRegistry } from "./tools.js";
+import { ToolRegistry, isReadOnlyTool } from "./tools.js";
 import { ReadTracker } from "./tools/read-tracker.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
@@ -489,23 +489,14 @@ export class CacheFirstLoop {
     if (!name) return false;
     const def = this.tools.get(name);
     if (!def) return false;
-    if (def.readOnlyCheck) {
-      let args: Record<string, unknown> = {};
-      try {
-        args = JSON.parse(call.function?.arguments ?? "{}") ?? {};
-      } catch {
-        // Malformed args → fall through to the static flag below; the
-        // dynamic check would've thrown anyway.
-      }
-      try {
-        if (def.readOnlyCheck(args as never)) return false;
-      } catch (err) {
-        // Mirror tools.ts: surface buggy readOnlyCheck instead of silently
-        // falling through to the static flag.
-        process.stderr.write(`readOnlyCheck for ${name} threw: ${(err as Error).message}\n`);
-      }
+    let args: Record<string, unknown> = {};
+    try {
+      args = JSON.parse(call.function?.arguments ?? "{}") ?? {};
+    } catch {
+      // Malformed args → fall through to the static flag below; the
+      // dynamic check would've thrown anyway.
     }
-    return def.readOnly !== true;
+    return !isReadOnlyTool(def, args);
   }
 
   private async runOneToolCall(

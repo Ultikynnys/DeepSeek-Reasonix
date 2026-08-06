@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import type { MemoryEntryDetail, MemoryEntryInfo, MemoryEntryKind } from "@reasonix/core-utils";
 import { readProjectMemory } from "../memory/project.js";
 import {
   type MemoryEntry,
@@ -11,21 +12,11 @@ import {
   readGlobalReasonixMemory,
 } from "../memory/user.js";
 
-export type MemoryEntryKind = "project_file" | "global_file" | "structured";
-
-export interface MemoryEntryInfo {
-  kind: MemoryEntryKind;
-  scope: MemoryScope;
-  name: string;
-  path: string;
-  description: string;
-  type?: string;
-}
-
-export interface MemoryEntryDetail extends MemoryEntryInfo {
-  body: string;
-  createdAt?: string;
-}
+export type {
+  MemoryEntryDetail,
+  MemoryEntryInfo,
+  MemoryEntryKind,
+} from "@reasonix/core-utils";
 
 export interface MemoryBrowserOptions {
   /** Absolute ~/.reasonix directory. Tests override this; production uses homedir(). */

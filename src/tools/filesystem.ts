@@ -2,6 +2,7 @@
 
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
+import { looksLikeAbsoluteSystemPath, pathIsUnder } from "@reasonix/core-utils/path-utils";
 import picomatch from "picomatch";
 import { decodeFileBuffer, encodeFile } from "../code/file-encoding.js";
 import { addProjectPathAllowed, loadProjectPathAllowed } from "../config.js";
@@ -25,6 +26,8 @@ import { searchContent, searchFiles } from "./fs/search.js";
 export { displayRel } from "./fs/rel.js";
 
 export { lineDiff } from "./fs/edit.js";
+
+export { looksLikeAbsoluteSystemPath, pathIsUnder } from "@reasonix/core-utils/path-utils";
 
 export interface FilesystemToolsOptions {
   /** Absolute directory the tools may read/write. Paths outside this are refused. */
@@ -57,19 +60,6 @@ const SKIP_DIR_NAMES: ReadonlySet<string> = new Set(
 
 /** First line of binary defense; NUL-byte sniff is the second (catches mislabeled `.txt`). */
 const BINARY_EXTENSIONS: ReadonlySet<string> = new Set(DEFAULT_INDEX_EXCLUDES.exts);
-
-/** Windows drive-letter prefixes always count; POSIX absolutes only count when their first segment is a known system root. */
-export function looksLikeAbsoluteSystemPath(raw: string): boolean {
-  if (/^[A-Za-z]:[\\/]/.test(raw)) return true;
-  return /^\/(?:home|Users|etc|var|opt|tmp|usr|mnt|Library|Volumes|proc|sys|dev|run|srv|media|Applications|System|root|boot|private)(?:[/\\]|$)/.test(
-    raw,
-  );
-}
-
-export function pathIsUnder(child: string, parent: string): boolean {
-  const rel = pathMod.relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !pathMod.isAbsolute(rel));
-}
 
 const GLOB_METACHARS = /[*?{[]/;
 

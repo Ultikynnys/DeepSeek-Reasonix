@@ -9,8 +9,9 @@
     ".": "./src/index.ts",
     "./compaction": "./src/compaction.ts",
     "./derive-prefix": "./src/derive-prefix.ts",
-    "./tildeify": "./src/tildeify.ts",
-    "./tool-kind": "./src/tool-kind.ts",
+    "./desktop-protocol": "./src/desktop-protocol.ts",
+    "./expand-tilde": "./src/expand-tilde.ts",
+    "./path-utils": "./src/path-utils.ts",
     "./permission-types": "./src/permission-types.ts",
     "./approval-prompt": "./src/approval-prompt.ts"
   },
