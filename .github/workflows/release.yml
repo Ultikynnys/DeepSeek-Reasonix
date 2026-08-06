@@ -4,7 +4,9 @@ name: Release
 # (lint, typecheck, build, tests) and then released: the patch version is bumped
 # from package.json, a `vX.Y.Z` tag + `chore(release)` commit are pushed
 # (via GITHUB_TOKEN, which does NOT re-trigger workflows), the Windows
-# installer is built and attached to a draft GitHub Release.
+# installer is built and published to a GitHub Release (published, not draft —
+# the updater's `releases/latest/download/latest.json` endpoint only resolves
+# for public releases, and a draft never appears there).
 #
 # `workflow_dispatch` with a `tag` input rebuilds an existing tag instead
 # of auto-versioning (e.g. v0.53.6 — the tag must exist on the remote).
@@ -206,7 +208,7 @@ jobs:
           projectPath: desktop
           tagName: ${{ steps.version.outputs.version }}
           releaseName: Reasonix ${{ steps.version.outputs.version }}
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --target x86_64-pc-windows-msvc
 
@@ -223,6 +225,6 @@ jobs:
           projectPath: desktop
           tagName: ${{ steps.version.outputs.version }}
           releaseName: Reasonix ${{ steps.version.outputs.version }}
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --target x86_64-pc-windows-msvc
