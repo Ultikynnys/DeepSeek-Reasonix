@@ -15,6 +15,7 @@ import {
   readSubdirMemoryContent,
 } from "../memory/subdir.js";
 import type { ToolCallContext, ToolRegistry } from "../tools.js";
+import { looksBinary } from "./fs/binary.js";
 import { applyEdit, applyMultiEdit } from "./fs/edit.js";
 import { globFiles } from "./fs/glob.js";
 import { extractOutline, formatOutline } from "./fs/outline.js";
@@ -90,15 +91,6 @@ function isLikelyBinaryByName(name: string): boolean {
   const dot = name.lastIndexOf(".");
   if (dot < 0) return false;
   return BINARY_EXTENSIONS.has(name.slice(dot).toLowerCase());
-}
-
-/** Sniff first 8 KiB for a NUL byte — catches binary files whose extension lied. UTF-16 (rare in source) is an accepted false positive. */
-function looksBinary(buf: Buffer): boolean {
-  const end = Math.min(buf.length, 8192);
-  for (let i = 0; i < end; i++) {
-    if (buf[i] === 0) return true;
-  }
-  return false;
 }
 
 function formatBytes(n: number): string {

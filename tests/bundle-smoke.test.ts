@@ -77,6 +77,10 @@ describe("bundled dist — tokenizer path resolution", () => {
     // so the spawn is killed by the timeout once the turn has failed fast;
     // the assertions run on the collected output.
     const smokeDir = mkdtempSync(join(tmpdir(), "reasonix-smoke-"));
+    // Isolate the daemon's home: it lists + echoes real session transcripts
+    // into stdout, and a transcript that happens to mention the tokenizer
+    // data path would trip the "must not match" assertions below.
+    const smokeHome = mkdtempSync(join(tmpdir(), "reasonix-smoke-home-"));
     const result = spawnSync("node", [CLI_BUNDLE, "desktop", "--dir", smokeDir], {
       encoding: "utf8",
       timeout: 10_000,
@@ -84,6 +88,8 @@ describe("bundled dist — tokenizer path resolution", () => {
       input: '{"cmd":"user_input","text":"hi"}\n',
       env: {
         ...process.env,
+        USERPROFILE: smokeHome,
+        HOME: smokeHome,
         DEEPSEEK_API_KEY: "sk-smoke-test-bogus",
         // Fail-fast fetch target: the :1 port is almost never open,
         // so we get connection-refused within ~1ms instead of the

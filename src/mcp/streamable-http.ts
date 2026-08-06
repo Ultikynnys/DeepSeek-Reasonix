@@ -1,6 +1,7 @@
 /** MCP Streamable HTTP transport (2025-03-26) — POST-only; no long-lived GET stream, no Last-Event-ID resume. */
 
-import { MessageQueue, consumeSseStream, parseSseMessageEvent } from "./message-queue.js";
+import { BaseMcpTransport } from "./base-transport.js";
+import { consumeSseStream, parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
 import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
@@ -14,24 +15,23 @@ export interface StreamableHttpTransportOptions {
 
 const SESSION_HEADER = "mcp-session-id";
 
-export class StreamableHttpTransport implements McpTransport {
+export class StreamableHttpTransport extends BaseMcpTransport implements McpTransport {
   private readonly url: string;
   private readonly extraHeaders: Record<string, string>;
-  private readonly incoming = new MessageQueue();
   private readonly controller = new AbortController();
   /** Session id minted by server on (typically) the initialize response. */
   private sessionId: string | null = null;
-  private closed = false;
   /** Background SSE read-loops kicked off by send(); awaited on close(). */
   private readonly streams = new Set<Promise<void>>();
 
   constructor(opts: StreamableHttpTransportOptions) {
+    super();
     this.url = opts.url;
     this.extraHeaders = opts.headers ?? {};
   }
 
   async send(message: JsonRpcMessage): Promise<void> {
-    if (this.closed) throw new Error("MCP Streamable HTTP transport is closed");
+    this.assertOpen("Streamable HTTP");
     const headers: Record<string, string> = {
       "content-type": "application/json",
       // Both accepted — server picks. application/json first signals a
@@ -119,14 +119,8 @@ export class StreamableHttpTransport implements McpTransport {
     await res.body?.cancel().catch(() => undefined);
   }
 
-  messages(): AsyncIterableIterator<JsonRpcMessage> {
-    return this.incoming.messages();
-  }
-
   async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.incoming.close();
+    if (!this.markClosed()) return;
     try {
       this.controller.abort();
     } catch {

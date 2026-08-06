@@ -1,6 +1,7 @@
 /** MCP HTTP+SSE transport (spec 2024-11-05) — POST endpoint URL arrives as the first `event: endpoint` SSE frame. */
 
-import { MessageQueue, consumeSseStream, parseSseMessageEvent } from "./message-queue.js";
+import { BaseMcpTransport } from "./base-transport.js";
+import { consumeSseStream, parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
 import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
@@ -12,18 +13,17 @@ export interface SseTransportOptions {
   headers?: Record<string, string>;
 }
 
-export class SseTransport implements McpTransport {
+export class SseTransport extends BaseMcpTransport implements McpTransport {
   private readonly url: string;
   private readonly headers: Record<string, string>;
-  private readonly incoming = new MessageQueue();
   private readonly controller = new AbortController();
-  private closed = false;
   private postUrl: string | null = null;
   private readonly endpointReady: Promise<string>;
   private resolveEndpoint!: (url: string) => void;
   private rejectEndpoint!: (err: Error) => void;
 
   constructor(opts: SseTransportOptions) {
+    super();
     this.url = opts.url;
     this.headers = opts.headers ?? {};
     this.endpointReady = new Promise<string>((resolve, reject) => {
@@ -36,7 +36,7 @@ export class SseTransport implements McpTransport {
   }
 
   async send(message: JsonRpcMessage): Promise<void> {
-    if (this.closed) throw new Error("MCP SSE transport is closed");
+    this.assertOpen("SSE");
     const postUrl = await this.endpointReady;
     const res = await fetch(postUrl, {
       method: "POST",
@@ -53,14 +53,8 @@ export class SseTransport implements McpTransport {
     }
   }
 
-  messages(): AsyncIterableIterator<JsonRpcMessage> {
-    return this.incoming.messages();
-  }
-
   async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.incoming.close();
+    if (!this.markClosed()) return;
     // Reject any still-pending send() that was waiting for the endpoint.
     this.rejectEndpoint(new Error("MCP SSE transport closed before endpoint was ready"));
     try {
@@ -123,11 +117,5 @@ export class SseTransport implements McpTransport {
     this.rejectEndpoint(new Error(reason));
     this.incoming.push(syntheticRpcError(reason));
     this.markClosed();
-  }
-
-  private markClosed(): void {
-    if (this.closed) return;
-    this.closed = true;
-    this.incoming.close();
   }
 }

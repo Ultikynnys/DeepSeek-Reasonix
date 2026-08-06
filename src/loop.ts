@@ -301,11 +301,7 @@ export class CacheFirstLoop {
       }
       if (healedCount > 0 || pruned.prunedCount > 0) {
         // Persist healed log so the same break isn't re-noticed every restart.
-        try {
-          rewriteSession(this.sessionName, messages);
-        } catch {
-          /* disk full / perms — skip, in-memory heal still applies */
-        }
+        this.persistLog(messages);
         if (healedCount > 0) {
           process.stderr.write(
             `▸ session "${this.sessionName}": healed ${healedCount} entr${healedCount === 1 ? "y" : "ies"}${tokensSaved > 0 ? ` (shrunk ${tokensSaved.toLocaleString()} tokens of oversized tool output/arguments)` : " (dropped dangling tool_calls tail)"}. Rewrote session file.\n`,
@@ -389,13 +385,7 @@ export class CacheFirstLoop {
     const kept = entries.slice(0, -1);
     kept.push(retained);
     this.log.compactInPlace(kept);
-    if (this.sessionName) {
-      try {
-        rewriteSession(this.sessionName, kept);
-      } catch {
-        /* disk issue shouldn't block the in-memory swap */
-      }
-    }
+    this.persistLog(kept);
   }
 
   /** "New chat" — drops in-memory messages, archives the on-disk transcript so it survives in Sessions, keeps sessionName so the prefix cache stays warm. Re-runs the system-prompt builder if one was wired (issue #778: REASONIX.md edits otherwise need a restart). */
@@ -406,7 +396,7 @@ export class CacheFirstLoop {
     if (this.sessionName) {
       try {
         archived = archiveSession(this.sessionName);
-        if (archived === null) rewriteSession(this.sessionName, []);
+        if (archived === null) this.persistLog([]);
       } catch {
         /* disk issue shouldn't block the in-memory clear */
       }
@@ -442,7 +432,7 @@ export class CacheFirstLoop {
     if (this.sessionName) {
       try {
         archived = archiveSession(this.sessionName);
-        if (archived === null) rewriteSession(this.sessionName, []);
+        if (archived === null) this.persistLog([]);
       } catch {
         /* disk issue shouldn't block the in-memory swap */
       }
@@ -632,13 +622,7 @@ export class CacheFirstLoop {
       return current;
     }
     this.log.compactInPlace(pruned.messages);
-    if (this.sessionName) {
-      try {
-        rewriteSession(this.sessionName, pruned.messages);
-      } catch {
-        /* disk issue shouldn't block the in-memory heal */
-      }
-    }
+    this.persistLog(pruned.messages);
     return pruned.messages;
   }
 
@@ -664,16 +648,20 @@ export class CacheFirstLoop {
     this._discardAbortRequested = false;
   }
 
+  /** Persist the on-disk transcript after an in-memory mutation; a disk failure must never block the loop. */
+  private persistLog(messages: ChatMessage[]): void {
+    if (!this.sessionName) return;
+    try {
+      rewriteSession(this.sessionName, messages);
+    } catch {
+      /* disk full / perms — the in-memory log still applies */
+    }
+  }
+
   private discardLogFrom(index: number): void {
     const preserved = this.log.entries.slice(0, index).map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
-    if (this.sessionName) {
-      try {
-        rewriteSession(this.sessionName, preserved);
-      } catch {
-        /* disk-full / perms — in-memory compaction still applies */
-      }
-    }
+    this.persistLog(preserved);
   }
 
   /** Drop the last user message + everything after; caller re-sends. Persists to session file. */
@@ -691,13 +679,7 @@ export class CacheFirstLoop {
     const userText = typeof raw === "string" ? raw : "";
     const preserved = entries.slice(0, lastUserIdx).map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
-    if (this.sessionName) {
-      try {
-        rewriteSession(this.sessionName, preserved);
-      } catch {
-        /* disk-full / perms — in-memory compaction still applies */
-      }
-    }
+    this.persistLog(preserved);
     return userText;
   }
 
@@ -721,13 +703,7 @@ export class CacheFirstLoop {
     const userText = typeof raw === "string" ? raw : "";
     const preserved = entries.slice(0, targetIdx).map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
-    if (this.sessionName) {
-      try {
-        rewriteSession(this.sessionName, preserved);
-      } catch {
-        /* disk-full / perms — in-memory compaction still applies */
-      }
-    }
+    this.persistLog(preserved);
 
     // Restore files to the state at the start of this user turn.
     const cpId = this._turnCheckpoints.get(userTurnIndex);

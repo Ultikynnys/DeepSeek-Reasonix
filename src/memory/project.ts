@@ -2,7 +2,7 @@
 
 import { existsSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { applyMemoryBlock, readCappedFile } from "./read-capped.js";
+import { type CappedPath, applyMemoryBlock, readCappedFile } from "./read-capped.js";
 
 /** Default WRITE target — created when no candidate exists yet. */
 export const PROJECT_MEMORY_FILE = "REASONIX.md";
@@ -79,17 +79,29 @@ export function memoryEnabled(): boolean {
   return true;
 }
 
+/** Shared prefix-assembly guard for memory blocks: skip when memory is disabled or the file is missing; splice otherwise. */
+export function applyMemoryIfPresent(
+  basePrompt: string,
+  read: () => CappedPath | null,
+  heading: string,
+  intro: string,
+): string {
+  if (!memoryEnabled()) return basePrompt;
+  const mem = read();
+  if (!mem) return basePrompt;
+  return applyMemoryBlock(basePrompt, heading, intro, mem.content);
+}
+
 /** Deterministic — same memory file always yields the same prefix hash. */
 export function applyProjectMemory(basePrompt: string, rootDir: string): string {
-  if (!memoryEnabled()) return basePrompt;
   const mem = readProjectMemory(rootDir);
-  if (!mem) return basePrompt;
+  if (!mem || !memoryEnabled()) return basePrompt;
   const filename = basename(mem.path);
   // Trailing newline preserved so the prefix output stays byte-identical.
-  return `${applyMemoryBlock(
+  return `${applyMemoryIfPresent(
     basePrompt,
+    () => mem,
     `# Project memory (${filename})`,
     "The user pinned these notes about this project — treat them as authoritative context for every turn:",
-    mem.content,
   )}\n`;
 }

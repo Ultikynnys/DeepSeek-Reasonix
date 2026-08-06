@@ -58,8 +58,7 @@ export interface UsageRecord {
 
 /** Where the log lives. Tests override via `opts.path`. */
 export function defaultUsageLogPath(homeDirOverride?: string): string {
-  const base = homeDirOverride ? join(homeDirOverride, ".reasonix") : reasonixHome();
-  return join(base, "usage.jsonl");
+  return join(reasonixHome(homeDirOverride), "usage.jsonl");
 }
 
 export interface AppendUsageInput {

@@ -2,10 +2,10 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { projectHooksTrusted } from "./config.js";
 import { t } from "./i18n/index.js";
+import { reasonixHome } from "./reasonix-home.js";
 
 export type HookEvent = "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "Stop";
 
@@ -85,7 +85,7 @@ export const HOOK_SETTINGS_DIRNAME = ".reasonix";
 
 /** Where the global settings.json lives. Equivalent to `~/.reasonix/settings.json`. */
 export function globalSettingsPath(homeDirOverride?: string): string {
-  return join(homeDirOverride ?? homedir(), HOOK_SETTINGS_DIRNAME, HOOK_SETTINGS_FILENAME);
+  return join(reasonixHome(homeDirOverride), HOOK_SETTINGS_FILENAME);
 }
 
 /** Where the project settings.json lives for a given root. */

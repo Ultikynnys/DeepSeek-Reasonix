@@ -1,7 +1,8 @@
 /** Primary: registry.modelcontextprotocol.io. Fallback: registry.smithery.ai. Last resort: bundled MCP_CATALOG. */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { readJsonFileSilently, writeJsonFileSilently } from "../core/json-file.js";
+import { fetchWithTimeout } from "../net/timeout-fetch.js";
 import { reasonixHome } from "../reasonix-home.js";
 import { MCP_CATALOG } from "./catalog.js";
 import type {
@@ -23,41 +24,24 @@ export function defaultCachePath(): string {
 }
 
 function readCache(path: string): CacheFile | null {
-  try {
-    const raw = readFileSync(path, "utf8");
-    const parsed = JSON.parse(raw) as Partial<CacheFile>;
-    if (
-      parsed.schemaVersion !== CACHE_SCHEMA_VERSION ||
-      typeof parsed.fetchedAt !== "number" ||
-      !Array.isArray(parsed.entries) ||
-      typeof parsed.pagination?.pagesLoaded !== "number"
-    ) {
-      return null;
-    }
-    return parsed as CacheFile;
-  } catch {
-    return null;
-  }
+  return readJsonFileSilently(path, (v): v is CacheFile => {
+    const parsed = v as Partial<CacheFile> | null;
+    return (
+      parsed !== null &&
+      parsed.schemaVersion === CACHE_SCHEMA_VERSION &&
+      typeof parsed.fetchedAt === "number" &&
+      Array.isArray(parsed.entries) &&
+      typeof parsed.pagination?.pagesLoaded === "number"
+    );
+  });
 }
 
 function writeCache(path: string, file: CacheFile): void {
-  try {
-    const dir = dirname(path);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(path, JSON.stringify(file, null, 2));
-  } catch {
-    /* cache failures are non-fatal */
-  }
+  writeJsonFileSilently(path, file, { pretty: true });
 }
 
 async function timeoutFetch(url: string, fetcher: typeof fetch): Promise<Response> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-  try {
-    return await fetcher(url, { signal: ctrl.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+  return fetchWithTimeout(url, fetcher, FETCH_TIMEOUT_MS);
 }
 
 interface OfficialPackage {

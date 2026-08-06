@@ -1,7 +1,7 @@
 /** MCP stdio = newline-delimited JSON-RPC; transport iface lets tests fake it without spawning. */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { MessageQueue } from "./message-queue.js";
+import { BaseMcpTransport } from "./base-transport.js";
 import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
 
@@ -28,13 +28,12 @@ export interface StdioTransportOptions {
   shell?: boolean;
 }
 
-export class StdioTransport implements McpTransport {
+export class StdioTransport extends BaseMcpTransport implements McpTransport {
   private readonly child: ChildProcess;
-  private readonly incoming = new MessageQueue();
-  private closed = false;
   private stdoutBuffer = "";
 
   constructor(opts: StdioTransportOptions) {
+    super();
     const env = opts.replaceEnv ? { ...(opts.env ?? {}) } : { ...process.env, ...(opts.env ?? {}) };
     // Windows wraps binaries as .cmd/.bat shims (npx.cmd, pnpm.cmd, …).
     // child_process.spawn without shell:true can't resolve them, which
@@ -82,7 +81,7 @@ export class StdioTransport implements McpTransport {
   }
 
   async send(message: JsonRpcMessage): Promise<void> {
-    if (this.closed) throw new Error("MCP transport is closed");
+    this.assertOpen("stdio");
     return new Promise((resolve, reject) => {
       const line = `${JSON.stringify(message)}\n`;
       this.child.stdin!.write(line, "utf8", (err) => {
@@ -92,15 +91,8 @@ export class StdioTransport implements McpTransport {
     });
   }
 
-  messages(): AsyncIterableIterator<JsonRpcMessage> {
-    return this.incoming.messages();
-  }
-
   async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    // Signal any pending waiters.
-    this.incoming.close();
+    if (!this.markClosed()) return;
     try {
       this.child.stdin!.end();
     } catch {
@@ -149,8 +141,7 @@ export class StdioTransport implements McpTransport {
   }
 
   private onClose(): void {
-    this.closed = true;
-    this.incoming.close();
+    this.markClosed();
   }
 }
 

@@ -1,8 +1,10 @@
 /** VERSION sourced from package.json so it never drifts from npm; latest-check returns null on any failure. */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readJsonFileSilently, writeJsonFileSilently } from "./core/json-file.js";
+import { fetchWithTimeout } from "./net/timeout-fetch.js";
 import { reasonixHome } from "./reasonix-home.js";
 
 /** npm registry endpoint for the `latest` dist-tag of this package. */
@@ -47,32 +49,18 @@ interface VersionCacheEntry {
 }
 
 function cachePath(homeDirOverride?: string): string {
-  const base = homeDirOverride ? join(homeDirOverride, ".reasonix") : reasonixHome();
-  return join(base, "version-cache.json");
+  return join(reasonixHome(homeDirOverride), "version-cache.json");
 }
 
 function readCache(homeDirOverride?: string): VersionCacheEntry | null {
-  try {
-    const raw = readFileSync(cachePath(homeDirOverride), "utf8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.version === "string" && typeof parsed.checkedAt === "number") {
-      return parsed;
-    }
-  } catch {
-    /* missing or malformed → no cached entry */
-  }
-  return null;
+  return readJsonFileSilently(cachePath(homeDirOverride), (v): v is VersionCacheEntry => {
+    const entry = v as VersionCacheEntry | null;
+    return !!entry && typeof entry.version === "string" && typeof entry.checkedAt === "number";
+  });
 }
 
 function writeCache(entry: VersionCacheEntry, homeDirOverride?: string): void {
-  try {
-    const p = cachePath(homeDirOverride);
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, JSON.stringify(entry), "utf8");
-  } catch {
-    /* cache is best-effort — a failed write just means we'll re-fetch
-     * next launch. No reason to surface this to the user. */
-  }
+  writeJsonFileSilently(cachePath(homeDirOverride), entry);
 }
 
 export interface GetLatestVersionOptions {
@@ -102,11 +90,8 @@ export async function getLatestVersion(opts: GetLatestVersionOptions = {}): Prom
   if (!fetchImpl) return null;
   const url = opts.registryUrl ?? REGISTRY_URL;
   const timeout = opts.timeoutMs ?? LATEST_FETCH_TIMEOUT_MS;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const res = await fetchImpl(url, {
-      signal: controller.signal,
+    const res = await fetchWithTimeout(url, fetchImpl, timeout, {
       headers: { accept: "application/json" },
     });
     if (!res.ok) return null;
@@ -116,8 +101,6 @@ export async function getLatestVersion(opts: GetLatestVersionOptions = {}): Prom
     return body.version;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

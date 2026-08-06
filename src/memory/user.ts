@@ -20,13 +20,13 @@ import {
 import { parseFrontmatter } from "../frontmatter.js";
 import { reasonixHome } from "../reasonix-home.js";
 import { applySkillsIndex } from "../skills.js";
-import { PROJECT_MEMORY_MAX_CHARS, applyProjectMemory, memoryEnabled } from "./project.js";
 import {
-  type CappedPath,
-  applyMemoryBlock,
-  readCappedFile,
-  readCappedTextFile,
-} from "./read-capped.js";
+  PROJECT_MEMORY_MAX_CHARS,
+  applyMemoryIfPresent,
+  applyProjectMemory,
+  memoryEnabled,
+} from "./project.js";
+import { type CappedPath, readCappedFile, readCappedTextFile } from "./read-capped.js";
 
 export const USER_MEMORY_DIR = "memory";
 export const MEMORY_INDEX_FILE = "MEMORY.md";
@@ -305,15 +305,12 @@ export function readGlobalReasonixMemory(homeDir: string = reasonixHome()): Capp
 }
 
 export function applyGlobalReasonixMemory(basePrompt: string, homeDir?: string): string {
-  if (!memoryEnabled()) return basePrompt;
   const dir = homeDir ?? reasonixHome();
-  const mem = readGlobalReasonixMemory(dir);
-  if (!mem) return basePrompt;
-  return applyMemoryBlock(
+  return applyMemoryIfPresent(
     basePrompt,
+    () => readGlobalReasonixMemory(dir),
     "# Global memory (~/.reasonix/REASONIX.md)",
     "Cross-project notes the user pinned via the `#g` prompt prefix. Treat as authoritative — same level of trust as project memory.",
-    mem.content,
   );
 }
 
@@ -324,14 +321,11 @@ export function readGlobalClaudeMemory(homeDir: string = homedir()): CappedPath 
 }
 
 export function applyGlobalClaudeMemory(basePrompt: string): string {
-  if (!memoryEnabled()) return basePrompt;
-  const mem = readGlobalClaudeMemory();
-  if (!mem) return basePrompt;
-  return applyMemoryBlock(
+  return applyMemoryIfPresent(
     basePrompt,
+    () => readGlobalClaudeMemory(),
     "# Global memory (~/.claude/CLAUDE.md)",
     "Cross-project notes from your Claude Code configuration. Treat as authoritative — same level of trust as project memory.",
-    mem.content,
   );
 }
 

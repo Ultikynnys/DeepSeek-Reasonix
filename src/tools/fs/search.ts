@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
+import { looksBinary } from "./binary.js";
 import { getRegexRunner } from "./regex-runner.js";
 import { displayRel } from "./rel.js";
 
@@ -193,8 +194,7 @@ export async function searchContent(
       }
       await fh.close();
       throwIfAborted(args.signal);
-      const firstNul = raw.indexOf(0);
-      if (firstNul !== -1 && firstNul < 8 * 1024) continue;
+      if (looksBinary(raw)) continue;
       const text = raw.toString("utf8");
       const rel = displayRel(ctx.rootDir, full);
       let hits: number[];
