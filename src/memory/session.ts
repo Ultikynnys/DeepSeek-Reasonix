@@ -16,9 +16,10 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
-import { DAY_MS } from "@reasonix/core-utils";
+import { DAY_MS, sanitizeFilename } from "@reasonix/core-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
-import { atomicWriteSync } from "../core/atomic-write.js";
+import { atomicWriteSync, tmpSiblingPath } from "../core/atomic-write.js";
+import { readJsonFileSilently } from "../core/json-file.js";
 import { appendJsonlLine, parseJsonl } from "../core/jsonl.js";
 import { reasonixHome } from "../reasonix-home.js";
 import type { ChatMessage } from "../types.js";
@@ -97,8 +98,7 @@ export function sessionPath(name: string): string {
 }
 
 export function sanitizeName(name: string): string {
-  const cleaned = name.replace(/[^\w\-\u4e00-\u9fa5]/g, "_").slice(0, 64);
-  return cleaned || "default";
+  return sanitizeFilename(name, { max: 64, fallback: "default", allowCjk: true });
 }
 
 /** Sortable timestamp `YYYYMMDDHHmm` (12 digits; 14 = seconds precision) — used as a session-name suffix. */
@@ -288,13 +288,7 @@ function metaPath(name: string): string {
 
 export function loadSessionMeta(name: string): SessionMeta {
   const p = metaPath(name);
-  if (!existsSync(p)) return {};
-  try {
-    const raw = JSON.parse(readFileSync(p, "utf8")) as SessionMeta;
-    return raw && typeof raw === "object" ? raw : {};
-  } catch {
-    return {};
-  }
+  return readJsonFileSilently(p, (v): v is SessionMeta => !!v && typeof v === "object") ?? {};
 }
 
 export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): SessionMeta {
@@ -382,7 +376,7 @@ export function rewriteSession(name: string, messages: ChatMessage[]): void {
   const path = sessionPath(name);
   mkdirSync(dirname(path), { recursive: true });
   const body = messages.map((m) => JSON.stringify(m)).join("\n");
-  const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+  const tmp = tmpSiblingPath(path);
   if (existsSync(path) && statSync(path).size > 0) {
     const backup = sessionBackupPath(path);
     copyFileSync(path, backup);

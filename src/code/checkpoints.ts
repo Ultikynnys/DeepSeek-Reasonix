@@ -2,6 +2,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { readJsonFileSilently } from "../core/json-file.js";
 import { fmtRelativeTime } from "../core/relative-time.js";
 import { reasonixHome } from "../reasonix-home.js";
 
@@ -55,28 +56,22 @@ function snapshotPath(rootDir: string, id: string): string {
 /** Load the index of checkpoint metadata for a workspace. Empty when missing. */
 export function listCheckpoints(rootDir: string): CheckpointMeta[] {
   const path = indexPath(rootDir);
-  if (!existsSync(path)) return [];
-  try {
-    const raw = readFileSync(path, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // Defensive: filter out malformed entries rather than throwing on
-    // a single bad row. A stale entry is annoying; a thrown listCheckpoints
-    // would break /checkpoint list entirely.
-    return parsed.filter(
-      (m): m is CheckpointMeta =>
-        typeof m === "object" &&
-        m !== null &&
-        typeof m.id === "string" &&
-        typeof m.name === "string" &&
-        typeof m.createdAt === "number" &&
-        typeof m.source === "string" &&
-        typeof m.fileCount === "number" &&
-        typeof m.bytes === "number",
-    );
-  } catch {
-    return [];
-  }
+  const parsed = readJsonFileSilently(path, (v): v is CheckpointMeta[] => Array.isArray(v));
+  if (!parsed) return [];
+  // Defensive: filter out malformed entries rather than throwing on
+  // a single bad row. A stale entry is annoying; a thrown listCheckpoints
+  // would break /checkpoint list entirely.
+  return parsed.filter(
+    (m): m is CheckpointMeta =>
+      typeof m === "object" &&
+      m !== null &&
+      typeof m.id === "string" &&
+      typeof m.name === "string" &&
+      typeof m.createdAt === "number" &&
+      typeof m.source === "string" &&
+      typeof m.fileCount === "number" &&
+      typeof m.bytes === "number",
+  );
 }
 
 function writeIndex(rootDir: string, items: CheckpointMeta[]): void {
@@ -87,18 +82,10 @@ function writeIndex(rootDir: string, items: CheckpointMeta[]): void {
 
 /** Read a single checkpoint by id. Returns null when missing or corrupt. */
 export function loadCheckpoint(rootDir: string, id: string): Checkpoint | null {
-  const path = snapshotPath(rootDir, id);
-  if (!existsSync(path)) return null;
-  try {
-    const raw = readFileSync(path, "utf8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && Array.isArray(parsed.files)) {
-      return parsed as Checkpoint;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  return readJsonFileSilently(
+    snapshotPath(rootDir, id),
+    (v): v is Checkpoint => !!v && typeof v === "object" && Array.isArray((v as Checkpoint).files),
+  );
 }
 
 export interface CreateCheckpointOptions {

@@ -1,6 +1,7 @@
 /** Primary: registry.modelcontextprotocol.io. Fallback: registry.smithery.ai. Last resort: bundled MCP_CATALOG. */
 
 import { join } from "node:path";
+import { sanitizeFilename } from "@reasonix/core-utils";
 import { readJsonFileSilently, writeJsonFileSilently } from "../core/json-file.js";
 import { fetchWithTimeout } from "../net/timeout-fetch.js";
 import { reasonixHome } from "../reasonix-home.js";
@@ -454,7 +455,12 @@ export async function loadMorePages(
 /** Build a `--mcp`-format spec string from a registry install descriptor. */
 export function specStringFor(name: string, install: RegistryInstall): string {
   const localName = name.split("/").pop() ?? name;
-  const safe = localName.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^-+|-+$/g, "") || "mcp";
+  const safe = sanitizeFilename(localName, {
+    max: Number.POSITIVE_INFINITY,
+    fallback: "mcp",
+    replaceWith: "-",
+    trim: true,
+  });
   if (install.runtime === "remote") {
     if (!install.url) throw new Error(`remote install for ${name} has no URL`);
     if (install.transport === "streamable-http") return `${safe}=streamable+${install.url}`;

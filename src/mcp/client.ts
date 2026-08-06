@@ -9,6 +9,7 @@ import {
   type GetPromptResult,
   type InitializeParams,
   type InitializeResult,
+  JSONRPC_VERSION,
   type JsonRpcId,
   type JsonRpcMessage,
   type JsonRpcRequest,
@@ -126,7 +127,7 @@ export class McpClient {
     // initialize response. Only then is the connection live for other
     // methods.
     await this.transport.send({
-      jsonrpc: "2.0",
+      jsonrpc: JSONRPC_VERSION,
       method: "notifications/initialized",
     });
     this.initialized = true;
@@ -208,7 +209,7 @@ export class McpClient {
 
   private async request<R>(method: string, params: unknown, signal?: AbortSignal): Promise<R> {
     const id = this.nextId++;
-    const frame: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
+    const frame: JsonRpcRequest = { jsonrpc: JSONRPC_VERSION, id, method, params };
     let abortHandler: (() => void) | null = null;
     const promise = new Promise<R>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -241,7 +242,7 @@ export class McpClient {
           clearTimeout(timeout);
           void this.transport
             .send({
-              jsonrpc: "2.0",
+              jsonrpc: JSONRPC_VERSION,
               method: "notifications/cancelled",
               params: { requestId: id, reason: "aborted by user" },
             })
@@ -334,7 +335,7 @@ export class McpClient {
     if (req.method === "roots/list" && this.workspaceRoot) {
       void this.transport
         .send({
-          jsonrpc: "2.0",
+          jsonrpc: JSONRPC_VERSION,
           id: req.id,
           result: { roots: [this.workspaceRoot] },
         })
@@ -343,7 +344,7 @@ export class McpClient {
     }
     void this.transport
       .send({
-        jsonrpc: "2.0",
+        jsonrpc: JSONRPC_VERSION,
         id: req.id,
         error: { code: -32601, message: `method not found: ${req.method}` },
       })

@@ -99,6 +99,7 @@ import {
   writeConfig,
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
+import { EventType } from "../../core/events.js";
 import type { Event as KernelEvent } from "../../core/events.js";
 import {
   type CheckpointVerdict,
@@ -307,7 +308,7 @@ function emit(ev: EmittableEvent, tabId?: string): void {
 function emitKernelEvent(kev: KernelEvent, tabId?: string): void {
   if (kev.type === "session.compacted") {
     const wire: SessionCompactedEvent = {
-      type: "session.compacted",
+      type: EventType.sessionCompacted,
       id: kev.id,
       ts: kev.ts,
       turn: kev.turn,
@@ -991,7 +992,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (tab) {
       emit(
         {
-          type: "status",
+          type: EventType.status,
           id: Date.now(),
           ts: new Date().toISOString(),
           turn: 0,
@@ -1192,7 +1193,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         if (!trimmed) return;
         emit(
           {
-            type: "user.message",
+            type: EventType.userMessage,
             id: Date.now(),
             ts: new Date().toISOString(),
             turn: 0,
@@ -2586,7 +2587,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const current = loadQQConfig();
         emit(
           {
-            type: "status",
+            type: EventType.status,
             id: Date.now(),
             ts: new Date().toISOString(),
             turn: 0,
@@ -2598,7 +2599,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           () => {
             emit(
               {
-                type: "status",
+                type: EventType.status,
                 id: Date.now(),
                 ts: new Date().toISOString(),
                 turn: 0,
@@ -2628,7 +2629,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           () => {
             emit(
               {
-                type: "status",
+                type: EventType.status,
                 id: Date.now(),
                 ts: new Date().toISOString(),
                 turn: 0,

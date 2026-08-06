@@ -1,12 +1,27 @@
 /** Best-effort JSON file cache helpers — shared by the version checker and the MCP registry fetcher. */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFile as readFileAsync } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /** Read + parse + validate a JSON file, returning null on any failure (missing, malformed, or wrong shape). */
 export function readJsonFileSilently<T>(path: string, validate: (v: unknown) => v is T): T | null {
   try {
     const raw = readFileSync(path, "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    return validate(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Async variant of readJsonFileSilently — for callers already on the promise API. */
+export async function readJsonFileSilentlyAsync<T>(
+  path: string,
+  validate: (v: unknown) => v is T,
+): Promise<T | null> {
+  try {
+    const raw = await readFileAsync(path, "utf8");
     const parsed: unknown = JSON.parse(raw);
     return validate(parsed) ? parsed : null;
   } catch {

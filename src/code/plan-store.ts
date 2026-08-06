@@ -3,7 +3,6 @@
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
   renameSync,
   statSync,
@@ -11,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { readJsonFileSilently } from "../core/json-file.js";
 import { fmtRelativeTime } from "../core/relative-time.js";
 import { sanitizeName, sessionsDir } from "../memory/session.js";
 import type { PlanStep, StepCompletion, StepEvidence } from "../tools/plan.js";
@@ -32,54 +32,19 @@ export function planStatePath(sessionName: string): string {
 }
 
 export function loadPlanState(sessionName: string): PlanStateOnDisk | null {
-  const path = planStatePath(sessionName);
-  if (!existsSync(path)) return null;
-  try {
-    const raw = readFileSync(path, "utf8");
-    const parsed = JSON.parse(raw) as Partial<PlanStateOnDisk>;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (parsed.version !== 1 && parsed.version !== 2) return null;
-    if (!Array.isArray(parsed.steps)) return null;
-    if (!Array.isArray(parsed.completedStepIds)) return null;
-    if (typeof parsed.updatedAt !== "string") return null;
-    // Defensive: filter out any malformed step entries so a partially
-    // corrupted file still yields a usable subset.
-    const steps: PlanStep[] = [];
-    for (const s of parsed.steps) {
-      if (!s || typeof s !== "object") continue;
-      const e = s as unknown as Record<string, unknown>;
-      if (typeof e.id !== "string" || !e.id) continue;
-      if (typeof e.title !== "string" || !e.title) continue;
-      if (typeof e.action !== "string" || !e.action) continue;
-      const step: PlanStep = { id: e.id, title: e.title, action: e.action };
-      if (e.risk === "low" || e.risk === "med" || e.risk === "high") step.risk = e.risk;
-      const targets = stringList(e.targets);
-      if (targets) step.targets = targets;
-      if (typeof e.acceptance === "string" && e.acceptance.trim()) {
-        step.acceptance = e.acceptance.trim();
-      }
-      const verification = stringList(e.verification);
-      if (verification) step.verification = verification;
-      steps.push(step);
-    }
-    if (steps.length === 0) return null;
-    const completedStepIds = parsed.completedStepIds.filter(
-      (id): id is string => typeof id === "string" && id.length > 0,
-    );
-    const stepCompletions = sanitizeStepCompletions(parsed.stepCompletions);
-    const out: PlanStateOnDisk = {
-      version: parsed.version,
-      steps,
-      completedStepIds,
-      updatedAt: parsed.updatedAt,
-    };
-    if (stepCompletions) out.stepCompletions = stepCompletions;
-    if (typeof parsed.body === "string" && parsed.body) out.body = parsed.body;
-    if (typeof parsed.summary === "string" && parsed.summary) out.summary = parsed.summary;
-    return out;
-  } catch {
-    return null;
-  }
+  const parsed = parsePlanFile(planStatePath(sessionName));
+  if (!parsed) return null;
+  if (!parsed.completedStepIds || typeof parsed.updatedAt !== "string") return null;
+  const out: PlanStateOnDisk = {
+    version: parsed.version,
+    steps: parsed.steps,
+    completedStepIds: parsed.completedStepIds,
+    updatedAt: parsed.updatedAt,
+  };
+  if (parsed.stepCompletions) out.stepCompletions = parsed.stepCompletions;
+  if (parsed.body) out.body = parsed.body;
+  if (parsed.summary) out.summary = parsed.summary;
+  return out;
 }
 
 /** Best-effort: write failure logs to stderr instead of crashing the TUI. */
@@ -167,72 +132,121 @@ interface ParsedPlanArchive {
   summary?: string;
 }
 
-function parsePlanArchiveFile(full: string): ParsedPlanArchive | null {
-  try {
-    const raw = readFileSync(full, "utf8");
-    const parsed = JSON.parse(raw) as Partial<PlanStateOnDisk>;
-    if (parsed.version !== 1 && parsed.version !== 2) return null;
-    if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) return null;
-    const steps = parsed.steps.filter(
-      (s): s is PlanStep =>
-        !!s &&
-        typeof s === "object" &&
-        typeof (s as PlanStep).id === "string" &&
-        typeof (s as PlanStep).title === "string" &&
-        typeof (s as PlanStep).action === "string",
-    );
-    if (steps.length === 0) return null;
-    const completedStepIds = Array.isArray(parsed.completedStepIds)
-      ? parsed.completedStepIds.filter((id): id is string => typeof id === "string" && !!id)
-      : [];
-    // Prefer the file's own updatedAt; fall back to mtime if missing
-    // or unparseable so a hand-edited archive still sorts sensibly.
-    let completedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : "";
-    if (!completedAt || Number.isNaN(Date.parse(completedAt))) {
-      try {
-        completedAt = statSync(full).mtime.toISOString();
-      } catch {
-        completedAt = new Date(0).toISOString();
-      }
-    }
-    const result: ParsedPlanArchive = { steps, completedStepIds, completedAt };
-    const sc = sanitizeStepCompletions(parsed.stepCompletions);
-    if (sc) result.stepCompletions = sc;
-    if (typeof parsed.body === "string" && parsed.body) result.body = parsed.body;
-    if (typeof parsed.summary === "string" && parsed.summary) result.summary = parsed.summary;
-    return result;
-  } catch {
-    return null;
-  }
+/** Raw JSON shape of a plan file before validation. */
+interface RawPlanFile {
+  version?: unknown;
+  steps?: unknown;
+  completedStepIds?: unknown;
+  updatedAt?: unknown;
+  stepCompletions?: unknown;
+  body?: unknown;
+  summary?: unknown;
 }
 
-export function listPlanArchives(sessionName: string): PlanArchiveSummary[] {
-  const dir = sessionsDir();
+/** Sanitized view shared by the live plan file and `.done.json` archives. */
+interface PlanFileParsed {
+  version: 1 | 2;
+  steps: PlanStep[];
+  /** Undefined when the file lacked a completedStepIds array — loadPlanState rejects that, archives default to []. */
+  completedStepIds: string[] | undefined;
+  /** Undefined when the file lacked updatedAt — loadPlanState rejects that, archives fall back to mtime. */
+  updatedAt: string | undefined;
+  stepCompletions?: Record<string, StepCompletion>;
+  body?: string;
+  summary?: string;
+}
+
+/** Read + validate + sanitize a plan file (live or archived). Null when missing, malformed, or yielding no usable steps. */
+function parsePlanFile(path: string): PlanFileParsed | null {
+  const raw = readJsonFileSilently(path, (v): v is RawPlanFile => !!v && typeof v === "object");
+  if (!raw) return null;
+  if (raw.version !== 1 && raw.version !== 2) return null;
+  const steps = sanitizeSteps(raw.steps);
+  if (steps.length === 0) return null;
+  const completedStepIds = Array.isArray(raw.completedStepIds)
+    ? raw.completedStepIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : undefined;
+  const out: PlanFileParsed = {
+    version: raw.version,
+    steps,
+    completedStepIds,
+    updatedAt: undefined,
+  };
+  if (typeof raw.updatedAt === "string") out.updatedAt = raw.updatedAt;
+  const stepCompletions = sanitizeStepCompletions(raw.stepCompletions);
+  if (stepCompletions) out.stepCompletions = stepCompletions;
+  if (typeof raw.body === "string" && raw.body) out.body = raw.body;
+  if (typeof raw.summary === "string" && raw.summary) out.summary = raw.summary;
+  return out;
+}
+
+function parsePlanArchiveFile(full: string): ParsedPlanArchive | null {
+  const parsed = parsePlanFile(full);
+  if (!parsed) return null;
+  // Prefer the file's own updatedAt; fall back to mtime if missing
+  // or unparseable so a hand-edited archive still sorts sensibly.
+  let completedAt = parsed.updatedAt ?? "";
+  if (!completedAt || Number.isNaN(Date.parse(completedAt))) {
+    try {
+      completedAt = statSync(full).mtime.toISOString();
+    } catch {
+      completedAt = new Date(0).toISOString();
+    }
+  }
+  const result: ParsedPlanArchive = {
+    steps: parsed.steps,
+    completedStepIds: parsed.completedStepIds ?? [],
+    completedAt,
+  };
+  if (parsed.stepCompletions) result.stepCompletions = parsed.stepCompletions;
+  if (parsed.body) result.body = parsed.body;
+  if (parsed.summary) result.summary = parsed.summary;
+  return result;
+}
+
+/** Shared single-scan enumeration of archive files; `classify` returns the owning session name ("" when unused) or null to skip. */
+function scanArchives(
+  dir: string,
+  classify: (name: string) => string | null,
+): Array<{ sessionName: string; full: string }> {
   if (!existsSync(dir)) return [];
-  const prefix = `${sanitizeName(sessionName)}.plan.`;
-  const suffix = ".done.json";
   let entries: string[];
   try {
     entries = readdirSync(dir);
   } catch {
     return [];
   }
-  const summaries: PlanArchiveSummary[] = [];
+  const out: Array<{ sessionName: string; full: string }> = [];
   for (const name of entries) {
-    if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue;
-    const full = join(dir, name);
+    const sessionName = classify(name);
+    if (sessionName === null) continue;
+    out.push({ sessionName, full: join(dir, name) });
+  }
+  return out;
+}
+
+function archiveSummaryFromParsed(parsed: ParsedPlanArchive, full: string): PlanArchiveSummary {
+  const entry: PlanArchiveSummary = {
+    path: full,
+    completedAt: parsed.completedAt,
+    steps: parsed.steps,
+    completedStepIds: parsed.completedStepIds,
+  };
+  if (parsed.stepCompletions) entry.stepCompletions = parsed.stepCompletions;
+  if (parsed.body) entry.body = parsed.body;
+  if (parsed.summary) entry.summary = parsed.summary;
+  return entry;
+}
+
+export function listPlanArchives(sessionName: string): PlanArchiveSummary[] {
+  const prefix = `${sanitizeName(sessionName)}.plan.`;
+  const suffix = ".done.json";
+  const summaries: PlanArchiveSummary[] = [];
+  for (const { full } of scanArchives(sessionsDir(), (name) =>
+    name.startsWith(prefix) && name.endsWith(suffix) ? "" : null,
+  )) {
     const parsed = parsePlanArchiveFile(full);
-    if (!parsed) continue;
-    const entry: PlanArchiveSummary = {
-      path: full,
-      completedAt: parsed.completedAt,
-      steps: parsed.steps,
-      completedStepIds: parsed.completedStepIds,
-    };
-    if (parsed.stepCompletions) entry.stepCompletions = parsed.stepCompletions;
-    if (parsed.body) entry.body = parsed.body;
-    if (parsed.summary) entry.summary = parsed.summary;
-    summaries.push(entry);
+    if (parsed) summaries.push(archiveSummaryFromParsed(parsed, full));
   }
   summaries.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
   return summaries;
@@ -248,40 +262,44 @@ export interface PlanArchiveWithSession extends PlanArchiveSummary {
 
 /** Cross-session enumeration in a single dir scan — used by the dashboard plans panel where the per-session loop was O(N×M) and timed out for users with hundreds of sessions. */
 export function listAllPlanArchives(): PlanArchiveWithSession[] {
-  const dir = sessionsDir();
-  if (!existsSync(dir)) return [];
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const out: PlanArchiveWithSession[] = [];
   const suffix = ".done.json";
   const planMarker = ".plan.";
-  for (const name of entries) {
-    if (!name.endsWith(suffix)) continue;
+  const out: PlanArchiveWithSession[] = [];
+  for (const { sessionName, full } of scanArchives(sessionsDir(), (name) => {
+    if (!name.endsWith(suffix)) return null;
     const planIdx = name.indexOf(planMarker);
-    if (planIdx < 0) continue;
-    const sessionName = name.slice(0, planIdx);
-    if (!sessionName) continue;
-    const full = join(dir, name);
+    return planIdx > 0 ? name.slice(0, planIdx) : null;
+  })) {
     const parsed = parsePlanArchiveFile(full);
     if (!parsed) continue;
-    const entry: PlanArchiveWithSession = {
-      sessionName,
-      path: full,
-      completedAt: parsed.completedAt,
-      steps: parsed.steps,
-      completedStepIds: parsed.completedStepIds,
-    };
-    if (parsed.stepCompletions) entry.stepCompletions = parsed.stepCompletions;
-    if (parsed.body) entry.body = parsed.body;
-    if (parsed.summary) entry.summary = parsed.summary;
-    out.push(entry);
+    out.push({ ...archiveSummaryFromParsed(parsed, full), sessionName });
   }
   out.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
   return out;
+}
+
+/** Defensive: rebuild step entries, filtering malformed ones so a partially corrupted file still yields a usable subset. */
+function sanitizeSteps(raw: unknown): PlanStep[] {
+  if (!Array.isArray(raw)) return [];
+  const steps: PlanStep[] = [];
+  for (const s of raw) {
+    if (!s || typeof s !== "object") continue;
+    const e = s as unknown as Record<string, unknown>;
+    if (typeof e.id !== "string" || !e.id) continue;
+    if (typeof e.title !== "string" || !e.title) continue;
+    if (typeof e.action !== "string" || !e.action) continue;
+    const step: PlanStep = { id: e.id, title: e.title, action: e.action };
+    if (e.risk === "low" || e.risk === "med" || e.risk === "high") step.risk = e.risk;
+    const targets = stringList(e.targets);
+    if (targets) step.targets = targets;
+    if (typeof e.acceptance === "string" && e.acceptance.trim()) {
+      step.acceptance = e.acceptance.trim();
+    }
+    const verification = stringList(e.verification);
+    if (verification) step.verification = verification;
+    steps.push(step);
+  }
+  return steps;
 }
 
 function stringList(raw: unknown): string[] | undefined {

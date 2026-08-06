@@ -11,34 +11,72 @@ export interface EventBase {
   turn: number;
 }
 
+/** Event type-name constants — emit sites (eventize.ts), reducer cases, and the desktop bridge reference these instead of restating literals. */
+export const EventType = {
+  userMessage: "user.message",
+  slashInvoked: "slash.invoked",
+  modelTurnStarted: "model.turn.started",
+  modelDelta: "model.delta",
+  modelFinal: "model.final",
+  toolPreparing: "tool.preparing",
+  toolIntent: "tool.intent",
+  toolDispatched: "tool.dispatched",
+  toolDenied: "tool.denied",
+  toolResult: "tool.result",
+  toolCall: "tool.call",
+  toolConfirmAllow: "tool.confirm.allow",
+  toolConfirmDeny: "tool.confirm.deny",
+  toolConfirmAlwaysAllow: "tool.confirm.always_allow",
+  effectFileTouched: "effect.file.touched",
+  effectMemoryWritten: "effect.memory.written",
+  planSubmitted: "plan.submitted",
+  planStepCompleted: "plan.step.completed",
+  checkpointCreated: "checkpoint.created",
+  checkpointRestored: "checkpoint.restored",
+  hookFired: "hook.fired",
+  policyBudgetWarning: "policy.budget.warning",
+  policyBudgetBlocked: "policy.budget.blocked",
+  policyEscalated: "policy.escalated",
+  sessionOpened: "session.opened",
+  sessionCompacted: "session.compacted",
+  sessionRetracted: "session.retracted",
+  compactionStarted: "compaction.started",
+  compactionFinished: "compaction.finished",
+  capabilityRegistered: "capability.registered",
+  capabilityRemoved: "capability.removed",
+  status: "status",
+  error: "error",
+  warning: "warning",
+} as const;
+
 export interface UserMessageEvent extends EventBase {
-  type: "user.message";
+  type: typeof EventType.userMessage;
   text: string;
   attachments?: ReadonlyArray<{ kind: "file" | "url"; ref: string }>;
 }
 
 export interface SlashInvokedEvent extends EventBase {
-  type: "slash.invoked";
+  type: typeof EventType.slashInvoked;
   name: string;
   args: string;
 }
 
 export interface ModelTurnStartedEvent extends EventBase {
-  type: "model.turn.started";
+  type: typeof EventType.modelTurnStarted;
   model: string;
   reasoningEffort: import("../config.js").ReasoningEffort;
   prefixHash: string;
 }
 
 export interface ModelDeltaEvent extends EventBase {
-  type: "model.delta";
+  type: typeof EventType.modelDelta;
   channel: "content" | "reasoning" | "tool_args";
   text: string;
   toolCallIndex?: number;
 }
 
 export interface ModelFinalEvent extends EventBase {
-  type: "model.final";
+  type: typeof EventType.modelFinal;
   content: string;
   reasoningContent?: string;
   toolCalls: ReadonlyArray<ToolCall>;
@@ -49,13 +87,13 @@ export interface ModelFinalEvent extends EventBase {
 }
 
 export interface ToolPreparingEvent extends EventBase {
-  type: "tool.preparing";
+  type: typeof EventType.toolPreparing;
   callId: string;
   name: string;
 }
 
 export interface ToolIntentEvent extends EventBase {
-  type: "tool.intent";
+  type: typeof EventType.toolIntent;
   callId: string;
   name: string;
   /** JSON string exactly as the model emitted it. */
@@ -63,18 +101,18 @@ export interface ToolIntentEvent extends EventBase {
 }
 
 export interface ToolDispatchedEvent extends EventBase {
-  type: "tool.dispatched";
+  type: typeof EventType.toolDispatched;
   callId: string;
 }
 
 export interface ToolDeniedEvent extends EventBase {
-  type: "tool.denied";
+  type: typeof EventType.toolDenied;
   callId: string;
   reason: "permission" | "budget" | "policy" | "hook";
 }
 
 export interface ToolResultEvent extends EventBase {
-  type: "tool.result";
+  type: typeof EventType.toolResult;
   callId: string;
   ok: boolean;
   output: string;
@@ -83,52 +121,52 @@ export interface ToolResultEvent extends EventBase {
 }
 
 export interface ToolCallEvent extends EventBase {
-  type: "tool.call";
+  type: typeof EventType.toolCall;
   name: string;
   args: Record<string, unknown>;
 }
 
 export interface ToolConfirmAllowEvent extends EventBase {
-  type: "tool.confirm.allow";
+  type: typeof EventType.toolConfirmAllow;
   kind: "run_command" | "run_background";
   payload: { command: string };
 }
 
 export interface ToolConfirmDenyEvent extends EventBase {
-  type: "tool.confirm.deny";
+  type: typeof EventType.toolConfirmDeny;
   kind: "run_command" | "run_background";
   payload: { command: string };
   denyContext?: string;
 }
 
 export interface ToolConfirmAlwaysAllowEvent extends EventBase {
-  type: "tool.confirm.always_allow";
+  type: typeof EventType.toolConfirmAlwaysAllow;
   kind: "run_command" | "run_background";
   payload: { command: string };
   prefix: string;
 }
 
 export interface FileTouchedEvent extends EventBase {
-  type: "effect.file.touched";
+  type: typeof EventType.effectFileTouched;
   path: string;
   mode: "create" | "edit" | "delete";
   bytes: number;
 }
 
 export interface MemoryWrittenEvent extends EventBase {
-  type: "effect.memory.written";
+  type: typeof EventType.effectMemoryWritten;
   scope: "user" | "project" | "hash";
   key: string;
 }
 
 export interface PlanSubmittedEvent extends EventBase {
-  type: "plan.submitted";
+  type: typeof EventType.planSubmitted;
   steps: ReadonlyArray<PlanStep>;
   body: string;
 }
 
 export interface PlanStepCompletedEvent extends EventBase {
-  type: "plan.step.completed";
+  type: typeof EventType.planStepCompleted;
   stepId: string;
   title?: string;
   notes?: string;
@@ -137,7 +175,7 @@ export interface PlanStepCompletedEvent extends EventBase {
 }
 
 export interface CheckpointCreatedEvent extends EventBase {
-  type: "checkpoint.created";
+  type: typeof EventType.checkpointCreated;
   checkpointId: string;
   name: string;
   source: "manual" | "auto-session-start" | "auto-pre-restore";
@@ -146,7 +184,7 @@ export interface CheckpointCreatedEvent extends EventBase {
 }
 
 export interface CheckpointRestoredEvent extends EventBase {
-  type: "checkpoint.restored";
+  type: typeof EventType.checkpointRestored;
   checkpointId: string;
   restored: number;
   removed: number;
@@ -154,26 +192,26 @@ export interface CheckpointRestoredEvent extends EventBase {
 }
 
 export interface HookFiredEvent extends EventBase {
-  type: "hook.fired";
+  type: typeof EventType.hookFired;
   hookName: string;
   phase: "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "Stop";
   outcome: "ok" | "blocked" | "modified" | "error";
 }
 
 export interface BudgetWarningEvent extends EventBase {
-  type: "policy.budget.warning";
+  type: typeof EventType.policyBudgetWarning;
   spentUsd: number;
   capUsd: number;
 }
 
 export interface BudgetBlockedEvent extends EventBase {
-  type: "policy.budget.blocked";
+  type: typeof EventType.policyBudgetBlocked;
   spentUsd: number;
   capUsd: number;
 }
 
 export interface EscalatedEvent extends EventBase {
-  type: "policy.escalated";
+  type: typeof EventType.policyEscalated;
   fromModel: string;
   toModel: string;
   reason: "self-report" | "failure-threshold" | "user-request";
@@ -182,13 +220,13 @@ export interface EscalatedEvent extends EventBase {
 }
 
 export interface SessionOpenedEvent extends EventBase {
-  type: "session.opened";
+  type: typeof EventType.sessionOpened;
   name: string;
   resumedFromTurn: number;
 }
 
 export interface SessionCompactedEvent extends EventBase {
-  type: "session.compacted";
+  type: typeof EventType.sessionCompacted;
   beforeMessages: number;
   afterMessages: number;
   reason: "user" | "auto-context-pressure";
@@ -200,7 +238,7 @@ export interface SessionCompactedEvent extends EventBase {
  *  session.compacted: the one event that REPLACES the conversation view, so
  *  replaying the events sidecar yields the truncated conversation. */
 export interface SessionRetractedEvent extends EventBase {
-  type: "session.retracted";
+  type: typeof EventType.sessionRetracted;
   /** What session edit truncated the log. */
   kind: "retry" | "rewind" | "abort-discard";
   beforeMessages: number;
@@ -210,7 +248,7 @@ export interface SessionRetractedEvent extends EventBase {
 }
 
 export interface CompactionStartedEvent extends EventBase {
-  type: "compaction.started";
+  type: typeof EventType.compactionStarted;
   /** Stable id pairing start with its finished event — the UI keys the card by it. */
   compactionId: string;
   reason: "user" | "auto-context-pressure";
@@ -222,7 +260,7 @@ export interface CompactionStartedEvent extends EventBase {
 }
 
 export interface CompactionFinishedEvent extends EventBase {
-  type: "compaction.finished";
+  type: typeof EventType.compactionFinished;
   /** Same compactionId as the matching started event. */
   compactionId: string;
   /** What kind of compaction ran — see CompactionStartedEvent.kind. */
@@ -242,24 +280,24 @@ export interface CompactionFinishedEvent extends EventBase {
 }
 
 export interface CapabilityRegisteredEvent extends EventBase {
-  type: "capability.registered";
+  type: typeof EventType.capabilityRegistered;
   name: string;
   permission: "ask" | "allow" | "deny";
 }
 
 export interface CapabilityRemovedEvent extends EventBase {
-  type: "capability.removed";
+  type: typeof EventType.capabilityRemoved;
   name: string;
 }
 
 /** Transient — never persisted, drops on next primary event. */
 export interface StatusEvent extends EventBase {
-  type: "status";
+  type: typeof EventType.status;
   text: string;
 }
 
 export interface ErrorEvent extends EventBase {
-  type: "error";
+  type: typeof EventType.error;
   message: string;
   recoverable: boolean;
   name?: string;
@@ -272,7 +310,7 @@ export interface ErrorEvent extends EventBase {
  *  rate-limit pause, user-aborted iter, storm-stuck interrupt, etc. Carries a
  *  severity so noisy/self-correcting warnings can be filtered out by the surface. */
 export interface WarningEvent extends EventBase {
-  type: "warning";
+  type: typeof EventType.warning;
   text: string;
   severity: "low" | "high";
 }

@@ -1,7 +1,7 @@
 /** MCP HTTP+SSE transport (spec 2024-11-05) — POST endpoint URL arrives as the first `event: endpoint` SSE frame. */
 
 import { BaseMcpTransport } from "./base-transport.js";
-import { consumeSseStream, parseSseMessageEvent } from "./message-queue.js";
+import { parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
 import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
@@ -83,17 +83,12 @@ export class SseTransport extends BaseMcpTransport implements McpTransport {
       return;
     }
 
-    try {
-      await consumeSseStream(res.body as AsyncIterable<Uint8Array>, (ev) =>
-        this.handleEvent(ev.event ?? "message", ev.data),
-      );
-    } catch (err) {
-      if (!this.closed) {
-        this.incoming.push(syntheticRpcError(`SSE stream error: ${(err as Error).message}`));
-      }
-    } finally {
-      this.markClosed();
-    }
+    await this.consumeSseGuarded(
+      res.body as AsyncIterable<Uint8Array>,
+      (ev) => this.handleEvent(ev.event ?? "message", ev.data),
+      "SSE",
+    );
+    this.markClosed();
   }
 
   private handleEvent(type: string, data: string): void {

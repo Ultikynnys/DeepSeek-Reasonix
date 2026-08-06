@@ -1,6 +1,7 @@
 import type { LoopEvent } from "../loop.js";
 import type { ChatMessage, RawUsage, ToolCall } from "../types.js";
 import { redactEventValue } from "./event-redaction.js";
+import { EventType } from "./events.js";
 import type {
   CompactionFinishedEvent,
   CompactionStartedEvent,
@@ -184,7 +185,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "user.message",
+      type: EventType.userMessage,
       text,
     };
   }
@@ -194,7 +195,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "slash.invoked",
+      type: EventType.slashInvoked,
       name,
       args,
     };
@@ -205,7 +206,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "session.opened",
+      type: EventType.sessionOpened,
       name,
       resumedFromTurn,
     };
@@ -222,7 +223,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "session.compacted",
+      type: EventType.sessionCompacted,
       beforeMessages: before,
       afterMessages: after,
       reason,
@@ -254,7 +255,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "session.retracted",
+      type: EventType.sessionRetracted,
       kind,
       beforeMessages: before,
       afterMessages: after,
@@ -267,7 +268,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "tool.call",
+      type: EventType.toolCall,
       name,
       args: redactEventValue(args),
     };
@@ -301,7 +302,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "model.final",
+      type: EventType.modelFinal,
       content: "[aborted by user — no response produced.]",
       toolCalls: [],
       usage: {},
@@ -318,7 +319,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "tool.confirm.allow",
+      type: EventType.toolConfirmAllow,
       kind,
       payload: redactEventValue(payload),
     };
@@ -334,7 +335,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "tool.confirm.deny",
+      type: EventType.toolConfirmDeny,
       kind,
       payload: redactEventValue(payload),
       denyContext,
@@ -351,7 +352,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "tool.confirm.always_allow",
+      type: EventType.toolConfirmAlwaysAllow,
       kind,
       payload: redactEventValue(payload),
       prefix,
@@ -363,7 +364,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "model.turn.started",
+      type: EventType.modelTurnStarted,
       model: ctx.model,
       reasoningEffort: ctx.reasoningEffort,
       prefixHash: ctx.prefixHash,
@@ -379,7 +380,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "model.delta",
+      type: EventType.modelDelta,
       channel,
       text,
     };
@@ -400,7 +401,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn: ev.turn,
-      type: "model.final",
+      type: EventType.modelFinal,
       content: ev.content,
       // toolCalls land later via tool_start → tool.intent — not in this event.
       toolCalls: [] as ReadonlyArray<ToolCall>,
@@ -416,7 +417,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "tool.preparing",
+      type: EventType.toolPreparing,
       callId,
       name,
     };
@@ -432,7 +433,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "tool.intent",
+      type: EventType.toolIntent,
       callId,
       name,
       args,
@@ -444,7 +445,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "tool.dispatched",
+      type: EventType.toolDispatched,
       callId,
     };
   }
@@ -460,7 +461,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "tool.result",
+      type: EventType.toolResult,
       callId,
       ok,
       output,
@@ -473,7 +474,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "status",
+      type: EventType.status,
       text,
     };
   }
@@ -489,7 +490,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "compaction.started",
+      type: EventType.compactionStarted,
       compactionId,
       reason,
       ...(kind ? { kind } : {}),
@@ -517,7 +518,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn: result.turn,
-      type: "compaction.finished",
+      type: EventType.compactionFinished,
       compactionId,
       ...(result.kind ? { kind: result.kind } : {}),
       folded: result.folded,
@@ -542,7 +543,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
-      type: "error",
+      type: EventType.error,
       message,
       recoverable,
       ...detail,
@@ -559,7 +560,7 @@ export class Eventizer {
         id: ++this.nextId,
         ts: new Date().toISOString(),
         turn: ev.turn,
-        type: "policy.escalated",
+        type: EventType.policyEscalated,
         fromModel: "",
         toModel: "",
         reason: c.includes("armed") ? "user-request" : "self-report",
@@ -571,7 +572,7 @@ export class Eventizer {
         id: ++this.nextId,
         ts: new Date().toISOString(),
         turn: ev.turn,
-        type: blocked ? "policy.budget.blocked" : "policy.budget.warning",
+        type: blocked ? EventType.policyBudgetBlocked : EventType.policyBudgetWarning,
         spentUsd: 0,
         capUsd: 0,
       };
@@ -581,7 +582,7 @@ export class Eventizer {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn: ev.turn,
-      type: "warning",
+      type: EventType.warning,
       text: c,
       severity: ev.severity ?? "high",
     };

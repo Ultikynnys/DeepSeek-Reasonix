@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { looksLikeAbsoluteSystemPath, pathIsUnder } from "@reasonix/core-utils/path-utils";
+import { tmpSiblingPath } from "../core/atomic-write.js";
 import { type FileEncoding, decodeFileBuffer, encodeFile } from "./file-encoding.js";
 
 export interface EditBlock {
@@ -106,7 +107,7 @@ function fsyncDirectoryBestEffort(path: string): void {
 }
 
 function atomicReplaceFileSync(path: string, buf: Buffer, mode: number): void {
-  const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+  const tmp = tmpSiblingPath(path);
   const permissions = mode & 0o7777;
   let fd: number | undefined;
   try {

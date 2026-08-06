@@ -3,6 +3,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { BaseMcpTransport } from "./base-transport.js";
 import { syntheticRpcError } from "./transport-utils.js";
+import { JSONRPC_VERSION } from "./types.js";
 import type { JsonRpcMessage } from "./types.js";
 
 export interface McpTransport {
@@ -73,7 +74,7 @@ export class StdioTransport extends BaseMcpTransport implements McpTransport {
       // Surface spawn errors as a synthetic JsonRpcError so callers don't
       // hang on a stream that never emits anything.
       this.incoming.push({
-        jsonrpc: "2.0",
+        jsonrpc: JSONRPC_VERSION,
         id: null,
         error: { code: -32000, message: `transport error: ${err.message}` },
       });

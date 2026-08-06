@@ -2,27 +2,30 @@
 
 export type JsonRpcId = string | number;
 
+/** JSON-RPC protocol version — the literal every wire frame must carry. */
+export const JSONRPC_VERSION = "2.0" as const;
+
 export interface JsonRpcRequest<P = unknown> {
-  jsonrpc: "2.0";
+  jsonrpc: typeof JSONRPC_VERSION;
   id: JsonRpcId;
   method: string;
   params?: P;
 }
 
 export interface JsonRpcNotification<P = unknown> {
-  jsonrpc: "2.0";
+  jsonrpc: typeof JSONRPC_VERSION;
   method: string;
   params?: P;
 }
 
 export interface JsonRpcSuccess<R = unknown> {
-  jsonrpc: "2.0";
+  jsonrpc: typeof JSONRPC_VERSION;
   id: JsonRpcId;
   result: R;
 }
 
 export interface JsonRpcError {
-  jsonrpc: "2.0";
+  jsonrpc: typeof JSONRPC_VERSION;
   id: JsonRpcId | null;
   error: {
     /** JSON-RPC standard codes: -32700 parse, -32600 invalid request, -32601 method not found, -32602 invalid params, -32603 internal. MCP also defines its own range. */

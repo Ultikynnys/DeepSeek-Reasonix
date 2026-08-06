@@ -3,6 +3,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { EmbeddingProvider } from "../../config.js";
+import { readJsonFileSilentlyAsync } from "../../core/json-file.js";
 import type { CodeChunk } from "./chunker.js";
 
 export interface IndexEntry extends CodeChunk {
@@ -34,12 +35,12 @@ const META_FILE = "index.meta.json";
 const DATA_FILE = "index.jsonl";
 
 export async function readIndexMeta(indexDir: string): Promise<IndexMeta | null> {
-  try {
-    const raw = await fs.readFile(path.join(indexDir, META_FILE), "utf8");
-    return normalizeMeta(JSON.parse(raw) as Partial<IndexMeta>);
-  } catch {
-    return null;
-  }
+  const raw = await readJsonFileSilentlyAsync(
+    path.join(indexDir, META_FILE),
+    // normalizeMeta defaults every field, so any non-null JSON is acceptable.
+    (v): v is Partial<IndexMeta> => v !== null && v !== undefined,
+  );
+  return raw ? normalizeMeta(raw) : null;
 }
 
 export function compareIndexIdentity(

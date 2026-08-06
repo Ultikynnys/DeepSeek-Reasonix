@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, parse, relative, resolve } from "node:path";
+import { sanitizeFilename } from "@reasonix/core-utils";
 import { reasonixHome } from "../reasonix-home.js";
 
 const TRUNCATED_DIR = "truncated-results";
@@ -16,7 +17,7 @@ const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 /** Sanitize a tool name for safe use in a filename. */
 function sanitizeToolName(name: string): string {
-  return name.replace(/[^\w\-]/g, "_").slice(0, 48) || "unknown";
+  return sanitizeFilename(name, { max: 48, fallback: "unknown" });
 }
 
 function useHomeFallback(rootDir: string): boolean {

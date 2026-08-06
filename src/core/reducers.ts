@@ -1,6 +1,7 @@
 /** Pure projection reducers over the Event log — deterministic, no I/O, no mutation. */
 
 import type { ChatMessage } from "../types.js";
+import { EventType } from "./events.js";
 import type {
   BudgetView,
   CapabilityView,
@@ -72,29 +73,29 @@ export function emptyProjections(capUsd: number | null = null): ProjectionSet {
 
 export const conversation: Reducer<ConversationView> = (v, ev) => {
   switch (ev.type) {
-    case "user.message": {
+    case EventType.userMessage: {
       const msg: ChatMessage = { role: "user", content: ev.text };
       return { ...v, messages: [...v.messages, msg] };
     }
-    case "model.final": {
+    case EventType.modelFinal: {
       const msg: ChatMessage = { role: "assistant", content: ev.content };
       if (ev.toolCalls.length > 0) msg.tool_calls = [...ev.toolCalls];
       if (ev.reasoningContent !== undefined) msg.reasoning_content = ev.reasoningContent;
       return { ...v, messages: [...v.messages, msg] };
     }
-    case "tool.intent":
+    case EventType.toolIntent:
       return {
         ...v,
         pendingToolCalls: [...v.pendingToolCalls, { callId: ev.callId, name: ev.name }],
       };
-    case "tool.result": {
+    case EventType.toolResult: {
       const msg: ChatMessage = { role: "tool", content: ev.output, tool_call_id: ev.callId };
       return {
         messages: [...v.messages, msg],
         pendingToolCalls: v.pendingToolCalls.filter((c) => c.callId !== ev.callId),
       };
     }
-    case "tool.denied": {
+    case EventType.toolDenied: {
       const msg: ChatMessage = {
         role: "tool",
         content: `denied: ${ev.reason}`,
@@ -105,8 +106,8 @@ export const conversation: Reducer<ConversationView> = (v, ev) => {
         pendingToolCalls: v.pendingToolCalls.filter((c) => c.callId !== ev.callId),
       };
     }
-    case "session.compacted":
-    case "session.retracted":
+    case EventType.sessionCompacted:
+    case EventType.sessionRetracted:
       return { messages: [...ev.replacementMessages], pendingToolCalls: [] };
     default:
       return v;
@@ -115,7 +116,7 @@ export const conversation: Reducer<ConversationView> = (v, ev) => {
 
 export const budget: Reducer<BudgetView> = (v, ev) => {
   switch (ev.type) {
-    case "model.final": {
+    case EventType.modelFinal: {
       const u = ev.usage;
       return {
         ...v,
@@ -126,9 +127,9 @@ export const budget: Reducer<BudgetView> = (v, ev) => {
         cacheMissTokens: v.cacheMissTokens + (u.prompt_cache_miss_tokens ?? 0),
       };
     }
-    case "policy.budget.warning":
+    case EventType.policyBudgetWarning:
       return { ...v, warned: true };
-    case "policy.budget.blocked":
+    case EventType.policyBudgetBlocked:
       return { ...v, blocked: true };
     default:
       return v;
@@ -137,7 +138,7 @@ export const budget: Reducer<BudgetView> = (v, ev) => {
 
 export const plan: Reducer<PlanView> = (v, ev) => {
   switch (ev.type) {
-    case "plan.submitted": {
+    case EventType.planSubmitted: {
       const steps: PlanStepView[] = ev.steps.map((s) => ({
         id: s.id,
         title: s.title,
@@ -147,7 +148,7 @@ export const plan: Reducer<PlanView> = (v, ev) => {
       }));
       return { steps, body: ev.body, submittedTurn: ev.turn };
     }
-    case "plan.step.completed": {
+    case EventType.planStepCompleted: {
       if (!v.steps.some((s) => s.id === ev.stepId)) return v;
       return {
         ...v,
@@ -163,12 +164,12 @@ export const plan: Reducer<PlanView> = (v, ev) => {
 
 export const workspace: Reducer<WorkspaceView> = (v, ev) => {
   switch (ev.type) {
-    case "effect.file.touched": {
+    case EventType.effectFileTouched: {
       const next = new Map(v.filesTouched);
       next.set(ev.path, ev.mode);
       return { ...v, filesTouched: next };
     }
-    case "checkpoint.created":
+    case EventType.checkpointCreated:
       return { ...v, lastCheckpointId: ev.checkpointId };
     default:
       return v;
@@ -177,11 +178,11 @@ export const workspace: Reducer<WorkspaceView> = (v, ev) => {
 
 export const capabilities: Reducer<CapabilityView> = (v, ev) => {
   switch (ev.type) {
-    case "capability.registered": {
+    case EventType.capabilityRegistered: {
       const filtered = v.tools.filter((t) => t.name !== ev.name);
       return { tools: [...filtered, { name: ev.name, permission: ev.permission }] };
     }
-    case "capability.removed":
+    case EventType.capabilityRemoved:
       return { tools: v.tools.filter((t) => t.name !== ev.name) };
     default:
       return v;
@@ -189,16 +190,16 @@ export const capabilities: Reducer<CapabilityView> = (v, ev) => {
 };
 
 const STATUS_CLEARING: ReadonlySet<Event["type"]> = new Set([
-  "model.delta",
-  "model.final",
-  "tool.dispatched",
-  "tool.result",
-  "tool.denied",
-  "error",
+  EventType.modelDelta,
+  EventType.modelFinal,
+  EventType.toolDispatched,
+  EventType.toolResult,
+  EventType.toolDenied,
+  EventType.error,
 ]);
 
 export const status: Reducer<StatusView> = (v, ev) => {
-  if (ev.type === "status") return { current: ev.text };
+  if (ev.type === EventType.status) return { current: ev.text };
   if (STATUS_CLEARING.has(ev.type) && v.current !== null) return { current: null };
   return v;
 };
@@ -207,14 +208,14 @@ export const sessionMeta: Reducer<SessionMetaView> = (v, ev) => {
   let next = v;
   if (ev.turn > next.currentTurn) next = { ...next, currentTurn: ev.turn };
   switch (ev.type) {
-    case "session.opened":
+    case EventType.sessionOpened:
       return {
         ...next,
         name: ev.name,
         openedAt: ev.ts,
         resumedFromTurn: ev.resumedFromTurn,
       };
-    case "error":
+    case EventType.error:
       return { ...next, lastError: ev.message };
     default:
       return next;

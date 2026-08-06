@@ -16,6 +16,11 @@ const defaultFs: AtomicWriteFs = {
   unlinkSync,
 };
 
+/** Collision-safe sibling tmp path for the write-then-rename pattern. */
+export function tmpSiblingPath(path: string): string {
+  return `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+}
+
 /** Atomic write with EXDEV fallback — Windows OneDrive / reparse points refuse rename, fixes #1738. */
 export function atomicWriteSync(
   path: string,

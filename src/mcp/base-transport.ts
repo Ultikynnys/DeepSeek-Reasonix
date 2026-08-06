@@ -1,6 +1,7 @@
 /** Shared plumbing for MCP transports: closed-guard, close semantics, and the incoming message queue. */
 
-import { MessageQueue } from "./message-queue.js";
+import { MessageQueue, consumeSseStream } from "./message-queue.js";
+import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
 
 /**
@@ -26,5 +27,21 @@ export abstract class BaseMcpTransport {
     this.closed = true;
     this.incoming.close();
     return true;
+  }
+
+  /** Consume an SSE body, pushing a synthetic error notification if the stream dies while open. Shared by the SSE and Streamable HTTP transports. */
+  protected async consumeSseGuarded(
+    body: AsyncIterable<Uint8Array>,
+    onEvent: (ev: { event?: string; data: string }) => void,
+    label: string,
+    opts: { shouldStop?: () => boolean } = {},
+  ): Promise<void> {
+    try {
+      await consumeSseStream(body, onEvent, opts);
+    } catch (err) {
+      if (!this.closed) {
+        this.incoming.push(syntheticRpcError(`${label} stream error: ${(err as Error).message}`));
+      }
+    }
   }
 }
