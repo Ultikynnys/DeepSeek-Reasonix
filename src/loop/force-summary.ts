@@ -1,11 +1,25 @@
 import { type DeepSeekClient, Usage } from "../client.js";
 import { t } from "../i18n/index.js";
 import type { TurnStats } from "../telemetry/stats.js";
+import { countTokensBounded } from "../tokenizer.js";
 import type { ChatMessage } from "../types.js";
 import { errorLabelFor, reasonPrefixFor } from "./errors.js";
 import { buildAssistantMessage } from "./messages.js";
 import { stripHallucinatedToolMarkup } from "./thinking.js";
 import type { LoopEvent } from "./types.js";
+
+// Scaled deadline for the summary call, mirroring the fold summarizer's pattern
+// (context-manager.ts): prefill + queue time grows with the prompt, so a fixed
+// short cap would deterministically kill summaries at large contexts — exactly
+// when the 80% guard fires. The client's own socket cap (11 min) still bounds
+// a hung connection, but an 11-min stall freezes the whole turn: the loop
+// consumes this generator inline, so in-flight tool dispatch (shell instances
+// included) hangs until it settles. The scaled deadline keeps the wait
+// proportional to the context (~4 min at a 240k-token context) instead of
+// pathological.
+const FORCE_SUMMARY_TIMEOUT_MS = 15_000;
+const FORCE_SUMMARY_PER_TOKEN_MS = 1.0;
+const FORCE_SUMMARY_MAX_TIMEOUT_MS = 300_000;
 
 export type ForceSummaryReason = "aborted" | "context-guard" | "stuck";
 
@@ -41,12 +55,43 @@ export async function* forceSummaryAfterIterLimit(
     // Use the active turn model — pinning a specific name (e.g. flash) 400s
     // on third-party endpoints that don't advertise it. `thinking: disabled`
     // still keeps reasoning tokens off the bill for the bounded paraphrase.
-    const resp = await ctx.client.chat({
-      model: ctx.model,
-      messages,
-      signal: ctx.signal,
-      thinking: "disabled",
+    // Deadline race: the summary call must settle within a context-scaled
+    // window even when the upstream connection stalls (see constants above).
+    // The deadline aborts the request — AbortSignal.any, the same combination
+    // the client uses for its own socket cap — and rejects, so the catch below
+    // surfaces an error event instead of freezing the turn on "summarizing…".
+    const summaryCtrl = new AbortController();
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadlineMs = Math.min(
+      FORCE_SUMMARY_MAX_TIMEOUT_MS,
+      FORCE_SUMMARY_TIMEOUT_MS +
+        Math.round(
+          messages.reduce(
+            (acc, m) => acc + countTokensBounded(typeof m.content === "string" ? m.content : ""),
+            0,
+          ) * FORCE_SUMMARY_PER_TOKEN_MS,
+        ),
+    );
+    const deadlinePromise = new Promise<never>((_, reject) => {
+      deadlineTimer = setTimeout(() => {
+        summaryCtrl.abort();
+        reject(new Error("forced-summary-timeout"));
+      }, deadlineMs);
     });
+    let resp: Awaited<ReturnType<typeof ctx.client.chat>>;
+    try {
+      resp = await Promise.race([
+        ctx.client.chat({
+          model: ctx.model,
+          messages,
+          signal: AbortSignal.any([ctx.signal, summaryCtrl.signal]),
+          thinking: "disabled",
+        }),
+        deadlinePromise,
+      ]);
+    } finally {
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+    }
     const rawContent = resp.content?.trim() ?? "";
     const cleaned = stripHallucinatedToolMarkup(rawContent);
     const summary = cleaned || t("summary.hallucinatedFallback");
@@ -67,7 +112,11 @@ export async function* forceSummaryAfterIterLimit(
     return summary;
   } catch (err) {
     const label = errorLabelFor(opts.reason);
-    const message = t("summary.failedAfterReason", { label, message: (err as Error).message });
+    const raw = err instanceof Error ? err.message : String(err);
+    const message = t("summary.failedAfterReason", {
+      label,
+      message: raw === "forced-summary-timeout" ? "summary request timed out" : raw,
+    });
     yield {
       turn: ctx.turn,
       role: "error",

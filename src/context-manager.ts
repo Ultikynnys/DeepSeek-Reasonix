@@ -568,14 +568,28 @@ export class ContextManager {
       { role: "user", content: buildFileTriageInstruction(summary, allPaths) },
     ];
     const triageCtrl = new AbortController();
-    const timeout = setTimeout(() => triageCtrl.abort(), FILE_TRIAGE_TIMEOUT_MS);
+    let triageTimer: ReturnType<typeof setTimeout> | undefined;
+    // Deadline race, not just abort: the client's own socket cap is 11 min and
+    // this call runs INSIDE the fold — a hung connection would freeze the
+    // "compacting history…" card (and the loop's tool dispatch) for minutes.
+    // The race rejects at FILE_TRIAGE_TIMEOUT_MS; the catch below fail-opens
+    // with zero drops, same as any other triage failure.
+    const deadlinePromise = new Promise<never>((_, reject) => {
+      triageTimer = setTimeout(() => {
+        triageCtrl.abort();
+        reject(new Error("file-triage-timeout"));
+      }, FILE_TRIAGE_TIMEOUT_MS);
+    });
     try {
-      const resp = await this.deps.client.chat({
-        model: FILE_TRIAGE_MODEL,
-        messages,
-        signal: triageCtrl.signal,
-        thinking: "disabled",
-      });
+      const resp = await Promise.race([
+        this.deps.client.chat({
+          model: FILE_TRIAGE_MODEL,
+          messages,
+          signal: triageCtrl.signal,
+          thinking: "disabled",
+        }),
+        deadlinePromise,
+      ]);
       this.deps.stats.record(
         this.deps.getCurrentTurn(),
         FILE_TRIAGE_MODEL,
@@ -586,7 +600,7 @@ export class ContextManager {
       // Fail-open: relevance is advisory — the fold proceeds with no drops.
       return { keep: allPaths, drop: [] };
     } finally {
-      clearTimeout(timeout);
+      if (triageTimer) clearTimeout(triageTimer);
     }
   }
 
