@@ -287,6 +287,21 @@ export type SessionLoadedEvent = {
   };
 };
 
+/** A fold committed and REPLACED the conversation — the chat must swap its
+ *  message list to the post-fold log (summary message + preserved tail), like
+ *  a session reload. `replacementMessages` ships in the same LoadedMessage
+ *  wire shape as $session_loaded.messages. */
+export type SessionCompactedEvent = {
+  type: "session.compacted";
+  id: number;
+  ts: string;
+  turn: number;
+  beforeMessages: number;
+  afterMessages: number;
+  reason: "user" | "auto-context-pressure";
+  replacementMessages: LoadedMessage[];
+};
+
 export type SessionEmptyEvent = {
   type: "$session_empty";
   name: string;
@@ -535,6 +550,7 @@ export type IncomingEvent = { tabId?: string } & (
   | SessionImportSourcesEvent
   | SessionImportResultEvent
   | SessionLoadedEvent
+  | SessionCompactedEvent
   | SessionEmptyEvent
   | NeedsSetupEvent
   | SettingsEvent

@@ -412,6 +412,20 @@ interface SessionLoadedEvent {
   };
 }
 
+/** session.compacted as shipped to the frontend: the kernel event with the
+ *  replacement converted from ChatMessage[] into the LoadedMessage[] wire
+ *  shape the App's $session_loaded consumer already understands. */
+interface SessionCompactedWireEvent {
+  type: "session.compacted";
+  id: number;
+  ts: string;
+  turn: number;
+  beforeMessages: number;
+  afterMessages: number;
+  reason: "user" | "auto-context-pressure";
+  replacementMessages: LoadedMessage[];
+}
+
 interface SessionEmptyEvent {
   type: "$session_empty";
   name: string;
@@ -593,6 +607,7 @@ interface RewindResultEvent {
  *  produced, not whenever the next 8 KB flushes. */
 type EmittableEvent =
   | KernelEvent
+  | SessionCompactedWireEvent
   | { type: "$ready" }
   | { type: "$error"; message: string }
   | { type: "$turn_complete" }
@@ -671,6 +686,27 @@ export function writeAllSync(
 function emit(ev: EmittableEvent, tabId?: string): void {
   const payload = tabId ? { ...ev, tabId } : ev;
   writeAllSync(1, Buffer.from(`${JSON.stringify(payload)}\n`, "utf8"));
+}
+
+/** Emit a kernel event to a tab; session.compacted's replacement payload is
+ *  converted from the kernel ChatMessage shape into the LoadedMessage wire
+ *  shape so the App reducer can swap in the post-fold conversation. */
+function emitKernelEvent(kev: KernelEvent, tabId?: string): void {
+  if (kev.type === "session.compacted") {
+    const wire: SessionCompactedWireEvent = {
+      type: "session.compacted",
+      id: kev.id,
+      ts: kev.ts,
+      turn: kev.turn,
+      beforeMessages: kev.beforeMessages,
+      afterMessages: kev.afterMessages,
+      reason: kev.reason,
+      replacementMessages: buildLoadedMessages([...kev.replacementMessages]),
+    };
+    emit(wire, tabId);
+    return;
+  }
+  emit(kev, tabId);
 }
 
 function tailLines(s: string, n: number): string {
@@ -1811,7 +1847,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             sawAssistantFinal = true;
             if (ev.content) lastAssistantText = ev.content;
           }
-          for (const kev of rt.eventizer.consume(ev, rt.ctx)) emit(kev, tab.id);
+          for (const kev of rt.eventizer.consume(ev, rt.ctx)) emitKernelEvent(kev, tab.id);
           if (ev.role === "assistant_final" || ev.role === "tool") {
             emitCtxBreakdown(tab);
           }
@@ -3109,7 +3145,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       void (async () => {
         try {
           for await (const ev of rt.loop.compactHistoryWithEvents()) {
-            for (const kev of rt.eventizer.consume(ev, rt.ctx)) emit(kev, tab.id);
+            for (const kev of rt.eventizer.consume(ev, rt.ctx)) emitKernelEvent(kev, tab.id);
           }
           emitCtxBreakdown(tab);
         } catch (err) {

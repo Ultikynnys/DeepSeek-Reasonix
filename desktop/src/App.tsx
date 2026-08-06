@@ -62,6 +62,7 @@ import {
   type ExternalSessionSource,
   type IncomingEvent,
   type JobInfo,
+  type LoadedMessage,
   type McpSpecInfo,
   type MemoryDetail,
   type MemoryEntryInfo,
@@ -753,6 +754,65 @@ function pruneSessionFiles(existing: SessionFile[], dropped: readonly string[]):
   return existing.filter((f) => !droppedSet.has(contextPathKey(f.path)));
 }
 
+/** Convert a server-sent conversation (LoadedMessage shape) into UI messages.
+ *  Shared by $session_loaded and session.compacted — both carry the same wire
+ *  shape, so the live fold replacement and a session reload render identically. */
+function mapLoadedMessages(loaded: LoadedMessage[]): ChatMessage[] {
+  return loaded.map((m, i) => {
+    if (m.kind === "user") {
+      return { kind: "user", text: m.text, clientId: `c-loaded-${i}`, turn: i + 1 };
+    }
+    const segments: AssistantSegment[] = m.segments.map((s) => {
+      if (s.kind === "tool") {
+        return {
+          kind: "tool",
+          callId: s.callId,
+          name: s.name,
+          args: s.args,
+          startedAt: 0,
+          result: s.result,
+          ok: s.ok,
+          durationMs: 0,
+        };
+      }
+      return s;
+    });
+    return { kind: "assistant", turn: m.turn, segments, pending: false };
+  });
+}
+
+/** Re-derive the "Files in context" list from a conversation: paths from tool
+ *  segments, minus paths the fold's triage dropped (persisted as a marker in
+ *  the folded summary message). Used by $session_loaded and session.compacted. */
+function deriveSessionFiles(loaded: ChatMessage[]): SessionFile[] {
+  let sessionFiles: SessionFile[] = [];
+  for (const m of loaded) {
+    if (m.kind !== "assistant") continue;
+    for (const s of m.segments) {
+      if (s.kind !== "tool") continue;
+      // For replayed sessions we don't have tool.result ok-status here, but
+      // segments only survive into history if the call completed. Trust it.
+      sessionFiles = mergeSessionFiles(sessionFiles, extractToolFiles(s.name, s.args));
+    }
+  }
+  // Files the fold's triage step dropped stay dropped across reloads: the
+  // decision is persisted as a marker in the folded summary message.
+  const droppedFromMarkers = new Set<string>();
+  for (const m of loaded) {
+    if (m.kind !== "assistant") continue;
+    for (const s of m.segments) {
+      if (s.kind !== "text") continue;
+      for (const p of parseFilesDroppedMarker(s.text)) {
+        droppedFromMarkers.add(contextPathKey(p));
+      }
+    }
+  }
+  if (droppedFromMarkers.size > 0) {
+    sessionFiles = sessionFiles.filter((f) => !droppedFromMarkers.has(contextPathKey(f.path)));
+  }
+  return sessionFiles;
+}
+
 function zeroUsage(): UsageStats {
   return {
     totalCostUsd: 0,
@@ -1039,52 +1099,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     }
     case "$session_loaded": {
       const sessionName = ev.name;
-      const loaded: ChatMessage[] = ev.messages.map((m, i) => {
-        if (m.kind === "user") {
-          return { kind: "user", text: m.text, clientId: `c-loaded-${i}`, turn: i + 1 };
-        }
-        const segments: AssistantSegment[] = m.segments.map((s) => {
-          if (s.kind === "tool") {
-            return {
-              kind: "tool",
-              callId: s.callId,
-              name: s.name,
-              args: s.args,
-              startedAt: 0,
-              result: s.result,
-              ok: s.ok,
-              durationMs: 0,
-            };
-          }
-          return s;
-        });
-        return { kind: "assistant", turn: m.turn, segments, pending: false };
-      });
-      let sessionFiles: SessionFile[] = [];
-      for (const m of loaded) {
-        if (m.kind !== "assistant") continue;
-        for (const s of m.segments) {
-          if (s.kind !== "tool") continue;
-          // For replayed sessions we don't have tool.result ok-status here, but
-          // segments only survive into history if the call completed. Trust it.
-          sessionFiles = mergeSessionFiles(sessionFiles, extractToolFiles(s.name, s.args));
-        }
-      }
-      // Files the fold's triage step dropped stay dropped across reloads: the
-      // decision is persisted as a marker in the folded summary message.
-      const droppedFromMarkers = new Set<string>();
-      for (const m of loaded) {
-        if (m.kind !== "assistant") continue;
-        for (const s of m.segments) {
-          if (s.kind !== "text") continue;
-          for (const p of parseFilesDroppedMarker(s.text)) {
-            droppedFromMarkers.add(contextPathKey(p));
-          }
-        }
-      }
-      if (droppedFromMarkers.size > 0) {
-        sessionFiles = sessionFiles.filter((f) => !droppedFromMarkers.has(contextPathKey(f.path)));
-      }
+      const loaded = mapLoadedMessages(ev.messages);
+      const sessionFiles = deriveSessionFiles(loaded);
       return {
         ...state,
         busy: false,
@@ -1286,9 +1302,10 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "compaction.started": {
       // Compaction card joins the assistant queue like a tool card — attached to
-      // the last assistant message (the running turn for auto folds; the previous
-      // turn for user-triggered /compact while idle). Creates a message if none
-      // exists yet.
+      // the LAST assistant message (the running turn for auto folds; the previous
+      // turn for user-triggered /compact while idle). Attaching to the first
+      // assistant message buries the card at the top of the transcript where
+      // nobody sees it. Creates a message if none exists yet.
       const seg: AssistantSegment = {
         kind: "compaction",
         id: ev.compactionId,
@@ -1297,16 +1314,28 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ...(ev.kind ? { compactionKind: ev.kind } : {}),
         ...(ev.aggressive ? { aggressive: true } : {}),
       };
-      let attached = false;
-      const messages = state.messages.map((m) => {
-        if (attached || m.kind !== "assistant") return m;
-        attached = true;
-        return { ...m, segments: [...m.segments, seg] };
-      });
-      if (!attached) {
-        messages.push({ kind: "assistant", turn: ev.turn, segments: [seg], pending: false });
+      let hostIdx = -1;
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        if (state.messages[i]?.kind === "assistant") {
+          hostIdx = i;
+          break;
+        }
       }
-      return { ...state, messages };
+      if (hostIdx >= 0) {
+        const messages = [...state.messages];
+        const host = messages[hostIdx];
+        if (host && host.kind === "assistant") {
+          messages[hostIdx] = { ...host, segments: [...host.segments, seg] };
+        }
+        return { ...state, messages };
+      }
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          { kind: "assistant", turn: ev.turn, segments: [seg], pending: false },
+        ],
+      };
     }
     case "compaction.finished": {
       const patch = (s: AssistantSegment): AssistantSegment => {
@@ -1333,6 +1362,20 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         messages: state.messages.map((m) =>
           m.kind === "assistant" ? { ...m, segments: m.segments.map(patch) } : m,
         ),
+      };
+    }
+    case "session.compacted": {
+      // The fold REPLACED the conversation (summary message + preserved tail).
+      // Apply the replacement so the chat reflects the compaction instead of
+      // keeping the stale pre-fold log forever: the summary message carries the
+      // fold marker, so it renders as an expandable compaction card with the
+      // recap, and the "Files in context" list is re-derived (marker drops
+      // included) so the panel count drops exactly like a session reload.
+      const loaded = mapLoadedMessages(ev.replacementMessages);
+      return {
+        ...state,
+        messages: loaded,
+        sessionFiles: deriveSessionFiles(loaded),
       };
     }
     case "$retry_result":

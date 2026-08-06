@@ -486,6 +486,48 @@ describe("Desktop App reducer — compaction card lifecycle", () => {
     });
   });
 
+  it("attaches the card to the LAST assistant message, not the first (#regression)", () => {
+    const state = {
+      ...initialState(),
+      messages: [
+        { kind: "user" as const, text: "q1", clientId: "1", turn: 1 },
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          segments: [{ kind: "text" as const, text: "first answer" }],
+          pending: false,
+        },
+        { kind: "user" as const, text: "q2", clientId: "2", turn: 2 },
+        {
+          kind: "assistant" as const,
+          turn: 2,
+          segments: [{ kind: "text" as const, text: "second answer" }],
+          pending: false,
+        },
+      ],
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "compaction.started",
+        id: 1,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 2,
+        compactionId: "compaction-last",
+        reason: "user",
+      },
+    });
+    // The card must land on the message the user is looking at (the newest
+    // assistant message) — attaching to the first assistant message buries it
+    // at the top of the transcript where the compaction is invisible.
+    const first = next.messages[1];
+    const last = next.messages[3];
+    expect(first?.kind === "assistant" && first.segments.length).toBe(1);
+    expect(
+      last?.kind === "assistant" && last.segments.at(-1),
+    ).toMatchObject({ kind: "compaction", id: "compaction-last", state: "running" });
+  });
+
   it("creates an assistant message when no assistant exists (idle /compact)", () => {
     const next = reduce(initialState(), {
       t: "incoming",
@@ -709,5 +751,95 @@ describe("Desktop App reducer — compaction file triage", () => {
     // The dropped paths would be re-derived from the surviving tool segment —
     // the marker keeps them out of the panel across reloads.
     expect(next.sessionFiles).toEqual([{ path: "src/keep.ts", status: "c" }]);
+  });
+
+  it("session.compacted swaps the chat to the post-fold conversation and re-derives files", () => {
+    const base = {
+      ...initialState(),
+      // Pre-fold UI state: old conversation plus a running compaction card —
+      // all of it must be replaced by the kernel's post-fold log.
+      messages: [
+        { kind: "user" as const, text: "q1", clientId: "1", turn: 1 },
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          segments: [
+            { kind: "text" as const, text: "answer" },
+            {
+              kind: "compaction" as const,
+              id: "c-1",
+              state: "done" as const,
+              reason: "auto-context-pressure" as const,
+              beforeMessages: 243,
+              afterMessages: 63,
+              summaryChars: 2912,
+              summary: "recap",
+            },
+          ],
+          pending: false,
+        },
+      ],
+      sessionFiles: [
+        { path: "src/keep.ts", status: "c" as const },
+        { path: "src/stale.ts", status: "c" as const },
+      ],
+    };
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "session.compacted",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        beforeMessages: 243,
+        afterMessages: 63,
+        reason: "auto-context-pressure",
+        // Wire shape matches $session_loaded.messages (server converts the
+        // kernel ChatMessage log via buildLoadedMessages before emitting).
+        replacementMessages: [
+          {
+            kind: "user",
+            text: "q1",
+          },
+          {
+            kind: "assistant",
+            turn: 1,
+            segments: [
+              {
+                kind: "text",
+                text: "[CONVERSATION HISTORY SUMMARY — earlier turns folded for context efficiency]\n\nrecap\n\n<files-dropped-from-context>\nsrc/stale.ts\n</files-dropped-from-context>",
+              },
+            ],
+            pending: false,
+          },
+          {
+            kind: "user",
+            text: "q2",
+          },
+          {
+            kind: "assistant",
+            turn: 2,
+            segments: [
+              { kind: "text", text: "kept tail answer" },
+              {
+                kind: "tool",
+                callId: "c1",
+                name: "read_file",
+                args: JSON.stringify({ path: "src/keep.ts" }),
+              },
+            ],
+            pending: false,
+          },
+        ],
+      },
+    });
+    // The stale pre-fold conversation is gone; the folded summary message
+    // (carrying the marker) renders as the compaction card in the thread.
+    expect(next.messages).toHaveLength(4);
+    const summary = next.messages[1];
+    expect(summary?.kind === "assistant" && summary.segments[0]?.kind).toBe("text");
+    // Files re-derived from the post-fold log, marker drops applied.
+    expect(next.sessionFiles).toEqual([{ path: "src/keep.ts", status: "c" }]);
+    expect(next.messages.at(-1)).toMatchObject({ kind: "assistant", turn: 2 });
   });
 });
