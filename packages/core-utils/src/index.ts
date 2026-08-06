@@ -14,7 +14,6 @@ export {
 } from "./tool-paths.js";
 export type { FilePathTool } from "./tool-paths.js";
 export { derivePrefix } from "./derive-prefix.js";
-export { tildeify } from "./tildeify.js";
 export { toolKindFor } from "./tool-kind.js";
 export type { AcpToolKind } from "./tool-kind.js";
 export type {
