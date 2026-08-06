@@ -10,7 +10,9 @@ import {
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
 import {
+  clipText,
   extractPathsFromArgs,
+  flattenText,
   isFilePathTool,
   parseFilesDroppedMarker,
 } from "@reasonix/core-utils";
@@ -51,23 +53,24 @@ import {
   readTabTheme,
   writeTabTheme,
 } from "./tab-theme";
-import type {
-  CheckpointVerdict,
-  ChoiceVerdict,
-  ConfirmationChoice,
-  ExternalSessionApp,
-  ExternalSessionSource,
-  IncomingEvent,
-  JobInfo,
-  McpSpecInfo,
-  MemoryDetail,
-  MemoryEntryInfo,
-  OutgoingCommand,
-  PlanStep,
-  PlanVerdict,
-  RevisionVerdict,
-  SettingsPatch,
-  SkillInfo,
+import {
+  type CheckpointVerdict,
+  type ChoiceVerdict,
+  type ConfirmationChoice,
+  type ExternalSessionApp,
+  type ExternalSessionSource,
+  type IncomingEvent,
+  type JobInfo,
+  type McpSpecInfo,
+  type MemoryDetail,
+  type MemoryEntryInfo,
+  type OutgoingCommand,
+  type PlanStep,
+  type PlanVerdict,
+  type RevisionVerdict,
+  rpcSend,
+  type SettingsPatch,
+  type SkillInfo,
 } from "./protocol";
 import { type QQDesktopSettingsState } from "./qq-settings";
 import { Composer, type SlashCmd } from "./ui/composer";
@@ -1565,10 +1568,7 @@ function TabRuntime({
 
   const sendRpc = useCallback(
     (cmd: OutgoingCommand) => {
-      const payload = { tabId, ...cmd };
-      invoke("rpc_send", { line: JSON.stringify(payload) }).catch((err) =>
-        console.error(`${cmd.cmd} failed`, err),
-      );
+      rpcSend({ tabId, ...cmd }).catch((err) => console.error(`${cmd.cmd} failed`, err));
     },
     [tabId],
   );
@@ -2262,8 +2262,8 @@ function TabRuntime({
     }
     const firstUser = state.messages.find((m) => m.kind === "user");
     if (firstUser && firstUser.kind === "user") {
-      const cleaned = firstUser.text.replace(/\s+/g, " ").trim();
-      if (cleaned) return cleaned.length > 60 ? `${cleaned.slice(0, 60)}…` : cleaned;
+      const cleaned = flattenText(firstUser.text);
+      if (cleaned) return clipText(cleaned, 60, "…");
     }
     if (state.currentSession) {
       const m = state.currentSession.match(/^desktop-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
@@ -2352,9 +2352,9 @@ function TabRuntime({
           setActive={setActiveTabId}
           onClose={(id) => {
             if (tabsList.length <= 1) return;
-            invoke("rpc_send", {
-              line: JSON.stringify({ cmd: "tab_close", tabId: id }),
-            }).catch((err) => console.error("tab_close failed", err));
+            rpcSend({ cmd: "tab_close", tabId: id }).catch((err) =>
+              console.error("tab_close failed", err),
+            );
           }}
           onNew={onNewTab}
           singleTab={tabsList.length <= 1}
@@ -3864,9 +3864,7 @@ export function App() {
         // alive but loses every $tab_opened / $settings / $needs_setup that
         // already fired. Ask the desktop server to re-emit them.
         if (!cancelled) {
-          await invoke("rpc_send", {
-            line: JSON.stringify({ cmd: "desktop_resync" }),
-          });
+          await rpcSend({ cmd: "desktop_resync" });
         }
       } catch (err) {
         if (!cancelled) {
@@ -3885,21 +3883,17 @@ export function App() {
   // Tell the backend which tab is focused so a restart can reopen on it (#1244).
   useEffect(() => {
     if (!activeTabId) return;
-    invoke("rpc_send", {
-      line: JSON.stringify({ cmd: "tab_activate", tabId: activeTabId }),
-    }).catch(() => {});
+    rpcSend({ cmd: "tab_activate", tabId: activeTabId }).catch(() => {});
   }, [activeTabId]);
 
   const openTab = useCallback(() => {
-    invoke("rpc_send", { line: JSON.stringify({ cmd: "tab_open" }) }).catch((err) =>
-      console.error("tab_open failed", err),
-    );
+    rpcSend({ cmd: "tab_open" }).catch((err) => console.error("tab_open failed", err));
   }, []);
 
   const closeTab = useCallback(
     (id: string) => {
       if (tabs.length <= 1) return;
-      invoke("rpc_send", { line: JSON.stringify({ cmd: "tab_close", tabId: id }) }).catch((err) =>
+      rpcSend({ cmd: "tab_close", tabId: id }).catch((err) =>
         console.error("tab_close failed", err),
       );
     },

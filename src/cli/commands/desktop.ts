@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { stdin } from "node:process";
 import { createInterface } from "node:readline";
-import { toApprovalPrompt } from "@reasonix/core-utils";
+import { flattenText, toApprovalPrompt } from "@reasonix/core-utils";
 import {
   type FileWithStats,
   listDirectory,
@@ -637,7 +637,7 @@ const SESSION_TITLE_MAX_CHARS = 200;
 
 /** Trim + cap a user-provided session title; empty string means "clear summary". Exported for tests. */
 export function normalizeSessionTitle(raw: string): string {
-  return raw.replace(/\s+/g, " ").trim().slice(0, SESSION_TITLE_MAX_CHARS);
+  return flattenText(raw).slice(0, SESSION_TITLE_MAX_CHARS);
 }
 
 /** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
@@ -1753,7 +1753,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (tab.currentSession) {
       const existing = loadSessionMeta(tab.currentSession).summary;
       if (!existing || !existing.trim()) {
-        const summary = text.replace(/\s+/g, " ").trim().slice(0, 60);
+        const summary = flattenText(text).slice(0, 60);
         if (summary) {
           try {
             patchSessionMeta(tab.currentSession, { summary });

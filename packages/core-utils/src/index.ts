@@ -30,6 +30,7 @@ export {
   toApprovalPrompt,
   resolveApprovalPrompt,
 } from "./approval-prompt.js";
+export { clipText, flattenText } from "./text.js";
 export type {
   ApprovalPrompt,
   ApprovalAction,

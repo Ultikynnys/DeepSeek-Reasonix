@@ -125,7 +125,7 @@ export function Sidebar({
       <div className="side-head">
         <button type="button" className="new-btn" onClick={onNewChat}>
           <I.plus size={14} />
-          <span>{t("sidebarPanel.newChat")}</span>
+          <span className="label">{t("sidebarPanel.newChat")}</span>
           <Shortcut keys={["mod", "N"]} />
         </button>
         <button
@@ -390,6 +390,28 @@ export function Sidebar({
   );
 }
 
+/** Clamp a popover anchored at (x, y) inside the viewport, keeping an 8px margin; re-runs whenever the anchor or its position moves. */
+function useClampedPopupPosition(
+  ref: { current: HTMLDivElement | null },
+  anchor: { x: number; y: number },
+  pos: { left: number; top: number },
+  setPos: (next: { left: number; top: number }) => void,
+): void {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const pad = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = anchor.x;
+    let top = anchor.y;
+    if (left + rect.width + pad > vw) left = Math.max(pad, vw - rect.width - pad);
+    if (top + rect.height + pad > vh) top = Math.max(pad, vh - rect.height - pad);
+    if (left !== pos.left || top !== pos.top) setPos({ left, top });
+  }, [ref.current, anchor.x, anchor.y, pos.left, pos.top, setPos]);
+}
+
 function SessionDeletePopover({
   target,
   onCancel,
@@ -406,20 +428,10 @@ function SessionDeletePopover({
     top: target.y,
   });
 
+  useClampedPopupPosition(ref, target, pos, setPos);
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const pad = 8;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = target.x;
-    let top = target.y;
-    if (left + rect.width + pad > vw) left = Math.max(pad, vw - rect.width - pad);
-    if (top + rect.height + pad > vh) top = Math.max(pad, vh - rect.height - pad);
-    if (left !== pos.left || top !== pos.top) setPos({ left, top });
     cancelRef.current?.focus();
-  }, [target.x, target.y, pos.left, pos.top]);
+  }, []);
 
   return (
     <div
@@ -481,20 +493,10 @@ function SessionImportPopover({
     });
   }, [importSources]);
 
+  useClampedPopupPosition(ref, target, pos, setPos);
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const pad = 8;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = target.x;
-    let top = target.y;
-    if (left + rect.width + pad > vw) left = Math.max(pad, vw - rect.width - pad);
-    if (top + rect.height + pad > vh) top = Math.max(pad, vh - rect.height - pad);
-    if (left !== pos.left || top !== pos.top) setPos({ left, top });
     if (mode === "custom") firstInputRef.current?.focus();
-  }, [target.x, target.y, pos.left, pos.top, mode]);
+  }, [mode]);
 
   const browse = async () => {
     try {

@@ -33,3 +33,25 @@ export function readCappedTextFile(path: string, maxChars: number): CappedText |
   if (!trimmed) return null;
   return truncateWithMarker(trimmed, maxChars);
 }
+
+/** Capped read that keeps the file path alongside the content. */
+export interface CappedPath extends CappedText {
+  path: string;
+}
+
+/** Read a capped file, carrying its path; null when missing, unreadable, or blank. */
+export function readCappedFile(path: string, maxChars: number): CappedPath | null {
+  const capped = readCappedTextFile(path, maxChars);
+  if (!capped) return null;
+  return { path, ...capped };
+}
+
+/** Assemble a memory block (heading + intro + code fence) into the prompt prefix. */
+export function applyMemoryBlock(
+  basePrompt: string,
+  heading: string,
+  intro: string,
+  content: string,
+): string {
+  return [basePrompt, "", heading, "", intro, "", "```", content, "```"].join("\n");
+}

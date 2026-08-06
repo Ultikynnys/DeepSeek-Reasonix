@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
+import { clipText, flattenText } from "@reasonix/core-utils";
 import { readJsonlLines } from "./core/jsonl.js";
 import {
   SESSION_EVENTS_SUFFIX,
@@ -523,6 +524,5 @@ function summarize(text: string | undefined): string | undefined {
 }
 
 function oneLine(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max)}...` : flat;
+  return clipText(flattenText(text), max, "...");
 }

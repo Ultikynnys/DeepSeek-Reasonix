@@ -21,7 +21,12 @@ import { parseFrontmatter } from "../frontmatter.js";
 import { reasonixHome } from "../reasonix-home.js";
 import { applySkillsIndex } from "../skills.js";
 import { PROJECT_MEMORY_MAX_CHARS, applyProjectMemory, memoryEnabled } from "./project.js";
-import { readCappedTextFile } from "./read-capped.js";
+import {
+  type CappedPath,
+  applyMemoryBlock,
+  readCappedFile,
+  readCappedTextFile,
+} from "./read-capped.js";
 
 export const USER_MEMORY_DIR = "memory";
 export const MEMORY_INDEX_FILE = "MEMORY.md";
@@ -294,34 +299,9 @@ export class MemoryStore {
   }
 }
 
-/** Read a capped text file for global-memory ingestion.  Returns null when
- *  the file is missing, empty, or whitespace-only. */
-function readMemoryFile(filePath: string): {
-  path: string;
-  content: string;
-  originalChars: number;
-  truncated: boolean;
-} | null {
-  const capped = readCappedTextFile(filePath, PROJECT_MEMORY_MAX_CHARS);
-  if (!capped) return null;
-  return { path: filePath, ...capped };
-}
-
-/** Assemble a memory block into the prompt prefix. */
-function applyMemoryBlock(
-  basePrompt: string,
-  heading: string,
-  intro: string,
-  content: string,
-): string {
-  return [basePrompt, "", heading, "", intro, "", "```", content, "```"].join("\n");
-}
-
 /** Freeform `#g` destination, distinct from MEMORY.md's curated index of named files. */
-export function readGlobalReasonixMemory(
-  homeDir: string = reasonixHome(),
-): ReturnType<typeof readMemoryFile> {
-  return readMemoryFile(join(homeDir, "REASONIX.md"));
+export function readGlobalReasonixMemory(homeDir: string = reasonixHome()): CappedPath | null {
+  return readCappedFile(join(homeDir, "REASONIX.md"), PROJECT_MEMORY_MAX_CHARS);
 }
 
 export function applyGlobalReasonixMemory(basePrompt: string, homeDir?: string): string {
@@ -339,10 +319,8 @@ export function applyGlobalReasonixMemory(basePrompt: string, homeDir?: string):
 
 /** Read ~/.claude/CLAUDE.md — cross-project notes from Claude Code migration.
  *  Same cap as global Reasonix memory (PROJECT_MEMORY_MAX_CHARS). */
-export function readGlobalClaudeMemory(
-  homeDir: string = homedir(),
-): ReturnType<typeof readMemoryFile> {
-  return readMemoryFile(join(homeDir, ".claude", "CLAUDE.md"));
+export function readGlobalClaudeMemory(homeDir: string = homedir()): CappedPath | null {
+  return readCappedFile(join(homeDir, ".claude", "CLAUDE.md"), PROJECT_MEMORY_MAX_CHARS);
 }
 
 export function applyGlobalClaudeMemory(basePrompt: string): string {

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { clipText, flattenText } from "@reasonix/core-utils";
 import { type SessionMeta, sanitizeName, sessionPath, timestampSuffix } from "./memory/session.js";
 import type { ChatMessage, ChatRequestOptions } from "./types.js";
 
@@ -99,6 +100,5 @@ export function shouldAutoNameSession(
 }
 
 function truncateForPrompt(text: string, max: number): string {
-  const trimmed = text.replace(/\s+/g, " ").trim();
-  return trimmed.length > max ? `${trimmed.slice(0, max)}...` : trimmed;
+  return clipText(flattenText(text), max, "...");
 }

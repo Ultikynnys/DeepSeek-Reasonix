@@ -38,3 +38,12 @@ export function readJsonlLines<T = unknown>(
   }
   return parseJsonl(raw, validate);
 }
+
+/** Count non-blank lines without parsing — cheap no-op-rewrite check for log compactors. */
+export function countJsonlLines(raw: string): number {
+  let count = 0;
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.trim()) count++;
+  }
+  return count;
+}

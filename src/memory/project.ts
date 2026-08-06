@@ -2,7 +2,7 @@
 
 import { existsSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { readCappedTextFile } from "./read-capped.js";
+import { applyMemoryBlock, readCappedFile } from "./read-capped.js";
 
 /** Default WRITE target — created when no candidate exists yet. */
 export const PROJECT_MEMORY_FILE = "REASONIX.md";
@@ -70,9 +70,7 @@ export interface ProjectMemory {
 export function readProjectMemory(rootDir: string): ProjectMemory | null {
   const path = findProjectMemoryPath(rootDir);
   if (!path) return null;
-  const capped = readCappedTextFile(path, PROJECT_MEMORY_MAX_CHARS);
-  if (!capped) return null;
-  return { path, ...capped };
+  return readCappedFile(path, PROJECT_MEMORY_MAX_CHARS);
 }
 
 export function memoryEnabled(): boolean {
@@ -87,14 +85,11 @@ export function applyProjectMemory(basePrompt: string, rootDir: string): string 
   const mem = readProjectMemory(rootDir);
   if (!mem) return basePrompt;
   const filename = basename(mem.path);
-  return `${basePrompt}
-
-# Project memory (${filename})
-
-The user pinned these notes about this project — treat them as authoritative context for every turn:
-
-\`\`\`
-${mem.content}
-\`\`\`
-`;
+  // Trailing newline preserved so the prefix output stays byte-identical.
+  return `${applyMemoryBlock(
+    basePrompt,
+    `# Project memory (${filename})`,
+    "The user pinned these notes about this project — treat them as authoritative context for every turn:",
+    mem.content,
+  )}\n`;
 }

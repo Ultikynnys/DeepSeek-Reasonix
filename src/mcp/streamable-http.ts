@@ -1,7 +1,6 @@
 /** MCP Streamable HTTP transport (2025-03-26) — POST-only; no long-lived GET stream, no Last-Event-ID resume. */
 
-import { createParser } from "eventsource-parser";
-import { MessageQueue, parseSseMessageEvent } from "./message-queue.js";
+import { MessageQueue, consumeSseStream, parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
 import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
@@ -145,22 +144,19 @@ export class StreamableHttpTransport implements McpTransport {
   }
 
   private async consumeStream(body: AsyncIterable<Uint8Array>): Promise<void> {
-    const parser = createParser({
-      onEvent: (ev) => {
-        // Per spec, server-side events use the `message` event type
-        // (default if `event:` line is missing). Other event types
-        // (server pings, custom extensions) we silently ignore;
-        // malformed JSON is dropped, mirroring the SSE transport.
-        const msg = parseSseMessageEvent(ev.event ?? "message", ev.data);
-        if (msg) this.incoming.push(msg);
-      },
-    });
-    const decoder = new TextDecoder();
     try {
-      for await (const chunk of body) {
-        if (this.closed) break;
-        parser.feed(decoder.decode(chunk, { stream: true }));
-      }
+      await consumeSseStream(
+        body,
+        (ev) => {
+          // Per spec, server-side events use the `message` event type
+          // (default if `event:` line is missing). Other event types
+          // (server pings, custom extensions) we silently ignore;
+          // malformed JSON is dropped, mirroring the SSE transport.
+          const msg = parseSseMessageEvent(ev.event ?? "message", ev.data);
+          if (msg) this.incoming.push(msg);
+        },
+        { shouldStop: () => this.closed },
+      );
     } catch (err) {
       if (!this.closed) {
         this.incoming.push(

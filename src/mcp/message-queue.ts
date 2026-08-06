@@ -1,5 +1,6 @@
 /** Incoming-message queue shared by all MCP transports: `push` produces, `messages()` consumes (blocking on waiters), `close()` wakes them with null. Buffered messages still drain after close — transports often close right after the server answered. */
 
+import { createParser } from "eventsource-parser";
 import type { JsonRpcMessage } from "./types.js";
 
 export class MessageQueue {
@@ -41,5 +42,21 @@ export function parseSseMessageEvent(type: string, data: string): JsonRpcMessage
     return JSON.parse(data) as JsonRpcMessage;
   } catch {
     return null;
+  }
+}
+
+/** Feed an SSE response body through an event-source parser, decoding UTF-8 incrementally. */
+export async function consumeSseStream(
+  body: AsyncIterable<Uint8Array>,
+  onEvent: (ev: { event?: string; data: string }) => void,
+  opts: { shouldStop?: () => boolean } = {},
+): Promise<void> {
+  const parser = createParser({
+    onEvent: (ev) => onEvent({ event: ev.event, data: ev.data }),
+  });
+  const decoder = new TextDecoder();
+  for await (const chunk of body) {
+    if (opts.shouldStop?.()) break;
+    parser.feed(decoder.decode(chunk, { stream: true }));
   }
 }

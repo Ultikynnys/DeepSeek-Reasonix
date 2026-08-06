@@ -1,7 +1,6 @@
 /** MCP HTTP+SSE transport (spec 2024-11-05) — POST endpoint URL arrives as the first `event: endpoint` SSE frame. */
 
-import { createParser } from "eventsource-parser";
-import { MessageQueue, parseSseMessageEvent } from "./message-queue.js";
+import { MessageQueue, consumeSseStream, parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
 import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
@@ -90,17 +89,13 @@ export class SseTransport implements McpTransport {
       return;
     }
 
-    const parser = createParser({
-      onEvent: (ev) => this.handleEvent(ev.event ?? "message", ev.data),
-    });
-    const decoder = new TextDecoder();
     try {
-      for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
-        parser.feed(decoder.decode(chunk, { stream: true }));
-      }
+      await consumeSseStream(res.body as AsyncIterable<Uint8Array>, (ev) =>
+        this.handleEvent(ev.event ?? "message", ev.data),
+      );
     } catch (err) {
       if (!this.closed) {
-        this.pushError(`SSE stream error: ${(err as Error).message}`);
+        this.incoming.push(syntheticRpcError(`SSE stream error: ${(err as Error).message}`));
       }
     } finally {
       this.markClosed();
@@ -126,16 +121,8 @@ export class SseTransport implements McpTransport {
 
   private failHandshake(reason: string): void {
     this.rejectEndpoint(new Error(reason));
-    this.pushError(reason);
+    this.incoming.push(syntheticRpcError(reason));
     this.markClosed();
-  }
-
-  private pushError(message: string): void {
-    this.incoming.push({
-      jsonrpc: "2.0",
-      id: null,
-      error: { code: -32000, message },
-    });
   }
 
   private markClosed(): void {

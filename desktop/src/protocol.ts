@@ -8,6 +8,7 @@ import type {
   PlanStep,
   ReasoningEffort,
 } from "@reasonix/core-utils";
+import { invoke } from "@tauri-apps/api/core";
 export type {
   ConfirmationChoice,
   ChoiceVerdict,
@@ -582,6 +583,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "checkpoint_response"; id: number; response: CheckpointVerdict }
   | { cmd: "revision_response"; id: number; response: RevisionVerdict }
   | { cmd: "session_list" }
+  | { cmd: "desktop_resync" }
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_load"; name: string }
   | { cmd: "session_rename"; name: string; title: string }
@@ -620,3 +622,8 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "rewind"; userTurn: number }
   | { cmd: "btw"; text: string }
 );
+
+/** Send one command to the desktop backend over the Tauri JSON-RPC bridge. */
+export function rpcSend(cmd: OutgoingCommand): Promise<void> {
+  return invoke("rpc_send", { line: JSON.stringify(cmd) });
+}

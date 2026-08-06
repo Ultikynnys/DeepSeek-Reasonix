@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Usage } from "../client.js";
-import { parseJsonl, readJsonlLines } from "../core/jsonl.js";
+import { countJsonlLines, parseJsonl, readJsonlLines } from "../core/jsonl.js";
 import { reasonixHome } from "../reasonix-home.js";
 import {
   CLAUDE_SONNET_PRICING,
@@ -109,7 +109,7 @@ function compactUsageLogIfLarge(path: string, now: number): void {
     if (rec.ts >= cutoff) kept.push(JSON.stringify(rec));
   }
   // No-op when nothing aged out — avoids rewrite storms on fresh logs.
-  if (kept.length === raw.split(/\r?\n/).filter((l) => l.trim()).length) return;
+  if (kept.length === countJsonlLines(raw)) return;
   // Write to a sibling tmp path then rename — atomic from a reader's
   // POV and severs CodeQL's stat→write taint chain. Concurrent
   // appenders during the compaction window lose their entries; we

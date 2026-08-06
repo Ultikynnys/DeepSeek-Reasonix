@@ -100,16 +100,15 @@ export function sanitizeName(name: string): string {
   return cleaned || "default";
 }
 
-/** Sortable timestamp `YYYYMMDDHHmm` — used as a session-name suffix. */
-export function timestampSuffix(): string {
-  return new Date().toISOString().replace(/[^\d]/g, "").slice(0, 12);
+/** Sortable timestamp `YYYYMMDDHHmm` (12 digits; 14 = seconds precision) — used as a session-name suffix. */
+export function timestampSuffix(length = 12): string {
+  return new Date().toISOString().replace(/[^\d]/g, "").slice(0, length);
 }
 
 /** Unique name for an in-app "new session" — strips a trailing 12/14-digit timestamp from the current name and re-stamps with seconds precision so back-to-back clicks don't collide. */
 export function freshSessionName(currentName: string | undefined): string {
   const base = currentName ? currentName.replace(/-\d{12,14}$/, "") : "default";
-  const stamp = new Date().toISOString().replace(/[^\d]/g, "").slice(0, 14);
-  return `${base || "default"}-${stamp}`;
+  return `${base || "default"}-${timestampSuffix(14)}`;
 }
 
 /** Names of `.jsonl` sessions starting with `prefix`, newest-first by filename. */
