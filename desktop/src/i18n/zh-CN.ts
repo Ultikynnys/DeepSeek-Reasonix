@@ -204,7 +204,7 @@ export const zhCN: typeof en = {
     editorCustom: "自定义",
     editorPlaceholder: '例如 "code"、"subl" 或可执行文件全路径',
     editorDefault: "(默认)",
-    apiKey: "API key",
+    apiKey: "DeepSeek API 密钥",
     apiKeyHint: "DeepSeek key — 保存到 ~/.reasonix/config.json (0600)。",
     apiKeyNotSet: "(未设置)",
     apiKeyCancel: "取消",

@@ -212,6 +212,9 @@ export function SettingsModal({
               <PageModels
                 settings={settings}
                 onSave={onSave}
+                baseUrl={settings.baseUrl}
+                apiKeyPrefix={settings.apiKeyPrefix}
+                onSaveApiKey={onSaveApiKey}
                 oauthSignedIn={settings.openaiOAuth?.signedIn ?? false}
                 oauthAccount={settings.openaiOAuth?.account}
                 oauthFlowError={settings.openaiOAuth?.flowError}
@@ -257,22 +260,6 @@ export function SettingsModal({
             {page === "shortcuts" && <PageShortcuts />}
             {page === "general" ? (
               <>
-                <ApiKeySection
-                  baseUrl={settings.baseUrl}
-                  apiKeyPrefix={settings.apiKeyPrefix}
-                  onSave={onSave}
-                  onSaveApiKey={onSaveApiKey}
-                />
-                <OpenAISection
-                  signedIn={settings.openaiOAuth?.signedIn ?? false}
-                  account={settings.openaiOAuth?.account}
-                  flowError={settings.openaiOAuth?.flowError}
-                  waiting={oauthWaiting}
-                  onBegin={onOAuthBegin}
-                  onCancel={onOAuthCancel}
-                  onSignOut={onOAuthSignOut}
-                  onSaveApiKey={onSaveOpenAIApiKey}
-                />
                 <QQChannelSection
                   qq={qq}
                   configureOpen={qqConfigureOpen}
@@ -700,42 +687,6 @@ function PageGeneral({
         <div className="stitle">{t("settings.behaviorSection")}</div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">{t("settings.reasoningEffort")}</div>
-            <div className="h">{t("settings.reasoningEffortHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            {(["low", "medium", "high", "max"] as const).map((e) => (
-              <button
-                type="button"
-                key={e}
-                data-on={settings.reasoningEffort === e}
-                onClick={() => onSave({ reasoningEffort: e })}
-              >
-                {e}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.editMode")}</div>
-            <div className="h">{t("settings.editModeHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            {(["plan", "review", "auto", "yolo"] as const).map((m) => (
-              <button
-                type="button"
-                key={m}
-                data-on={settings.editMode === m}
-                onClick={() => onSave({ editMode: m })}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="setting-row">
-          <div className="l">
             <div className="n">{t("settings.showSystemEvents")}</div>
             <div className="h">{t("settings.showSystemEventsHint")}</div>
           </div>
@@ -1135,6 +1086,9 @@ type EffortValue = (typeof EFFORT_VALUES)[number];
 function PageModels({
   settings,
   onSave,
+  baseUrl,
+  apiKeyPrefix,
+  onSaveApiKey,
   oauthSignedIn,
   oauthAccount,
   oauthFlowError,
@@ -1146,6 +1100,9 @@ function PageModels({
 }: {
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
+  baseUrl?: string;
+  apiKeyPrefix?: string;
+  onSaveApiKey: (key: string) => void;
   oauthSignedIn: boolean;
   oauthAccount?: string;
   oauthFlowError?: string;
@@ -1223,6 +1180,12 @@ function PageModels({
           </div>
         </div>
       </section>
+      <ApiKeySection
+        baseUrl={baseUrl}
+        apiKeyPrefix={apiKeyPrefix}
+        onSave={onSave}
+        onSaveApiKey={onSaveApiKey}
+      />
       <OpenAISection
         signedIn={oauthSignedIn}
         account={oauthAccount}

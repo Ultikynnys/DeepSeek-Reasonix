@@ -219,7 +219,7 @@ export const de: typeof en = {
     editorCustom: "benutzerdefiniert",
     editorPlaceholder: 'z.B. "code", "subl" oder vollständiger Pfad zur ausführbaren Datei',
     editorDefault: "(Standard)",
-    apiKey: "API-Schlüssel",
+    apiKey: "DeepSeek-API-Schlüssel",
     apiKeyHint: "DeepSeek-Schlüssel — gespeichert in ~/.reasonix/config.json (0600).",
     apiKeyNotSet: "(nicht gesetzt)",
     apiKeyCancel: "Abbrechen",

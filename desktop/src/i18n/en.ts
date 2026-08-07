@@ -205,7 +205,7 @@ export const en = {
     editorCustom: "custom",
     editorPlaceholder: 'e.g. "code", "subl", or full path to executable',
     editorDefault: "(default)",
-    apiKey: "API key",
+    apiKey: "DeepSeek API key",
     apiKeyHint: "DeepSeek key — saved to ~/.reasonix/config.json (0600).",
     apiKeyNotSet: "(not set)",
     apiKeyCancel: "Cancel",
