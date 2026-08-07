@@ -16,7 +16,7 @@ import {
   isFilePathTool,
   parseFilesDroppedMarker,
 } from "@reasonix/core-utils";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
 import { WorkspaceProvider } from "./Markdown";
 import {
@@ -441,18 +441,6 @@ function nextMessageTurn(messages: ChatMessage[]): number {
   return lastTurn + 1;
 }
 
-/** 0-based position of the message at `index` among the user messages — the
- *  index the backend expects for rewind (it counts user entries in the log).
- *  Counted from the list, not derived from turn numbers: after a /compact
- *  swap, assistant turns are dense counts that can drift from user turns. */
-function userMessageIndex(messages: ChatMessage[], index: number): number {
-  let n = 0;
-  for (let i = 0; i < index; i++) {
-    if (messages[i]?.kind === "user") n += 1;
-  }
-  return n;
-}
-
 let _errSeq = 0;
 function nextErrorId(): string {
   _errSeq += 1;
@@ -521,12 +509,22 @@ export function reduce(state: State, action: Action): State {
           collapsed.push({ ...item });
         }
       }
+      if (collapsed.length === 0) return state;
+      // Group by turn once — the per-message filter below was O(n·k) per
+      // frame and ran for every message (even non-assistant) at transcript
+      // scale; a turn-keyed lookup is O(1) per message.
+      const byTurn = new Map<number, DeltaBatchItem[]>();
+      for (const it of collapsed) {
+        const bucket = byTurn.get(it.turn);
+        if (bucket) bucket.push(it);
+        else byTurn.set(it.turn, [it]);
+      }
       return {
         ...state,
         messages: state.messages.map((m) => {
           if (m.kind !== "assistant") return m;
-          const relevant = collapsed.filter((it) => it.turn === m.turn);
-          if (relevant.length === 0) return m;
+          const relevant = byTurn.get(m.turn);
+          if (!relevant || relevant.length === 0) return m;
           let segments = m.segments;
           for (const it of relevant) {
             segments = appendTextSegment(
@@ -721,6 +719,44 @@ function DiffStats({ stats }: { stats: FileStats }) {
     </div>
   );
 }
+
+/** Memoized assistant row — props are stable for unchanged messages, so a
+ *  streaming frame re-renders only the changed row; countFileStats runs for
+ *  that row alone, not the whole transcript. */
+const AssistantRow = memo(function AssistantRow({
+  m,
+  model,
+  pendingConfirms,
+  onApproveConfirm,
+  onRejectConfirm,
+  onAlwaysAllowConfirm,
+  onStopTool,
+}: {
+  m: Extract<ChatMessage, { kind: "assistant" }>;
+  model?: string;
+  pendingConfirms: PendingConfirm[];
+  onApproveConfirm: (id: number) => void;
+  onRejectConfirm: (id: number) => void;
+  onAlwaysAllowConfirm: (id: number, prefix: string) => void;
+  onStopTool: () => void;
+}) {
+  const stats = !m.pending ? countFileStats(m.segments) : null;
+  return (
+    <>
+      <AssistantMsg
+        segments={m.segments}
+        pending={m.pending}
+        model={model}
+        onApproveConfirm={onApproveConfirm}
+        onRejectConfirm={onRejectConfirm}
+        onAlwaysAllowConfirm={onAlwaysAllowConfirm}
+        onStopTool={onStopTool}
+        pendingConfirms={pendingConfirms}
+      />
+      {stats ? <DiffStats stats={stats} /> : null}
+    </>
+  );
+});
 
 function extractToolFiles(name: string, args: string): SessionFile[] {
   if (!isFilePathTool(name)) return [];
@@ -2043,6 +2079,9 @@ function TabRuntime({
     (id: number, prefix: string) => resolveConfirm(id, { type: "always_allow", prefix }),
     [resolveConfirm],
   );
+  /** Stable identity — passed to memoized AssistantMsg; an inline arrow would
+   *  defeat the memo and re-render the whole transcript on every frame. */
+  const onStopTool = useCallback(() => sendRpc({ cmd: "cancel_tool" }), [sendRpc]);
   const resolvePathAccess = useCallback(
     (id: number, response: ConfirmationChoice) => {
       sendRpc({ cmd: "confirm_response", id, response });
@@ -2346,6 +2385,20 @@ function TabRuntime({
   ];
 
   const elapsed = useElapsed(state.busy);
+  // userIndexAt[i] = number of user messages before index i (the rewind index
+  // the backend expects). Built once per messages change in O(n) instead of
+  // the O(n) scan per user message the old helper paid — O(n²) per render at
+  // transcript scale, which is exactly what made long conversations janky.
+  const userIndexAt = useMemo(() => {
+    const msgs = state.messages;
+    const arr = new Uint32Array(msgs.length);
+    let n = 0;
+    for (let i = 0; i < msgs.length; i++) {
+      arr[i] = n;
+      if (msgs[i]?.kind === "user") n++;
+    }
+    return arr;
+  }, [state.messages]);
   const workspaceLabel = state.settings?.workspaceDir
     ? state.settings.workspaceDir.split(/[\\/]/).pop() || "workspace"
     : "Reasonix";
@@ -2552,7 +2605,7 @@ function TabRuntime({
                       const dividerLabel = `turn ${m.turn}`;
                       const prev = state.messages[i - 1];
                       const needsDivider = !prev || prev.kind === "user";
-                      const userIndex = userMessageIndex(state.messages, i);
+                      const userIndex = userIndexAt[i] ?? 0;
                       // Snapshot retention: only the last 2 user turns keep
                       // their snapshots; older messages gray out (rewind off).
                       const rewindable =
@@ -2574,20 +2627,17 @@ function TabRuntime({
                       );
                     }
                     if (m.kind === "assistant") {
-                      const stats = !m.pending ? countFileStats(m.segments) : null;
                       return (
                         <div key={`a-${m.turn}`}>
-                          <AssistantMsg
-                            segments={m.segments}
-                            pending={m.pending}
+                          <AssistantRow
+                            m={m}
                             model={state.model}
+                            pendingConfirms={state.pendingConfirms}
                             onApproveConfirm={onApproveConfirm}
                             onRejectConfirm={onRejectConfirm}
                             onAlwaysAllowConfirm={onAlwaysAllowConfirm}
-                            onStopTool={() => sendRpc({ cmd: "cancel_tool" })}
-                            pendingConfirms={state.pendingConfirms}
+                            onStopTool={onStopTool}
                           />
-                          {stats ? <DiffStats stats={stats} /> : null}
                         </div>
                       );
                     }

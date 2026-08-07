@@ -90,12 +90,25 @@ export class ImmutablePrefix {
 
 export class AppendOnlyLog {
   private _entries: ChatMessage[] = [];
+  private appendListeners: Array<(msg: ChatMessage) => void> = [];
+  private replaceListeners: Array<() => void> = [];
+
+  /** Observe appends (append/extend) — lets ContextManager keep an incremental token total. */
+  onAppend(listener: (msg: ChatMessage) => void): void {
+    this.appendListeners.push(listener);
+  }
+
+  /** Observe full-array replacement (compactInPlace) — cached totals must be invalidated. */
+  onReplace(listener: () => void): void {
+    this.replaceListeners.push(listener);
+  }
 
   append(message: ChatMessage): void {
     if (!message || typeof message !== "object" || !("role" in message)) {
       throw new Error(`invalid log entry: ${JSON.stringify(message)}`);
     }
     this._entries.push(message);
+    for (const l of this.appendListeners) l(message);
   }
 
   extend(messages: ChatMessage[]): void {
@@ -105,6 +118,7 @@ export class AppendOnlyLog {
   /** The one append-only-breaking path — reserved for `/compact` + recovery. Use `append()` otherwise. */
   compactInPlace(replacement: ChatMessage[]): void {
     this._entries = [...replacement];
+    for (const l of this.replaceListeners) l();
   }
 
   get entries(): readonly ChatMessage[] {

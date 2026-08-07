@@ -17,9 +17,12 @@ export function useElapsed(active: boolean, startAt?: number): number {
       return;
     }
     start.current = startAt ?? performance.now();
+    // 250ms, not 80ms: the tick re-renders the whole TabRuntime tree, and
+    // while busy that happened 12.5×/s. 4Hz is still smooth for a tenths
+    // display and cuts the per-turn render load ~3×.
     const id = setInterval(() => {
       if (start.current !== null) setMs(performance.now() - start.current);
-    }, 80);
+    }, 250);
     return () => clearInterval(id);
   }, [active, startAt]);
   return ms;

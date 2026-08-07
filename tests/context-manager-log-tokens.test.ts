@@ -90,4 +90,19 @@ describe("ContextManager.getLogTokens", () => {
     const after = mgr.getLogTokens();
     expect(after).toBeLessThan(before);
   });
+
+  it("reflects appends made after the first read", () => {
+    const log = new AppendOnlyLog();
+    const mgr = makeManager(log);
+    log.append({ role: "user", content: "question one" });
+    log.append({ role: "assistant", content: "answer one" });
+    const before = mgr.getLogTokens();
+    expect(before).toBeGreaterThan(0);
+
+    // Appends after the first read must land in the running total (the
+    // desktop calls getLogTokens after every tool event, between appends).
+    log.append({ role: "user", content: "question two" });
+    log.append({ role: "assistant", content: "answer two" });
+    expect(mgr.getLogTokens()).toBeGreaterThan(before);
+  });
 });

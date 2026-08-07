@@ -193,17 +193,41 @@ function foldRetryDelay(ms: number): Promise<void> {
 }
 
 export class ContextManager {
-  constructor(private deps: ContextManagerDeps) {}
+  /** Running token total — null until first computed. Appends increment it;
+   *  compactInPlace invalidates it (lazy recompute) — without this, Desktop's
+   *  per-tool-event getLogTokens re-tokenized the whole log on every call. */
+  private logTokenTotal: number | null = null;
+  /** Per-message counts — messages are immutable once appended, so counts
+   *  survive recomputes after compaction for kept messages. */
+  private logTokenCache = new WeakMap<ChatMessage, number>();
 
-  /** Real-time token count of the current log — used by Desktop to refresh the
-   *  context meter after /compact when no API usage event is available. */
+  constructor(private deps: ContextManagerDeps) {
+    deps.log.onAppend((msg) => {
+      if (this.logTokenTotal !== null) this.logTokenTotal += this.countMessageTokensCached(msg);
+    });
+    deps.log.onReplace(() => {
+      this.logTokenTotal = null;
+    });
+  }
+
+  /** Real-time token count of the current log — Desktop's context meter.
+   *  O(1) steady-state: appends increment a running total, compaction
+   *  invalidates it and the next call recomputes lazily. */
   getLogTokens(): number {
-    const entries = this.deps.log.toMessages();
-    let total = 0;
-    for (const e of entries) {
-      total += countMessageTokens(e);
+    if (this.logTokenTotal === null) {
+      let total = 0;
+      for (const e of this.deps.log.entries) total += this.countMessageTokensCached(e);
+      this.logTokenTotal = total;
     }
-    return total;
+    return this.logTokenTotal;
+  }
+
+  private countMessageTokensCached(m: ChatMessage): number {
+    const cached = this.logTokenCache.get(m);
+    if (cached !== undefined) return cached;
+    const n = countMessageTokens(m);
+    this.logTokenCache.set(m, n);
+    return n;
   }
 
   /** Decision after a turn's response — fold, exit with summary, or carry on. */

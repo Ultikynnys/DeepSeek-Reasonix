@@ -637,13 +637,33 @@ function countTokensForMeter(text: string): number {
   }
 }
 
+/** Reserved (system + tool specs) tokens per loop prefix. Keyed by prefix
+ *  identity so emitCtxBreakdown stays O(1); length guards cover in-place
+ *  addTool/removeTool (MCP hot-bridge). */
+const reservedTokenCache = new WeakMap<
+  object,
+  { sys: number; sysLen: number; tools: number; toolsLen: number }
+>();
+
 // reserved = system prompt + tool specs, constant for the tab's lifetime once
 // the loop is built. logTokens is refreshed during turns so Desktop doesn't
 // show a fake zero while the streaming call is still waiting on usage metadata.
 function emitCtxBreakdown(tab: Tab): void {
   if (!tab.runtime) return;
-  const sys = countTokensForMeter(tab.runtime.loop.prefix.system);
-  const tools = countTokensForMeter(JSON.stringify(tab.runtime.loop.prefix.toolSpecs));
+  const prefix = tab.runtime.loop.prefix;
+  const toolSpecs = prefix.toolSpecs;
+  let cached = reservedTokenCache.get(prefix);
+  if (!cached || cached.sysLen !== prefix.system.length || cached.toolsLen !== toolSpecs.length) {
+    cached = {
+      sys: countTokensForMeter(prefix.system),
+      sysLen: prefix.system.length,
+      tools: countTokensForMeter(JSON.stringify(toolSpecs)),
+      toolsLen: toolSpecs.length,
+    };
+    reservedTokenCache.set(prefix, cached);
+  }
+  const sys = cached.sys;
+  const tools = cached.tools;
   let logTokens = 0;
   try {
     logTokens = tab.runtime.loop.getCurrentLogTokens();
