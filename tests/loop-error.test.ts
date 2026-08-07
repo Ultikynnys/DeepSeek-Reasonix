@@ -93,6 +93,28 @@ describe("formatLoopError", () => {
     expect(out).toContain("platform.deepseek.com");
   });
 
+  it("OpenAI 429 with 'no credits remaining' → out-of-credits hint, not the concurrency advice", () => {
+    const raw = new Error(
+      'Upstream 429: {"error":{"message":"You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/"}}',
+    );
+    const out = formatLoopError(raw, undefined, { upstreamHost: "https://api.openai.com/v1" });
+    expect(out).toContain("OpenAI");
+    expect(out).toContain("(429)");
+    expect(out).toMatch(/out of credits/i);
+    expect(out).toContain("platform.openai.com");
+    expect(out).toMatch(/sign in with your ChatGPT account/i);
+    expect(out).not.toMatch(/in-flight/i);
+  });
+
+  it("OpenAI 429 concurrency → generic rate-limit hint stays", () => {
+    const raw = new Error(
+      'Upstream 429: {"error":{"message":"Too many requests in a short period. Please retry."}}',
+    );
+    const out = formatLoopError(raw, undefined, { upstreamHost: "https://api.openai.com/v1" });
+    expect(out).toContain("OpenAI rate limit hit (429)");
+    expect(out).toMatch(/in-flight/i);
+  });
+
   it("400 (non-overflow) → extracts the inner error message, drops the JSON wrapping", () => {
     const raw = new Error(
       'DeepSeek 400: {"error":{"message":"request body malformed at messages[3].role"}}',

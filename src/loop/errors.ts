@@ -45,6 +45,12 @@ export function formatLoopError(
   if (status === "400") return t("errors.badrequest400", { brand: label, inner });
   if (status === "429") {
     if (label === "DeepSeek") return t("errors.concurrency429", { inner });
+    // OpenAI bills platform credits — a 429 whose body says the account is
+    // out of credits is not a concurrency problem, so the generic "reduce
+    // parallelism" advice would be misleading.
+    if (isOutOfCredits429(inner)) {
+      return t("errors.outOfCredits429", { brand: label, inner });
+    }
     return t("errors.concurrency429Generic", { brand: label, inner });
   }
   if (is5xxStatus(status)) return format5xx(status, probe, opts?.upstreamHost);
@@ -108,6 +114,15 @@ function upstreamLabel(rawPrefix: string, upstreamHost: string | undefined): Ups
 
 function is5xxStatus(status: string): boolean {
   return status === "500" || status === "502" || status === "503" || status === "504";
+}
+
+/** 429s whose body means the account is out of credits / over its plan's
+ *  usage limit — distinct from rate-limit/concurrency 429s. */
+const OUT_OF_CREDITS_429 =
+  /no credits? remaining|insufficient (credits?|balance)|out of credits|usage limit/i;
+
+function isOutOfCredits429(inner: string): boolean {
+  return OUT_OF_CREDITS_429.test(inner);
 }
 
 function format5xx(

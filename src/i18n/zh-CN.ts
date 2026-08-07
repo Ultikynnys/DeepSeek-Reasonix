@@ -690,6 +690,8 @@ export const zhCN: TranslationSchema = {
       "DeepSeek 并发超限（429）：{inner}。账号在跑的请求超过上限（v4-pro 500、v4-flash 2500，账号下所有 API key 累加）。通常是同一账号开了多个 Reasonix 进程，或者并行 subagent 一次发太多。等几秒重试、减少并行，或在 https://platform.deepseek.com 申请扩容。",
     concurrency429Generic:
       "{brand} 触发限流（429）：{inner}。并发请求过多 — 等几秒重试，或减少并行。",
+    outOfCredits429:
+      "{brand} 额度已用完（429）：{inner}。请在账单页面充值，或前往 设置 → OpenAI 登录 ChatGPT 账号，用套餐配额运行 gpt 模型。",
     deepseek5xxHead:
       "DeepSeek 服务不可用（{status}） — 这是 DeepSeek 服务端问题，不是 Reasonix 故障。已按指数退避重试 4 次。",
     deepseek5xxReachable:

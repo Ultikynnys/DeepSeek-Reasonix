@@ -722,6 +722,8 @@ export const EN: TranslationSchema = {
       "DeepSeek concurrency limit hit (429): {inner}. The account has too many in-flight requests (cap: 500 for v4-pro, 2500 for v4-flash, summed across API keys account-wide). Usually means another Reasonix process is sharing the same key, or a parallel subagent fan-out overshot. Wait a few seconds and retry, reduce parallelism, or request a higher cap at https://platform.deepseek.com.",
     concurrency429Generic:
       "{brand} rate limit hit (429): {inner}. Too many in-flight requests — wait a few seconds and retry, or reduce parallelism.",
+    outOfCredits429:
+      "{brand} is out of credits (429): {inner}. Top up the account's billing page, or sign in with your ChatGPT account (Settings → OpenAI) to use the plan quota for gpt models.",
     deepseek5xxHead:
       "DeepSeek service unavailable ({status}) — this is a DeepSeek-side problem, not Reasonix. Already retried 4× with backoff.",
     deepseek5xxReachable:

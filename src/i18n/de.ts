@@ -735,6 +735,8 @@ export const de: TranslationSchema = {
       "DeepSeek-Gleichzeitigkeitslimit erreicht (429): {inner}. Das Konto hat zu viele gleichzeitige Anfragen (Grenze: 500 für v4-pro, 2500 für v4-flash, summiert über alle API-Schlüssel des Kontos). Meist läuft ein weiterer Reasonix-Prozess mit demselben Schlüssel oder ein paralleler Subagent-Fan-out hat überzogen. Warte einige Sekunden und wiederhole, reduziere die Parallelität oder beantrage eine höhere Grenze unter https://platform.deepseek.com.",
     concurrency429Generic:
       "{brand} Ratenlimit erreicht (429): {inner}. Zu viele gleichzeitige Anfragen — warte einige Sekunden und wiederhole oder reduziere die Parallelität.",
+    outOfCredits429:
+      "{brand} hat keine Credits mehr (429): {inner}. Laden Sie das Konto auf der Rechnungsseite auf, oder melden Sie sich in den Einstellungen → OpenAI mit Ihrem ChatGPT-Konto an, um für gpt-Modelle das Plan-Kontingent zu nutzen.",
     deepseek5xxHead:
       "DeepSeek-Dienst nicht verfügbar ({status}) — dies ist ein DeepSeek-seitiges Problem, nicht Reasonix. Bereits 4× mit Backoff wiederholt.",
     deepseek5xxReachable:

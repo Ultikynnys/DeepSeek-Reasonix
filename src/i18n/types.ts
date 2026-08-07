@@ -309,6 +309,7 @@ export interface TranslationSchema {
     badrequest400: string;
     concurrency429: string;
     concurrency429Generic: string;
+    outOfCredits429: string;
     deepseek5xxHead: string;
     deepseek5xxReachable: string;
     deepseek5xxUnreachable: string;
