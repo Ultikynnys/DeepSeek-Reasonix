@@ -1,7 +1,18 @@
 /** One file per checkpoint (not jsonl) so delete/restore is cheap and a corrupt snapshot only loses itself. */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  type Stats,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { listFilesWithStatsSync } from "../at-mentions.js";
 import { readJsonFileSilently } from "../core/json-file.js";
 import { fmtRelativeTime } from "../core/relative-time.js";
 import { reasonixHome } from "../reasonix-home.js";
@@ -10,6 +21,9 @@ import { reasonixHome } from "../reasonix-home.js";
 export interface CheckpointFile {
   path: string;
   content: string | null;
+  /** mtime + size at snapshot time — incremental turn snapshots skip unchanged files. */
+  mtimeMs?: number;
+  size?: number;
 }
 
 export interface Checkpoint {
@@ -93,6 +107,10 @@ export interface CreateCheckpointOptions {
   name: string;
   source?: Checkpoint["source"];
   paths: readonly string[];
+  /** Skip binary files (\0 sniff) — restore would corrupt or delete them. */
+  skipBinary?: boolean;
+  /** Skip existing-but-unreadable files instead of recording null — restore would DELETE them. */
+  skipUnreadable?: boolean;
 }
 
 /** Missing files recorded as `content: null` so restore knows to delete; ID has random suffix to avoid same-ms collision. */
@@ -111,17 +129,18 @@ export function createCheckpoint(opts: CreateCheckpointOptions): CheckpointMeta 
     // checkpoint.
     if (abs !== absRoot && !abs.startsWith(`${absRoot}${sep}`)) continue;
     const rel = relative(absRoot, abs).split(sep).join("/");
-    if (existsSync(abs)) {
-      try {
-        const content = readFileSync(abs, "utf8");
-        files.push({ path: rel, content });
-        bytes += content.length;
-      } catch {
-        // Unreadable (binary, perms) — record as null so restore knows
-        // to delete on revert. Wrong for binary files but consistent.
-        files.push({ path: rel, content: null });
-      }
-    } else {
+    if (!existsSync(abs)) {
+      files.push({ path: rel, content: null });
+      continue;
+    }
+    try {
+      const st = statSync(abs);
+      const buf = readFileSync(abs);
+      if (opts.skipBinary === true && buf.includes(0)) continue;
+      files.push({ path: rel, content: buf.toString("utf8"), mtimeMs: st.mtimeMs, size: st.size });
+      bytes += buf.length;
+    } catch {
+      if (opts.skipUnreadable === true) continue;
       files.push({ path: rel, content: null });
     }
   }
@@ -200,6 +219,128 @@ export function restoreCheckpoint(rootDir: string, id: string): RestoreResult {
       }
     } catch (err) {
       result.skipped.push({ path: f.path, reason: (err as Error).message });
+    }
+  }
+  return result;
+}
+
+/** Cap on files collected per turn snapshot. */
+export const WORKSPACE_SNAPSHOT_MAX_FILES = 5000;
+/** Per-file cap — larger files are never recorded (rewind leaves them alone). */
+export const WORKSPACE_SNAPSHOT_MAX_FILE_BYTES = 1024 * 1024;
+/** Total content cap per snapshot. */
+export const WORKSPACE_SNAPSHOT_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+
+/** Collect workspace-relative paths for a turn snapshot: walker-filtered
+ *  (VCS/build dirs, gitignores, symlinks, size caps) and incremental — files
+ *  with unchanged mtime+size are skipped. `extra` paths always included. */
+export function collectWorkspaceSnapshotPaths(
+  rootDir: string,
+  opts?: { prev?: Checkpoint | null; extra?: readonly string[] },
+): string[] {
+  const prevFiles = new Map<string, CheckpointFile>();
+  if (opts?.prev) {
+    for (const f of opts.prev.files) prevFiles.set(f.path, f);
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let total = 0;
+  for (const f of listFilesWithStatsSync(rootDir, { maxResults: WORKSPACE_SNAPSHOT_MAX_FILES })) {
+    if (seen.has(f.path)) continue;
+    const abs = join(resolve(rootDir), f.path);
+    let st: Stats;
+    try {
+      st = lstatSync(abs);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue;
+    if (st.size > WORKSPACE_SNAPSHOT_MAX_FILE_BYTES) continue;
+    const prev = prevFiles.get(f.path);
+    if (prev && prev.mtimeMs === st.mtimeMs && prev.size === st.size) continue;
+    total += st.size;
+    if (total > WORKSPACE_SNAPSHOT_MAX_TOTAL_BYTES) break;
+    seen.add(f.path);
+    out.push(f.path);
+  }
+  for (const p of opts?.extra ?? []) {
+    if (seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+  }
+  return out;
+}
+
+export interface WorkspaceRestoreResult {
+  /** Files written back to disk. */
+  restored: string[];
+  /** Files removed (absent at the rewind point, existed at restore). */
+  removed: string[];
+  /** Files removed because they only appear in later snapshots (created during rewound turns). */
+  removedCreated: string[];
+  /** Files we couldn't touch (errors), with the reason. */
+  skipped: Array<{ path: string; reason: string }>;
+}
+
+/** Reconstruct the workspace as of `upToIds` (newest wins per path — snapshots
+ *  are incremental), then delete files that only appear in `afterIds` — they
+ *  came into existence during rewound turns. Never touches unsnapshotted ones. */
+export function reconstructWorkspaceTo(
+  rootDir: string,
+  upToIds: readonly string[],
+  afterIds: readonly string[],
+): WorkspaceRestoreResult {
+  const result: WorkspaceRestoreResult = {
+    restored: [],
+    removed: [],
+    removedCreated: [],
+    skipped: [],
+  };
+  const absRoot = resolve(rootDir);
+  const state = new Map<string, CheckpointFile>();
+  for (const id of [...upToIds].reverse()) {
+    const cp = loadCheckpoint(rootDir, id);
+    if (!cp) continue;
+    for (const f of cp.files) {
+      if (!state.has(f.path)) state.set(f.path, f);
+    }
+  }
+  for (const [path, f] of state) {
+    const abs = resolve(absRoot, path);
+    if (abs !== absRoot && !abs.startsWith(`${absRoot}${sep}`)) {
+      result.skipped.push({ path, reason: "path escapes rootDir" });
+      continue;
+    }
+    try {
+      if (f.content === null) {
+        if (existsSync(abs)) {
+          rmSync(abs);
+          result.removed.push(path);
+        }
+      } else {
+        mkdirSync(dirname(abs), { recursive: true });
+        writeFileSync(abs, f.content, "utf8");
+        result.restored.push(path);
+      }
+    } catch (err) {
+      result.skipped.push({ path, reason: (err as Error).message });
+    }
+  }
+  for (const id of afterIds) {
+    const cp = loadCheckpoint(rootDir, id);
+    if (!cp) continue;
+    for (const f of cp.files) {
+      if (state.has(f.path)) continue;
+      const abs = resolve(absRoot, f.path);
+      if (abs !== absRoot && !abs.startsWith(`${absRoot}${sep}`)) continue;
+      try {
+        if (existsSync(abs)) {
+          rmSync(abs);
+          result.removedCreated.push(f.path);
+        }
+      } catch (err) {
+        result.skipped.push({ path: f.path, reason: (err as Error).message });
+      }
     }
   }
   return result;

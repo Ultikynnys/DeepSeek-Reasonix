@@ -820,6 +820,9 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     hooks: tab.hooks,
     hookCwd: tab.rootDir,
   });
+  // Per-turn workspace snapshots (rewind's file restore) are scoped to the
+  // workspace root; without this the desktop never takes them.
+  loop.setRootDir(tab.rootDir);
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };
   return { loop, eventizer, ctx };

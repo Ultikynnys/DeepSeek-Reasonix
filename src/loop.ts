@@ -10,7 +10,13 @@ import {
   truncateForModelByTokens,
 } from "./mcp/registry.js";
 
-import { createCheckpoint, restoreCheckpoint } from "./code/checkpoints.js";
+import {
+  collectWorkspaceSnapshotPaths,
+  createCheckpoint,
+  deleteCheckpoint,
+  loadCheckpoint,
+  reconstructWorkspaceTo,
+} from "./code/checkpoints.js";
 import { ContextManager, type FoldResult, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
@@ -413,6 +419,7 @@ export class CacheFirstLoop {
     this._steerQueue.length = 0;
     this._steerConsumed = false;
     // Per-turn snapshots are scoped to the session; /new starts fresh.
+    this.deleteTurnCheckpointFiles();
     this._touchedFiles.clear();
     this._turnCheckpoints.clear();
     this._userTurnCount = 0;
@@ -445,6 +452,7 @@ export class CacheFirstLoop {
     this._steerQueue.length = 0;
     this._steerConsumed = false;
     // Snapshots are scoped to the workspace root; switching resets tracking.
+    this.deleteTurnCheckpointFiles();
     this._touchedFiles.clear();
     this._turnCheckpoints.clear();
     this._userTurnCount = 0;
@@ -651,6 +659,18 @@ export class CacheFirstLoop {
     }
   }
 
+  /** Delete auto turn-snapshot files for the current root (best-effort). */
+  private deleteTurnCheckpointFiles(): void {
+    if (!this._rootDir) return;
+    for (const id of this._turnCheckpoints.values()) {
+      try {
+        deleteCheckpoint(this._rootDir, id);
+      } catch {
+        /* best-effort disk cleanup */
+      }
+    }
+  }
+
   private discardLogFrom(index: number): void {
     const preserved = this.log.entries.slice(0, index).map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
@@ -676,9 +696,9 @@ export class CacheFirstLoop {
     return userText;
   }
 
-  /** Rewind to the N-th user turn (0-indexed). Drops that turn + everything after.
-   *  Also restores the file snapshot taken at the start of this turn so the
-   *  workspace matches the conversation state. */
+  /** Rewind to the N-th user turn (0-indexed, relative to the current log).
+   *  Drops that turn + everything after and restores its file snapshot.
+   *  Out-of-range N (folded head) clamps to the newest boundary. */
   rewindToUserTurn(userTurnIndex: number): string | null {
     const entries = this.log.entries;
     let count = 0;
@@ -691,18 +711,42 @@ export class CacheFirstLoop {
       }
       count++;
     }
-    if (targetIdx < 0) return null;
+    if (targetIdx < 0) {
+      // Walk back from the end — the newest user entry is the closest boundary.
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i]!.role === "user") {
+          targetIdx = i;
+          break;
+        }
+      }
+      if (targetIdx < 0) return null;
+      // Recompute count: checkpoint/file bookkeeping below must use the ACTUAL
+      // boundary's user position (the requested index was beyond the log).
+      count = 0;
+      for (let i = 0; i < targetIdx; i++) {
+        if (entries[i]!.role === "user") count++;
+      }
+    }
+    const actualIndex = count;
     const raw = entries[targetIdx]!.content;
     const userText = typeof raw === "string" ? raw : "";
     const preserved = entries.slice(0, targetIdx).map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
     this.persistLog(preserved);
 
-    // Restore files to the state at the start of this user turn.
-    const cpId = this._turnCheckpoints.get(userTurnIndex);
-    if (cpId && this._rootDir) {
+    // Restore files to the state at the start of this user turn. Workspace
+    // reconstruction: checkpoints ≤ the rewind point define the target state
+    // (newest wins per path), files only in later snapshots were created
+    // during rewound turns (tools or shell) and are deleted.
+    if (this._rootDir) {
       try {
-        restoreCheckpoint(this._rootDir, cpId);
+        const upTo: string[] = [];
+        const after: string[] = [];
+        for (const [key, id] of this._turnCheckpoints) {
+          if (key <= actualIndex) upTo.push(id);
+          else after.push(id);
+        }
+        reconstructWorkspaceTo(this._rootDir, upTo, after);
       } catch {
         // Best-effort; conversation rewind already succeeded.
       }
@@ -710,13 +754,23 @@ export class CacheFirstLoop {
 
     // Prune touched-files tracking to only files from before this turn.
     for (const [path, turn] of this._touchedFiles) {
-      if (turn > userTurnIndex) this._touchedFiles.delete(path);
+      if (turn > actualIndex) this._touchedFiles.delete(path);
     }
-    // Prune checkpoints from this turn onward.
+    // Prune checkpoints from this turn onward (map + snapshot files on disk).
     for (const key of this._turnCheckpoints.keys()) {
-      if (key >= userTurnIndex) this._turnCheckpoints.delete(key);
+      if (key >= actualIndex) {
+        const id = this._turnCheckpoints.get(key);
+        this._turnCheckpoints.delete(key);
+        if (id && this._rootDir) {
+          try {
+            deleteCheckpoint(this._rootDir, id);
+          } catch {
+            // Best-effort disk cleanup.
+          }
+        }
+      }
     }
-    this._userTurnCount = userTurnIndex;
+    this._userTurnCount = actualIndex;
 
     return userText;
   }
@@ -783,19 +837,26 @@ export class CacheFirstLoop {
       }
     }
     this._turn++;
-    // Per-turn file snapshot: capture the current state of all files touched
-    // by previous turns so we can rewind here later. Runs BEFORE the user
-    // message is appended so the snapshot represents "state after turn N-1,
-    // before turn N processes the user's message."
-    if (this._rootDir && this._touchedFiles.size > 0) {
+    // Per-turn workspace snapshot: a rewind must revert shell-modified files
+    // too, not just file-tool edits. Workspace-scoped (ignores VCS/build dirs,
+    // gitignores, binaries, oversized). Incremental via mtime+size; restore
+    // reconstructs the checkpoint chain. Runs BEFORE the user message.
+    if (this._rootDir) {
       const userTurnIndex = this._userTurnCount;
       try {
-        const paths = [...this._touchedFiles.keys()];
+        const prevId = this._turnCheckpoints.get(userTurnIndex - 1);
+        const prev = prevId ? loadCheckpoint(this._rootDir, prevId) : null;
+        const paths = collectWorkspaceSnapshotPaths(this._rootDir, {
+          prev,
+          extra: [...this._touchedFiles.keys()],
+        });
         const meta = createCheckpoint({
           rootDir: this._rootDir,
           name: `auto-turn-${userTurnIndex}`,
           source: "auto-session-start",
           paths,
+          skipBinary: true,
+          skipUnreadable: true,
         });
         this._turnCheckpoints.set(userTurnIndex, meta.id);
       } catch {

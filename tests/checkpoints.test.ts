@@ -84,7 +84,9 @@ describe("createCheckpoint", () => {
       paths: ["../../etc/passwd", "ok.txt"],
     });
     const cp = loadCheckpoint(workspace, meta.id);
-    expect(cp!.files).toEqual([{ path: "ok.txt", content: "ok" }]);
+    expect(cp!.files).toEqual([
+      { path: "ok.txt", content: "ok", mtimeMs: expect.any(Number), size: expect.any(Number) },
+    ]);
   });
 
   it("appends to the index so listCheckpoints sees the new entry", () => {

@@ -1671,7 +1671,7 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser", () => {
     expect(loop.log.entries[1]!.content).toBe("reply one");
   });
 
-  it("rewindToUserTurn(N) returns null when N exceeds available user turns", () => {
+  it("rewindToUserTurn(N) clamps to the newest boundary when N exceeds available user turns", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({
       client,
@@ -1681,8 +1681,13 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser", () => {
     loop.log.append({ role: "user", content: "only one" });
     loop.log.append({ role: "assistant", content: "reply" });
 
-    expect(loop.rewindToUserTurn(5)).toBeNull();
-    expect(loop.log.length).toBe(2);
+    // The UI counts every user message it renders, but compaction can fold the
+    // head into a summary — so the requested index can exceed the log's user
+    // entries. Clamp to the newest available boundary instead of no-opping
+    // (the old null return left the desktop with just a composer prefill).
+    const result = loop.rewindToUserTurn(5);
+    expect(result).toBe("only one");
+    expect(loop.log.length).toBe(0);
   });
 });
 
@@ -2814,7 +2819,7 @@ describe("CacheFirstLoop — per-turn file snapshots", () => {
     expect(readFileSync(join(workspace, "hello.txt"), "utf8")).toBe("v1");
   });
 
-  it("rewindToUserTurn(0) clears touched-files tracking", async () => {
+  it("rewindToUserTurn(0) deletes files created in later turns", async () => {
     const client = makeClient([
       {
         content: "",
@@ -2827,6 +2832,7 @@ describe("CacheFirstLoop — per-turn file snapshots", () => {
         ],
       },
       { content: "done" },
+      { content: "done again" },
     ]);
     const tools = makeTools(workspace);
     const loop = new CacheFirstLoop({
@@ -2839,13 +2845,126 @@ describe("CacheFirstLoop — per-turn file snapshots", () => {
 
     await loop.run("create x.txt");
     expect(existsSync(join(workspace, "x.txt"))).toBe(true);
+    await loop.run("next");
 
-    // Rewinding to turn 0 clears tracking (though file on disk may remain
-    // since we never snapshotted the initial empty state).
+    // Rewinding to turn 0 restores the pre-conversation workspace: x.txt was
+    // created after the turn-0 snapshot, so the reconstruction deletes it.
     const text = loop.rewindToUserTurn(0);
     expect(text).toBe("create x.txt");
-    // Conversation is truncated but file tracking is cleared.
-    // The file still exists on disk (documented limitation for first-turn rewind).
+    expect(existsSync(join(workspace, "x.txt"))).toBe(false);
+  });
+
+  it("rewind reverts files the shell created or modified after a turn", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "write_file", arguments: '{"path":"a.txt","content":"v1"}' },
+          },
+        ],
+      },
+      { content: "done" },
+      { content: "done again" },
+    ]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    loop.setRootDir(workspace);
+
+    await loop.run("create a.txt");
+    // Simulate shell activity between turns: overwrite a.txt, create b.txt.
+    writeFileSync(join(workspace, "a.txt"), "v2");
+    writeFileSync(join(workspace, "b.txt"), "x");
+    await loop.run("next");
+
+    // Rewind to turn 0 — both files only exist in later snapshots (created
+    // during the rewound window), so both are removed.
+    const text = loop.rewindToUserTurn(0);
+    expect(text).toBe("create a.txt");
+    expect(existsSync(join(workspace, "a.txt"))).toBe(false);
+    expect(existsSync(join(workspace, "b.txt"))).toBe(false);
+  });
+
+  it("rewind to turn N keeps shell changes made before turn N", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "write_file", arguments: '{"path":"a.txt","content":"v1"}' },
+          },
+        ],
+      },
+      { content: "done" },
+      { content: "done again" },
+    ]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    loop.setRootDir(workspace);
+
+    await loop.run("create a.txt");
+    // Simulate shell activity after turn 0 but before turn 1's snapshot.
+    writeFileSync(join(workspace, "a.txt"), "v2");
+    writeFileSync(join(workspace, "b.txt"), "x");
+    await loop.run("next");
+    // Simulate shell activity AFTER the turn-1 snapshot: revert should undo
+    // the a.txt overwrite (its v2 is in the turn-1 snapshot) but leave c.txt
+    // alone — no snapshot ever recorded it, so it's outside the revert.
+    writeFileSync(join(workspace, "a.txt"), "v3");
+    writeFileSync(join(workspace, "c.txt"), "y");
+
+    loop.rewindToUserTurn(1);
+    expect(readFileSync(join(workspace, "a.txt"), "utf8")).toBe("v2");
+    expect(readFileSync(join(workspace, "b.txt"), "utf8")).toBe("x");
+    expect(existsSync(join(workspace, "c.txt"))).toBe(true);
+  });
+
+  it("rewind never touches binary or oversized files", async () => {
+    const bin = Buffer.concat([
+      Buffer.from("PK"),
+      Buffer.from([0, 1, 0, 255]),
+      Buffer.from("tail"),
+    ]);
+    writeFileSync(join(workspace, "bin.dat"), bin);
+    const huge = "x".repeat(2 * 1024 * 1024);
+    writeFileSync(join(workspace, "huge.txt"), huge);
+
+    const client = makeClient([{ content: "done" }, { content: "done again" }]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    loop.setRootDir(workspace);
+
+    await loop.run("next");
+    // Simulate shell overwrites between turns.
+    const bin2 = Buffer.concat([Buffer.from("PK2"), Buffer.from([0, 9]), Buffer.from("more")]);
+    writeFileSync(join(workspace, "bin.dat"), bin2);
+    writeFileSync(join(workspace, "huge.txt"), "y".repeat(2 * 1024 * 1024));
+    await loop.run("next");
+
+    // Neither file was snapshotted (binary / over the per-file cap), so the
+    // rewind must leave them untouched — never deleted, never corrupted.
+    loop.rewindToUserTurn(0);
+    expect(readFileSync(join(workspace, "bin.dat")).equals(bin2)).toBe(true);
+    expect(readFileSync(join(workspace, "huge.txt"), "utf8")).toBe("y".repeat(2 * 1024 * 1024));
   });
 
   it("clearLog resets touched-files tracking", async () => {
