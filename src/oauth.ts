@@ -446,6 +446,8 @@ export async function fetchCodexQuota(
         accept: "application/json",
         "OAI-Product-Sku": "codex",
       },
+      // A hung endpoint must not stall quota refreshes forever.
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as Record<string, unknown>;

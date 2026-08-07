@@ -1837,9 +1837,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // the boot dir before construction, and rotate `first` to the next
   // surviving tab when its source closes.
   let shuttingDown = false;
+  /** 60s quota poll — assigned below after tab restore, cleared on shutdown. */
+  let codexQuotaTimer: ReturnType<typeof setInterval> | undefined = undefined;
   async function gracefulShutdown(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
+    if (codexQuotaTimer) clearInterval(codexQuotaTimer);
     await stopDesktopQQ(false).catch(() => undefined);
     await Promise.allSettled(
       [...tabs.values()].map((t) => t.toolset?.jobs.shutdown(1500) ?? Promise.resolve()),
@@ -2153,6 +2156,23 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   const activeIdx = savedTabs.findIndex((t) => t.active);
   lastActiveTabId = ((activeIdx >= 0 ? restored[activeIdx] : first) ?? first).id;
   persistOpenTabs();
+  // The account-wide weekly Codex quota changes underneath us (other
+  // devices, weekly reset) — poll so the statusbar chip is never stale.
+  // Skipped mid-turn so the $turn_complete fetch stays the authoritative
+  // turn-cost measurement. Only OpenAI tabs actually fetch.
+  let codexQuotaPolling = false;
+  codexQuotaTimer = setInterval(() => {
+    if (codexQuotaPolling) return;
+    for (const t of tabs.values()) {
+      if (t.aborter) return;
+    }
+    const tab = tabs.get(lastActiveTabId);
+    if (!tab) return;
+    codexQuotaPolling = true;
+    void emitCodexQuota(tab).finally(() => {
+      codexQuotaPolling = false;
+    });
+  }, 60_000);
   const qqConfig = loadQQConfig();
   if (qqConfig.enabled && qqConfig.appId && qqConfig.appSecret) {
     void startDesktopQQ(false).catch(() => undefined);
@@ -2184,9 +2204,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "tab_activate") {
-      if (tabs.has(msg.tabId)) {
+      const activated = tabs.get(msg.tabId);
+      if (activated) {
         lastActiveTabId = msg.tabId;
         persistOpenTabs();
+        // Refetch immediately — the tab may have sat idle for hours, and
+        // the statusbar must show the current quota the moment it's shown.
+        void emitCodexQuota(activated);
       }
       return;
     }
