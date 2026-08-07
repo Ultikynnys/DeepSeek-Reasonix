@@ -433,12 +433,17 @@ function quotaCurrency(obj: Record<string, unknown>, key: string): string | unde
 
 /** Weekly Codex quota for the signed-in ChatGPT plan. Null when not signed
  *  in, the token is rejected, or the payload doesn't match a known shape —
- *  callers render nothing and keep the session working. */
+ *  callers render nothing; failures are logged (stderr) for diagnosis. */
 export async function fetchCodexQuota(
   path: string = defaultConfigPath(),
 ): Promise<CodexQuota | null> {
   const token = await resolveOpenAIToken(path);
-  if (!token) return null;
+  if (!token) {
+    console.warn(
+      "reasonix: codex quota — no OpenAI OAuth token (not signed in, or token refresh failed)",
+    );
+    return null;
+  }
   try {
     const res = await fetch(CODEX_QUOTA_URL, {
       headers: {
@@ -449,7 +454,13 @@ export async function fetchCodexQuota(
       // A hung endpoint must not stall quota refreshes forever.
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = (await res.text().catch(() => "")).slice(0, 200);
+      console.warn(
+        `reasonix: codex quota — ${res.status} ${res.statusText} from ${CODEX_QUOTA_URL}${body ? `: ${body}` : ""}`,
+      );
+      return null;
+    }
     const data = (await res.json()) as Record<string, unknown>;
     // Known shapes, in preference order: nested usage/limit objects with
     // `amount`, or flat numeric `used`/`limit`.
@@ -461,7 +472,12 @@ export async function fetchCodexQuota(
       quotaAmount(data, "weekly_quota_limit") ??
       quotaAmount(data, "quota_limit") ??
       quotaAmount(data, "limit");
-    if (used === undefined || limit === undefined || limit <= 0) return null;
+    if (used === undefined || limit === undefined || limit <= 0) {
+      console.warn(
+        `reasonix: codex quota — payload has no used/limit fields (keys: ${Object.keys(data).join(", ") || "(empty)"})`,
+      );
+      return null;
+    }
     return {
       used,
       limit,
@@ -472,7 +488,8 @@ export async function fetchCodexQuota(
         quotaCurrency(data, "used"),
       fetchedAt: Date.now(),
     };
-  } catch {
+  } catch (err) {
+    console.warn(`reasonix: codex quota fetch failed — ${(err as Error).message}`);
     return null;
   }
 }

@@ -105,12 +105,18 @@ export function StatusBar({
   const dotWarn = !dotDanger && openaiAuth === "none";
   // OpenAI tabs swap the balance / $ display for the API-reported weekly
   // Codex quota: % + credits left, and this turn's cost as % of the weekly
-  // limit (delta between fetches — OpenAI reports no dollar amounts).
-  const quota = codexQuota && settings?.model.startsWith("gpt-5.6") ? codexQuota : null;
+  // limit (delta between fetches — OpenAI reports no dollar amounts). The
+  // swap happens for every gpt-* model (matches providerForModel), and even
+  // without quota data the chips render an em dash + retry hint — the
+  // DeepSeek balance and $ amounts are meaningless on an OpenAI tab.
+  const openaiTab = !!settings?.model?.startsWith("gpt-");
+  const quota = codexQuota && openaiTab ? codexQuota : null;
   const showQuota = !!quota && quota.limit > 0;
   const quotaCurrency = quota?.currency ?? t("statusbar.codexCredits");
-  const quotaLeft = showQuota ? Math.max(0, quota.limit - quota.used) : 0;
-  const quotaLeftPct = showQuota ? Math.max(0, 100 - quota.usedPct) : 0;
+  const quotaLimit = quota?.limit ?? 0;
+  const quotaTurnCost = quota?.turnCost ?? null;
+  const quotaLeft = showQuota ? Math.max(0, quotaLimit - (quota?.used ?? 0)) : 0;
+  const quotaLeftPct = showQuota ? Math.max(0, 100 - (quota?.usedPct ?? 0)) : 0;
   const [themeOpen, setThemeOpen] = useState(false);
   const themePopRef = useRef<HTMLDivElement | null>(null);
   const themeButtonRef = useRef<HTMLSpanElement | null>(null);
@@ -156,10 +162,10 @@ export function StatusBar({
       <span
         className="seg"
         title={
-          showQuota && quota.turnCost != null
+          quotaTurnCost != null && quotaLimit > 0
             ? t("statusbar.thisTurnQuotaTitle", {
-                pct: ((quota.turnCost / quota.limit) * 100).toFixed(1),
-                credits: quota.turnCost.toFixed(2),
+                pct: ((quotaTurnCost / quotaLimit) * 100).toFixed(1),
+                credits: quotaTurnCost.toFixed(2),
                 currency: quotaCurrency,
               })
             : undefined
@@ -167,11 +173,11 @@ export function StatusBar({
       >
         <I.coin size={11} />
         <span>{t("statusbar.thisTurn")}</span>
-        {showQuota ? (
-          quota.turnCost != null ? (
+        {openaiTab ? (
+          quotaTurnCost != null && quotaLimit > 0 ? (
             <>
-              <span className="v ok">{((quota.turnCost / quota.limit) * 100).toFixed(1)}%</span>
-              <span className="conv">{`${quota.turnCost.toFixed(2)} ${quotaCurrency}`}</span>
+              <span className="v ok">{((quotaTurnCost / quotaLimit) * 100).toFixed(1)}%</span>
+              <span className="conv">{`${quotaTurnCost.toFixed(2)} ${quotaCurrency}`}</span>
             </>
           ) : (
             <span className="v ok">—</span>
@@ -220,26 +226,37 @@ export function StatusBar({
         <span className="v vio">{settings?.model ?? "—"}</span>
         <span className="v">{settings?.reasoningEffort ?? "high"}</span>
       </span>
-      {showQuota ? (
+      {openaiTab ? (
         <span
           className="seg"
-          title={t("statusbar.codexQuotaTitle", {
-            left: Math.round(quotaLeft),
-            limit: Math.round(quota.limit),
-            currency: quotaCurrency,
-          })}
+          title={
+            showQuota
+              ? t("statusbar.codexQuotaTitle", {
+                  left: Math.round(quotaLeft),
+                  limit: Math.round(quotaLimit),
+                  currency: quotaCurrency,
+                })
+              : openaiAuth === "oauth"
+                ? t("statusbar.codexUnavailable")
+                : t("statusbar.codexNoData")
+          }
           style={onRefreshCodexQuota ? { cursor: "pointer" } : undefined}
           onClick={onRefreshCodexQuota}
         >
           <I.coin size={11} style={{ color: "var(--accent)" }} />
           <span>{t("statusbar.codexQuota")}</span>
-          <span className="v acc">
-            {Math.round(quotaLeftPct)}% {t("statusbar.codexLeft")}
-          </span>
-          <span className="conv">{`${Math.round(quotaLeft)} / ${Math.round(quota.limit)}`}</span>
+          {showQuota ? (
+            <>
+              <span className="v acc">
+                {Math.round(quotaLeftPct)}% {t("statusbar.codexLeft")}
+              </span>
+              <span className="conv">{`${Math.round(quotaLeft)} / ${Math.round(quotaLimit)}`}</span>
+            </>
+          ) : (
+            <span className="v acc">—</span>
+          )}
         </span>
-      ) : null}
-      {!showQuota ? (
+      ) : (
         <span
           className="seg"
           title={t("statusbar.switchCurrency")}
@@ -255,7 +272,7 @@ export function StatusBar({
               : balanceLabel}
           </span>
         </span>
-      ) : null}
+      )}
       <span
         ref={themeButtonRef}
         className={`seg theme-trigger ${themeOpen ? "active" : ""}`}

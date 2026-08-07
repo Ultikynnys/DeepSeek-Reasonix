@@ -643,6 +643,8 @@ export const de: typeof en = {
     balance: "Guthaben",
     codexQuota: "Codex",
     codexQuotaTitle: "Codex-Wochenkontingent · {left} / {limit} {currency} übrig · zum Aktualisieren klicken",
+    codexNoData: "Codex-Wochenkontingent · keine Daten — in den Einstellungen bei OpenAI anmelden · zum Wiederholen klicken",
+    codexUnavailable: "Codex-Wochenkontingent · derzeit nicht verfügbar — zum Wiederholen klicken",
     codexCredits: "Credits",
     codexLeft: "übrig",
     thisTurnQuotaTitle: "Dieser Turn hat {pct}% des wöchentlichen Codex-Kontingents verbraucht ({credits} {currency})",

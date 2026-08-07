@@ -74,12 +74,44 @@ describe("StatusBar quota display", () => {
     expect(screen.getByText("—")).toBeTruthy();
   });
 
-  it("falls back to the balance display when quota data is missing", () => {
+  it("keeps the quota chips (em dash + retry) for gpt tabs when quota data is missing — never the DeepSeek balance", () => {
     renderBar({
       settings: { model: "gpt-5.6-sol" } as Settings,
       codexQuota: null,
     });
-    expect(screen.getByText("balance")).toBeTruthy();
-    expect(screen.queryByText("codex")).toBeNull();
+    // The codex chip and this-turn chip both render an em dash.
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("codex")).toBeTruthy();
+    expect(screen.queryByText("balance")).toBeNull();
+    expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
+    // Not signed in → the chip hints at signing in with OpenAI.
+    expect(screen.getByTitle(/sign in with OpenAI/)).toBeTruthy();
+  });
+
+  it("tells signed-in gpt tabs that the quota is unavailable rather than hinting to sign in", () => {
+    renderBar({
+      settings: {
+        model: "gpt-5.6-sol",
+        modelEndpoint: {
+          provider: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          openaiAuth: "oauth",
+        },
+      } as Settings,
+      codexQuota: null,
+    });
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByTitle(/sign in with OpenAI/)).toBeNull();
+    expect(screen.getByTitle(/unavailable right now/)).toBeTruthy();
+  });
+
+  it("treats any gpt-* model as an OpenAI tab (quota chips, not balance)", () => {
+    renderBar({
+      settings: { model: "gpt-4o-custom" } as Settings,
+      codexQuota: GPT_QUOTA,
+    });
+    expect(screen.getByText(/58%\s*left/)).toBeTruthy();
+    expect(screen.queryByText("balance")).toBeNull();
+    expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
   });
 });

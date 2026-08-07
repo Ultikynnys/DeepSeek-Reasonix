@@ -402,6 +402,8 @@ export const zhCN: typeof en = {
     balance: "余额",
     codexQuota: "Codex",
     codexQuotaTitle: "Codex 每周配额 · 剩余 {left} / {limit} {currency} · 点击刷新",
+    codexNoData: "Codex 每周配额 · 暂无数据 — 请在设置中登录 OpenAI · 点击重试",
+    codexUnavailable: "Codex 每周配额 · 当前不可用 — 点击重试",
     codexCredits: "积分",
     codexLeft: "剩余",
     thisTurnQuotaTitle: "本轮已消耗周配额 {pct}%（{credits} {currency}）",

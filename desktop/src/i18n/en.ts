@@ -612,6 +612,8 @@ export const en = {
     balance: "balance",
     codexQuota: "codex",
     codexQuotaTitle: "Codex weekly quota · {left} / {limit} {currency} left · click to refresh",
+    codexNoData: "Codex weekly quota · no data — sign in with OpenAI in Settings · click to retry",
+    codexUnavailable: "Codex weekly quota · unavailable right now — click to retry",
     codexCredits: "credits",
     codexLeft: "left",
     thisTurnQuotaTitle: "This turn used {pct}% of the weekly Codex quota ({credits} {currency})",
