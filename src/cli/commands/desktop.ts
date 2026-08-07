@@ -35,6 +35,7 @@ import type {
   RetryResultEvent,
   RevisionRequiredEvent,
   RewindResultEvent,
+  RewindWindowEvent,
   SessionCompactedEvent,
   SessionEmptyEvent,
   SessionImportResultEvent,
@@ -247,6 +248,7 @@ type EmittableEvent =
   | RetryResultEvent
   | BtwResultEvent
   | RewindResultEvent
+  | RewindWindowEvent
   | TabOpenedEvent
   | TabClosedEvent
   | McpSpecsEvent
@@ -569,6 +571,7 @@ function loadSessionIntoTab(
   );
   emitCtxBreakdown(tab);
   emitSettings(tab);
+  emitRewindWindow(tab);
   if (backfilledWorkspace) emitSessions(tab);
 }
 
@@ -663,6 +666,14 @@ function emitCtxBreakdown(tab: Tab): void {
     },
     tab.id,
   );
+}
+
+/** Broadcast the retained rewind window (grayed messages) after events that
+ *  shift it: turn completion (new snapshot / eviction), rewinds, session load. */
+function emitRewindWindow(tab: Tab): void {
+  if (!tab.runtime) return;
+  const window = tab.runtime.loop.rewindWindow();
+  emit({ type: "$rewind_window", window }, tab.id);
 }
 
 function emitSkills(tab: Tab): void {
@@ -1531,6 +1542,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             });
           }
           emit({ type: "$turn_complete" }, tab.id);
+          emitRewindWindow(tab);
           if (tab.planTotalSteps > 0 && tab.completedStepIds.size >= tab.planTotalSteps) {
             tab.completedStepIds.clear();
             tab.planTotalSteps = 0;
@@ -2800,6 +2812,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       const prev = tab.runtime.loop.rewindToUserTurn(msg.userTurn);
       if (prev) {
         emit({ type: "$rewind_result", turn: msg.userTurn, text: prev }, tab.id);
+        emitRewindWindow(tab);
         emit(
           tab.runtime.eventizer.emitSessionRetracted(
             tab.runtime.loop.currentTurn,

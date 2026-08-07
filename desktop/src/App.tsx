@@ -70,6 +70,7 @@ import {
   type PlanStep,
   type PlanVerdict,
   type RevisionVerdict,
+  type RewindWindow,
   rpcSend,
   type SettingsPatch,
   type SkillInfo,
@@ -343,6 +344,7 @@ type State = {
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
   mcpSpecs: McpSpecInfo[];
+  rewindWindow: RewindWindow | null;
   mcpBridged: boolean;
   skills: SkillInfo[];
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
@@ -1432,6 +1434,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         retryNonce: state.retryNonce + 1,
       };
     }
+    case "$rewind_window":
+      return { ...state, rewindWindow: ev.window };
     case "$btw_result":
       return {
         ...state,
@@ -1606,6 +1610,7 @@ function TabRuntime({
     activeSkill: null,
     queuedSends: [],
     retryNonce: 0,
+    rewindWindow: null,
   });
   useLang();
   useDisableTextAssist();
@@ -2547,14 +2552,22 @@ function TabRuntime({
                       const dividerLabel = `turn ${m.turn}`;
                       const prev = state.messages[i - 1];
                       const needsDivider = !prev || prev.kind === "user";
+                      const userIndex = userMessageIndex(state.messages, i);
+                      // Snapshot retention: only the last 2 user turns keep
+                      // their snapshots; older messages gray out (rewind off).
+                      const rewindable =
+                        state.rewindWindow !== null &&
+                        userIndex >= state.rewindWindow.min &&
+                        userIndex <= state.rewindWindow.max;
                       return (
                         <div key={`u-${i}`} data-turn={m.turn}>
                           {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
                           <UserMsg
                             text={m.text}
                             skill={m.skill}
-                            userIndex={userMessageIndex(state.messages, i)}
-                            disabled={state.busy}
+                            userIndex={userIndex}
+                            grayed={!rewindable}
+                            disabled={state.busy || !rewindable}
                             onRewind={onRewindUserMsg}
                           />
                         </div>

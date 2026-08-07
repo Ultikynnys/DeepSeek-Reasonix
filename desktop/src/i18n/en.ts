@@ -758,6 +758,7 @@ export const en = {
     checkpointSub: "checkpoint · {completed} / {total}",
     continue: "Continue",
     stop: "Stop",
+    rewindUnavailable: "Snapshot cleared — rewind unavailable",
     revise: "Revise",
     planRevisionKind: "plan revision",
     rewritePlan: "Plan rewrite",

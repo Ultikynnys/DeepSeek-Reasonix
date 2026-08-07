@@ -444,6 +444,18 @@ describe("listFilesSync", () => {
     expect(files.every((f) => !f.includes(".git/"))).toBe(true);
   });
 
+  it("descends into dot-directories and custom-dir skips only when asked", () => {
+    const files = listFilesSync(root, {
+      ignoreDirs: [],
+      respectGitignore: false,
+      includeDotDirs: true,
+    });
+    expect(files).toContain(".git/objects/abc");
+    expect(files).toContain("node_modules/foo/index.js");
+    // .gitignore is only respected when asked; dist/ was never created here.
+    expect(files).toContain(".gitignore");
+  });
+
   it("includes dotfiles at the top level (e.g. .gitignore)", () => {
     const files = listFilesSync(root);
     expect(files).toContain(".gitignore");

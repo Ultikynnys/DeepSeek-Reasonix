@@ -42,6 +42,8 @@ export interface ListFilesOptions {
   ignoreDirs?: readonly string[];
   /** Walk nested .gitignores (root + every subdir). Default true. */
   respectGitignore?: boolean;
+  /** Also descend into dot-directories (.git, .env dirs…). Default false. */
+  includeDotDirs?: boolean;
 }
 
 /** Sync on purpose — fits the TUI's single-turn-per-tick model. Skips dot-DIRS but keeps dotfiles. */
@@ -62,6 +64,7 @@ export function listFilesWithStatsSync(root: string, opts: ListFilesOptions = {}
   const ignoreDirs = new Set(opts.ignoreDirs ?? DEFAULT_PICKER_IGNORE_DIRS);
   const rootAbs = resolve(root);
   const respectGi = opts.respectGitignore !== false;
+  const includeDotDirs = opts.includeDotDirs === true;
   const out: FileWithStats[] = [];
 
   const walk = (dirAbs: string, dirRel: string, layers: readonly GitignoreLayer[]) => {
@@ -83,7 +86,7 @@ export function listFilesWithStatsSync(root: string, opts: ListFilesOptions = {}
       const relPath = dirRel ? `${dirRel}/${ent.name}` : ent.name;
       const absPath = join(dirAbs, ent.name);
       if (ent.isDirectory()) {
-        if (ent.name.startsWith(".") || ignoreDirs.has(ent.name)) continue;
+        if ((!includeDotDirs && ent.name.startsWith(".")) || ignoreDirs.has(ent.name)) continue;
         if (ignoredByLayers(effectiveLayers, absPath, true)) continue;
         walk(absPath, relPath, effectiveLayers);
       } else if (ent.isFile()) {
@@ -135,6 +138,8 @@ export async function listFilesWithStatsAsync(
 
 export interface StreamWalkOptions {
   ignoreDirs?: readonly string[];
+  /** Include dot-directories (hidden) in the walk. */
+  includeDotDirs?: boolean;
   respectGitignore?: boolean;
   signal?: AbortSignal;
   /** Called per file entry. Return false to halt the walk. */
@@ -152,6 +157,7 @@ export async function walkFilesStream(
 ): Promise<{ scanned: number; cancelled: boolean }> {
   const ignoreDirs = new Set(opts.ignoreDirs ?? DEFAULT_PICKER_IGNORE_DIRS);
   const respectGi = opts.respectGitignore !== false;
+  const includeDotDirs = opts.includeDotDirs === true;
   const rootAbs = resolve(root);
   const progressGap = Math.max(0, opts.progressIntervalMs ?? 100);
   let scanned = 0;
@@ -197,7 +203,7 @@ export async function walkFilesStream(
       if (halted || opts.signal?.aborted) break;
       const absPath = join(dirAbs, ent.name);
       if (ent.isDirectory()) {
-        if (ent.name.startsWith(".") || ignoreDirs.has(ent.name)) continue;
+        if ((!includeDotDirs && ent.name.startsWith(".")) || ignoreDirs.has(ent.name)) continue;
         if (ignoredByLayers(effectiveLayers, absPath, true)) continue;
         if (fileEnts.length > 0) {
           await flushFiles(fileEnts, dirAbs, dirRel, effectiveLayers, emit);

@@ -51,6 +51,8 @@ import type {
   RevisionRequiredEvent,
   RevisionVerdict,
   RewindResultEvent,
+  RewindWindow,
+  RewindWindowEvent,
   SessionCompactedEvent,
   SessionEmptyEvent,
   SessionImportResultEvent,
@@ -116,6 +118,8 @@ export type {
   RevisionRequiredEvent,
   RevisionVerdict,
   RewindResultEvent,
+  RewindWindow,
+  RewindWindowEvent,
   SessionCompactedEvent,
   SessionEmptyEvent,
   SessionImportResultEvent,
@@ -341,6 +345,7 @@ export type IncomingEvent = { tabId?: string } & (
   | RetryResultEvent
   | BtwResultEvent
   | RewindResultEvent
+  | RewindWindowEvent
 );
 
 /** Send one command to the desktop backend over the Tauri JSON-RPC bridge. */

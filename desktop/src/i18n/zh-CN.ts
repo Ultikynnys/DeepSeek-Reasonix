@@ -744,6 +744,7 @@ export const zhCN: typeof en = {
     checkpointSub: "检查点 · {completed} / {total}",
     continue: "继续",
     stop: "停止",
+    rewindUnavailable: "快照已清理 — 无法回退",
     revise: "修订",
     planRevisionKind: "计划修订",
     rewritePlan: "计划重写",

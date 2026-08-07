@@ -78,6 +78,8 @@ export type {
   RetryResultEvent,
   BtwResultEvent,
   RewindResultEvent,
+  RewindWindow,
+  RewindWindowEvent,
   JobInfo,
   JobsEvent,
   LoadedSegment,

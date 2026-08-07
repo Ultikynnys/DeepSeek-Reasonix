@@ -15,6 +15,7 @@ import {
   createCheckpoint,
   deleteCheckpoint,
   loadCheckpoint,
+  mergeCheckpointInto,
   reconstructWorkspaceTo,
 } from "./code/checkpoints.js";
 import { ContextManager, type FoldResult, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
@@ -169,6 +170,11 @@ export class CacheFirstLoop {
   readonly repair: ToolCallRepair;
   /** Files the model has read this session; gates edit_file / multi_edit so SEARCH text matches on-disk bytes. Cleared on fold / mechanical truncate (the model's byte-level view of the elided history is gone). In-memory only — naturally empty on resume. */
   readonly readTracker = new ReadTracker();
+
+  /** How many per-turn workspace snapshots a session keeps. Older snapshots
+   *  are folded into the next-oldest and deleted — rewinds to those turns are
+   *  refused and the UI grays them out. */
+  static readonly REWIND_SNAPSHOT_RETENTION = 2;
 
   // Mutable via configure() — slash commands in the TUI / library callers tweak
   // these mid-session so users don't have to restart.
@@ -677,6 +683,25 @@ export class CacheFirstLoop {
     this.persistLog(preserved);
   }
 
+  /** Keep at most REWIND_SNAPSHOT_RETENTION turn snapshots: fold the oldest
+   *  into the next-oldest (reconstruction needs a self-sufficient chain) and
+   *  delete its checkpoint file. */
+  private evictOldSnapshots(): void {
+    if (!this._rootDir) return;
+    while (this._turnCheckpoints.size > CacheFirstLoop.REWIND_SNAPSHOT_RETENTION) {
+      const minKey = Math.min(...this._turnCheckpoints.keys());
+      const nextId = this._turnCheckpoints.get(minKey + 1);
+      const minId = this._turnCheckpoints.get(minKey);
+      if (!minId || !nextId) break;
+      try {
+        mergeCheckpointInto(this._rootDir, minId, nextId);
+      } catch {
+        // Best-effort — the map entry is dropped either way.
+      }
+      this._turnCheckpoints.delete(minKey);
+    }
+  }
+
   /** Drop the last user message + everything after; caller re-sends. Persists to session file. */
   retryLastUser(): string | null {
     const entries = this.log.entries;
@@ -728,6 +753,13 @@ export class CacheFirstLoop {
       }
     }
     const actualIndex = count;
+    // Snapshots older than the retention window were evicted — their file
+    // state can't be reconstructed. Refuse instead of silently truncating
+    // without a file restore (the UI grays those messages out).
+    if (this._rootDir && this._turnCheckpoints.size > 0) {
+      const minKey = Math.min(...this._turnCheckpoints.keys());
+      if (actualIndex < minKey) return null;
+    }
     const raw = entries[targetIdx]!.content;
     const userText = typeof raw === "string" ? raw : "";
     const preserved = entries.slice(0, targetIdx).map((m) => ({ ...m }));
@@ -773,6 +805,15 @@ export class CacheFirstLoop {
     this._userTurnCount = actualIndex;
 
     return userText;
+  }
+
+  /** The retained turn-snapshot range — the rewindable user turns. `null`
+   *  when no snapshots exist (fresh session, or after reload before the
+   *  first turn). The desktop UI grays messages outside this window. */
+  rewindWindow(): { min: number; max: number } | null {
+    if (this._turnCheckpoints.size === 0) return null;
+    const keys = [...this._turnCheckpoints.keys()];
+    return { min: Math.min(...keys), max: Math.max(...keys) };
   }
 
   async *step(userInput: string): AsyncGenerator<LoopEvent> {
@@ -837,10 +878,9 @@ export class CacheFirstLoop {
       }
     }
     this._turn++;
-    // Per-turn workspace snapshot: a rewind must revert shell-modified files
-    // too, not just file-tool edits. Workspace-scoped (ignores VCS/build dirs,
-    // gitignores, binaries, oversized). Incremental via mtime+size; restore
-    // reconstructs the checkpoint chain. Runs BEFORE the user message.
+    // Per-turn workspace snapshot: rewind must revert shell-modified files
+    // too, not just file-tool edits. Full coverage of rootDir (except
+    // .git/.reasonix), incremental via mtime+size; restore reconstructs.
     if (this._rootDir) {
       const userTurnIndex = this._userTurnCount;
       try {
@@ -855,10 +895,10 @@ export class CacheFirstLoop {
           name: `auto-turn-${userTurnIndex}`,
           source: "auto-session-start",
           paths,
-          skipBinary: true,
           skipUnreadable: true,
         });
         this._turnCheckpoints.set(userTurnIndex, meta.id);
+        this.evictOldSnapshots();
       } catch {
         // Snapshot failure shouldn't block the turn.
       }

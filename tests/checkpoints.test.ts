@@ -11,6 +11,7 @@ import {
   fmtAgo,
   listCheckpoints,
   loadCheckpoint,
+  mergeCheckpointInto,
   restoreCheckpoint,
 } from "../src/code/checkpoints.js";
 
@@ -96,6 +97,27 @@ describe("createCheckpoint", () => {
     const items = listCheckpoints(workspace);
     expect(items).toHaveLength(2);
     expect(items.map((m) => m.name)).toEqual(["one", "two"]);
+  });
+
+  it("mergeCheckpointInto folds src into dst (dst wins) and deletes src", () => {
+    writeFileSync(join(workspace, "a.txt"), "v1");
+    writeFileSync(join(workspace, "b.txt"), "x");
+    const src = createCheckpoint({ rootDir: workspace, name: "old", paths: ["a.txt", "b.txt"] });
+    writeFileSync(join(workspace, "a.txt"), "v2");
+    const dst = createCheckpoint({ rootDir: workspace, name: "new", paths: ["a.txt"] });
+
+    expect(mergeCheckpointInto(workspace, src.id, dst.id)).toBe(true);
+
+    const merged = loadCheckpoint(workspace, dst.id);
+    expect(merged!.files).toEqual([
+      { path: "a.txt", content: "v2", mtimeMs: expect.any(Number), size: expect.any(Number) },
+      { path: "b.txt", content: "x", mtimeMs: expect.any(Number), size: expect.any(Number) },
+    ]);
+    expect(merged!.bytes).toBe(3); // "v2" + "x"
+    expect(loadCheckpoint(workspace, src.id)).toBeNull();
+    const meta = listCheckpoints(workspace).find((m) => m.id === dst.id);
+    expect(meta?.fileCount).toBe(2);
+    expect(meta?.bytes).toBe(3);
   });
 });
 

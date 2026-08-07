@@ -2138,6 +2138,14 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   padding: 10px 14px;
 }
 
+/* Snapshot evicted (retention window) — rewind unavailable, dim the bubble. */
+.msg.user.grayed .body {
+  opacity: 0.45;
+}
+.msg.user.grayed .rewind-btn {
+  opacity: 0.35;
+}
+
 .msg-text {
   font-size: 14px;
   line-height: 1.72;

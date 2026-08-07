@@ -24,6 +24,8 @@ export interface CheckpointFile {
   /** mtime + size at snapshot time — incremental turn snapshots skip unchanged files. */
   mtimeMs?: number;
   size?: number;
+  /** Set when content is base64-encoded binary (NUL-sniffed at snapshot). */
+  encoding?: "base64";
 }
 
 export interface Checkpoint {
@@ -102,13 +104,31 @@ export function loadCheckpoint(rootDir: string, id: string): Checkpoint | null {
   );
 }
 
+/** Fold `srcId` into `dstId` (dst wins on overlap — it's newer), then delete
+ *  srcId. Evicted turn snapshots merge into the survivor so reconstruction
+ *  stays self-sufficient. */
+export function mergeCheckpointInto(rootDir: string, srcId: string, dstId: string): boolean {
+  const src = loadCheckpoint(rootDir, srcId);
+  const dst = loadCheckpoint(rootDir, dstId);
+  if (!src || !dst) return false;
+  const byPath = new Map<string, CheckpointFile>();
+  for (const f of src.files) byPath.set(f.path, f);
+  for (const f of dst.files) byPath.set(f.path, f);
+  const files = [...byPath.values()];
+  let bytes = 0;
+  for (const f of files) bytes += f.content?.length ?? 0;
+  writeFileSync(snapshotPath(rootDir, dstId), JSON.stringify({ ...dst, files, bytes }), "utf8");
+  const items = listCheckpoints(rootDir);
+  const next = items.map((m) => (m.id === dstId ? { ...m, fileCount: files.length, bytes } : m));
+  if (next.length === items.length) writeIndex(rootDir, next);
+  return deleteCheckpoint(rootDir, srcId);
+}
+
 export interface CreateCheckpointOptions {
   rootDir: string;
   name: string;
   source?: Checkpoint["source"];
   paths: readonly string[];
-  /** Skip binary files (\0 sniff) — restore would corrupt or delete them. */
-  skipBinary?: boolean;
   /** Skip existing-but-unreadable files instead of recording null — restore would DELETE them. */
   skipUnreadable?: boolean;
 }
@@ -136,8 +156,23 @@ export function createCheckpoint(opts: CreateCheckpointOptions): CheckpointMeta 
     try {
       const st = statSync(abs);
       const buf = readFileSync(abs);
-      if (opts.skipBinary === true && buf.includes(0)) continue;
-      files.push({ path: rel, content: buf.toString("utf8"), mtimeMs: st.mtimeMs, size: st.size });
+      if (buf.includes(0)) {
+        // Binary — store base64 so restore round-trips exact bytes.
+        files.push({
+          path: rel,
+          content: buf.toString("base64"),
+          encoding: "base64",
+          mtimeMs: st.mtimeMs,
+          size: st.size,
+        });
+      } else {
+        files.push({
+          path: rel,
+          content: buf.toString("utf8"),
+          mtimeMs: st.mtimeMs,
+          size: st.size,
+        });
+      }
       bytes += buf.length;
     } catch {
       if (opts.skipUnreadable === true) continue;
@@ -214,7 +249,7 @@ export function restoreCheckpoint(rootDir: string, id: string): RestoreResult {
         }
       } else {
         mkdirSync(dirname(abs), { recursive: true });
-        writeFileSync(abs, f.content, "utf8");
+        writeFileSync(abs, f.encoding === "base64" ? Buffer.from(f.content, "base64") : f.content);
         result.restored.push(f.path);
       }
     } catch (err) {
@@ -224,16 +259,18 @@ export function restoreCheckpoint(rootDir: string, id: string): RestoreResult {
   return result;
 }
 
-/** Cap on files collected per turn snapshot. */
-export const WORKSPACE_SNAPSHOT_MAX_FILES = 5000;
-/** Per-file cap — larger files are never recorded (rewind leaves them alone). */
-export const WORKSPACE_SNAPSHOT_MAX_FILE_BYTES = 1024 * 1024;
+/** Safety valve on files collected per turn snapshot. */
+export const WORKSPACE_SNAPSHOT_MAX_FILES = 1_000_000;
+/** Per-file safety valve — larger files are never recorded (rewind leaves them alone). */
+export const WORKSPACE_SNAPSHOT_MAX_FILE_BYTES = 64 * 1024 * 1024;
 /** Total content cap per snapshot. */
-export const WORKSPACE_SNAPSHOT_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+export const WORKSPACE_SNAPSHOT_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+/** Dir names skipped even in full-coverage mode (VCS internals, app-private state). */
+export const WORKSPACE_SNAPSHOT_SKIP_DIRS: readonly string[] = [".git", ".reasonix"];
 
-/** Collect workspace-relative paths for a turn snapshot: walker-filtered
- *  (VCS/build dirs, gitignores, symlinks, size caps) and incremental — files
- *  with unchanged mtime+size are skipped. `extra` paths always included. */
+/** Collect workspace-relative paths for a turn snapshot — full coverage: every
+ *  regular file under rootDir except .git/.reasonix and symlinks, bounded by
+ *  the safety valves below. Incremental: unchanged mtime+size files skipped. */
 export function collectWorkspaceSnapshotPaths(
   rootDir: string,
   opts?: { prev?: Checkpoint | null; extra?: readonly string[] },
@@ -245,7 +282,12 @@ export function collectWorkspaceSnapshotPaths(
   const out: string[] = [];
   const seen = new Set<string>();
   let total = 0;
-  for (const f of listFilesWithStatsSync(rootDir, { maxResults: WORKSPACE_SNAPSHOT_MAX_FILES })) {
+  for (const f of listFilesWithStatsSync(rootDir, {
+    maxResults: WORKSPACE_SNAPSHOT_MAX_FILES,
+    respectGitignore: false,
+    ignoreDirs: WORKSPACE_SNAPSHOT_SKIP_DIRS,
+    includeDotDirs: true,
+  })) {
     if (seen.has(f.path)) continue;
     const abs = join(resolve(rootDir), f.path);
     let st: Stats;
@@ -319,7 +361,7 @@ export function reconstructWorkspaceTo(
         }
       } else {
         mkdirSync(dirname(abs), { recursive: true });
-        writeFileSync(abs, f.content, "utf8");
+        writeFileSync(abs, f.encoding === "base64" ? Buffer.from(f.content, "base64") : f.content);
         result.restored.push(path);
       }
     } catch (err) {

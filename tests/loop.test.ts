@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient, Usage } from "../src/client.js";
-import { createCheckpoint } from "../src/code/checkpoints.js";
+import { WORKSPACE_SNAPSHOT_MAX_FILE_BYTES, createCheckpoint } from "../src/code/checkpoints.js";
 import {
   HISTORY_FOLD_AGGRESSIVE_THRESHOLD,
   HISTORY_FOLD_THRESHOLD,
@@ -2933,15 +2933,16 @@ describe("CacheFirstLoop — per-turn file snapshots", () => {
     expect(existsSync(join(workspace, "c.txt"))).toBe(true);
   });
 
-  it("rewind never touches binary or oversized files", async () => {
-    const bin = Buffer.concat([
+  it("rewind reverts binary files byte-for-byte and leaves oversized ones", async () => {
+    const bin1 = Buffer.concat([
       Buffer.from("PK"),
       Buffer.from([0, 1, 0, 255]),
       Buffer.from("tail"),
     ]);
-    writeFileSync(join(workspace, "bin.dat"), bin);
-    const huge = "x".repeat(2 * 1024 * 1024);
-    writeFileSync(join(workspace, "huge.txt"), huge);
+    writeFileSync(join(workspace, "bin.dat"), bin1);
+    // Over the per-file safety valve — never recorded, never touched.
+    const huge = "x".repeat(WORKSPACE_SNAPSHOT_MAX_FILE_BYTES + 1);
+    writeFileSync(join(workspace, "huge.bin"), huge);
 
     const client = makeClient([{ content: "done" }, { content: "done again" }]);
     const tools = makeTools(workspace);
@@ -2957,14 +2958,84 @@ describe("CacheFirstLoop — per-turn file snapshots", () => {
     // Simulate shell overwrites between turns.
     const bin2 = Buffer.concat([Buffer.from("PK2"), Buffer.from([0, 9]), Buffer.from("more")]);
     writeFileSync(join(workspace, "bin.dat"), bin2);
-    writeFileSync(join(workspace, "huge.txt"), "y".repeat(2 * 1024 * 1024));
+    writeFileSync(join(workspace, "huge.bin"), "y".repeat(WORKSPACE_SNAPSHOT_MAX_FILE_BYTES + 1));
     await loop.run("next");
 
-    // Neither file was snapshotted (binary / over the per-file cap), so the
-    // rewind must leave them untouched — never deleted, never corrupted.
     loop.rewindToUserTurn(0);
-    expect(readFileSync(join(workspace, "bin.dat")).equals(bin2)).toBe(true);
-    expect(readFileSync(join(workspace, "huge.txt"), "utf8")).toBe("y".repeat(2 * 1024 * 1024));
+    // Binary content is snapshotted base64 — reverted to its original bytes.
+    expect(readFileSync(join(workspace, "bin.dat")).equals(bin1)).toBe(true);
+    // Over the per-file safety valve — rewind leaves it alone.
+    expect(readFileSync(join(workspace, "huge.bin"), "utf8")).toBe(
+      "y".repeat(WORKSPACE_SNAPSHOT_MAX_FILE_BYTES + 1),
+    );
+  });
+
+  it("snapshots ignored and dot directories but never .git or .reasonix", async () => {
+    const client = makeClient([{ content: "done" }, { content: "done again" }]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    loop.setRootDir(workspace);
+
+    // dist/ (default-ignored walker dir) and .config/ (dot-dir) must be
+    // snapshotted; .git/ and .reasonix/ (app-private) must not.
+    mkdirSync(join(workspace, "dist"), { recursive: true });
+    mkdirSync(join(workspace, ".config"), { recursive: true });
+    mkdirSync(join(workspace, ".git"), { recursive: true });
+    mkdirSync(join(workspace, ".reasonix"), { recursive: true });
+    writeFileSync(join(workspace, "dist", "out.txt"), "v1");
+    writeFileSync(join(workspace, ".config", "settings.txt"), "s1");
+    writeFileSync(join(workspace, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(join(workspace, ".reasonix", "note.txt"), "n1");
+
+    await loop.run("next");
+    // Simulate shell overwrites between turns.
+    writeFileSync(join(workspace, "dist", "out.txt"), "v2");
+    writeFileSync(join(workspace, ".config", "settings.txt"), "s2");
+    writeFileSync(join(workspace, ".git", "HEAD"), "ref: refs/heads/other\n");
+    writeFileSync(join(workspace, ".reasonix", "note.txt"), "n2");
+    await loop.run("next");
+
+    loop.rewindToUserTurn(0);
+    // Ignored/dot-dir files are part of the full-coverage snapshot.
+    expect(readFileSync(join(workspace, "dist", "out.txt"), "utf8")).toBe("v1");
+    expect(readFileSync(join(workspace, ".config", "settings.txt"), "utf8")).toBe("s1");
+    // .git and .reasonix were never snapshotted — their state is untouched.
+    expect(readFileSync(join(workspace, ".git", "HEAD"), "utf8")).toBe("ref: refs/heads/other\n");
+    expect(readFileSync(join(workspace, ".reasonix", "note.txt"), "utf8")).toBe("n2");
+  });
+
+  it("retains only the 2 most recent turn snapshots; older rewinds are refused", async () => {
+    // a.txt exists BEFORE the first turn so early snapshots record it.
+    writeFileSync(join(workspace, "a.txt"), "v1");
+    const client = makeClient([{ content: "done" }, { content: "done" }, { content: "done" }]);
+    const tools = makeTools(workspace);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+    loop.setRootDir(workspace);
+
+    await loop.run("next"); // turn 0 — snapshot 0 = {a.txt v1}
+    await loop.run("next"); // turn 1 — snapshot 1 = {}
+    await loop.run("next"); // turn 2 — snapshot 2 = {}; snapshot 0 evicted → folded into 1
+
+    // Window = the retained snapshots: turns 1-2 only.
+    expect(loop.rewindWindow()).toEqual({ min: 1, max: 2 });
+    // Turn 0's snapshot was evicted — rewinding there is refused.
+    expect(loop.rewindToUserTurn(0)).toBeNull();
+
+    // Simulate a shell overwrite AFTER the last snapshot: rewind to turn 1
+    // must restore v1 — the evicted snapshot 0 was folded into checkpoint 1.
+    writeFileSync(join(workspace, "a.txt"), "v3");
+    loop.rewindToUserTurn(1);
+    expect(readFileSync(join(workspace, "a.txt"), "utf8")).toBe("v1");
   });
 
   it("clearLog resets touched-files tracking", async () => {

@@ -87,6 +87,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     activeSkill: null,
     queuedSends: [],
     retryNonce: 0,
+    rewindWindow: null,
   };
 }
 
@@ -457,6 +458,19 @@ describe("Desktop App reducer — rewind", () => {
     });
     expect(next.messages.map((m) => ("turn" in m ? m.turn : 0))).toEqual([1, 1, 2]);
     expect(next.retryText).toBe("u3");
+  });
+
+  it("stores the retained rewind window and nulls it when snapshots are gone", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: { type: "$rewind_window", window: { min: 1, max: 2 } },
+    });
+    expect(next.rewindWindow).toEqual({ min: 1, max: 2 });
+    const cleared = reduce(next, {
+      t: "incoming",
+      event: { type: "$rewind_window", window: null },
+    });
+    expect(cleared.rewindWindow).toBeNull();
   });
 });
 

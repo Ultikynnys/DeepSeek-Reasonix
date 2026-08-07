@@ -791,6 +791,7 @@ export const de: typeof en = {
     checkpointSub: "Checkpoint · {completed} / {total}",
     continue: "Fortsetzen",
     stop: "Stopp",
+    rewindUnavailable: "Snapshot gelöscht — Zurückspulen nicht verfügbar",
     revise: "Überarbeiten",
     planRevisionKind: "Plan-Überarbeitung",
     rewritePlan: "Plan umschreiben",

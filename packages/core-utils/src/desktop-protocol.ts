@@ -241,6 +241,13 @@ export type BtwResultEvent = { type: "$btw_result"; question: string; answer: st
  *  into the composer so the user can re-send it. */
 export type RewindResultEvent = { type: "$rewind_result"; turn: number; text: string };
 
+/** The user-turn range whose turn snapshots are retained (rewind targets).
+ *  `null` when no snapshots exist (fresh session, or reload before the first
+ *  turn) — nothing is rewindable. Messages outside the window gray out; their
+ *  snapshots were cleared to bound storage. */
+export type RewindWindow = { min: number; max: number };
+export type RewindWindowEvent = { type: "$rewind_window"; window: RewindWindow | null };
+
 export interface JobInfo {
   id: number;
   tabId: string;
