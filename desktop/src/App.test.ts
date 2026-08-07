@@ -435,6 +435,29 @@ describe("Desktop App reducer — rewind", () => {
     expect(next.retryText).toBe("q3");
     expect(next.retryNonce).toBe(1);
   });
+
+  it("cuts at the clicked user message by position even after turns were renumbered", () => {
+    // Post-/compact shape: assistant turns are dense counts (summary=1,
+    // a2=2) that no longer line up with user turns (u2=1, u3=3). A turn-based
+    // filter ("turn <= ev.turn") would keep the wrong messages here.
+    const state = {
+      ...initialState(),
+      messages: [
+        { kind: "assistant" as const, turn: 1, segments: [], pending: false },
+        { kind: "user" as const, text: "u2", clientId: "2", turn: 1 },
+        { kind: "assistant" as const, turn: 2, segments: [], pending: false },
+        { kind: "user" as const, text: "u3", clientId: "3", turn: 3 },
+        { kind: "assistant" as const, turn: 6, segments: [], pending: false },
+      ],
+    };
+    // ev.turn is the 0-based user index the UI sent (2nd user message, u3).
+    const next = reduce(state, {
+      t: "incoming",
+      event: { type: "$rewind_result", turn: 1, text: "u3" },
+    });
+    expect(next.messages.map((m) => ("turn" in m ? m.turn : 0))).toEqual([1, 1, 2]);
+    expect(next.retryText).toBe("u3");
+  });
 });
 
 describe("desktop thread layout", () => {

@@ -42,16 +42,17 @@ export const UserMsg = memo(function UserMsg({
   text,
   time,
   skill,
-  turn,
+  userIndex,
   disabled,
   onRewind,
 }: {
   text: string;
   time?: string;
   skill?: SkillOrigin;
-  turn?: number;
+  /** 0-based position among user messages — what the backend expects for rewind. */
+  userIndex: number;
   disabled?: boolean;
-  onRewind?: (turn: number, text: string) => void;
+  onRewind?: (userIndex: number, text: string) => void;
 }) {
   useLang();
   const [copied, setCopied] = useState(false);
@@ -87,7 +88,7 @@ export const UserMsg = memo(function UserMsg({
               type="button"
               className="rewind-btn"
               disabled={disabled}
-              onClick={() => onRewind(turn!, text)}
+              onClick={() => onRewind(userIndex, text)}
               title={t("cards.checkpointRewind")}
             >
               <I.rotate size={11} />

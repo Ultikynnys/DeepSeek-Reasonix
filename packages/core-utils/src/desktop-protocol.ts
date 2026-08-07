@@ -235,6 +235,10 @@ export type RetryResultEvent = { type: "$retry_result"; text: string };
 
 export type BtwResultEvent = { type: "$btw_result"; question: string; answer: string };
 
+/** Reply to a rewind RPC. `turn` is the 0-based index of the user message the
+ *  log was truncated before — the index the UI sent, so the UI can cut its
+ *  thread at the clicked message. `text` is that message's content, prefilled
+ *  into the composer so the user can re-send it. */
 export type RewindResultEvent = { type: "$rewind_result"; turn: number; text: string };
 
 export interface JobInfo {

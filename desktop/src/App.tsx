@@ -439,6 +439,18 @@ function nextMessageTurn(messages: ChatMessage[]): number {
   return lastTurn + 1;
 }
 
+/** 0-based position of the message at `index` among the user messages — the
+ *  index the backend expects for rewind (it counts user entries in the log).
+ *  Counted from the list, not derived from turn numbers: after a /compact
+ *  swap, assistant turns are dense counts that can drift from user turns. */
+function userMessageIndex(messages: ChatMessage[], index: number): number {
+  let n = 0;
+  for (let i = 0; i < index; i++) {
+    if (messages[i]?.kind === "user") n += 1;
+  }
+  return n;
+}
+
 let _errSeq = 0;
 function nextErrorId(): string {
   _errSeq += 1;
@@ -758,9 +770,15 @@ function pruneSessionFiles(existing: SessionFile[], dropped: readonly string[]):
  *  Shared by $session_loaded and session.compacted — both carry the same wire
  *  shape, so the live fold replacement and a session reload render identically. */
 function mapLoadedMessages(loaded: LoadedMessage[]): ChatMessage[] {
+  // User turns are counted by user-message position (1-based), matching live
+  // numbering. List index i+1 would drift: the loaded list interleaves
+  // assistant messages, so the 2nd user message would render as turn 3 and
+  // rewind's index mapping (turn - 1) would point past the log's user entries.
+  let userTurn = 0;
   return loaded.map((m, i) => {
     if (m.kind === "user") {
-      return { kind: "user", text: m.text, clientId: `c-loaded-${i}`, turn: i + 1 };
+      userTurn += 1;
+      return { kind: "user", text: m.text, clientId: `c-loaded-${i}`, turn: userTurn };
     }
     const segments: AssistantSegment[] = m.segments.map((s) => {
       if (s.kind === "tool") {
@@ -1390,13 +1408,30 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     }
     case "$retry_result":
       return { ...state, retryText: ev.text, retryNonce: state.retryNonce + 1 };
-    case "$rewind_result":
+    case "$rewind_result": {
+      // The backend truncated the log to before the (ev.turn+1)-th user
+      // message — the 0-based index this tab sent. Mirror it by cutting the
+      // thread at that message: list order mirrors log order, so the prefix
+      // survives exactly. Position cut, not turn comparison: after a /compact
+      // swap, assistant turns are dense counts that no longer line up with
+      // user turns, so "turn <= ev.turn" would keep/drop the wrong messages.
+      let seen = 0;
+      let cut = state.messages.length;
+      for (const [i, m] of state.messages.entries()) {
+        if (m.kind !== "user") continue;
+        if (seen === ev.turn) {
+          cut = i;
+          break;
+        }
+        seen++;
+      }
       return {
         ...state,
-        messages: state.messages.filter((m) => "turn" in m && m.turn <= ev.turn),
+        messages: state.messages.slice(0, cut),
         retryText: ev.text,
         retryNonce: state.retryNonce + 1,
       };
+    }
     case "$btw_result":
       return {
         ...state,
@@ -1902,12 +1937,12 @@ function TabRuntime({
   }, [state.retryNonce]);
 
   const onRewindUserMsg = useCallback(
-    (turn: number, text: string) => {
+    (userIndex: number, text: string) => {
       // Rewinding mid-stream would truncate the log under a running turn.
       if (state.busy) return;
       setDraft(text);
       composerRef.current?.focus();
-      sendRpc({ cmd: "rewind", userTurn: turn - 1 });
+      sendRpc({ cmd: "rewind", userTurn: userIndex });
     },
     [sendRpc, state.busy],
   );
@@ -2518,7 +2553,7 @@ function TabRuntime({
                           <UserMsg
                             text={m.text}
                             skill={m.skill}
-                            turn={m.turn}
+                            userIndex={userMessageIndex(state.messages, i)}
                             disabled={state.busy}
                             onRewind={onRewindUserMsg}
                           />
