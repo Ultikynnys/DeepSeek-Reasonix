@@ -555,12 +555,23 @@ async function emitBalance(tab: Tab): Promise<void> {
   );
 }
 
-/** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs
- *  only (the endpoint needs the OAuth token); null → UI hides the chip. */
+/** Last API-reported weekly usage — delta to the next fetch = credits consumed since (each $turn_complete refetches). */
+let lastCodexQuotaUsed: number | null = null;
+
+/** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only; `turnCost` = API-reported credits delta since the previous fetch. */
 async function emitCodexQuota(tab: Tab): Promise<void> {
   if (providerForModel(tab.currentModel) !== "openai") return;
   const quota = await fetchCodexQuota().catch(() => null);
-  emit({ type: "$codex_quota", quota }, tab.id);
+  if (quota) {
+    let turnCost: number | null = null;
+    if (lastCodexQuotaUsed !== null && quota.used >= lastCodexQuotaUsed) {
+      turnCost = quota.used - lastCodexQuotaUsed;
+    }
+    lastCodexQuotaUsed = quota.used;
+    emit({ type: "$codex_quota", quota: { ...quota, turnCost } }, tab.id);
+    return;
+  }
+  emit({ type: "$codex_quota", quota: null }, tab.id);
 }
 
 function emitSessions(tab: Tab): void {

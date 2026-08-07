@@ -408,6 +408,10 @@ export interface CodexQuota {
   usedPct: number;
   /** Unit the backend reports (typically "credits"). */
   currency?: string;
+  /** Credits consumed since the previous measurement (fetches fire on every
+   *  $turn_complete). Null until a second measurement exists — first fetch,
+   *  weekly rollover, or a failed fetch. Pure API numbers, no cost conversion. */
+  turnCost?: number | null;
   fetchedAt: number;
 }
 

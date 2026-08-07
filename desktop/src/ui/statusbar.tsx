@@ -103,6 +103,14 @@ export function StatusBar({
   if (authFailed) apiTitle += `\n${t("statusbar.oauthFailed", { message: oauthFlowError })}`;
   const dotDanger = connState === "off" || authFailed;
   const dotWarn = !dotDanger && openaiAuth === "none";
+  // OpenAI tabs swap the balance / $ display for the API-reported weekly
+  // Codex quota: % + credits left, and this turn's cost as % of the weekly
+  // limit (delta between fetches — OpenAI reports no dollar amounts).
+  const quota = codexQuota && settings?.model.startsWith("gpt-5.6") ? codexQuota : null;
+  const showQuota = !!quota && quota.limit > 0;
+  const quotaCurrency = quota?.currency ?? t("statusbar.codexCredits");
+  const quotaLeft = showQuota ? Math.max(0, quota.limit - quota.used) : 0;
+  const quotaLeftPct = showQuota ? Math.max(0, 100 - quota.usedPct) : 0;
   const [themeOpen, setThemeOpen] = useState(false);
   const themePopRef = useRef<HTMLDivElement | null>(null);
   const themeButtonRef = useRef<HTMLSpanElement | null>(null);
@@ -145,13 +153,35 @@ export function StatusBar({
         <span>{t("statusbar.tokens")}</span>
         <span className="v">{tokenLabel(totalTokens)}</span>
       </span>
-      <span className="seg">
+      <span
+        className="seg"
+        title={
+          showQuota && quota.turnCost != null
+            ? t("statusbar.thisTurnQuotaTitle", {
+                pct: ((quota.turnCost / quota.limit) * 100).toFixed(1),
+                credits: quota.turnCost.toFixed(2),
+                currency: quotaCurrency,
+              })
+            : undefined
+        }
+      >
         <I.coin size={11} />
         <span>{t("statusbar.thisTurn")}</span>
-        <span className="v ok">
-          {spent}
-          <span className="conv">{`(${spentOther})`}</span>
-        </span>
+        {showQuota ? (
+          quota.turnCost != null ? (
+            <>
+              <span className="v ok">{((quota.turnCost / quota.limit) * 100).toFixed(1)}%</span>
+              <span className="conv">{`${quota.turnCost.toFixed(2)} ${quotaCurrency}`}</span>
+            </>
+          ) : (
+            <span className="v ok">—</span>
+          )
+        ) : (
+          <span className="v ok">
+            {spent}
+            <span className="conv">{`(${spentOther})`}</span>
+          </span>
+        )}
       </span>
 
       <span className="grow" />
@@ -190,38 +220,42 @@ export function StatusBar({
         <span className="v vio">{settings?.model ?? "—"}</span>
         <span className="v">{settings?.reasoningEffort ?? "high"}</span>
       </span>
-      {settings?.model.startsWith("gpt-5.6") && codexQuota ? (
+      {showQuota ? (
         <span
           className="seg"
           title={t("statusbar.codexQuotaTitle", {
-            used: codexQuota.used,
-            limit: codexQuota.limit,
-            currency: codexQuota.currency ?? t("statusbar.codexCredits"),
+            left: Math.round(quotaLeft),
+            limit: Math.round(quota.limit),
+            currency: quotaCurrency,
           })}
           style={onRefreshCodexQuota ? { cursor: "pointer" } : undefined}
           onClick={onRefreshCodexQuota}
         >
           <I.coin size={11} style={{ color: "var(--accent)" }} />
           <span>{t("statusbar.codexQuota")}</span>
-          <span className="v acc">{Math.round(codexQuota.usedPct)}%</span>
-          <span className="conv">{`${codexQuota.used} / ${codexQuota.limit}`}</span>
+          <span className="v acc">
+            {Math.round(quotaLeftPct)}% {t("statusbar.codexLeft")}
+          </span>
+          <span className="conv">{`${Math.round(quotaLeft)} / ${Math.round(quota.limit)}`}</span>
         </span>
       ) : null}
-      <span
-        className="seg"
-        title={t("statusbar.switchCurrency")}
-        onClick={onToggleCurrency}
-      >
-        <I.coin size={11} />
-        <span>{t("statusbar.balance")}</span>
-        <span className="v ok">
-          {balance && balance.infos.length > 0
-            ? balance.infos
-                .map((info) => `${info.currency === "USD" ? "$" : "¥"} ${info.total.toFixed(2)}`)
-                .join(" / ")
-            : balanceLabel}
+      {!showQuota ? (
+        <span
+          className="seg"
+          title={t("statusbar.switchCurrency")}
+          onClick={onToggleCurrency}
+        >
+          <I.coin size={11} />
+          <span>{t("statusbar.balance")}</span>
+          <span className="v ok">
+            {balance && balance.infos.length > 0
+              ? balance.infos
+                  .map((info) => `${info.currency === "USD" ? "$" : "¥"} ${info.total.toFixed(2)}`)
+                  .join(" / ")
+              : balanceLabel}
+          </span>
         </span>
-      </span>
+      ) : null}
       <span
         ref={themeButtonRef}
         className={`seg theme-trigger ${themeOpen ? "active" : ""}`}
