@@ -346,6 +346,7 @@ export type IncomingEvent = { tabId?: string } & (
   | BtwResultEvent
   | RewindResultEvent
   | RewindWindowEvent
+  | { type: "oauth_begin_result"; url: string }
 );
 
 /** Send one command to the desktop backend over the Tauri JSON-RPC bridge. */

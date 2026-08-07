@@ -37,7 +37,7 @@
 <br/>
 
 > [!TIP]
-> **Cache stability isn't a feature you turn on; it's an invariant the loop is designed around.** That's the whole reason Reasonix is DeepSeek-only — every layer is tuned to the byte-stable prefix-cache mechanic.
+> **Cache stability isn't a feature you turn on; it's an invariant the loop is designed around.** Every layer is tuned to the byte-stable prefix-cache mechanic — DeepSeek stays the default and best-cached backend. The OpenAI GPT-5.6 family (Sol / Terra / Luna) is supported as an option; see [Models](#models).
 
 > [!NOTE]
 > **Real user, single day (2026-05-01):** 435M input tokens, **99.82% cache hit**, ~$12 instead of the ~$61 the same workload would cost with no cache on `v4-flash`. DeepSeek provides the cacheable bytes; the four mechanisms in [Pillar 1](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) are how Reasonix keeps them cacheable across long sessions.
@@ -104,6 +104,17 @@ One JSON file at `~/.reasonix/config.json` plus per-project overrides under `<pr
 
 <br/>
 
+### Models
+
+DeepSeek is the default backend (`deepseek-v4-flash` / `deepseek-v4-pro`). The OpenAI **GPT-5.6 family** — Sol (flagship, alias `gpt-5.6`), Terra (balanced), Luna (fast / cheap) — is supported as a first-class alternative:
+
+- Pick a model with `--model` (CLI), the composer picker, or Settings → Models.
+- `gpt-*` ids route to `https://api.openai.com/v1` automatically and need `OPENAI_API_KEY` (optionally `OPENAI_BASE_URL` for proxies / Azure-compatible gateways); DeepSeek ids use `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (see `.env.example`).
+- All three tiers accept `reasoning_effort` `low|medium|high|xhigh|max` — the same `/effort` knob and Settings control DeepSeek uses, with `xhigh` and `max` as the extra-deep tiers.
+- Skills run subagents on `deepseek-v4-flash` by default; set `model: gpt-5.6-sol` in a skill's frontmatter to run its subagent on OpenAI (needs an OpenAI key).
+
+<br/>
+
 ## What makes Reasonix different
 
 The loop is organized around three pillars. Each one solves a problem generic agent frameworks don't even see — because they were designed for a different cache mechanic.
@@ -128,7 +139,7 @@ Click through to the full architecture writeup → [Pillar 1 — Cache-first loo
 
 |                                   | Reasonix         | Claude Code       | Cursor              | Aider              |
 |-----------------------------------|------------------|-------------------|---------------------|--------------------|
-| Backend                           | DeepSeek         | Anthropic         | OpenAI / Anthropic  | any (OpenRouter)   |
+| Backend                           | DeepSeek / GPT-5.6 | Anthropic         | OpenAI / Anthropic  | any (OpenRouter)   |
 | License                           | **MIT**          | closed            | closed              | Apache 2           |
 | Cost profile                      | **low per task** | premium           | subscription + use  | varies             |
 | DeepSeek prefix-cache             | **engineered**   | not applicable    | not applicable      | incidental         |

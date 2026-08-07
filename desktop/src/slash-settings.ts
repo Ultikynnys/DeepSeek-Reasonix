@@ -10,6 +10,7 @@ export const SLASH_REASONING_EFFORTS = [
   "low",
   "medium",
   "high",
+  "xhigh",
   "max",
 ] as const satisfies readonly ReasoningEffort[];
 

@@ -205,13 +205,13 @@ export const EN: TranslationSchema = {
     budgetHint: "session USD cap — warns at 80%, refuses next turn at 100%",
     modelIdHint: "DeepSeek model id (e.g. deepseek-v4-flash)",
     systemPromptHint: "override the default system prompt",
-    effortHint: "reasoning effort — low|medium|high|max",
+    effortHint: "reasoning effort — low|medium|high|xhigh|max",
     sessionNameHint: "session name (default: 'default')",
     ephemeralHint: "disable session persistence for this run",
     mcpSpecHint: "MCP server spec (repeatable)",
     mcpPrefixHint: "prefix MCP tool names with this string",
     noConfigHint: "ignore ~/.reasonix/config.json for this run",
-    effortHintShort: "reasoning effort — low|medium|high|max",
+    effortHintShort: "reasoning effort — low|medium|high|xhigh|max",
     budgetHintShort: "session USD cap",
     transcriptHintShort: "JSONL transcript path",
     mcpSpecHintShort: "MCP server spec (repeatable)",
@@ -268,8 +268,8 @@ export const EN: TranslationSchema = {
     status: { description: "current model, flags, context, session" },
     effort: {
       description:
-        "reasoning_effort cap (low|medium|high|max); high is the safe default for vLLM/Azure",
-      argsHint: "<low|medium|high|max>",
+        "reasoning_effort cap (low|medium|high|xhigh|max); high is the safe default for vLLM/Azure",
+      argsHint: "<low|medium|high|xhigh|max>",
     },
     model: { description: "switch DeepSeek model id", argsHint: "<id>" },
     models: { description: "list available models fetched from DeepSeek /models" },
@@ -954,7 +954,7 @@ export const EN: TranslationSchema = {
       modelSet: "model → {id}",
       effortStatus: "effort → {current}   (pick: {list})",
       effortUsage:
-        "usage: /effort <{list}>   (high is the safe default; max is a DeepSeek extension)",
+        "usage: /effort <{list}>   (high is the safe default; max is a DeepSeek/GPT-5.6 extension)",
       effortUsageNoMax: "usage: /effort <{list}>",
       effortSet: "effort → {effort}",
       budgetNoCap:
@@ -1460,7 +1460,8 @@ export const EN: TranslationSchema = {
       low: "fastest \u2014 minimal reasoning",
       medium: "balanced",
       high: "default \u2014 safe for vLLM / Azure",
-      max: "DeepSeek extension; rejected by stock OpenAI / vLLM",
+      xhigh: "between high and max (GPT-5.6 family)",
+      max: "deepest reasoning (DeepSeek, GPT-5.6 Sol)",
     },
     pickerFooter:
       "  \u2191\u2193 pick  \u00b7  \u23ce confirm  \u00b7  [r] refresh  \u00b7  esc cancel",

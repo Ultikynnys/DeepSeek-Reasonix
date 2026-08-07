@@ -15,6 +15,7 @@ import {
   flattenText,
   isFilePathTool,
   parseFilesDroppedMarker,
+  type ReasoningEffort,
 } from "@reasonix/core-utils";
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
@@ -275,7 +276,7 @@ export type SessionInfo = {
 };
 
 export type Settings = {
-  reasoningEffort: "low" | "medium" | "high" | "max";
+  reasoningEffort: ReasoningEffort;
   editMode: "review" | "auto" | "yolo" | "plan";
   budgetUsd: number | null;
   baseUrl?: string;
@@ -296,6 +297,7 @@ export type Settings = {
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
+  openaiOAuth?: { signedIn: boolean; account?: string };
   version: string;
 };
 
@@ -363,6 +365,8 @@ type State = {
   /** Populated by $retry_result — component useEffect reads and sets composer draft. */
   retryText?: string;
   retryNonce: number;
+  /** True between oauth_begin_result and the flow's terminal state — settings card spinner. */
+  oauthWaiting: boolean;
 };
 
 export type SessionFile = {
@@ -400,6 +404,7 @@ type Action =
   | { t: "dequeue_send"; index: number }
   | { t: "shift_queued_send" }
   | { t: "settings_patch"; patch: SettingsPatch }
+  | { t: "oauth_waiting"; waiting: boolean }
   | { t: "push_status"; text: string };
 
 function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
@@ -499,6 +504,8 @@ export function reduce(state: State, action: Action): State {
       return state.settings
         ? { ...state, settings: { ...state.settings, ...sanitizeSettingsPatch(action.patch) } }
         : state;
+    case "oauth_waiting":
+      return { ...state, oauthWaiting: action.waiting };
     case "batch_delta": {
       const collapsed: DeltaBatchItem[] = [];
       for (const item of action.items) {
@@ -1149,8 +1156,10 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           webSearchApiKeys: ev.webSearchApiKeys,
           subagentModels: ev.subagentModels,
           showSystemEvents: ev.showSystemEvents,
+          openaiOAuth: ev.openaiOAuth,
           version: ev.version,
         },
+        oauthWaiting: ev.openaiOAuth?.signedIn ? false : state.oauthWaiting,
       };
     }
     case "$session_loaded": {
@@ -1222,12 +1231,15 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ...state,
         busy: false,
         activeSkill: null,
+        oauthWaiting: ev.message.includes("OAuth") ? false : state.oauthWaiting,
         messages: [
           ...settled,
           { kind: "error", message: ev.message, id: nextErrorId(), recoverable },
         ],
       };
     }
+    case "oauth_begin_result":
+      return { ...state, oauthWaiting: true };
     case "model.turn.started":
       if (state.messages.some((m) => m.kind === "assistant" && m.turn === ev.turn)) {
         return { ...state, model: ev.model };
@@ -1646,6 +1658,7 @@ function TabRuntime({
     activeSkill: null,
     queuedSends: [],
     retryNonce: 0,
+    oauthWaiting: false,
     rewindWindow: null,
   });
   useLang();
@@ -2914,6 +2927,14 @@ function TabRuntime({
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
             onSaveApiKey={saveApiKey}
+            oauthWaiting={state.oauthWaiting}
+            onOAuthBegin={() => sendRpc({ cmd: "oauth_begin" })}
+            onOAuthCancel={() => {
+              dispatch({ t: "oauth_waiting", waiting: false });
+              sendRpc({ cmd: "oauth_cancel" });
+            }}
+            onOAuthSignOut={() => sendRpc({ cmd: "oauth_signout" })}
+            onSaveOpenAIApiKey={(key) => sendRpc({ cmd: "setup_save_openai_key", key })}
             onLoadQQ={loadQQSettings}
             onConnectQQ={connectQQ}
             onDisconnectQQ={disconnectQQ}
@@ -3934,6 +3955,13 @@ export function App() {
               setTabs((prev) =>
                 prev.map((t) => (t.id === tabId ? { ...t, workspaceDir: ev.workspaceDir } : t)),
               );
+            }
+
+            // Side effect only — the reducer tracks oauthWaiting from the same
+            // event (and clears it on $error with an OAuth message / signed-in
+            // $settings), so the event still falls through to deliverToTab.
+            if (ev.type === "oauth_begin_result") {
+              void openUrl(ev.url).catch((err) => console.error("openUrl failed", err));
             }
 
             if (ev.type === "$jobs") {

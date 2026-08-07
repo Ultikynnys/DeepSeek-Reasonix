@@ -24,8 +24,10 @@ export type ChoiceVerdict =
   | { type: "text"; text: string }
   | { type: "cancel" };
 
-/** Reasoning effort levels — shared between config, model calls, and desktop UI. */
-export type ReasoningEffort = "low" | "medium" | "high" | "max";
+/** Reasoning effort levels — shared between config, model calls, and desktop UI.
+ *  `xhigh` sits between `high` and `max` (GPT-5.6 family ladder). Endpoints that
+ *  don't accept a level reject the request — callers surface the 400 as-is. */
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 /** A choice option shown in the desktop picker — shared with the ask_choice tool. */
 export type ChoiceOption = {

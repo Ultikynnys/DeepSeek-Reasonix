@@ -31,16 +31,49 @@ export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
   "deepseek-v4-pro",
 ];
 
+/** GPT-5.6 family (Sol/Terra/Luna) — OpenAI's flagship series (2026-07 GA).
+ *  `gpt-5.6` is an alias for `gpt-5.6-sol`. All tiers accept
+ *  reasoning_effort none|low|medium|high|xhigh|max. */
+export const GPT56_MODELS: readonly string[] = [
+  "gpt-5.6",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+];
+
+/** Everything the default endpoints accept without a custom baseUrl, across providers. */
+export const SUPPORTED_MODELS: readonly string[] = [...SUPPORTED_OFFICIAL_MODELS, ...GPT56_MODELS];
+
+/** Which provider a model id routes to. `gpt-` prefixed ids → OpenAI, everything else → DeepSeek. */
+export type ModelProvider = "deepseek" | "openai";
+
+export function providerForModel(model: string | undefined | null): ModelProvider {
+  if (typeof model === "string" && model.startsWith("gpt-")) return "openai";
+  return "deepseek";
+}
+
 import type { EditMode, ReasoningEffort } from "@reasonix/core-utils";
 import { expandTilde } from "@reasonix/core-utils/expand-tilde";
 
 /** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates; plan blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch. */
 export type { EditMode, ReasoningEffort };
 
-export const REASONING_EFFORT_VALUES: readonly ReasoningEffort[] = ["low", "medium", "high", "max"];
+export const REASONING_EFFORT_VALUES: readonly ReasoningEffort[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 export function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return value === "low" || value === "medium" || value === "high" || value === "max";
+  return (
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh" ||
+    value === "max"
+  );
 }
 
 export type EngineeringLifecycleMode = "off" | "strict";
@@ -148,9 +181,23 @@ export interface ProxyConfig {
   bypassDeepSeekDirect?: boolean;
 }
 
+/** OpenAI website-account OAuth tokens — set by the settings "Sign in with OpenAI" flow. */
+export interface OpenAIOAuthCreds {
+  accessToken: string;
+  refreshToken: string;
+  /** ms epoch — OpenAI access tokens are short-lived; refreshed from refreshToken when within 5 min of expiry. */
+  expiresAt: number;
+  /** Account email from userinfo — shown masked in settings, never shipped over the bridge. */
+  account?: string;
+}
+
 export interface ReasonixConfig {
   apiKey?: string;
   baseUrl?: string;
+  /** Manual OpenAI API key for gpt-* models (falls back to OPENAI_API_KEY env). */
+  openaiApiKey?: string;
+  /** Set by the browser OAuth sign-in; auto-refreshed from refreshToken on expiry. */
+  openaiOAuth?: OpenAIOAuthCreds;
   lang?: LanguageCode;
   /** Persisted DeepSeek model id — `/model <id>` and the dashboard model picker write through this. */
   model?: string;
@@ -680,6 +727,31 @@ export function loadEndpoint(path: string = defaultConfigPath()): ResolvedEndpoi
   return { baseUrl: undefined, apiKey: process.env.DEEPSEEK_API_KEY ?? cfg.apiKey };
 }
 
+/** Endpoint tuple per model — GPT ids route to OpenAI (OPENAI_BASE_URL /
+ *  OPENAI_API_KEY, default https://api.openai.com/v1); the rest to DeepSeek.
+ *  Same tuple rule as loadEndpoint: the baseUrl owner defines apiKey too. */
+export function loadEndpointForModel(
+  model: string,
+  path: string = defaultConfigPath(),
+): ResolvedEndpoint {
+  if (providerForModel(model) === "openai") {
+    const envBaseUrl = process.env.OPENAI_BASE_URL?.trim();
+    if (envBaseUrl) return { baseUrl: envBaseUrl, apiKey: process.env.OPENAI_API_KEY };
+    const cfg = readConfig(path);
+    // Tuple rule mirrors loadEndpoint (#1631): a custom config baseUrl owns its
+    // key — a stale OPENAI_API_KEY env must not bleed into a custom gateway.
+    if (cfg.baseUrl) return { baseUrl: cfg.baseUrl, apiKey: cfg.openaiApiKey ?? cfg.apiKey };
+    // OAuth tokens are audience-locked to api.openai.com — never snapshot one
+    // here: the client's async resolver refreshes it per request
+    // (src/oauth.ts resolveOpenAIToken).
+    return {
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: process.env.OPENAI_API_KEY ?? cfg.openaiApiKey ?? cfg.apiKey,
+    };
+  }
+  return loadEndpoint(path);
+}
+
 export function loadApiKey(path: string = defaultConfigPath()): string | undefined {
   return loadEndpoint(path).apiKey;
 }
@@ -966,6 +1038,25 @@ export function saveApiKey(key: string, path: string = defaultConfigPath()): voi
   if (trimmed) process.env.DEEPSEEK_API_KEY = trimmed;
 }
 
+export function saveOpenAIApiKey(key: string, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.openaiApiKey = key.trim();
+  writeConfig(cfg, path);
+}
+
+export function saveOpenAIOAuth(creds: OpenAIOAuthCreds, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.openaiOAuth = creds;
+  writeConfig(cfg, path);
+}
+
+export function clearOpenAIOAuth(path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  if (!cfg.openaiOAuth) return;
+  const { openaiOAuth: _drop, ...rest } = cfg;
+  writeConfig(rest, path);
+}
+
 /** Windows: case-insensitive — NTFS treats `F:\Foo` and `f:\foo` as one directory (#402). */
 function findProjectKey(cfg: ReasonixConfig, rootDir: string): string | undefined {
   const projects = cfg.projects;
@@ -1209,19 +1300,19 @@ export function loadModel(path: string = defaultConfigPath()): string {
   // Custom-endpoint owners pick their own model namespace; trust them.
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
   if (customEndpoint) return trimmed;
-  return SUPPORTED_OFFICIAL_MODELS.includes(trimmed) ? trimmed : DEFAULT_MODEL;
+  return SUPPORTED_MODELS.includes(trimmed) ? trimmed : DEFAULT_MODEL;
 }
 
 export function saveModel(model: string, path: string = defaultConfigPath()): void {
   const trimmed = model.trim();
   if (!trimmed) return;
-  // On the official endpoint, refuse to persist a model the API won't accept.
+  // On the official endpoints, refuse to persist a model the API won't accept.
   // Custom-endpoint owners set their own namespace — validation is on them.
   const cfg = readConfig(path);
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
-  if (!customEndpoint && !SUPPORTED_OFFICIAL_MODELS.includes(trimmed)) {
+  if (!customEndpoint && !SUPPORTED_MODELS.includes(trimmed)) {
     throw new Error(
-      `Unsupported model "${trimmed}". Official endpoint only accepts: ${SUPPORTED_OFFICIAL_MODELS.join(", ")}. Set a custom baseUrl to use other models.`,
+      `Unsupported model "${trimmed}". Official endpoints only accept: ${SUPPORTED_MODELS.join(", ")}. Set a custom baseUrl to use other models.`,
     );
   }
   cfg.model = trimmed;

@@ -87,6 +87,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     activeSkill: null,
     queuedSends: [],
     retryNonce: 0,
+    oauthWaiting: false,
     rewindWindow: null,
   };
 }
@@ -972,5 +973,78 @@ describe("Desktop App reducer — model.final content", () => {
     if (assistant?.kind !== "assistant") throw new Error("no assistant message");
     expect(assistant.segments).toHaveLength(0);
     expect(assistant.pending).toBe(false);
+  });
+});
+
+describe("Desktop App reducer — OpenAI OAuth flow state", () => {
+  it("oauth_begin_result sets oauthWaiting", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: { type: "oauth_begin_result", url: "https://auth.example/authorize?x=1" },
+    });
+    expect(next.oauthWaiting).toBe(true);
+  });
+
+  it("$error with an OAuth message clears oauthWaiting", () => {
+    const state = { ...initialState(), oauthWaiting: true };
+    const next = reduce(state, {
+      t: "incoming",
+      event: { type: "$error", message: "OAuth sign-in failed: access_denied" },
+    });
+    expect(next.oauthWaiting).toBe(false);
+    expect(next.messages.at(-1)).toMatchObject({ kind: "error" });
+  });
+
+  it("unrelated $error keeps oauthWaiting", () => {
+    const state = { ...initialState(), oauthWaiting: true };
+    const next = reduce(state, {
+      t: "incoming",
+      event: { type: "$error", message: "settings_save failed: boom" },
+    });
+    expect(next.oauthWaiting).toBe(true);
+  });
+
+  it("$settings with signed-in OAuth clears oauthWaiting", () => {
+    const state = { ...initialState(), oauthWaiting: true };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$settings",
+        reasoningEffort: "medium",
+        editMode: "review",
+        budgetUsd: null,
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "gpt-5.6-sol",
+        openaiOAuth: { signedIn: true, account: "u@example.com" },
+        version: "0.50.1",
+      },
+    });
+    expect(next.oauthWaiting).toBe(false);
+    expect(next.settings?.openaiOAuth).toEqual({ signedIn: true, account: "u@example.com" });
+  });
+
+  it("$settings without signed-in OAuth keeps oauthWaiting", () => {
+    const state = { ...initialState(), oauthWaiting: true };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$settings",
+        reasoningEffort: "medium",
+        editMode: "review",
+        budgetUsd: null,
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "deepseek-v4-flash",
+        version: "0.50.1",
+      },
+    });
+    expect(next.oauthWaiting).toBe(true);
+  });
+
+  it("oauth_waiting action sets the flag directly (cancel button)", () => {
+    const state = { ...initialState(), oauthWaiting: true };
+    const next = reduce(state, { t: "oauth_waiting", waiting: false });
+    expect(next.oauthWaiting).toBe(false);
   });
 });

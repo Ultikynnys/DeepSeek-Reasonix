@@ -1,5 +1,5 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
-import { loadRateLimit, resolveBaseUrlEnv } from "./config.js";
+import { loadRateLimit, providerForModel, resolveBaseUrlEnv } from "./config.js";
 import { type RetryOptions, fetchWithRetry } from "./retry.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
 
@@ -106,6 +106,10 @@ export interface DeepSeekClientOptions {
   rateLimit?: { rpm?: number };
   /** Retry configuration. Pass `{ maxAttempts: 1 }` to disable retries. */
   retry?: RetryOptions;
+  /** Per-request key resolution — lets OpenAI OAuth tokens refresh mid-session.
+   *  When it returns a value it wins over `apiKey`; when it returns undefined
+   *  the static key (or the constructor's env fallback) is used. */
+  apiKeyResolver?: () => Promise<string | undefined>;
 }
 
 // DeepSeek's strict JSON parser rejects lone UTF-16 surrogate escapes
@@ -158,16 +162,18 @@ export class DeepSeekClient {
   readonly retry: RetryOptions;
   private readonly _fetch: typeof fetch;
   private readonly minChatIntervalMs: number;
+  private readonly apiKeyResolver?: () => Promise<string | undefined>;
   private nextChatRequestAt = 0;
 
   constructor(opts: DeepSeekClientOptions = {}) {
     const apiKey = opts.apiKey ?? process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
+    if (!apiKey && !opts.apiKeyResolver) {
       throw new Error(
-        "DEEPSEEK_API_KEY is not set. Put it in .env or pass apiKey to DeepSeekClient.",
+        "No API key: set DEEPSEEK_API_KEY (deepseek-* models) or OPENAI_API_KEY (gpt-* models) in .env, or pass apiKey to DeepSeekClient.",
       );
     }
-    this.apiKey = apiKey;
+    this.apiKey = apiKey ?? "";
+    this.apiKeyResolver = opts.apiKeyResolver;
     let url = opts.baseUrl ?? resolveBaseUrlEnv() ?? "https://api.deepseek.com";
     // Manual trim — `/\/+$/` is O(n²) on slash-heavy non-matches per CodeQL js/polynomial-redos.
     while (url.endsWith("/")) url = url.slice(0, -1);
@@ -187,6 +193,15 @@ export class DeepSeekClient {
     this.retry = opts.retry ?? {};
     const rpm = opts.rateLimit?.rpm ?? loadRateLimit()?.rpm;
     this.minChatIntervalMs = rpm ? Math.ceil(60_000 / rpm) : 0;
+  }
+
+  /** Resolved per request — OAuth access tokens expire far faster than static keys. */
+  private async resolveApiKey(): Promise<string> {
+    if (this.apiKeyResolver) {
+      const resolved = await this.apiKeyResolver();
+      if (resolved) return resolved;
+    }
+    return this.apiKey;
   }
 
   private async waitForChatRateLimit(signal?: AbortSignal): Promise<void> {
@@ -225,7 +240,9 @@ export class DeepSeekClient {
     // ignored — we don't strip them here because the server's explicit
     // "setting won't report an error" contract means leaving them in is
     // safe and keeps the request payload diffable against OpenAI tooling.
-    if (opts.thinking && !this._isAzureEndpoint()) {
+    // OpenAI (and Azure) reject the proprietary field — GPT models control
+    // reasoning via reasoning_effort instead, so never send it for them.
+    if (opts.thinking && !this._isAzureEndpoint() && providerForModel(opts.model) !== "openai") {
       payload.extra_body = { thinking: { type: opts.thinking } };
     }
     if (opts.reasoningEffort) {
@@ -246,12 +263,28 @@ export class DeepSeekClient {
     }
   }
 
+  /** True for api.deepseek.com / *.deepseek.com — the only hosts that get
+   *  DeepSeek-branded error prefixes and balance probes. */
+  private _isDeepSeekEndpoint(): boolean {
+    try {
+      return new URL(this.baseUrl).hostname.toLowerCase().endsWith(".deepseek.com");
+    } catch {
+      return false;
+    }
+  }
+
+  /** Error-prefix brand for formatLoopError — "DeepSeek NNN" on DeepSeek hosts,
+   *  "Upstream NNN" everywhere else (OpenAI, proxies, local gateways). */
+  private _errorPrefix(): string {
+    return this._isDeepSeekEndpoint() ? "DeepSeek" : "Upstream";
+  }
+
   /** Returns null on failure so callers can degrade — session must keep working without balance UI. */
   async getBalance(opts: { signal?: AbortSignal } = {}): Promise<UserBalance | null> {
     try {
       const resp = await this._fetch(`${this.baseUrl}/user/balance`, {
         method: "GET",
-        headers: { Authorization: `Bearer ${this.apiKey}` },
+        headers: { Authorization: `Bearer ${await this.resolveApiKey()}` },
         signal: opts.signal,
       });
       if (!resp.ok) return null;
@@ -268,7 +301,7 @@ export class DeepSeekClient {
     try {
       const resp = await this._fetch(`${this.baseUrl}/models`, {
         method: "GET",
-        headers: { Authorization: `Bearer ${this.apiKey}` },
+        headers: { Authorization: `Bearer ${await this.resolveApiKey()}` },
         signal: opts.signal,
       });
       if (!resp.ok) return null;
@@ -283,7 +316,7 @@ export class DeepSeekClient {
   async chat(opts: ChatRequestOptions): Promise<ChatResponse> {
     const ctrl = new AbortController();
     const timer = setTimeout(
-      () => ctrl.abort(new Error(`DeepSeek request timed out after ${this.timeoutMs}ms`)),
+      () => ctrl.abort(new Error(`Model request timed out after ${this.timeoutMs}ms`)),
       this.timeoutMs,
     );
     // Combine — `opts.signal ?? ctrl.signal` orphans the timer when the
@@ -298,7 +331,7 @@ export class DeepSeekClient {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${await this.resolveApiKey()}`,
             "Content-Type": "application/json",
           },
           body: stringifyJsonTransport(this.buildPayload(opts, false)),
@@ -307,13 +340,13 @@ export class DeepSeekClient {
         { ...this.retry, signal },
       );
       if (!resp.ok) {
-        throw new Error(`DeepSeek ${resp.status}: ${await resp.text()}`);
+        throw new Error(`${this._errorPrefix()} ${resp.status}: ${await resp.text()}`);
       }
       const data: any = await resp.json();
       const choice = data.choices?.[0]?.message ?? {};
       return {
         content: choice.content ?? "",
-        reasoningContent: choice.reasoning_content ?? null,
+        reasoningContent: choice.reasoning_content ?? choice.reasoning ?? null,
         toolCalls: choice.tool_calls ?? [],
         usage: Usage.fromApi(data.usage ?? data),
         raw: data,
@@ -326,7 +359,7 @@ export class DeepSeekClient {
   async *stream(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
     const ctrl = new AbortController();
     const timer = setTimeout(
-      () => ctrl.abort(new Error(`DeepSeek stream timed out after ${this.timeoutMs}ms`)),
+      () => ctrl.abort(new Error(`Model stream timed out after ${this.timeoutMs}ms`)),
       this.timeoutMs,
     );
     // Combine — `opts.signal ?? ctrl.signal` orphans the timer when the
@@ -346,7 +379,7 @@ export class DeepSeekClient {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${await this.resolveApiKey()}`,
             "Content-Type": "application/json",
             Accept: "text/event-stream",
           },
@@ -361,7 +394,9 @@ export class DeepSeekClient {
     }
     if (!resp.ok || !resp.body) {
       clearTimeout(timer);
-      throw new Error(`DeepSeek ${resp.status}: ${await resp.text().catch(() => "")}`);
+      throw new Error(
+        `${this._errorPrefix()} ${resp.status}: ${await resp.text().catch(() => "")}`,
+      );
     }
 
     const queue: StreamChunk[] = [];
@@ -380,8 +415,12 @@ export class DeepSeekClient {
           if (typeof delta.content === "string" && delta.content.length > 0) {
             chunk.contentDelta = delta.content;
           }
+          // DeepSeek streams reasoning as `reasoning_content`; OpenAI GPT-5.x
+          // family streams it as `reasoning`. Accept both.
           if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
             chunk.reasoningDelta = delta.reasoning_content;
+          } else if (typeof delta.reasoning === "string" && delta.reasoning.length > 0) {
+            chunk.reasoningDelta = delta.reasoning;
           }
           if (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0) {
             const tc = delta.tool_calls[0];

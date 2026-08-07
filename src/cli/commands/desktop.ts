@@ -71,6 +71,7 @@ import {
   loadEditMode,
   loadEditor,
   loadEndpoint,
+  loadEndpointForModel,
   loadExaApiKey,
   loadMetasoApiKey,
   loadModel,
@@ -84,6 +85,7 @@ import {
   loadSubagentModels,
   loadTavilyApiKey,
   loadWorkspaceDir,
+  providerForModel,
   pushRecentWorkspace,
   readConfig,
   webSearchEngine as readWebSearchEngine,
@@ -93,6 +95,8 @@ import {
   saveEditMode,
   saveEditor,
   saveModel,
+  saveOpenAIApiKey,
+  saveOpenAIOAuth,
   saveReasoningEffort,
   saveShowSystemEvents,
   saveSubagentModels,
@@ -158,6 +162,13 @@ import {
   sessionPath,
   timestampSuffix,
 } from "../../memory/session.js";
+import {
+  type OAuthFlow,
+  beginOAuthFlow,
+  oauthAccount,
+  resolveOpenAIToken,
+  signOutOpenAI,
+} from "../../oauth.js";
 import { QQChannel } from "../../qq/channel.js";
 import {
   discoverExternalSessionApps,
@@ -226,6 +237,7 @@ type EmittableEvent =
   | { type: "$ready" }
   | { type: "$error"; message: string }
   | { type: "$turn_complete" }
+  | { type: "oauth_begin_result"; url: string }
   | ConfirmRequiredEvent
   | PathAccessRequiredEvent
   | ChoiceRequiredEvent
@@ -439,7 +451,11 @@ function collectWebSearchApiKeyPrefixes(): {
   };
 }
 
+let oauthGen = 0;
+let pendingOAuth: OAuthFlow | null = null;
+
 function emitSettings(tab: Tab): void {
+  const oauth = readConfig().openaiOAuth;
   const ep = loadEndpoint();
   const editMode = loadEditMode();
   if (tab.toolset) applyPlanMode(tab.toolset.tools, editMode);
@@ -461,6 +477,7 @@ function emitSettings(tab: Tab): void {
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
       subagentModels: loadSubagentModels(),
       showSystemEvents: loadShowSystemEvents(),
+      openaiOAuth: { signedIn: !!oauth?.accessToken, account: oauth?.account },
       version: VERSION,
     },
     tab.id,
@@ -836,8 +853,18 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   if (!tab.toolset) throw new Error("buildRuntimeFor called before initTabToolset finished");
   const toolset = tab.toolset;
   applyPlanMode(toolset.tools, loadEditMode());
-  const ep = loadEndpoint();
-  const client = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
+  const ep = loadEndpointForModel(tab.currentModel);
+  const client = new DeepSeekClient({
+    apiKey: ep.apiKey,
+    baseUrl: ep.baseUrl,
+    // OAuth tokens refresh per request — attached only when no static key
+    // exists (env/config keys win; OAuth tokens are audience-locked to
+    // api.openai.com so a custom baseUrl never receives one).
+    apiKeyResolver:
+      providerForModel(tab.currentModel) === "openai" && !ep.apiKey
+        ? () => resolveOpenAIToken()
+        : undefined,
+  });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = tab.currentReasoningEffort;
   const loop = new CacheFirstLoop({
@@ -2502,6 +2529,84 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       persistOpenTabs();
       if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
       emitSessions(tab);
+      return;
+    }
+    if (msg.cmd === "oauth_begin") {
+      oauthGen++;
+      if (pendingOAuth) pendingOAuth.cancel();
+      const gen = oauthGen;
+      void beginOAuthFlow()
+        .then((flow) => {
+          pendingOAuth = flow;
+          emit({ type: "oauth_begin_result", url: flow.url }, tab.id);
+          void flow.done
+            .then(async (creds) => {
+              if (gen !== oauthGen) return; // superseded by a newer begin/signout
+              pendingOAuth = null;
+              const account = await oauthAccount(creds.accessToken);
+              saveOpenAIOAuth({ ...creds, account });
+              emitSettings(tab);
+            })
+            .catch((err: Error) => {
+              if (gen !== oauthGen) return;
+              pendingOAuth = null;
+              emit({ type: "$error", message: err.message }, tab.id);
+            });
+        })
+        .catch((err: Error) => {
+          emit({ type: "$error", message: `oauth_begin failed: ${err.message}` }, tab.id);
+        });
+      return;
+    }
+    if (msg.cmd === "oauth_cancel") {
+      oauthGen++;
+      if (pendingOAuth) {
+        pendingOAuth.cancel();
+        pendingOAuth = null;
+      }
+      return;
+    }
+    if (msg.cmd === "oauth_signout") {
+      oauthGen++;
+      if (pendingOAuth) {
+        pendingOAuth.cancel();
+        pendingOAuth = null;
+      }
+      void signOutOpenAI()
+        .then(() => emitSettings(tab))
+        .catch((err: Error) => {
+          emit({ type: "$error", message: `oauth_signout failed: ${err.message}` }, tab.id);
+        });
+      return;
+    }
+    if (msg.cmd === "setup_save_openai_key") {
+      const key = msg.key.trim();
+      if (!isPlausibleKey(key)) {
+        emit(
+          {
+            type: "$error",
+            message: "Key looks too short — paste the full token (16+ chars, no spaces).",
+          },
+          tab.id,
+        );
+        return;
+      }
+      try {
+        saveOpenAIApiKey(key);
+        // The runtime snapshots the static key at build time — rebuild gpt-model
+        // tabs so a freshly pasted key takes effect without a model flip.
+        for (const t of tabs.values()) {
+          if (t.toolset && providerForModel(t.currentModel) === "openai") {
+            t.runtime = buildRuntimeFor(t);
+          }
+        }
+        emitSettings(tab);
+      } catch (err) {
+        emit(
+          { type: "$error", message: `saveOpenAIApiKey failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
       return;
     }
     if (msg.cmd === "settings_get") {

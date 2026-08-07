@@ -33,4 +33,31 @@ describe("escalationContract (#582)", () => {
     expect(out).toContain("`deepseek-v5-experimental`");
     expect(out).toContain("<<<NEEDS_PRO");
   });
+
+  it("gpt-5.6-sol and the gpt-5.6 alias are top tiers — no-op escalation note", () => {
+    for (const id of ["gpt-5.6", "gpt-5.6-sol"]) {
+      const out = escalationContract(id);
+      expect(out).toContain(`\`${id}\``);
+      expect(out).toContain("flagship tier");
+      expect(out).not.toContain("<<<NEEDS_PRO: <one-sentence reason>>>>");
+      expect(out).not.toContain("deepseek-v4-pro");
+    }
+  });
+
+  it("gpt-5.6-terra/luna ladder targets gpt-5.6-sol, never deepseek-v4-pro", () => {
+    for (const id of ["gpt-5.6-terra", "gpt-5.6-luna"]) {
+      const out = escalationContract(id);
+      expect(out).toContain(`\`${id}\``);
+      expect(out).toContain("retries this turn on `gpt-5.6-sol`");
+      expect(out).not.toContain("deepseek-v4-pro");
+      expect(out).not.toContain("flash requested escalation");
+    }
+  });
+
+  it("deepseek contract text stays byte-stable (cache prefix)", () => {
+    expect(escalationContract("deepseek-v4-flash")).toContain(
+      "Cost-aware escalation (you are running on `deepseek-v4-flash`):",
+    );
+    expect(escalationContract("deepseek-v4-flash")).not.toContain("gpt-5.6");
+  });
 });

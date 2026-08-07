@@ -345,6 +345,8 @@ export interface SettingsEvent {
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
+  /** OpenAI website-account OAuth state — never ships tokens, only the masked account. */
+  openaiOAuth?: { signedIn: boolean; account?: string };
   version: string;
 }
 
@@ -436,6 +438,10 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "memory_import"; json: string }
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
+  | { cmd: "setup_save_openai_key"; key: string }
+  | { cmd: "oauth_begin" }
+  | { cmd: "oauth_cancel" }
+  | { cmd: "oauth_signout" }
   | { cmd: "settings_get" }
   | ({ cmd: "settings_save" } & SettingsPatch)
   | { cmd: "qq_status_get" }

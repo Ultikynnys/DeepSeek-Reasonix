@@ -269,8 +269,9 @@ describe("registerSubagentTool", () => {
     });
     const parent = new ToolRegistry();
     registerSubagentTool(parent, { client });
-    // "gpt-4" is not a deepseek-* model — should be ignored.
-    await parent.dispatch("spawn_subagent", JSON.stringify({ task: "go", model: "gpt-4" }));
+    // Only known model namespaces (deepseek-*, gpt-*) pass the args guard —
+    // an id from neither must fall back to the default.
+    await parent.dispatch("spawn_subagent", JSON.stringify({ task: "go", model: "claude-sonnet" }));
     // Subagent default was pro pre-0.6; now flash to keep explore/research
     // cheap. Skill frontmatter `model:` is the opt-in override for skills
     // that empirically benefit from pro.

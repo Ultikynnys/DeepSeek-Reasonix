@@ -24,7 +24,7 @@ export function formatLoopError(
     return t("errors.contextOverflow", { requested });
   }
 
-  const m = /^DeepSeek (\d{3}):\s*([\s\S]*)$/.exec(msg);
+  const m = /^(?:DeepSeek|Upstream) (\d{3}):\s*([\s\S]*)$/.exec(msg);
   if (!m) return msg;
   const status = m[1] ?? "";
   const body = m[2] ?? "";
@@ -41,13 +41,13 @@ export function formatLoopError(
 
 export function is5xxError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  const m = /^DeepSeek (5\d{2}):/.exec(err.message ?? "");
+  const m = /^(?:DeepSeek|Upstream) (5\d{2}):/.exec(err.message ?? "");
   return m !== null;
 }
 
 export function is4xxError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  return /^DeepSeek (4\d{2}):/.test(err.message ?? "");
+  return /^(?:DeepSeek|Upstream) (4\d{2}):/.test(err.message ?? "");
 }
 
 /** Read structured metadata off thrown errors without resorting to `as any`. */

@@ -5,6 +5,15 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Non-DeepSeek models — OpenAI GPT-5.6 family (Sol / Terra / Luna).**
+
+- New model options: `gpt-5.6` (alias for Sol), `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` selectable from the composer picker, Settings → Models, or `--model`.
+- `gpt-*` ids auto-route to `https://api.openai.com/v1` (override with `OPENAI_BASE_URL`; key via `OPENAI_API_KEY` or the config `apiKey` field) — DeepSeek ids keep their existing endpoint resolution.
+- Reasoning effort ladder extended with `xhigh` (GPT-5.6's tier between `high` and `max`); `/effort`, `--effort`, and the desktop effort menu all accept it.
+- Client streams OpenAI's `reasoning` field alongside DeepSeek's `reasoning_content`; DeepSeek-only `extra_body.thinking` is never sent to OpenAI endpoints; non-DeepSeek hosts get `Upstream NNN` error prefixes so 4xx/5xx copy stays accurate.
+- Pricing + context tables include the GPT-5.6 family (Sol $5/$30, Terra $2/$12, Luna $0.20/$1.20 per MTok; 300K context quality cap) so the USD budget cap and cost meters work.
+- Skills can run subagents on `model: gpt-5.6-sol` (frontmatter) with a provider-matched client; the default subagent model is unchanged (`deepseek-v4-flash`).
+
 **Desktop-first reorientation — the repo now centers the Windows desktop app.**
 
 - CI: `verify` runs on Windows only, and the release pipeline builds just the Windows installer (NSIS). Removed the unused `issue-labeler.yml` config.

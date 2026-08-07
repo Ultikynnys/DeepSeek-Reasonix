@@ -35,6 +35,15 @@ describe("formatLoopError", () => {
     expect(out).toContain("Your api key is invalid");
   });
 
+  it("Upstream 401 (non-DeepSeek host, e.g. OpenAI) → same authentication hint", () => {
+    const raw = new Error('Upstream 401: {"error":{"message":"Incorrect API key provided"}}');
+    const out = formatLoopError(raw);
+    expect(out).toMatch(/Authentication failed/);
+    expect(out).toMatch(/401/);
+    // Inner error.message survives the unwrap
+    expect(out).toContain("Incorrect API key provided");
+  });
+
   it("402 → balance hint with top-up URL", () => {
     const raw = new Error('DeepSeek 402: {"error":{"message":"Insufficient Balance"}}');
     const out = formatLoopError(raw);

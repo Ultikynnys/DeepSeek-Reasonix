@@ -1,0 +1,419 @@
+/** OpenAI website-account OAuth (PKCE) — browser sign-in powers gpt-5.6
+ *  requests; endpoints verified via OIDC discovery, client_id env-overridable. */
+
+import { createHash, randomBytes } from "node:crypto";
+import { type Server, createServer } from "node:http";
+import {
+  type OpenAIOAuthCreds,
+  clearOpenAIOAuth,
+  defaultConfigPath,
+  readConfig,
+  saveOpenAIOAuth,
+} from "./config.js";
+
+export const OPENAI_DEFAULT_AUTHORIZE_URL = "https://auth.openai.com/api/accounts/authorize";
+export const OPENAI_DEFAULT_TOKEN_URL = "https://auth.openai.com/api/accounts/oauth/token";
+export const OPENAI_DEFAULT_REVOKE_URL = "https://auth.openai.com/api/accounts/oauth/revoke";
+export const OPENAI_DEFAULT_USERINFO_URL = "https://auth.openai.com/api/accounts/oauth/userinfo";
+/** Community-documented client_id of the official ChatGPT desktop app.
+ *  Unverified against redirect-uri allowlists — a registered OpenAI OAuth
+ *  app (via OPENAI_OAUTH_CLIENT_ID) is the reliable path if this fails. */
+export const OPENAI_DEFAULT_CLIENT_ID = "DRivsnm2Mu42T3KOpqdtwB3NYviHYzwD";
+
+const DEFAULT_SCOPE = "openid profile email offline_access";
+const REFRESH_SLACK_MS = 5 * 60_000;
+const OAUTH_FLOW_TIMEOUT_MS = 10 * 60_000;
+
+function envOr(def: string, name: string): string {
+  const v = process.env[name]?.trim();
+  return v ? v : def;
+}
+
+export function openAIAuthorizeUrl(): string {
+  return envOr(OPENAI_DEFAULT_AUTHORIZE_URL, "OPENAI_AUTH_URL");
+}
+
+export function openAITokenUrl(): string {
+  return envOr(OPENAI_DEFAULT_TOKEN_URL, "OPENAI_TOKEN_URL");
+}
+
+export function openAIRevokeUrl(): string {
+  return envOr(OPENAI_DEFAULT_REVOKE_URL, "OPENAI_REVOKE_URL");
+}
+
+export function openAIUserinfoUrl(): string {
+  return envOr(OPENAI_DEFAULT_USERINFO_URL, "OPENAI_USERINFO_URL");
+}
+
+export function openAIClientId(): string {
+  return envOr(OPENAI_DEFAULT_CLIENT_ID, "OPENAI_OAUTH_CLIENT_ID");
+}
+
+function base64Url(buf: Buffer): string {
+  return buf.toString("base64url");
+}
+
+/** RFC 7636 PKCE pair — verifier is 64 random bytes, challenge is S256. */
+export function pkcePair(): { verifier: string; challenge: string } {
+  const verifier = base64Url(randomBytes(64));
+  const challenge = base64Url(createHash("sha256").update(verifier).digest());
+  return { verifier, challenge };
+}
+
+export function randomOAuthState(): string {
+  return randomBytes(24).toString("hex");
+}
+
+export interface AuthorizeParams {
+  clientId: string;
+  redirectUri: string;
+  state: string;
+  codeChallenge: string;
+  scope?: string;
+  audience?: string;
+}
+
+export function buildAuthorizeUrl(p: AuthorizeParams): string {
+  const q = new URLSearchParams({
+    client_id: p.clientId,
+    redirect_uri: p.redirectUri,
+    response_type: "code",
+    code_challenge: p.codeChallenge,
+    code_challenge_method: "S256",
+    state: p.state,
+    scope: p.scope ?? envOr(DEFAULT_SCOPE, "OPENAI_OAUTH_SCOPE"),
+  });
+  const audience = p.audience ?? process.env.OPENAI_OAUTH_AUDIENCE?.trim();
+  if (audience) q.set("audience", audience);
+  return `${openAIAuthorizeUrl()}?${q.toString()}`;
+}
+
+interface TokenResponse {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  error?: string;
+  error_description?: string;
+}
+
+async function postTokenForm(url: string, body: URLSearchParams): Promise<TokenResponse> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  const text = await res.text();
+  let parsed: TokenResponse;
+  try {
+    parsed = JSON.parse(text) as TokenResponse;
+  } catch {
+    throw new Error(`OAuth token endpoint returned ${res.status}: ${text.slice(0, 200)}`);
+  }
+  if (!res.ok || parsed.error) {
+    throw new Error(
+      `OAuth token exchange failed (${res.status}): ${parsed.error_description ?? parsed.error ?? text.slice(0, 200)}`,
+    );
+  }
+  if (!parsed.access_token) throw new Error("OAuth token endpoint returned no access_token");
+  return parsed;
+}
+
+function toCreds(parsed: TokenResponse, fallbackRefresh: string): OpenAIOAuthCreds {
+  return {
+    accessToken: parsed.access_token as string,
+    refreshToken: parsed.refresh_token ?? fallbackRefresh,
+    expiresAt: parsed.expires_in ? Date.now() + parsed.expires_in * 1000 : Date.now() + 10 * 60_000,
+  };
+}
+
+export async function exchangeOAuthCode(opts: {
+  clientId: string;
+  redirectUri: string;
+  code: string;
+  verifier: string;
+}): Promise<OpenAIOAuthCreds> {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: opts.clientId,
+    code: opts.code,
+    redirect_uri: opts.redirectUri,
+    code_verifier: opts.verifier,
+  });
+  return toCreds(await postTokenForm(openAITokenUrl(), body), "");
+}
+
+export async function refreshOAuthToken(
+  refreshToken: string,
+  clientId: string,
+): Promise<OpenAIOAuthCreds> {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: clientId,
+    refresh_token: refreshToken,
+  });
+  return toCreds(await postTokenForm(openAITokenUrl(), body), refreshToken);
+}
+
+/** Best-effort revocation — local state clears regardless of upstream result. */
+export async function revokeOAuthToken(token: string, clientId: string): Promise<void> {
+  try {
+    const body = new URLSearchParams({
+      token,
+      client_id: clientId,
+      token_type_hint: "access_token",
+    });
+    await fetch(openAIRevokeUrl(), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+  } catch {
+    /* offline or refused — nothing to do */
+  }
+}
+
+/** Account email from userinfo, for the settings card. Undefined on failure. */
+export async function oauthAccount(accessToken: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(openAIUserinfoUrl(), {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return undefined;
+    const info = (await res.json()) as { email?: string };
+    return info.email;
+  } catch {
+    return undefined;
+  }
+}
+
+let refreshInFlight: Promise<string | undefined> | null = null;
+
+/** A usable OpenAI access token — refreshes from the stored refresh token
+ *  when expired or within 5 min of expiry. Undefined when no OAuth creds
+ *  exist or refresh fails (callers fall back to their static key). */
+export async function resolveOpenAIToken(
+  path: string = defaultConfigPath(),
+): Promise<string | undefined> {
+  const creds = readConfig(path).openaiOAuth;
+  if (!creds?.accessToken) return undefined;
+  if (!creds.refreshToken || creds.expiresAt - Date.now() > REFRESH_SLACK_MS)
+    return creds.accessToken;
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const next = await refreshOAuthToken(creds.refreshToken, openAIClientId());
+      saveOpenAIOAuth(next, path);
+      return next.accessToken;
+    } catch (err) {
+      console.warn(`reasonix: OpenAI OAuth refresh failed — ${(err as Error).message}`);
+      return undefined;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+export interface OAuthFlow {
+  /** Authorize URL to open in the system browser. */
+  url: string;
+  /** Resolves with exchanged tokens; rejects on error / cancel / timeout. */
+  done: Promise<OpenAIOAuthCreds>;
+  cancel: () => void;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+const SUCCESS_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Signed in</title></head>
+<body style="font-family:system-ui;max-width:34em;margin:4em auto;line-height:1.6">
+<h2>Signed in to OpenAI</h2><p>You can close this window and return to Reasonix.</p></body></html>`;
+
+function errorPage(msg: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in failed</title></head>
+<body style="font-family:system-ui;max-width:34em;margin:4em auto;line-height:1.6">
+<h2>Sign-in failed</h2><p>${escapeHtml(msg)}</p>
+<p>You can close this window and retry from Reasonix.</p></body></html>`;
+}
+
+/** Starts the browser OAuth dance: PKCE + state, a one-shot 127.0.0.1
+ *  callback server, and the authorize URL. `done` rejects on state
+ *  mismatch, exchange failure, user cancel, or the 10-minute timeout. */
+export async function beginOAuthFlow(opts: { timeoutMs?: number } = {}): Promise<OAuthFlow> {
+  const { verifier, challenge } = pkcePair();
+  const state = randomOAuthState();
+  const timeoutMs = opts.timeoutMs ?? OAUTH_FLOW_TIMEOUT_MS;
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let resolveDone: (creds: OpenAIOAuthCreds) => void = () => {};
+  let rejectDone: (err: Error) => void = () => {};
+  const done = new Promise<OpenAIOAuthCreds>((resolve, reject) => {
+    resolveDone = resolve;
+    rejectDone = reject;
+  });
+
+  const settle = (fn: () => void) => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    fn();
+    server.closeAllConnections();
+    server.close(() => {});
+  };
+
+  const server: Server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname !== "/callback") {
+      res.writeHead(404).end("Not found");
+      return;
+    }
+    const q = url.searchParams;
+    if (q.get("error")) {
+      const msg = q.get("error_description") ?? q.get("error") ?? "access_denied";
+      res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+      res.end(errorPage(msg));
+      settle(() => rejectDone(new Error(`OAuth sign-in failed: ${msg}`)));
+      return;
+    }
+    const code = q.get("code");
+    if (!code || q.get("state") !== state) {
+      res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+      res.end(errorPage("State mismatch — this sign-in attempt is invalid. Retry from Reasonix."));
+      settle(() => rejectDone(new Error("OAuth state mismatch")));
+      return;
+    }
+    const clientId = openAIClientId();
+    const redirectUri =
+      process.env.OPENAI_OAUTH_REDIRECT_URI ?? `http://127.0.0.1:${port}/callback`;
+    void exchangeOAuthCode({ clientId, redirectUri, code, verifier })
+      .then((creds) => {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(SUCCESS_PAGE);
+        settle(() => resolveDone(creds));
+      })
+      .catch((err: unknown) => {
+        const msg = (err as Error).message;
+        res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+        res.end(errorPage(msg));
+        settle(() => rejectDone(err as Error));
+      });
+  });
+  server.on("error", () => {
+    /* surfaced via the listening promise / settle-close */
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", () => resolve());
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1");
+  });
+  const addr = server.address();
+  if (!addr || typeof addr === "string") throw new Error("OAuth callback server failed to bind");
+  const port = addr.port;
+
+  const redirectUri = process.env.OPENAI_OAUTH_REDIRECT_URI ?? `http://127.0.0.1:${port}/callback`;
+  const url = buildAuthorizeUrl({
+    clientId: openAIClientId(),
+    redirectUri,
+    state,
+    codeChallenge: challenge,
+  });
+
+  timer = setTimeout(() => {
+    settle(() => rejectDone(new Error("OAuth sign-in timed out — retry from settings")));
+  }, timeoutMs);
+
+  return {
+    url,
+    done,
+    cancel: () => settle(() => rejectDone(new Error("OAuth sign-in cancelled"))),
+  };
+}
+
+/** Convenience for sign-out: revoke (best-effort) then wipe local creds. */
+export async function signOutOpenAI(path: string = defaultConfigPath()): Promise<void> {
+  const creds = readConfig(path).openaiOAuth;
+  if (creds?.accessToken) await revokeOAuthToken(creds.accessToken, openAIClientId());
+  clearOpenAIOAuth(path);
+}
+
+/** ChatGPT-plan weekly Codex quota. The chatgpt.com backend contract is not
+ *  publicly documented — parse leniently and return null on any miss so the
+ *  UI can degrade to "—" instead of surfacing a wrong number. */
+export interface CodexQuota {
+  /** Credits used this week, cumulative (server-reported). */
+  used: number;
+  /** Weekly credit limit. */
+  limit: number;
+  /** used / limit × 100. */
+  usedPct: number;
+  /** Unit the backend reports (typically "credits"). */
+  currency?: string;
+  fetchedAt: number;
+}
+
+export const CODEX_QUOTA_URL = "https://chatgpt.com/backend-api/codex/quota";
+
+function quotaAmount(obj: Record<string, unknown>, key: string): number | undefined {
+  const v = obj[key];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (v && typeof v === "object") {
+    const amount = (v as Record<string, unknown>).amount;
+    if (typeof amount === "number" && Number.isFinite(amount)) return amount;
+    const n = Number(amount);
+    if (typeof amount === "string" && Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function quotaCurrency(obj: Record<string, unknown>, key: string): string | undefined {
+  const v = obj[key];
+  if (!v || typeof v !== "object") return undefined;
+  const currency = (v as Record<string, unknown>).currency;
+  return typeof currency === "string" && currency ? currency : undefined;
+}
+
+/** Weekly Codex quota for the signed-in ChatGPT plan. Null when not signed
+ *  in, the token is rejected, or the payload doesn't match a known shape —
+ *  callers render nothing and keep the session working. */
+export async function fetchCodexQuota(
+  path: string = defaultConfigPath(),
+): Promise<CodexQuota | null> {
+  const token = await resolveOpenAIToken(path);
+  if (!token) return null;
+  try {
+    const res = await fetch(CODEX_QUOTA_URL, {
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/json",
+        "OAI-Product-Sku": "codex",
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Record<string, unknown>;
+    // Known shapes, in preference order: nested usage/limit objects with
+    // `amount`, or flat numeric `used`/`limit`.
+    const used =
+      quotaAmount(data, "weekly_quota_usage") ??
+      quotaAmount(data, "quota_usage") ??
+      quotaAmount(data, "used");
+    const limit =
+      quotaAmount(data, "weekly_quota_limit") ??
+      quotaAmount(data, "quota_limit") ??
+      quotaAmount(data, "limit");
+    if (used === undefined || limit === undefined || limit <= 0) return null;
+    return {
+      used,
+      limit,
+      usedPct: (used / limit) * 100,
+      currency:
+        quotaCurrency(data, "weekly_quota_usage") ??
+        quotaCurrency(data, "quota_usage") ??
+        quotaCurrency(data, "used"),
+      fetchedAt: Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}

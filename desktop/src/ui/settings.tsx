@@ -76,6 +76,11 @@ export function SettingsModal({
   onClose,
   onSave,
   onSaveApiKey,
+  oauthWaiting,
+  onOAuthBegin,
+  onOAuthCancel,
+  onOAuthSignOut,
+  onSaveOpenAIApiKey,
   onLoadQQ,
   onConnectQQ,
   onDisconnectQQ,
@@ -116,6 +121,11 @@ export function SettingsModal({
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
   onSaveApiKey: (key: string) => void;
+  oauthWaiting: boolean;
+  onOAuthBegin: () => void;
+  onOAuthCancel: () => void;
+  onOAuthSignOut: () => void;
+  onSaveOpenAIApiKey: (key: string) => void;
   onLoadQQ: () => void;
   onConnectQQ: () => void;
   onDisconnectQQ: () => void;
@@ -239,6 +249,15 @@ export function SettingsModal({
                   apiKeyPrefix={settings.apiKeyPrefix}
                   onSave={onSave}
                   onSaveApiKey={onSaveApiKey}
+                />
+                <OpenAISection
+                  signedIn={settings.openaiOAuth?.signedIn ?? false}
+                  account={settings.openaiOAuth?.account}
+                  waiting={oauthWaiting}
+                  onBegin={onOAuthBegin}
+                  onCancel={onOAuthCancel}
+                  onSignOut={onOAuthSignOut}
+                  onSaveApiKey={onSaveOpenAIApiKey}
                 />
                 <QQChannelSection
                   qq={qq}
@@ -984,9 +1003,107 @@ function ApiKeySection({
   );
 }
 
-const KNOWN_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
+export function OpenAISection({
+  signedIn,
+  account,
+  waiting,
+  onBegin,
+  onCancel,
+  onSignOut,
+  onSaveApiKey,
+}: {
+  signedIn: boolean;
+  account?: string;
+  waiting: boolean;
+  onBegin: () => void;
+  onCancel: () => void;
+  onSignOut: () => void;
+  onSaveApiKey: (key: string) => void;
+}) {
+  const [key, setKey] = useState("");
+  return (
+    <section className="section">
+      <div className="stitle">{t("settings.openaiSection")}</div>
+      {signedIn ? (
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.openaiSignedIn")}</div>
+            <div className="h">
+              {account
+                ? t("settings.openaiAccount", { account })
+                : t("settings.openaiTokenSet")}
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={onSignOut} disabled={waiting}>
+            {t("settings.openaiSignOut")}
+          </button>
+        </div>
+      ) : (
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.openaiSignInTitle")}</div>
+            <div className="h">
+              {waiting ? t("settings.openaiWaiting") : t("settings.openaiSignInHint")}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {waiting && (
+              <button type="button" className="btn" onClick={onCancel}>
+                {t("settings.openaiCancel")}
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn primary"
+              onClick={onBegin}
+              disabled={waiting}
+            >
+              {t("settings.openaiSignIn")}
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="setting-row">
+        <div className="l">
+          <div className="n">{t("settings.openaiApiKey")}</div>
+          <div className="h">{t("settings.openaiApiKeyHint")}</div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            className="field mono"
+            type="password"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder="sk-…"
+          />
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!key}
+            onClick={() => {
+              if (!key) return;
+              onSaveApiKey(key);
+              setKey("");
+            }}
+          >
+            {t("settings.apiKeySave")}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
 
-const EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
+const KNOWN_MODELS = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "gpt-5.6",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+] as const;
+
+const EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const;
 type EffortValue = (typeof EFFORT_VALUES)[number];
 
 function PageModels({

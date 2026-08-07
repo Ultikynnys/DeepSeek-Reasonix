@@ -6,6 +6,7 @@ import {
   type DesktopOpenTab,
   addProjectPathAllowed,
   addProjectShellAllowed,
+  clearOpenAIOAuth,
   clearProjectPathAllowed,
   clearProjectShellAllowed,
   editModeHintShown,
@@ -16,6 +17,7 @@ import {
   loadDesktopOpenTabs,
   loadEditMode,
   loadEndpoint,
+  loadEndpointForModel,
   loadEngineeringLifecycleMode,
   loadFilesystemOutlineThresholdBytes,
   loadIndexConfig,
@@ -33,6 +35,7 @@ import {
   loadTheme,
   loadToolRateLimit,
   markEditModeHintShown,
+  providerForModel,
   readConfig,
   redactKey,
   redactSemanticEmbeddingConfig,
@@ -45,6 +48,9 @@ import {
   saveDesktopOpenTabs,
   saveEditMode,
   saveIndexConfig,
+  saveModel,
+  saveOpenAIApiKey,
+  saveOpenAIOAuth,
   saveReasoningEffort,
   saveSemanticEmbeddingConfig,
   saveSubagentModels,
@@ -275,6 +281,159 @@ describe("config", () => {
     const ep = loadEndpoint(path);
     expect(ep.baseUrl).toBe("https://new-api.example.com/v1");
     expect(ep.apiKey).toBeUndefined();
+  });
+
+  describe("GPT-5.6 provider routing", () => {
+    const origOpenAIKey = process.env.OPENAI_API_KEY;
+    const origOpenAIBase = process.env.OPENAI_BASE_URL;
+
+    beforeEach(() => {
+      // biome-ignore lint/performance/noDelete: restore exact env state
+      delete process.env.OPENAI_API_KEY;
+      // biome-ignore lint/performance/noDelete: same reason
+      delete process.env.OPENAI_BASE_URL;
+    });
+
+    afterEach(() => {
+      if (origOpenAIKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason as beforeEach
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = origOpenAIKey;
+      }
+      if (origOpenAIBase === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason as beforeEach
+        delete process.env.OPENAI_BASE_URL;
+      } else {
+        process.env.OPENAI_BASE_URL = origOpenAIBase;
+      }
+    });
+
+    it("providerForModel routes gpt-* ids to openai, everything else to deepseek", () => {
+      expect(providerForModel("gpt-5.6-sol")).toBe("openai");
+      expect(providerForModel("gpt-5.6")).toBe("openai");
+      expect(providerForModel("deepseek-v4-flash")).toBe("deepseek");
+      expect(providerForModel(undefined)).toBe("deepseek");
+    });
+
+    it("loadEndpointForModel: OpenAI env tuple wins for gpt ids", () => {
+      process.env.OPENAI_BASE_URL = "https://proxy.example.com/v1";
+      process.env.OPENAI_API_KEY = "sk-openai-env-abc";
+      writeConfig({ baseUrl: "https://config.example.com", apiKey: "sk-config-token" }, path);
+      const ep = loadEndpointForModel("gpt-5.6-sol", path);
+      expect(ep.baseUrl).toBe("https://proxy.example.com/v1");
+      expect(ep.apiKey).toBe("sk-openai-env-abc");
+    });
+
+    it("loadEndpointForModel: config tuple wins when config sets baseUrl", () => {
+      process.env.OPENAI_API_KEY = "sk-stale-env";
+      writeConfig({ baseUrl: "https://gateway.example.com/v1", apiKey: "sk-config-token" }, path);
+      const ep = loadEndpointForModel("gpt-5.6-luna", path);
+      expect(ep.baseUrl).toBe("https://gateway.example.com/v1");
+      expect(ep.apiKey).toBe("sk-config-token");
+    });
+
+    it("loadEndpointForModel: gpt id without overrides lands on the official OpenAI endpoint", () => {
+      process.env.OPENAI_API_KEY = "sk-openai-default";
+      const ep = loadEndpointForModel("gpt-5.6-terra", path);
+      expect(ep.baseUrl).toBe("https://api.openai.com/v1");
+      expect(ep.apiKey).toBe("sk-openai-default");
+    });
+
+    it("loadEndpointForModel: falls back to config apiKey when OPENAI_API_KEY unset", () => {
+      writeConfig({ apiKey: "sk-config-fallback" }, path);
+      const ep = loadEndpointForModel("gpt-5.6-sol", path);
+      expect(ep.baseUrl).toBe("https://api.openai.com/v1");
+      expect(ep.apiKey).toBe("sk-config-fallback");
+    });
+
+    it("loadEndpointForModel: deepseek ids behave exactly like loadEndpoint", () => {
+      process.env.DEEPSEEK_API_KEY = "sk-ds-env";
+      const ep = loadEndpointForModel("deepseek-v4-pro", path);
+      expect(ep).toEqual(loadEndpoint(path));
+    });
+
+    it("saveModel accepts the GPT-5.6 family on the official endpoints", () => {
+      saveModel("gpt-5.6-sol", path);
+      saveModel("gpt-5.6-terra", path);
+      saveModel("gpt-5.6-luna", path);
+      expect(loadModel(path)).toBe("gpt-5.6-luna");
+    });
+
+    it("saveModel still rejects unknown ids (even gpt- prefixed) without a custom baseUrl", () => {
+      expect(() => saveModel("gpt-4o-mini", path)).toThrow(/Unsupported model/);
+      expect(() => saveModel("deepseek-made-up", path)).toThrow(/Unsupported model/);
+    });
+
+    it("loadModel keeps gpt-5.6 ids on the official endpoints", () => {
+      writeConfig({ model: "gpt-5.6-sol" }, path);
+      expect(loadModel(path)).toBe("gpt-5.6-sol");
+    });
+
+    it("loadEndpointForModel: config openaiApiKey beats the DeepSeek apiKey fallback", () => {
+      writeConfig({ apiKey: "sk-deepseek-config", openaiApiKey: "sk-openai-config" }, path);
+      const ep = loadEndpointForModel("gpt-5.6-sol", path);
+      expect(ep.baseUrl).toBe("https://api.openai.com/v1");
+      expect(ep.apiKey).toBe("sk-openai-config");
+    });
+
+    it("loadEndpointForModel: OPENAI_API_KEY env beats config openaiApiKey", () => {
+      process.env.OPENAI_API_KEY = "sk-openai-env";
+      writeConfig({ openaiApiKey: "sk-openai-config" }, path);
+      const ep = loadEndpointForModel("gpt-5.6-terra", path);
+      expect(ep.apiKey).toBe("sk-openai-env");
+    });
+
+    it("loadEndpointForModel: custom baseUrl never receives the OAuth token", () => {
+      writeConfig(
+        {
+          baseUrl: "https://gateway.example.com/v1",
+          openaiOAuth: {
+            accessToken: "oauth-access-123",
+            refreshToken: "oauth-refresh-456",
+            expiresAt: Date.now() + 60_000,
+          },
+        },
+        path,
+      );
+      const ep = loadEndpointForModel("gpt-5.6-luna", path);
+      expect(ep.baseUrl).toBe("https://gateway.example.com/v1");
+      expect(ep.apiKey).toBeUndefined();
+    });
+
+    it("loadEndpointForModel: OAuth token is never snapshotted synchronously", () => {
+      writeConfig(
+        {
+          openaiOAuth: {
+            accessToken: "oauth-access-123",
+            refreshToken: "oauth-refresh-456",
+            expiresAt: Date.now() + 60_000,
+          },
+        },
+        path,
+      );
+      const ep = loadEndpointForModel("gpt-5.6-sol", path);
+      expect(ep.apiKey).toBeUndefined(); // resolver path handles OAuth, not the sync snapshot
+    });
+
+    it("saveOpenAIApiKey / saveOpenAIOAuth / clearOpenAIOAuth round-trip", () => {
+      saveOpenAIApiKey(" sk-openai-manual ", path);
+      expect(readConfig(path).openaiApiKey).toBe("sk-openai-manual");
+      saveOpenAIOAuth(
+        { accessToken: "at", refreshToken: "rt", expiresAt: 123, account: "u@example.com" },
+        path,
+      );
+      expect(readConfig(path).openaiOAuth).toEqual({
+        accessToken: "at",
+        refreshToken: "rt",
+        expiresAt: 123,
+        account: "u@example.com",
+      });
+      clearOpenAIOAuth(path);
+      expect(readConfig(path).openaiOAuth).toBeUndefined();
+      // Clearing leaves unrelated fields intact.
+      expect(readConfig(path).openaiApiKey).toBe("sk-openai-manual");
+    });
   });
 
   it("loads pricingOverride with valid non-negative fields", () => {

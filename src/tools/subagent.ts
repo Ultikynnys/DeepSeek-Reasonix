@@ -531,7 +531,8 @@ export function registerSubagentTool(
       }
       const typeSpec = getSubagentType(args.type);
       const model =
-        typeof args.model === "string" && args.model.startsWith("deepseek-")
+        typeof args.model === "string" &&
+        (args.model.startsWith("deepseek-") || args.model.startsWith("gpt-"))
           ? args.model
           : defaultModel;
       const system =

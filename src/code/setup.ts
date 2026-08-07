@@ -1,18 +1,21 @@
 import { DeepSeekClient } from "../client.js";
 import {
+  DEFAULT_MODEL,
   type EditMode,
   loadEditMode,
-  loadEndpoint,
+  loadEndpointForModel,
   loadFilesystemOutlineThresholdBytes,
   loadJavaSourceEnabled,
   loadProjectShellAllowed,
   loadResolvedSkillPaths,
   loadSubagentModels,
   loadToolRateLimit,
+  providerForModel,
   readConfig,
   searchEnabled,
 } from "../config.js";
 import { bootstrapSemanticSearchInCodeMode } from "../index/semantic/tool.js";
+import { resolveOpenAIToken } from "../oauth.js";
 import { ToolRegistry } from "../tools.js";
 import { registerChoiceTool } from "../tools/choice.js";
 import { registerCodeQueryTools } from "../tools/code-query.js";
@@ -96,20 +99,34 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   if (loadJavaSourceEnabled()) {
     registerJavaSourceTool(tools, { projectRoot: opts.rootDir });
   }
-  // Lazy: constructing DeepSeekClient throws when DEEPSEEK_API_KEY is unset,
-  // which would kill `reasonix code` before the setup wizard can prompt for
-  // one. Defer to first subagent dispatch — by then the user has either keyed
-  // in or we error per-call instead of at boot.
-  let subagentClient: DeepSeekClient | null = null;
+  // Lazy per-model: constructing DeepSeekClient throws when the provider's API
+  // key is unset, which would kill `reasonix code` before the setup wizard can
+  // prompt for one. Defer to first subagent dispatch — by then the user has
+  // either keyed in or we error per-call instead of at boot. Keyed by resolved
+  // model id so `model: gpt-5.6-sol` skills route to the OpenAI endpoint and
+  // DeepSeek skills to theirs.
+  const subagentClients = new Map<string, DeepSeekClient>();
   registerSkillTools(tools, {
     projectRoot: opts.rootDir,
     customSkillPaths: loadResolvedSkillPaths(opts.rootDir),
     subagentModels: loadSubagentModels(),
     onSkillInstalled: opts.onSkillInstalled,
     subagentRunner: async (skill, task, signal) => {
+      const model = skill.model ?? DEFAULT_MODEL;
+      let subagentClient = subagentClients.get(model);
       if (!subagentClient) {
-        const ep = loadEndpoint();
-        subagentClient = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
+        const ep = loadEndpointForModel(model);
+        subagentClient = new DeepSeekClient({
+          apiKey: ep.apiKey,
+          baseUrl: ep.baseUrl,
+          // OAuth tokens refresh per request — only when no static key exists
+          // (env/config keys win; OAuth tokens are audience-locked to api.openai.com).
+          apiKeyResolver:
+            providerForModel(model) === "openai" && !ep.apiKey
+              ? () => resolveOpenAIToken()
+              : undefined,
+        });
+        subagentClients.set(model, subagentClient);
       }
       const result = await spawnSubagent({
         client: subagentClient,

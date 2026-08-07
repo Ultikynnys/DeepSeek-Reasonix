@@ -11,6 +11,12 @@ export const DEEPSEEK_PRICING: Record<
   // Compat aliases — priced as v4-flash per the deprecation notice.
   "deepseek-chat": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
   "deepseek-reasoner": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
+  // GPT-5.6 family (Sol/Terra/Luna) — official pricing (2026-07 GA). Cache
+  // reads bill at 10% of input (90% discount). Override via `pricingOverride`.
+  "gpt-5.6": { inputCacheHit: 0.5, inputCacheMiss: 5, output: 30 },
+  "gpt-5.6-sol": { inputCacheHit: 0.5, inputCacheMiss: 5, output: 30 },
+  "gpt-5.6-terra": { inputCacheHit: 0.2, inputCacheMiss: 2, output: 12 },
+  "gpt-5.6-luna": { inputCacheHit: 0.02, inputCacheMiss: 0.2, output: 1.2 },
 };
 
 export type ModelPricing = (typeof DEEPSEEK_PRICING)[string];
@@ -41,6 +47,12 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
   "deepseek-v4-pro": 300_000,
   "deepseek-chat": 300_000,
   "deepseek-reasoner": 300_000,
+  // GPT-5.6 advertises a 1.05M window; same 300K quality cap as DeepSeek
+  // (compaction thresholds are fractions of this cap).
+  "gpt-5.6": 300_000,
+  "gpt-5.6-sol": 300_000,
+  "gpt-5.6-terra": 300_000,
+  "gpt-5.6-luna": 300_000,
 };
 
 /** Fallback when the caller's model id isn't in the table — safe lower bound. */

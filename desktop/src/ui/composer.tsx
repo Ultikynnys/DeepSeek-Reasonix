@@ -24,7 +24,7 @@ export type { EditMode, ReasoningEffort };
 
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
 
-const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high", "max"];
+const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
 const MODE_INFO: ModeEntry[] = [
   { k: "plan", label: "editMode.plan", icon: <I.list size={11} />, hint: "editMode.planHint" },
@@ -821,7 +821,14 @@ function Popup({
   );
 }
 
-const KNOWN_MODELS: readonly string[] = ["deepseek-v4-flash", "deepseek-v4-pro"];
+const KNOWN_MODELS: readonly string[] = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "gpt-5.6",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+];
 
 function ModelEffortMenu({
   modelLabel,
