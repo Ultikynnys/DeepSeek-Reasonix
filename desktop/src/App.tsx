@@ -2564,7 +2564,11 @@ function TabRuntime({
             <NeedsSetupView
               workspaceDir={state.settings?.workspaceDir}
               onPickWorkspace={pickWorkspace}
+              model={state.settings?.model}
+              oauthWaiting={state.oauthWaiting}
+              onOAuthBegin={() => sendRpc({ cmd: "oauth_begin" })}
               onSubmit={(key) => sendRpc({ cmd: "setup_save_key", key })}
+              onSaveOpenAIApiKey={(key) => sendRpc({ cmd: "setup_save_openai_key", key })}
             />
           ) : (
             <>
@@ -3524,14 +3528,23 @@ function EmptyState({
 function NeedsSetupView({
   workspaceDir,
   onPickWorkspace,
+  model,
+  oauthWaiting,
+  onOAuthBegin,
   onSubmit,
+  onSaveOpenAIApiKey,
 }: {
   workspaceDir?: string;
   onPickWorkspace: () => void;
+  model?: string;
+  oauthWaiting: boolean;
+  onOAuthBegin: () => void;
   onSubmit: (key: string) => void;
+  onSaveOpenAIApiKey: (key: string) => void;
 }) {
   useLang();
   const [key, setKey] = useState("");
+  const openai = typeof model === "string" && model.startsWith("gpt-");
   return (
     <div
       style={{
@@ -3546,7 +3559,7 @@ function NeedsSetupView({
     >
       <div style={{ fontSize: 18, fontWeight: 600 }}>{t("app.setup.welcome")}</div>
       <div style={{ fontSize: 12.5, color: "var(--muted)", maxWidth: 400, textAlign: "center" }}>
-        {t("app.setup.description")}
+        {openai ? t("app.setup.descriptionGpt") : t("app.setup.description")}
       </div>
       <div
         style={{
@@ -3565,6 +3578,16 @@ function NeedsSetupView({
             {t("app.setup.choose")}
           </button>
         </div>
+        {openai && (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={oauthWaiting}
+            onClick={onOAuthBegin}
+          >
+            {oauthWaiting ? t("settings.openaiWaiting") : t("settings.openaiSignIn")}
+          </button>
+        )}
         <input
           className="field mono"
           type="password"
@@ -3577,9 +3600,9 @@ function NeedsSetupView({
           type="button"
           className="btn primary"
           disabled={!key.trim()}
-          onClick={() => onSubmit(key.trim())}
+          onClick={() => (openai ? onSaveOpenAIApiKey(key.trim()) : onSubmit(key.trim()))}
         >
-          {t("app.setup.saveAndStart")}
+          {openai ? t("settings.apiKeySave") : t("app.setup.saveAndStart")}
         </button>
       </div>
     </div>

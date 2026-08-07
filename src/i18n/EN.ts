@@ -708,12 +708,20 @@ export const EN: TranslationSchema = {
     contextOverflowTooMany: "too many tokens",
     auth401:
       "Authentication failed (DeepSeek 401): {inner}. Your API key is rejected. Fix with `reasonix setup` or `export DEEPSEEK_API_KEY=sk-...`. Get one at https://platform.deepseek.com/api_keys.",
+    auth401OpenAI:
+      "Authentication failed (OpenAI 401): {inner}. Your API key is rejected — set it in Settings → OpenAI, sign in with your ChatGPT account (Settings → OpenAI), or `export OPENAI_API_KEY=sk-...`. Get one at https://platform.openai.com/api-keys.",
+    auth401Upstream:
+      "Authentication failed (Upstream 401): {inner}. The configured endpoint rejected the key — for gpt models set `export OPENAI_API_KEY=sk-...` or sign in with your ChatGPT account in Settings → OpenAI.",
     balance402:
       "Out of balance (DeepSeek 402): {inner}. Top up at https://platform.deepseek.com/top_up — the panel header shows your balance once it's non-zero.",
-    badparam422: "Invalid parameter (DeepSeek 422): {inner}",
-    badrequest400: "Bad request (DeepSeek 400): {inner}",
+    balance402Generic:
+      "Payment required ({brand} 402): {inner}. Check the account's billing page for this provider.",
+    badparam422: "Invalid parameter ({brand} 422): {inner}",
+    badrequest400: "Bad request ({brand} 400): {inner}",
     concurrency429:
       "DeepSeek concurrency limit hit (429): {inner}. The account has too many in-flight requests (cap: 500 for v4-pro, 2500 for v4-flash, summed across API keys account-wide). Usually means another Reasonix process is sharing the same key, or a parallel subagent fan-out overshot. Wait a few seconds and retry, reduce parallelism, or request a higher cap at https://platform.deepseek.com.",
+    concurrency429Generic:
+      "{brand} rate limit hit (429): {inner}. Too many in-flight requests — wait a few seconds and retry, or reduce parallelism.",
     deepseek5xxHead:
       "DeepSeek service unavailable ({status}) — this is a DeepSeek-side problem, not Reasonix. Already retried 4× with backoff.",
     deepseek5xxReachable:

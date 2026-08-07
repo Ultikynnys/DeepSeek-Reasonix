@@ -8,11 +8,18 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 **Non-DeepSeek models — OpenAI GPT-5.6 family (Sol / Terra / Luna).**
 
 - New model options: `gpt-5.6` (alias for Sol), `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` selectable from the composer picker, Settings → Models, or `--model`.
-- `gpt-*` ids auto-route to `https://api.openai.com/v1` (override with `OPENAI_BASE_URL`; key via `OPENAI_API_KEY` or the config `apiKey` field) — DeepSeek ids keep their existing endpoint resolution.
+- `gpt-*` ids auto-route to `https://api.openai.com/v1` (override with `OPENAI_BASE_URL`; key via `OPENAI_API_KEY`, the config `openaiApiKey` field, or ChatGPT-account sign-in) — DeepSeek ids keep their existing endpoint resolution and never send the DeepSeek key to OpenAI endpoints.
 - Reasoning effort ladder extended with `xhigh` (GPT-5.6's tier between `high` and `max`); `/effort`, `--effort`, and the desktop effort menu all accept it.
 - Client streams OpenAI's `reasoning` field alongside DeepSeek's `reasoning_content`; DeepSeek-only `extra_body.thinking` is never sent to OpenAI endpoints; non-DeepSeek hosts get `Upstream NNN` error prefixes so 4xx/5xx copy stays accurate.
 - Pricing + context tables include the GPT-5.6 family (Sol $5/$30, Terra $2/$12, Luna $0.20/$1.20 per MTok; 300K context quality cap) so the USD budget cap and cost meters work.
 - Skills can run subagents on `model: gpt-5.6-sol` (frontmatter) with a provider-matched client; the default subagent model is unchanged (`deepseek-v4-flash`).
+
+**Fixed — ChatGPT-model authentication.**
+
+- A gpt-* model with no OpenAI credential no longer falls back to the DeepSeek key: the request isn't attempted, and the setup screen offers ChatGPT sign-in or an OpenAI key input instead of the DeepSeek form. The turn gate and bootstrap checks are provider-aware (`loadApiKey` vs OpenAI key / OAuth session).
+- 4xx error copy is branded by the actual upstream — api.openai.com shows "OpenAI 401" with `OPENAI_API_KEY` / sign-in hints instead of the DeepSeek 401 wording and `DEEPSEEK_API_KEY` fix; 400/402/422/429 labels follow the host too.
+- Settings → Models now shows the OpenAI section (sign-in button, account state, API key) next to the model grid, so the OAuth browser flow is reachable right where ChatGPT models are picked.
+- OAuth sign-in rebuilds gpt runtimes immediately (and clears the needs-setup screen) without a model flip; OAuth tokens are only ever attached to `api.openai.com`, never custom gateways.
 
 **Desktop-first reorientation — the repo now centers the Windows desktop app.**
 

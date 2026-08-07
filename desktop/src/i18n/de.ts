@@ -537,6 +537,8 @@ export const de: typeof en = {
       welcome: "Willkommen bei Reasonix",
       description:
         "Die Ersteinrichtung erfordert einen DeepSeek-API-Schlüssel und ein Arbeitsbereichsverzeichnis. Der Schlüssel wird nur lokal gespeichert.",
+      descriptionGpt:
+        "Du hast ein GPT-5.6-Modell (ChatGPT) gewählt — füge einen OpenAI-API-Schlüssel hinzu oder melde dich mit deinem ChatGPT-Konto an. DeepSeek-Schlüssel werden für gpt-Modelle nicht akzeptiert.",
       workspace: "Arbeitsbereich",
       notSelected: "Nicht ausgewählt",
       choose: "Wählen…",

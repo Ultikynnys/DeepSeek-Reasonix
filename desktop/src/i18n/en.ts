@@ -510,6 +510,8 @@ export const en = {
       welcome: "Welcome to Reasonix",
       description:
         "First-time setup requires a DeepSeek API Key and workspace directory. The key is stored locally only.",
+      descriptionGpt:
+        "You picked a GPT-5.6 (ChatGPT) model — add an OpenAI API key or sign in with your ChatGPT account. DeepSeek keys are not accepted for gpt models.",
       workspace: "Workspace",
       notSelected: "Not selected",
       choose: "Choose…",

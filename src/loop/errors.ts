@@ -24,17 +24,29 @@ export function formatLoopError(
     return t("errors.contextOverflow", { requested });
   }
 
-  const m = /^(?:DeepSeek|Upstream) (\d{3}):\s*([\s\S]*)$/.exec(msg);
+  const m = /^(DeepSeek|Upstream) (\d{3}):\s*([\s\S]*)$/.exec(msg);
   if (!m) return msg;
-  const status = m[1] ?? "";
-  const body = m[2] ?? "";
+  const brand = m[1]!;
+  const status = m[2]!;
+  const body = m[3]!;
   const inner = extractDeepSeekErrorMessage(body);
+  const label = upstreamLabel(brand, opts?.upstreamHost);
 
-  if (status === "401") return t("errors.auth401", { inner });
-  if (status === "402") return t("errors.balance402", { inner });
-  if (status === "422") return t("errors.badparam422", { inner });
-  if (status === "400") return t("errors.badrequest400", { inner });
-  if (status === "429") return t("errors.concurrency429", { inner });
+  if (status === "401") {
+    if (label === "DeepSeek") return t("errors.auth401", { inner });
+    if (label === "OpenAI") return t("errors.auth401OpenAI", { inner });
+    return t("errors.auth401Upstream", { inner });
+  }
+  if (status === "402") {
+    if (label === "DeepSeek") return t("errors.balance402", { inner });
+    return t("errors.balance402Generic", { brand: label, inner });
+  }
+  if (status === "422") return t("errors.badparam422", { brand: label, inner });
+  if (status === "400") return t("errors.badrequest400", { brand: label, inner });
+  if (status === "429") {
+    if (label === "DeepSeek") return t("errors.concurrency429", { inner });
+    return t("errors.concurrency429Generic", { brand: label, inner });
+  }
   if (is5xxStatus(status)) return format5xx(status, probe, opts?.upstreamHost);
   return msg;
 }
@@ -75,6 +87,23 @@ export function isDeepSeekHost(baseUrl: string | undefined | null): boolean {
   } catch {
     return false;
   }
+}
+
+export type UpstreamLabel = "DeepSeek" | "OpenAI" | "Upstream";
+
+/** Brand for error copy — "DeepSeek" from the raw prefix, refined to "OpenAI"
+ *  when the failed host is api.openai.com (gpt models); everything else stays
+ *  a generic "Upstream". */
+function upstreamLabel(rawPrefix: string, upstreamHost: string | undefined): UpstreamLabel {
+  if (rawPrefix === "DeepSeek") return "DeepSeek";
+  if (upstreamHost === undefined) return "Upstream";
+  try {
+    const host = new URL(upstreamHost).hostname.toLowerCase();
+    if (host === "api.openai.com" || host.endsWith(".openai.com")) return "OpenAI";
+  } catch {
+    /* keep generic */
+  }
+  return "Upstream";
 }
 
 function is5xxStatus(status: string): boolean {

@@ -677,12 +677,19 @@ export const zhCN: TranslationSchema = {
     contextOverflowTooMany: "tokens 数量过多",
     auth401:
       "认证失败（DeepSeek 401）：{inner}。你的 API key 被拒绝。运行 `reasonix setup` 或 `export DEEPSEEK_API_KEY=sk-...` 修复。在 https://platform.deepseek.com/api_keys 获取 key。",
+    auth401OpenAI:
+      "认证失败（OpenAI 401）：{inner}。你的 API key 被拒绝 — 在 设置 → OpenAI 填入 key、用 ChatGPT 账号登录（设置 → OpenAI），或 `export OPENAI_API_KEY=sk-...`。在 https://platform.openai.com/api-keys 获取 key。",
+    auth401Upstream:
+      "认证失败（Upstream 401）：{inner}。配置的端点拒绝了该 key — 对 gpt 模型请设置 `export OPENAI_API_KEY=sk-...`，或在 设置 → OpenAI 中用 ChatGPT 账号登录。",
     balance402:
       "余额不足（DeepSeek 402）：{inner}。在 https://platform.deepseek.com/top_up 充值 — 余额非零时面板顶栏会显示。",
-    badparam422: "参数错误（DeepSeek 422）：{inner}",
-    badrequest400: "请求错误（DeepSeek 400）：{inner}",
+    balance402Generic: "需要付款（{brand} 402）：{inner}。请检查该服务商账号的账单页面。",
+    badparam422: "参数错误（{brand} 422）：{inner}",
+    badrequest400: "请求错误（{brand} 400）：{inner}",
     concurrency429:
       "DeepSeek 并发超限（429）：{inner}。账号在跑的请求超过上限（v4-pro 500、v4-flash 2500，账号下所有 API key 累加）。通常是同一账号开了多个 Reasonix 进程，或者并行 subagent 一次发太多。等几秒重试、减少并行，或在 https://platform.deepseek.com 申请扩容。",
+    concurrency429Generic:
+      "{brand} 触发限流（429）：{inner}。并发请求过多 — 等几秒重试，或减少并行。",
     deepseek5xxHead:
       "DeepSeek 服务不可用（{status}） — 这是 DeepSeek 服务端问题，不是 Reasonix 故障。已按指数退避重试 4 次。",
     deepseek5xxReachable:

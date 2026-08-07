@@ -740,13 +740,14 @@ export function loadEndpointForModel(
     const cfg = readConfig(path);
     // Tuple rule mirrors loadEndpoint (#1631): a custom config baseUrl owns its
     // key — a stale OPENAI_API_KEY env must not bleed into a custom gateway.
-    if (cfg.baseUrl) return { baseUrl: cfg.baseUrl, apiKey: cfg.openaiApiKey ?? cfg.apiKey };
+    // cfg.apiKey is the DeepSeek key — never hand it to OpenAI endpoints.
+    if (cfg.baseUrl) return { baseUrl: cfg.baseUrl, apiKey: cfg.openaiApiKey };
     // OAuth tokens are audience-locked to api.openai.com — never snapshot one
     // here: the client's async resolver refreshes it per request
     // (src/oauth.ts resolveOpenAIToken).
     return {
       baseUrl: "https://api.openai.com/v1",
-      apiKey: process.env.OPENAI_API_KEY ?? cfg.openaiApiKey ?? cfg.apiKey,
+      apiKey: process.env.OPENAI_API_KEY ?? cfg.openaiApiKey,
     };
   }
   return loadEndpoint(path);

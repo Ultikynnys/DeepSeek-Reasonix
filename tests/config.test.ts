@@ -325,12 +325,15 @@ describe("config", () => {
       expect(ep.apiKey).toBe("sk-openai-env-abc");
     });
 
-    it("loadEndpointForModel: config tuple wins when config sets baseUrl", () => {
+    it("loadEndpointForModel: custom config baseUrl never receives the DeepSeek apiKey", () => {
       process.env.OPENAI_API_KEY = "sk-stale-env";
-      writeConfig({ baseUrl: "https://gateway.example.com/v1", apiKey: "sk-config-token" }, path);
+      writeConfig(
+        { baseUrl: "https://gateway.example.com/v1", apiKey: "sk-deepseek-config" },
+        path,
+      );
       const ep = loadEndpointForModel("gpt-5.6-luna", path);
       expect(ep.baseUrl).toBe("https://gateway.example.com/v1");
-      expect(ep.apiKey).toBe("sk-config-token");
+      expect(ep.apiKey).toBeUndefined();
     });
 
     it("loadEndpointForModel: gpt id without overrides lands on the official OpenAI endpoint", () => {
@@ -340,11 +343,11 @@ describe("config", () => {
       expect(ep.apiKey).toBe("sk-openai-default");
     });
 
-    it("loadEndpointForModel: falls back to config apiKey when OPENAI_API_KEY unset", () => {
-      writeConfig({ apiKey: "sk-config-fallback" }, path);
+    it("loadEndpointForModel: gpt id without any OpenAI key leaves apiKey undefined — the DeepSeek key is never sent", () => {
+      writeConfig({ apiKey: "sk-deepseek-config" }, path);
       const ep = loadEndpointForModel("gpt-5.6-sol", path);
       expect(ep.baseUrl).toBe("https://api.openai.com/v1");
-      expect(ep.apiKey).toBe("sk-config-fallback");
+      expect(ep.apiKey).toBeUndefined();
     });
 
     it("loadEndpointForModel: deepseek ids behave exactly like loadEndpoint", () => {

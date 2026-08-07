@@ -529,6 +529,8 @@ export const zhCN: typeof en = {
     setup: {
       welcome: "欢迎使用 Reasonix",
       description: "首次使用需要配置 DeepSeek API Key 与工作目录。Key 仅保存在本地。",
+      descriptionGpt:
+        "你选择了 GPT-5.6（ChatGPT）模型 — 请填写 OpenAI API key 或用 ChatGPT 账号登录。gpt 模型不接受 DeepSeek key。",
       workspace: "工作目录",
       notSelected: "未选择",
       choose: "选择…",

@@ -208,7 +208,19 @@ export function SettingsModal({
                 onPickWorkspace={onPickWorkspace}
               />
             )}
-            {page === "models" && <PageModels settings={settings} onSave={onSave} />}
+            {page === "models" && (
+              <PageModels
+                settings={settings}
+                onSave={onSave}
+                oauthSignedIn={settings.openaiOAuth?.signedIn ?? false}
+                oauthAccount={settings.openaiOAuth?.account}
+                oauthWaiting={oauthWaiting}
+                onOAuthBegin={onOAuthBegin}
+                onOAuthCancel={onOAuthCancel}
+                onOAuthSignOut={onOAuthSignOut}
+                onSaveOpenAIApiKey={onSaveOpenAIApiKey}
+              />
+            )}
             {page === "mcp" && (
               <PageMCP
                 specs={mcpSpecs}
@@ -1109,9 +1121,23 @@ type EffortValue = (typeof EFFORT_VALUES)[number];
 function PageModels({
   settings,
   onSave,
+  oauthSignedIn,
+  oauthAccount,
+  oauthWaiting,
+  onOAuthBegin,
+  onOAuthCancel,
+  onOAuthSignOut,
+  onSaveOpenAIApiKey,
 }: {
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
+  oauthSignedIn: boolean;
+  oauthAccount?: string;
+  oauthWaiting: boolean;
+  onOAuthBegin: () => void;
+  onOAuthCancel: () => void;
+  onOAuthSignOut: () => void;
+  onSaveOpenAIApiKey: (key: string) => void;
 }) {
   const [draft, setDraft] = useState(settings.model);
   useEffect(() => setDraft(settings.model), [settings.model]);
@@ -1181,6 +1207,15 @@ function PageModels({
           </div>
         </div>
       </section>
+      <OpenAISection
+        signedIn={oauthSignedIn}
+        account={oauthAccount}
+        waiting={oauthWaiting}
+        onBegin={onOAuthBegin}
+        onCancel={onOAuthCancel}
+        onSignOut={onOAuthSignOut}
+        onSaveApiKey={onSaveOpenAIApiKey}
+      />
     </>
   );
 }

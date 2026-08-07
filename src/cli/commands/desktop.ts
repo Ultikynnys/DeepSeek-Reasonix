@@ -849,6 +849,17 @@ function restoreSessionModelPrefs(tab: Tab, meta: SessionMeta): void {
   tab.currentReasoningEffort = prefs.reasoningEffort;
 }
 
+/** Provider-aware credential check — gpt tabs need an OpenAI key or an OAuth
+ *  session; deepseek tabs need the DeepSeek key (env or config). */
+function tabHasCredential(tab: Tab): boolean {
+  if (providerForModel(tab.currentModel) === "openai") {
+    const ep = loadEndpointForModel(tab.currentModel);
+    if (ep.apiKey) return true;
+    return !!readConfig().openaiOAuth?.accessToken;
+  }
+  return !!loadApiKey();
+}
+
 function buildRuntimeFor(tab: Tab): RuntimeState {
   if (!tab.toolset) throw new Error("buildRuntimeFor called before initTabToolset finished");
   const toolset = tab.toolset;
@@ -858,10 +869,13 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     apiKey: ep.apiKey,
     baseUrl: ep.baseUrl,
     // OAuth tokens refresh per request — attached only when no static key
-    // exists (env/config keys win; OAuth tokens are audience-locked to
-    // api.openai.com so a custom baseUrl never receives one).
+    // exists AND the endpoint is api.openai.com (env/config keys win; OAuth
+    // tokens are audience-locked to api.openai.com, so a custom baseUrl
+    // never receives one).
     apiKeyResolver:
-      providerForModel(tab.currentModel) === "openai" && !ep.apiKey
+      providerForModel(tab.currentModel) === "openai" &&
+      !ep.apiKey &&
+      ep.baseUrl === "https://api.openai.com/v1"
         ? () => resolveOpenAIToken()
         : undefined,
   });
@@ -1352,7 +1366,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       hasSemanticSearch: toolset.semantic.enabled,
       modelId: tab.currentModel,
     });
-    if (loadApiKey()) {
+    if (tabHasCredential(tab)) {
       bridgeEndpointEnv();
       tab.runtime = buildRuntimeFor(tab);
       void bridgeTabMcp(tab);
@@ -1453,6 +1467,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
   async function runTurn(tab: Tab, text: string, fromQQ = false): Promise<void> {
     if (!tab.runtime) return;
+    if (!tabHasCredential(tab)) {
+      const openai = providerForModel(tab.currentModel) === "openai";
+      emit(
+        {
+          type: "$error",
+          message: openai
+            ? `No OpenAI credential for ${tab.currentModel} — add an OpenAI key or sign in with ChatGPT (Settings → OpenAI).`
+            : "No API key configured — paste your DeepSeek API key first.",
+        },
+        tab.id,
+      );
+      return;
+    }
     const rt = tab.runtime;
     // First turn of a fresh conversation records the model/effort it runs
     // with; a later resume restores them even after a reinstall wiped the
@@ -2036,11 +2063,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         tab.id,
       );
     }
-    if (!loadApiKey()) emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
+    if (!tabHasCredential(tab)) emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
     void emitBalance(tab);
     void initTabToolset(tab)
       .then(() => {
-        if (loadApiKey()) emit({ type: "$ready" }, tab.id);
+        if (tabHasCredential(tab)) emit({ type: "$ready" }, tab.id);
         emitCtxBreakdown(tab);
       })
       .catch((err) => {
@@ -2180,7 +2207,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // WebView reloads (DevTools F5, host-side respawn) leave the Node child
       // alive but the React app starts blank. Re-fire the bootstrap events
       // so it can rehydrate without restarting the agent.
-      const hasKey = !!loadApiKey();
       for (const t of tabs.values()) {
         emit(
           { type: "$tab_opened", workspaceDir: t.rootDir, active: t.id === lastActiveTabId },
@@ -2192,7 +2218,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emitSkills(t);
         emitMemory(t);
         emitQQSettings(t);
-        if (!hasKey) emit({ type: "$needs_setup", reason: "no_api_key" }, t.id);
+        if (!tabHasCredential(t)) emit({ type: "$needs_setup", reason: "no_api_key" }, t.id);
         else if (t.toolset) emit({ type: "$ready" }, t.id);
         void emitBalance(t);
         // Re-emit session_loaded so the resumed session's messages and
@@ -2545,6 +2571,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               pendingOAuth = null;
               const account = await oauthAccount(creds.accessToken);
               saveOpenAIOAuth({ ...creds, account });
+              // The runtime snapshots the credential source at build time —
+              // rebuild gpt tabs so a fresh sign-in takes effect (and clears
+              // the needs-setup screen) without a model flip.
+              for (const t of tabs.values()) {
+                if (t.toolset && providerForModel(t.currentModel) === "openai") {
+                  t.runtime = buildRuntimeFor(t);
+                  emit({ type: "$ready" }, t.id);
+                }
+              }
               emitSettings(tab);
             })
             .catch((err: Error) => {
@@ -2598,6 +2633,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         for (const t of tabs.values()) {
           if (t.toolset && providerForModel(t.currentModel) === "openai") {
             t.runtime = buildRuntimeFor(t);
+            emit({ type: "$ready" }, t.id);
           }
         }
         emitSettings(tab);
@@ -2979,8 +3015,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "user_input") {
       if (!tab.runtime) {
+        const openai = providerForModel(tab.currentModel) === "openai";
         emit(
-          { type: "$error", message: "Not configured yet — paste your DeepSeek API key first." },
+          {
+            type: "$error",
+            message: openai
+              ? "Not configured yet — add an OpenAI key or sign in with ChatGPT (Settings → OpenAI) first."
+              : "Not configured yet — paste your DeepSeek API key first.",
+          },
           tab.id,
         );
         return;

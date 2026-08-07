@@ -721,12 +721,20 @@ export const de: TranslationSchema = {
     contextOverflowTooMany: "Zu viele Tokens",
     auth401:
       "Authentifizierung fehlgeschlagen (DeepSeek 401): {inner}. Dein API-Schlüssel wird abgewiesen. Behebe mit `reasonix setup` oder `export DEEPSEEK_API_KEY=sk-...`. Erhalte einen unter https://platform.deepseek.com/api_keys.",
+    auth401OpenAI:
+      "Authentifizierung fehlgeschlagen (OpenAI 401): {inner}. Dein API-Schlüssel wird abgewiesen — setze ihn unter Einstellungen → OpenAI, melde dich mit deinem ChatGPT-Konto an (Einstellungen → OpenAI) oder `export OPENAI_API_KEY=sk-...`. Erhalte einen unter https://platform.openai.com/api-keys.",
+    auth401Upstream:
+      "Authentifizierung fehlgeschlagen (Upstream 401): {inner}. Der konfigurierte Endpunkt hat den Schlüssel abgewiesen — für gpt-Modelle `export OPENAI_API_KEY=sk-...` setzen oder dich in den Einstellungen → OpenAI mit deinem ChatGPT-Konto anmelden.",
     balance402:
       "Kontoguthaben aufgebraucht (DeepSeek 402): {inner}. Lade auf unter https://platform.deepseek.com/top_up — der Panel-Header zeigt dein Guthaben, sobald es nicht Null ist.",
-    badparam422: "Ungültiger Parameter (DeepSeek 422): {inner}",
-    badrequest400: "Fehlerhafte Anfrage (DeepSeek 400): {inner}",
+    balance402Generic:
+      "Zahlung erforderlich ({brand} 402): {inner}. Prüfe die Rechnungsseite des Kontos für diesen Anbieter.",
+    badparam422: "Ungültiger Parameter ({brand} 422): {inner}",
+    badrequest400: "Fehlerhafte Anfrage ({brand} 400): {inner}",
     concurrency429:
       "DeepSeek-Gleichzeitigkeitslimit erreicht (429): {inner}. Das Konto hat zu viele gleichzeitige Anfragen (Grenze: 500 für v4-pro, 2500 für v4-flash, summiert über alle API-Schlüssel des Kontos). Meist läuft ein weiterer Reasonix-Prozess mit demselben Schlüssel oder ein paralleler Subagent-Fan-out hat überzogen. Warte einige Sekunden und wiederhole, reduziere die Parallelität oder beantrage eine höhere Grenze unter https://platform.deepseek.com.",
+    concurrency429Generic:
+      "{brand} Ratenlimit erreicht (429): {inner}. Zu viele gleichzeitige Anfragen — warte einige Sekunden und wiederhole oder reduziere die Parallelität.",
     deepseek5xxHead:
       "DeepSeek-Dienst nicht verfügbar ({status}) — dies ist ein DeepSeek-seitiges Problem, nicht Reasonix. Bereits 4× mit Backoff wiederholt.",
     deepseek5xxReachable:

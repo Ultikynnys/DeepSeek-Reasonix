@@ -122,7 +122,9 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
           // OAuth tokens refresh per request — only when no static key exists
           // (env/config keys win; OAuth tokens are audience-locked to api.openai.com).
           apiKeyResolver:
-            providerForModel(model) === "openai" && !ep.apiKey
+            providerForModel(model) === "openai" &&
+            !ep.apiKey &&
+            ep.baseUrl === "https://api.openai.com/v1"
               ? () => resolveOpenAIToken()
               : undefined,
         });

@@ -301,10 +301,14 @@ export interface TranslationSchema {
     contextOverflow: string;
     contextOverflowTooMany: string;
     auth401: string;
+    auth401OpenAI: string;
+    auth401Upstream: string;
     balance402: string;
+    balance402Generic: string;
     badparam422: string;
     badrequest400: string;
     concurrency429: string;
+    concurrency429Generic: string;
     deepseek5xxHead: string;
     deepseek5xxReachable: string;
     deepseek5xxUnreachable: string;

@@ -35,13 +35,33 @@ describe("formatLoopError", () => {
     expect(out).toContain("Your api key is invalid");
   });
 
-  it("Upstream 401 (non-DeepSeek host, e.g. OpenAI) → same authentication hint", () => {
+  it("Upstream 401 without host info → generic upstream hint, no DeepSeek-specific fix", () => {
     const raw = new Error('Upstream 401: {"error":{"message":"Incorrect API key provided"}}');
     const out = formatLoopError(raw);
     expect(out).toMatch(/Authentication failed/);
     expect(out).toMatch(/401/);
+    expect(out).not.toContain("DEEPSEEK_API_KEY");
+    expect(out).not.toContain("platform.deepseek.com");
     // Inner error.message survives the unwrap
     expect(out).toContain("Incorrect API key provided");
+  });
+
+  it("Upstream 401 against api.openai.com → OpenAI-branded hint with OPENAI_API_KEY fix", () => {
+    const raw = new Error('Upstream 401: {"error":{"message":"Incorrect API key provided"}}');
+    const out = formatLoopError(raw, undefined, { upstreamHost: "https://api.openai.com/v1" });
+    expect(out).toContain("OpenAI 401");
+    expect(out).toContain("OPENAI_API_KEY");
+    expect(out).toContain("Incorrect API key provided");
+    expect(out).not.toContain("DEEPSEEK_API_KEY");
+    expect(out).not.toContain("platform.deepseek.com");
+  });
+
+  it("DeepSeek 401 keeps the DeepSeek-branded hint", () => {
+    const raw = new Error('DeepSeek 401: {"error":{"message":"Authentication Fails"}}');
+    const out = formatLoopError(raw);
+    expect(out).toContain("DeepSeek 401");
+    expect(out).toContain("DEEPSEEK_API_KEY");
+    expect(out).toContain("Authentication Fails");
   });
 
   it("402 → balance hint with top-up URL", () => {
