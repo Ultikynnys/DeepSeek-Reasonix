@@ -353,6 +353,10 @@ type State = {
   qq: QQDesktopSettingsState | null;
   balance: Balance | null;
   codexQuota: CodexQuota | null;
+  /** True between a statusbar chip click and the $codex_quota reply — the chip shows a refresh indicator. */
+  codexQuotaRefreshing: boolean;
+  /** Why the last quota fetch produced no data — shown in the chip tooltip. */
+  codexQuotaReason: string | null;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
   mcpSpecs: McpSpecInfo[];
@@ -415,6 +419,7 @@ type Action =
   | { t: "shift_queued_send" }
   | { t: "settings_patch"; patch: SettingsPatch }
   | { t: "oauth_waiting"; waiting: boolean }
+  | { t: "codex_quota_refreshing" }
   | { t: "push_status"; text: string };
 
 function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
@@ -516,6 +521,8 @@ export function reduce(state: State, action: Action): State {
         : state;
     case "oauth_waiting":
       return { ...state, oauthWaiting: action.waiting };
+    case "codex_quota_refreshing":
+      return { ...state, codexQuotaRefreshing: true };
     case "batch_delta": {
       const collapsed: DeltaBatchItem[] = [];
       for (const item of action.items) {
@@ -1120,7 +1127,12 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         },
       };
     case "$codex_quota":
-      return { ...state, codexQuota: ev.quota };
+      return {
+        ...state,
+        codexQuota: ev.quota,
+        codexQuotaReason: ev.reason ?? null,
+        codexQuotaRefreshing: false,
+      };
     case "$qq_settings":
       return {
         ...state,
@@ -1661,7 +1673,8 @@ function TabRuntime({
     qq: null,
     balance: null,
     codexQuota: null,
-    mentionResults: null,
+    codexQuotaRefreshing: false,
+    codexQuotaReason: null,    mentionResults: null,
     mentionPreview: null,
     mcpSpecs: [],
     mcpBridged: false,
@@ -1749,10 +1762,10 @@ function TabRuntime({
     (patch: SettingsPatch) => sendRpc({ cmd: "settings_save", ...patch }),
     [sendRpc],
   );
-  const refreshCodexQuota = useCallback(
-    () => sendRpc({ cmd: "codex_quota_get" }),
-    [sendRpc],
-  );
+  const refreshCodexQuota = useCallback(() => {
+    dispatch({ t: "codex_quota_refreshing" });
+    sendRpc({ cmd: "codex_quota_get" });
+  }, [sendRpc, dispatch]);
   const applySettingsPatch = useCallback(
     (patch: SettingsPatch) => {
       dispatch({ t: "settings_patch", patch });
@@ -2887,6 +2900,8 @@ function TabRuntime({
           settings={state.settings}
           balance={state.balance}
           codexQuota={state.codexQuota}
+          codexQuotaRefreshing={state.codexQuotaRefreshing}
+          codexQuotaReason={state.codexQuotaReason}
           onRefreshCodexQuota={refreshCodexQuota}
           usage={state.usage}
           busy={state.busy}

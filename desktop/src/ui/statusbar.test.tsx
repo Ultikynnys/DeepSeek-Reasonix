@@ -114,4 +114,42 @@ describe("StatusBar quota display", () => {
     expect(screen.queryByText("balance")).toBeNull();
     expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
   });
+
+  it("renders percent-only quota when the backend reports no absolute used/limit (wham fallback)", () => {
+    renderBar({
+      settings: { model: "gpt-5.6-sol" } as Settings,
+      codexQuota: { used: null, limit: null, usedPct: 75, currency: "credits", fetchedAt: 0 },
+    });
+    expect(screen.getByText(/25%\s*left/)).toBeTruthy();
+    expect(screen.getByText("codex")).toBeTruthy();
+    expect(screen.queryByText(/\/\s*100/)).toBeNull();
+    expect(screen.queryByText("balance")).toBeNull();
+  });
+
+  it("shows a refresh indicator while a retry is in flight", () => {
+    renderBar({
+      settings: { model: "gpt-5.6-sol" } as Settings,
+      codexQuota: null,
+      codexQuotaRefreshing: true,
+    });
+    expect(screen.getByText("…")).toBeTruthy();
+    expect(screen.getByText("codex")).toBeTruthy();
+  });
+
+  it("surfaces the fetch failure reason in the chip tooltip", () => {
+    renderBar({
+      settings: {
+        model: "gpt-5.6-sol",
+        modelEndpoint: {
+          provider: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          openaiAuth: "oauth",
+        },
+      } as Settings,
+      codexQuota: null,
+      codexQuotaReason: "401 Unauthorized from https://chatgpt.com/backend-api/wham/usage",
+    });
+    expect(screen.getByTitle(/unavailable right now/)).toBeTruthy();
+    expect(screen.getByTitle(/401 Unauthorized/)).toBeTruthy();
+  });
 });

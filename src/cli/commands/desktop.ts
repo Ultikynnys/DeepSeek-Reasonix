@@ -167,7 +167,7 @@ import {
 import {
   type OAuthFlow,
   beginOAuthFlow,
-  fetchCodexQuota,
+  fetchCodexQuotaDetailed,
   oauthAccount,
   resolveOpenAIToken,
   signOutOpenAI,
@@ -561,17 +561,22 @@ let lastCodexQuotaUsed: number | null = null;
 /** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only; `turnCost` = API-reported credits delta since the previous fetch. */
 async function emitCodexQuota(tab: Tab): Promise<void> {
   if (providerForModel(tab.currentModel) !== "openai") return;
-  const quota = await fetchCodexQuota().catch(() => null);
+  const { quota, reason } = await fetchCodexQuotaDetailed().catch((err) => ({
+    quota: null,
+    reason: (err as Error).message,
+  }));
   if (quota) {
     let turnCost: number | null = null;
-    if (lastCodexQuotaUsed !== null && quota.used >= lastCodexQuotaUsed) {
-      turnCost = quota.used - lastCodexQuotaUsed;
+    if (quota.used !== null) {
+      if (lastCodexQuotaUsed !== null && quota.used >= lastCodexQuotaUsed) {
+        turnCost = quota.used - lastCodexQuotaUsed;
+      }
+      lastCodexQuotaUsed = quota.used;
     }
-    lastCodexQuotaUsed = quota.used;
     emit({ type: "$codex_quota", quota: { ...quota, turnCost } }, tab.id);
     return;
   }
-  emit({ type: "$codex_quota", quota: null }, tab.id);
+  emit({ type: "$codex_quota", quota: null, ...(reason ? { reason } : {}) }, tab.id);
 }
 
 function emitSessions(tab: Tab): void {

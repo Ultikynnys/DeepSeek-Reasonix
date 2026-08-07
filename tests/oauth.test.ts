@@ -11,6 +11,7 @@ import {
   buildAuthorizeUrl,
   exchangeOAuthCode,
   fetchCodexQuota,
+  fetchCodexQuotaDetailed,
   oauthAccount,
   openAIClientId,
   pkcePair,
@@ -426,16 +427,74 @@ describe("oauth", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("returns null on rejection, malformed payloads, and non-positive limits", async () => {
+    it("falls back to /wham/usage when the legacy endpoint fails, reporting percent-only quota", async () => {
       saveOpenAIOAuth(creds, cfgPath);
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: "gone" }, 404));
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          rate_limits: {
+            plan_type: "plus",
+            rate_limit: {
+              allowed: true,
+              limit_reached: false,
+              primary_window: {
+                used_percent: 25,
+                limit_window_seconds: 604800,
+                reset_after_seconds: 123,
+                reset_at: 456,
+              },
+            },
+          },
+        }),
+      );
+      const q = await fetchCodexQuota(cfgPath);
+      expect(q).not.toBeNull();
+      expect(q!.used).toBeNull();
+      expect(q!.limit).toBeNull();
+      expect(q!.usedPct).toBe(25);
+      expect(q!.currency).toBe("credits");
+      const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+      expect(urls[0]).toBe("https://chatgpt.com/backend-api/codex/quota");
+      expect(urls[1]).toBe("https://chatgpt.com/backend-api/wham/usage");
+      const whamHeaders = fetchMock.mock.calls[1]![1] as RequestInit;
+      expect((whamHeaders.headers as Record<string, string>).authorization).toBe("Bearer at-1");
+      expect((whamHeaders.headers as Record<string, string>)["user-agent"]).toBe("codex-cli");
+    });
+
+    it("returns null on rejection, malformed payloads, and non-positive limits (legacy + wham both fail)", async () => {
+      saveOpenAIOAuth(creds, cfgPath);
+      // legacy 401 → wham 401
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: "nope" }, 401));
       fetchMock.mockResolvedValueOnce(jsonResponse({ error: "nope" }, 401));
       expect(await fetchCodexQuota(cfgPath)).toBeNull();
+      // legacy malformed → wham malformed
+      fetchMock.mockResolvedValueOnce(jsonResponse({ whatever: true }));
       fetchMock.mockResolvedValueOnce(jsonResponse({ whatever: true }));
       expect(await fetchCodexQuota(cfgPath)).toBeNull();
+      // legacy non-positive limit → wham malformed
       fetchMock.mockResolvedValueOnce(jsonResponse({ used: 10, limit: 0 }));
+      fetchMock.mockResolvedValueOnce(jsonResponse({ whatever: true }));
       expect(await fetchCodexQuota(cfgPath)).toBeNull();
+      // legacy network error → wham network error
+      fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
       fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
       expect(await fetchCodexQuota(cfgPath)).toBeNull();
+    });
+
+    it("reports why quota is null through fetchCodexQuotaDetailed", async () => {
+      saveOpenAIOAuth(creds, cfgPath);
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: "nope" }, 401));
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: "nope" }, 401));
+      const { quota, reason } = await fetchCodexQuotaDetailed(cfgPath);
+      expect(quota).toBeNull();
+      expect(reason).toContain("401");
+      expect(reason).toContain("codex/quota");
+      expect(reason).toContain("wham/usage");
+      // Success → reason null
+      fetchMock.mockResolvedValueOnce(jsonResponse({ used: 5, limit: 10 }));
+      const ok = await fetchCodexQuotaDetailed(cfgPath);
+      expect(ok.quota).not.toBeNull();
+      expect(ok.reason).toBeNull();
     });
   });
 });

@@ -400,11 +400,12 @@ export interface BalanceEvent {
  *  `null` payload means "no data" — not signed in, rejected, or malformed —
  *  the UI degrades to no chip instead of a wrong number. */
 export interface CodexQuota {
-  /** Credits used this week, cumulative (server-reported). */
-  used: number;
-  /** Weekly credit limit. */
-  limit: number;
-  /** used / limit × 100. */
+  /** Credits used this week, cumulative (server-reported). Null when the
+   *  backend only reports a percent (wham/usage fallback). */
+  used: number | null;
+  /** Weekly credit limit. Null when the backend only reports a percent. */
+  limit: number | null;
+  /** used / limit × 100 — or the server-reported percent directly. */
   usedPct: number;
   /** Unit the backend reports (typically "credits"). */
   currency?: string;
@@ -418,6 +419,9 @@ export interface CodexQuota {
 export interface CodexQuotaEvent {
   type: "$codex_quota";
   quota: CodexQuota | null;
+  /** Why quota is null (HTTP status, malformed payload, network error) —
+   *  surfaced in the statusbar tooltip so a silent "—" is diagnosable. */
+  reason?: string;
 }
 
 // ---- commands ----

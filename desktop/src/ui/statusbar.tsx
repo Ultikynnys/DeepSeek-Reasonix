@@ -24,6 +24,8 @@ export function StatusBar({
   balance,
   codexQuota,
   onRefreshCodexQuota,
+  codexQuotaRefreshing,
+  codexQuotaReason,
   usage,
   busy,
   ready,
@@ -42,6 +44,10 @@ export function StatusBar({
   balance: Balance | null;
   codexQuota: CodexQuota | null;
   onRefreshCodexQuota?: () => void;
+  /** True between a chip click and the $codex_quota reply — renders a refresh indicator. */
+  codexQuotaRefreshing?: boolean;
+  /** Why the last quota fetch produced no data — appended to the chip tooltip. */
+  codexQuotaReason?: string | null;
   usage: UsageStats;
   busy: boolean;
   ready: boolean;
@@ -111,12 +117,34 @@ export function StatusBar({
   // DeepSeek balance and $ amounts are meaningless on an OpenAI tab.
   const openaiTab = !!settings?.model?.startsWith("gpt-");
   const quota = codexQuota && openaiTab ? codexQuota : null;
-  const showQuota = !!quota && quota.limit > 0;
+  const showQuota = !!quota;
   const quotaCurrency = quota?.currency ?? t("statusbar.codexCredits");
   const quotaLimit = quota?.limit ?? 0;
+  const quotaUsed = quota?.used ?? null;
   const quotaTurnCost = quota?.turnCost ?? null;
-  const quotaLeft = showQuota ? Math.max(0, quotaLimit - (quota?.used ?? 0)) : 0;
+  // Absolute credit numbers are null when the backend only reported a
+  // percent (wham/usage fallback) — the chip then shows "% left" alone.
+  const quotaLeft =
+    showQuota && quotaUsed !== null && quotaLimit > 0
+      ? Math.max(0, quotaLimit - quotaUsed)
+      : null;
   const quotaLeftPct = showQuota ? Math.max(0, 100 - (quota?.usedPct ?? 0)) : 0;
+  const quotaTitle = showQuota
+    ? quotaLeft !== null
+      ? t("statusbar.codexQuotaTitle", {
+          left: Math.round(quotaLeft),
+          limit: Math.round(quotaLimit),
+          currency: quotaCurrency,
+        })
+      : t("statusbar.codexQuotaPctTitle", { left: Math.round(quotaLeftPct) })
+    : openaiAuth === "oauth"
+      ? t("statusbar.codexUnavailable")
+      : t("statusbar.codexNoData");
+  // A failed fetch stays diagnosable: append the server/network reason to the tooltip.
+  const quotaTitleWithReason =
+    !showQuota && codexQuotaReason
+      ? `${quotaTitle}\n${t("statusbar.codexReason", { reason: codexQuotaReason })}`
+      : quotaTitle;
   const [themeOpen, setThemeOpen] = useState(false);
   const themePopRef = useRef<HTMLDivElement | null>(null);
   const themeButtonRef = useRef<HTMLSpanElement | null>(null);
@@ -229,17 +257,7 @@ export function StatusBar({
       {openaiTab ? (
         <span
           className="seg"
-          title={
-            showQuota
-              ? t("statusbar.codexQuotaTitle", {
-                  left: Math.round(quotaLeft),
-                  limit: Math.round(quotaLimit),
-                  currency: quotaCurrency,
-                })
-              : openaiAuth === "oauth"
-                ? t("statusbar.codexUnavailable")
-                : t("statusbar.codexNoData")
-          }
+          title={quotaTitleWithReason}
           style={onRefreshCodexQuota ? { cursor: "pointer" } : undefined}
           onClick={onRefreshCodexQuota}
         >
@@ -250,8 +268,14 @@ export function StatusBar({
               <span className="v acc">
                 {Math.round(quotaLeftPct)}% {t("statusbar.codexLeft")}
               </span>
-              <span className="conv">{`${Math.round(quotaLeft)} / ${Math.round(quotaLimit)}`}</span>
+              {quotaLeft !== null ? (
+                <span className="conv">{`${Math.round(quotaLeft)} / ${Math.round(quotaLimit)}`}</span>
+              ) : (
+                <span className="conv">{quotaCurrency}</span>
+              )}
             </>
+          ) : codexQuotaRefreshing ? (
+            <span className="v acc">{t("statusbar.codexRefreshing")}</span>
           ) : (
             <span className="v acc">—</span>
           )}

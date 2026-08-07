@@ -74,6 +74,8 @@ function initialState(): Parameters<typeof reduce>[0] {
     qq: null,
     balance: null,
     codexQuota: null,
+    codexQuotaRefreshing: false,
+    codexQuotaReason: null,
     mentionResults: null,
     mentionPreview: null,
     mcpSpecs: [],
