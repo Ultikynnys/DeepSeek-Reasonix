@@ -68,6 +68,7 @@ import {
   type McpSpecInfo,
   type MemoryDetail,
   type MemoryEntryInfo,
+  type ModelEndpointInfo,
   type OutgoingCommand,
   type PlanStep,
   type PlanVerdict,
@@ -298,7 +299,14 @@ export type Settings = {
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
-  openaiOAuth?: { signedIn: boolean; account?: string };
+  /** Endpoint + auth state for the tab's current model — per tab, follows model switches. */
+  modelEndpoint?: ModelEndpointInfo;
+  openaiOAuth?: {
+    signedIn: boolean;
+    account?: string;
+    /** Last OAuth flow failure (e.g. upstream invalid_client / timeout) — drives the status-bar auth chip until the next successful sign-in. */
+    flowError?: string;
+  };
   version: string;
 };
 
@@ -1160,6 +1168,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           webSearchApiKeys: ev.webSearchApiKeys,
           subagentModels: ev.subagentModels,
           showSystemEvents: ev.showSystemEvents,
+          modelEndpoint: ev.modelEndpoint,
           openaiOAuth: ev.openaiOAuth,
           version: ev.version,
         },

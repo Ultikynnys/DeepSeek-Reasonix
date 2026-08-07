@@ -1025,6 +1025,45 @@ describe("Desktop App reducer — OpenAI OAuth flow state", () => {
     expect(next.settings?.openaiOAuth).toEqual({ signedIn: true, account: "u@example.com" });
   });
 
+  it("$settings maps modelEndpoint and OAuth flowError into settings (#1529)", () => {
+    const state = initialState();
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$settings",
+        reasoningEffort: "medium",
+        editMode: "review",
+        budgetUsd: null,
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "gpt-5.6-sol",
+        modelEndpoint: {
+          provider: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          openaiAuth: "oauth",
+          oauthAccount: "u@example.com",
+        },
+        openaiOAuth: {
+          signedIn: true,
+          account: "u@example.com",
+          flowError: "OAuth token exchange failed: invalid_client",
+        },
+        version: "0.50.1",
+      },
+    });
+    expect(next.settings?.modelEndpoint).toEqual({
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      openaiAuth: "oauth",
+      oauthAccount: "u@example.com",
+    });
+    expect(next.settings?.openaiOAuth).toEqual({
+      signedIn: true,
+      account: "u@example.com",
+      flowError: "OAuth token exchange failed: invalid_client",
+    });
+  });
+
   it("$settings without signed-in OAuth keeps oauthWaiting", () => {
     const state = { ...initialState(), oauthWaiting: true };
     const next = reduce(state, {

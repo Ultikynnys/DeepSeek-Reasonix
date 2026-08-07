@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readConfig, saveOpenAIOAuth } from "../src/config.js";
 import {
+  accountFromIdToken,
   beginOAuthFlow,
   buildAuthorizeUrl,
   exchangeOAuthCode,
@@ -55,6 +56,11 @@ function httpGet(url: string): Promise<{ status: number; body: string }> {
   });
 }
 
+/** Minimal JWT (header.payload.signature) with the given claims payload. */
+function jwt(payload: object): string {
+  return `h.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.s`;
+}
+
 describe("oauth", () => {
   let dir: string;
   let cfgPath: string;
@@ -100,7 +106,7 @@ describe("oauth", () => {
       }),
     );
     expect(url.origin).toBe("https://auth.openai.com");
-    expect(url.pathname).toBe("/api/accounts/authorize");
+    expect(url.pathname).toBe("/oauth/authorize");
     expect(url.searchParams.get("client_id")).toBe("cid-1");
     expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:9999/callback");
     expect(url.searchParams.get("response_type")).toBe("code");
@@ -108,6 +114,10 @@ describe("oauth", () => {
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(url.searchParams.get("state")).toBe("st-1");
     expect(url.searchParams.get("scope")).toContain("offline_access");
+    // Codex CLI flow params — simplified consent + orgs in the id_token.
+    expect(url.searchParams.get("codex_cli_simplified_flow")).toBe("true");
+    expect(url.searchParams.get("id_token_add_organizations")).toBe("true");
+    expect(url.searchParams.get("originator")).toBe("reasonix");
   });
 
   it("buildAuthorizeUrl honors OPENAI_OAUTH_AUDIENCE and env-overridden endpoints", () => {
@@ -136,7 +146,7 @@ describe("oauth", () => {
       verifier: "ver-1",
     });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://auth.openai.com/api/accounts/oauth/token");
+    expect(url).toBe("https://auth.openai.com/oauth/token");
     const body = new URLSearchParams(String(init.body));
     expect(body.get("grant_type")).toBe("authorization_code");
     expect(body.get("client_id")).toBe("cid");
@@ -219,7 +229,7 @@ describe("oauth", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({}, 200));
     await revokeOAuthToken("tok", "cid");
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://auth.openai.com/api/accounts/oauth/revoke");
+    expect(url).toBe("https://auth.openai.com/oauth/revoke");
     const body = new URLSearchParams(String(init.body));
     expect(body.get("token")).toBe("tok");
     expect(body.get("client_id")).toBe("cid");
@@ -231,13 +241,50 @@ describe("oauth", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ email: "u@example.com" }));
     expect(await oauthAccount("at")).toBe("u@example.com");
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://auth.openai.com/api/accounts/oauth/userinfo");
+    expect(url).toBe("https://auth.openai.com/oauth/userinfo");
     expect((init.headers as Record<string, string>).authorization).toBe("Bearer at");
   });
 
   it("oauthAccount is undefined on non-ok responses", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({}, 500));
     expect(await oauthAccount("at")).toBeUndefined();
+  });
+
+  describe("accountFromIdToken", () => {
+    it("reads chatgpt_account_id from id_token claims", () => {
+      expect(accountFromIdToken(jwt({ chatgpt_account_id: "u_123" }))).toBe("u_123");
+    });
+
+    it("falls back to the api.openai.com/auth namespace and organizations", () => {
+      expect(
+        accountFromIdToken(jwt({ "https://api.openai.com/auth": { chatgpt_account_id: "u_456" } })),
+      ).toBe("u_456");
+      expect(accountFromIdToken(jwt({ organizations: [{ id: "org_7" }] }))).toBe("org_7");
+    });
+
+    it("is undefined for garbage or missing tokens", () => {
+      expect(accountFromIdToken(undefined)).toBeUndefined();
+      expect(accountFromIdToken("not-a-jwt")).toBeUndefined();
+      expect(accountFromIdToken(jwt({ email: "u@example.com" }))).toBeUndefined();
+    });
+  });
+
+  it("exchangeOAuthCode extracts the account from id_token claims", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        access_token: "at-1",
+        refresh_token: "rt-1",
+        id_token: jwt({ chatgpt_account_id: "u_42" }),
+        expires_in: 900,
+      }),
+    );
+    const creds = await exchangeOAuthCode({
+      clientId: "cid",
+      redirectUri: "http://127.0.0.1:1/cb",
+      code: "code-1",
+      verifier: "ver-1",
+    });
+    expect(creds.account).toBe("u_42");
   });
 
   describe("beginOAuthFlow (real localhost callback server)", () => {
@@ -247,6 +294,7 @@ describe("oauth", () => {
           return jsonResponse({
             access_token: "at-flow",
             refresh_token: "rt-flow",
+            id_token: jwt({ chatgpt_account_id: "u_flow" }),
             expires_in: 900,
           });
         }
@@ -256,7 +304,7 @@ describe("oauth", () => {
       const parsed = new URL(flow.url);
       const state = parsed.searchParams.get("state")!;
       const redirect = parsed.searchParams.get("redirect_uri")!;
-      expect(redirect).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback$/);
+      expect(redirect).toMatch(/^http:\/\/localhost:\d+\/auth\/callback$/);
       expect(parsed.searchParams.get("code_challenge")).toBeTruthy();
 
       const res = await httpGet(`${redirect}?code=code-flow&state=${state}`);
@@ -266,6 +314,7 @@ describe("oauth", () => {
       const creds = await flow.done;
       expect(creds.accessToken).toBe("at-flow");
       expect(creds.refreshToken).toBe("rt-flow");
+      expect(creds.account).toBe("u_flow");
       // The server closed after the callback.
       await expect(httpGet(redirect)).rejects.toThrow();
     });
@@ -309,7 +358,7 @@ describe("oauth", () => {
     await signOutOpenAI(cfgPath);
     expect(readConfig(cfgPath).openaiOAuth).toBeUndefined();
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://auth.openai.com/api/accounts/oauth/revoke");
+    expect(url).toBe("https://auth.openai.com/oauth/revoke");
     expect(new URLSearchParams(String(init.body)).get("token")).toBe("at");
   });
 
@@ -323,8 +372,8 @@ describe("oauth", () => {
     expect(readConfig(cfgPath).openaiOAuth).toBeUndefined();
   });
 
-  it("openAIClientId defaults to the community client, overridable via env", () => {
-    expect(openAIClientId()).toBe("DRivsnm2Mu42T3KOpqdtwB3NYviHYzwD");
+  it("openAIClientId defaults to the Codex CLI client, overridable via env", () => {
+    expect(openAIClientId()).toBe("app_EMoamEEZ73f0CkXaXp7hrann");
     process.env.OPENAI_OAUTH_CLIENT_ID = "registered-cid";
     expect(openAIClientId()).toBe("registered-cid");
   });

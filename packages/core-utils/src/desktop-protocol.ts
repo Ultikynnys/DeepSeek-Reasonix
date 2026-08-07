@@ -345,9 +345,27 @@ export interface SettingsEvent {
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
+  /** Endpoint + auth state for the tab's current model — per tab, follows model switches. */
+  modelEndpoint?: ModelEndpointInfo;
   /** OpenAI website-account OAuth state — never ships tokens, only the masked account. */
-  openaiOAuth?: { signedIn: boolean; account?: string };
+  openaiOAuth?: {
+    signedIn: boolean;
+    account?: string;
+    /** Last OAuth flow failure (e.g. upstream invalid_client / timeout) — drives the status-bar auth chip until the next successful sign-in. */
+    flowError?: string;
+  };
   version: string;
+}
+
+/** Endpoint + auth state for the tab's CURRENT model — the status bar's API
+ *  chip is per tab and flips between DeepSeek and OpenAI with the model. */
+export interface ModelEndpointInfo {
+  provider: "deepseek" | "openai";
+  baseUrl: string;
+  /** Auth source for OpenAI endpoints — absent for the DeepSeek provider. */
+  openaiAuth?: "oauth" | "apiKey" | "none";
+  /** Masked account email when signed in via OAuth. */
+  oauthAccount?: string;
 }
 
 export interface QQSettingsEvent {

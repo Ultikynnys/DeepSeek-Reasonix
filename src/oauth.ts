@@ -1,5 +1,5 @@
 /** OpenAI website-account OAuth (PKCE) — browser sign-in powers gpt-5.6
- *  requests; endpoints verified via OIDC discovery, client_id env-overridable. */
+ *  requests; client_id / endpoints env-overridable. */
 
 import { createHash, randomBytes } from "node:crypto";
 import { type Server, createServer } from "node:http";
@@ -11,18 +11,20 @@ import {
   saveOpenAIOAuth,
 } from "./config.js";
 
-export const OPENAI_DEFAULT_AUTHORIZE_URL = "https://auth.openai.com/api/accounts/authorize";
-export const OPENAI_DEFAULT_TOKEN_URL = "https://auth.openai.com/api/accounts/oauth/token";
-export const OPENAI_DEFAULT_REVOKE_URL = "https://auth.openai.com/api/accounts/oauth/revoke";
-export const OPENAI_DEFAULT_USERINFO_URL = "https://auth.openai.com/api/accounts/oauth/userinfo";
-/** Community-documented client_id of the official ChatGPT desktop app.
- *  Unverified against redirect-uri allowlists — a registered OpenAI OAuth
- *  app (via OPENAI_OAUTH_CLIENT_ID) is the reliable path if this fails. */
-export const OPENAI_DEFAULT_CLIENT_ID = "DRivsnm2Mu42T3KOpqdtwB3NYviHYzwD";
+export const OPENAI_DEFAULT_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
+export const OPENAI_DEFAULT_TOKEN_URL = "https://auth.openai.com/oauth/token";
+export const OPENAI_DEFAULT_REVOKE_URL = "https://auth.openai.com/oauth/revoke";
+export const OPENAI_DEFAULT_USERINFO_URL = "https://auth.openai.com/oauth/userinfo";
+/** Current Codex CLI OAuth client — the old ChatGPT desktop client id
+ *  (DRivsnm2Mu42T3KOpqdtwB3NYviHYzwD) was revoked by OpenAI: invalid_client /
+ *  "This app is unavailable", reproduced live 2026-08. Env-overridable. */
+export const OPENAI_DEFAULT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 
 const DEFAULT_SCOPE = "openid profile email offline_access";
 const REFRESH_SLACK_MS = 5 * 60_000;
 const OAUTH_FLOW_TIMEOUT_MS = 10 * 60_000;
+/** Callback port the Codex client allowlists (mirrors the Codex CLI / opencode). */
+const OAUTH_CALLBACK_PORT = 1455;
 
 function envOr(def: string, name: string): string {
   const v = process.env[name]?.trim();
@@ -82,6 +84,11 @@ export function buildAuthorizeUrl(p: AuthorizeParams): string {
     code_challenge_method: "S256",
     state: p.state,
     scope: p.scope ?? envOr(DEFAULT_SCOPE, "OPENAI_OAUTH_SCOPE"),
+    // Matches the Codex CLI flow (opencode): simplified consent, and orgs in
+    // the id_token so the account id survives without a userinfo round-trip.
+    codex_cli_simplified_flow: "true",
+    id_token_add_organizations: "true",
+    originator: "reasonix",
   });
   const audience = p.audience ?? process.env.OPENAI_OAUTH_AUDIENCE?.trim();
   if (audience) q.set("audience", audience);
@@ -91,6 +98,7 @@ export function buildAuthorizeUrl(p: AuthorizeParams): string {
 interface TokenResponse {
   access_token?: string;
   refresh_token?: string;
+  id_token?: string;
   expires_in?: number;
   error?: string;
   error_description?: string;
@@ -118,11 +126,32 @@ async function postTokenForm(url: string, body: URLSearchParams): Promise<TokenR
   return parsed;
 }
 
+/** OpenAI account id from JWT claims (id_token or access_token) — the Codex
+ *  family tokens carry chatgpt_account_id / organizations instead of email. */
+export function accountFromIdToken(token: string | undefined): string | undefined {
+  if (!token) return undefined;
+  try {
+    const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString()) as {
+      chatgpt_account_id?: string;
+      organizations?: Array<{ id?: string }>;
+      "https://api.openai.com/auth"?: { chatgpt_account_id?: string };
+    };
+    return (
+      claims.chatgpt_account_id ??
+      claims["https://api.openai.com/auth"]?.chatgpt_account_id ??
+      claims.organizations?.[0]?.id
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 function toCreds(parsed: TokenResponse, fallbackRefresh: string): OpenAIOAuthCreds {
   return {
     accessToken: parsed.access_token as string,
     refreshToken: parsed.refresh_token ?? fallbackRefresh,
     expiresAt: parsed.expires_in ? Date.now() + parsed.expires_in * 1000 : Date.now() + 10 * 60_000,
+    account: accountFromIdToken(parsed.id_token) ?? accountFromIdToken(parsed.access_token),
   };
 }
 
@@ -237,9 +266,19 @@ function errorPage(msg: string): string {
 <p>You can close this window and retry from Reasonix.</p></body></html>`;
 }
 
-/** Starts the browser OAuth dance: PKCE + state, a one-shot 127.0.0.1
- *  callback server, and the authorize URL. `done` rejects on state
- *  mismatch, exchange failure, user cancel, or the 10-minute timeout. */
+/** Port parsed from an OPENAI_OAUTH_REDIRECT_URI override, else the Codex port. */
+function redirectPort(uri: string): number {
+  try {
+    const parsed = new URL(uri);
+    return parsed.port ? Number(parsed.port) : OAUTH_CALLBACK_PORT;
+  } catch {
+    return OAUTH_CALLBACK_PORT;
+  }
+}
+
+/** Starts the browser OAuth dance: PKCE + state, a one-shot localhost
+ *  callback server on the Codex client's allowlisted port, and the authorize
+ *  URL. `done` rejects on error, cancel, or the 10-minute timeout. */
 export async function beginOAuthFlow(opts: { timeoutMs?: number } = {}): Promise<OAuthFlow> {
   const { verifier, challenge } = pkcePair();
   const state = randomOAuthState();
@@ -253,18 +292,23 @@ export async function beginOAuthFlow(opts: { timeoutMs?: number } = {}): Promise
     rejectDone = reject;
   });
 
+  const envRedirect = process.env.OPENAI_OAUTH_REDIRECT_URI?.trim();
+  let redirectUri = envRedirect ?? `http://localhost:${OAUTH_CALLBACK_PORT}/auth/callback`;
+
   const settle = (fn: () => void) => {
     if (settled) return;
     settled = true;
     if (timer) clearTimeout(timer);
     fn();
-    server.closeAllConnections();
+    // Close idle keep-alive sockets only — an in-flight response (the
+    // success/error page) must reach the browser before the server closes.
+    server.closeIdleConnections();
     server.close(() => {});
   };
 
   const server: Server = createServer((req, res) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (url.pathname !== "/callback") {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname !== "/auth/callback") {
       res.writeHead(404).end("Not found");
       return;
     }
@@ -283,10 +327,7 @@ export async function beginOAuthFlow(opts: { timeoutMs?: number } = {}): Promise
       settle(() => rejectDone(new Error("OAuth state mismatch")));
       return;
     }
-    const clientId = openAIClientId();
-    const redirectUri =
-      process.env.OPENAI_OAUTH_REDIRECT_URI ?? `http://127.0.0.1:${port}/callback`;
-    void exchangeOAuthCode({ clientId, redirectUri, code, verifier })
+    void exchangeOAuthCode({ clientId: openAIClientId(), redirectUri, code, verifier })
       .then((creds) => {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(SUCCESS_PAGE);
@@ -303,16 +344,32 @@ export async function beginOAuthFlow(opts: { timeoutMs?: number } = {}): Promise
     /* surfaced via the listening promise / settle-close */
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("listening", () => resolve());
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1");
-  });
+  const listen = (port: number) =>
+    new Promise<void>((resolve, reject) => {
+      const onError = (err: Error) => reject(err);
+      server.once("error", onError);
+      server.once("listening", () => {
+        server.removeListener("error", onError);
+        resolve();
+      });
+      // No host: dual-stack bind — both localhost (::1) and 127.0.0.1 reach it.
+      server.listen(port);
+    });
+
+  let port = envRedirect ? redirectPort(envRedirect) : OAUTH_CALLBACK_PORT;
+  try {
+    await listen(port);
+  } catch {
+    // Fixed port taken — fall back to an ephemeral port; the redirect URI is
+    // recomputed from the actual port below (best-effort: the upstream
+    // allowlist may only cover 1455).
+    await listen(0);
+  }
   const addr = server.address();
   if (!addr || typeof addr === "string") throw new Error("OAuth callback server failed to bind");
-  const port = addr.port;
+  port = addr.port;
+  if (!envRedirect) redirectUri = `http://localhost:${port}/auth/callback`;
 
-  const redirectUri = process.env.OPENAI_OAUTH_REDIRECT_URI ?? `http://127.0.0.1:${port}/callback`;
   const url = buildAuthorizeUrl({
     clientId: openAIClientId(),
     redirectUri,

@@ -71,6 +71,38 @@ export function StatusBar({
     ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
     : "—";
   const connState = !ready ? "off" : busy ? "running" : "online";
+  const ep = settings?.modelEndpoint;
+  const apiHost =
+    ep?.baseUrl?.replace(/^https?:\/\//, "") ??
+    settings?.baseUrl?.replace(/^https?:\/\//, "") ??
+    "api.deepseek.com";
+  // Per-tab provider state: DeepSeek tabs show the DeepSeek endpoint, gpt-*
+  // tabs show the OpenAI endpoint and its auth source (OAuth > static key > none).
+  const openaiAuth = ep?.provider === "openai" ? (ep.openaiAuth ?? "none") : null;
+  const oauthFlowError = openaiAuth !== null ? settings?.openaiOAuth?.flowError : undefined;
+  const authFailed = openaiAuth !== null && !!oauthFlowError;
+  const authLabel =
+    openaiAuth === "oauth"
+      ? t("statusbar.authOauth")
+      : openaiAuth === "apiKey"
+        ? t("statusbar.authKey")
+        : openaiAuth === "none"
+          ? t("statusbar.authNone")
+          : null;
+  let apiTitle =
+    openaiAuth === "oauth"
+      ? t("statusbar.apiOpenaiOauth", {
+          baseUrl: ep?.baseUrl ?? "",
+          account: ep?.oauthAccount ?? "",
+        })
+      : openaiAuth === "apiKey"
+        ? t("statusbar.apiOpenaiKey", { baseUrl: ep?.baseUrl ?? "" })
+        : openaiAuth === "none"
+          ? t("statusbar.apiOpenaiNone", { baseUrl: ep?.baseUrl ?? "" })
+          : `API · ${settings?.baseUrl ?? "api.deepseek.com"}`;
+  if (authFailed) apiTitle += `\n${t("statusbar.oauthFailed", { message: oauthFlowError })}`;
+  const dotDanger = connState === "off" || authFailed;
+  const dotWarn = !dotDanger && openaiAuth === "none";
   const [themeOpen, setThemeOpen] = useState(false);
   const themePopRef = useRef<HTMLDivElement | null>(null);
   const themeButtonRef = useRef<HTMLSpanElement | null>(null);
@@ -88,12 +120,19 @@ export function StatusBar({
 
   return (
     <footer className="statusbar">
-      <span className="seg" title={`API · ${settings?.baseUrl ?? "api.deepseek.com"}`}>
+      <span className="seg" title={apiTitle}>
         <span
-          className={connState === "off" ? "sw warn" : "sw"}
-          style={connState === "off" ? { background: "var(--danger)" } : undefined}
+          className={dotDanger || dotWarn ? "sw warn" : "sw"}
+          style={
+            dotDanger
+              ? { background: "var(--danger)" }
+              : dotWarn
+                ? { background: "var(--warn)" }
+                : undefined
+          }
         />
-        <span>{settings?.baseUrl?.replace(/^https?:\/\//, "") ?? "api.deepseek.com"}</span>
+        <span>{apiHost}</span>
+        {authLabel ? <span className="v">{authLabel}</span> : null}
         <span className="v">{!ready ? t("statusbar.offline") : busy ? t("statusbar.busy") : t("statusbar.online")}</span>
       </span>
       <span className="seg" title={t("statusbar.cacheHit")}>

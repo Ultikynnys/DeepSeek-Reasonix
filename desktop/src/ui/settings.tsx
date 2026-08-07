@@ -214,6 +214,7 @@ export function SettingsModal({
                 onSave={onSave}
                 oauthSignedIn={settings.openaiOAuth?.signedIn ?? false}
                 oauthAccount={settings.openaiOAuth?.account}
+                oauthFlowError={settings.openaiOAuth?.flowError}
                 oauthWaiting={oauthWaiting}
                 onOAuthBegin={onOAuthBegin}
                 onOAuthCancel={onOAuthCancel}
@@ -265,6 +266,7 @@ export function SettingsModal({
                 <OpenAISection
                   signedIn={settings.openaiOAuth?.signedIn ?? false}
                   account={settings.openaiOAuth?.account}
+                  flowError={settings.openaiOAuth?.flowError}
                   waiting={oauthWaiting}
                   onBegin={onOAuthBegin}
                   onCancel={onOAuthCancel}
@@ -1018,6 +1020,7 @@ function ApiKeySection({
 export function OpenAISection({
   signedIn,
   account,
+  flowError,
   waiting,
   onBegin,
   onCancel,
@@ -1026,6 +1029,8 @@ export function OpenAISection({
 }: {
   signedIn: boolean;
   account?: string;
+  /** Last OAuth flow failure — shown so a failed sign-in (e.g. upstream invalid_client) is visible instead of just "not signed in". */
+  flowError?: string;
   waiting: boolean;
   onBegin: () => void;
   onCancel: () => void;
@@ -1075,6 +1080,16 @@ export function OpenAISection({
           </div>
         </div>
       )}
+      {flowError ? (
+        <div className="setting-row" style={{ borderColor: "var(--danger)" }}>
+          <div className="l">
+            <div className="n">{t("settings.openaiFlowFailed")}</div>
+            <div className="h" style={{ color: "var(--danger)" }}>
+              {flowError}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="setting-row">
         <div className="l">
           <div className="n">{t("settings.openaiApiKey")}</div>
@@ -1122,6 +1137,7 @@ function PageModels({
   onSave,
   oauthSignedIn,
   oauthAccount,
+  oauthFlowError,
   oauthWaiting,
   onOAuthBegin,
   onOAuthCancel,
@@ -1132,6 +1148,7 @@ function PageModels({
   onSave: (patch: SettingsPatch) => void;
   oauthSignedIn: boolean;
   oauthAccount?: string;
+  oauthFlowError?: string;
   oauthWaiting: boolean;
   onOAuthBegin: () => void;
   onOAuthCancel: () => void;
@@ -1209,6 +1226,7 @@ function PageModels({
       <OpenAISection
         signedIn={oauthSignedIn}
         account={oauthAccount}
+        flowError={oauthFlowError}
         waiting={oauthWaiting}
         onBegin={onOAuthBegin}
         onCancel={onOAuthCancel}

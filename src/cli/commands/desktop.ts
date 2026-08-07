@@ -27,6 +27,7 @@ import type {
   MemoryResultEvent,
   MentionPreviewEvent,
   MentionResultsEvent,
+  ModelEndpointInfo,
   NeedsSetupEvent,
   PathAccessRequiredEvent,
   PlanClearedEvent,
@@ -456,6 +457,30 @@ function collectWebSearchApiKeyPrefixes(): {
 
 let oauthGen = 0;
 let pendingOAuth: OAuthFlow | null = null;
+/** Last OAuth flow failure message — surfaced in the status bar's OpenAI auth
+ *  chip until the next successful sign-in clears it. */
+let lastOAuthError: string | null = null;
+
+/** Endpoint + auth state for a model id — drives the status bar's API chip.
+ *  DeepSeek models report the DeepSeek endpoint; gpt-* models the OpenAI one
+ *  plus auth source (OAuth sign-in > static key > none). Exported for tests. */
+export function modelEndpointFor(model: string, path?: string): ModelEndpointInfo {
+  if (providerForModel(model) !== "openai") {
+    return {
+      provider: "deepseek",
+      // Mirrors the client's default (src/client.ts) when nothing is configured.
+      baseUrl: loadEndpoint(path).baseUrl ?? "https://api.deepseek.com",
+    };
+  }
+  const oep = loadEndpointForModel(model, path);
+  const oauth = readConfig(path).openaiOAuth;
+  return {
+    provider: "openai",
+    baseUrl: oep.baseUrl ?? "https://api.openai.com/v1",
+    openaiAuth: oauth?.accessToken ? "oauth" : oep.apiKey ? "apiKey" : "none",
+    oauthAccount: oauth?.account,
+  };
+}
 
 function emitSettings(tab: Tab): void {
   const oauth = readConfig().openaiOAuth;
@@ -480,7 +505,12 @@ function emitSettings(tab: Tab): void {
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
       subagentModels: loadSubagentModels(),
       showSystemEvents: loadShowSystemEvents(),
-      openaiOAuth: { signedIn: !!oauth?.accessToken, account: oauth?.account },
+      modelEndpoint: modelEndpointFor(tab.currentModel),
+      openaiOAuth: {
+        signedIn: !!oauth?.accessToken,
+        account: oauth?.account,
+        flowError: lastOAuthError ?? undefined,
+      },
       version: VERSION,
     },
     tab.id,
@@ -2582,8 +2612,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             .then(async (creds) => {
               if (gen !== oauthGen) return; // superseded by a newer begin/signout
               pendingOAuth = null;
-              const account = await oauthAccount(creds.accessToken);
+              const account = (await oauthAccount(creds.accessToken)) ?? creds.account;
               saveOpenAIOAuth({ ...creds, account });
+              lastOAuthError = null;
               // The runtime snapshots the credential source at build time —
               // rebuild gpt tabs so a fresh sign-in takes effect (and clears
               // the needs-setup screen) without a model flip.
@@ -2598,11 +2629,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             .catch((err: Error) => {
               if (gen !== oauthGen) return;
               pendingOAuth = null;
+              lastOAuthError = err.message;
               emit({ type: "$error", message: err.message }, tab.id);
+              emitSettings(tab);
             });
         })
         .catch((err: Error) => {
+          lastOAuthError = err.message;
           emit({ type: "$error", message: `oauth_begin failed: ${err.message}` }, tab.id);
+          emitSettings(tab);
         });
       return;
     }
@@ -2616,6 +2651,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "oauth_signout") {
       oauthGen++;
+      lastOAuthError = null;
       if (pendingOAuth) {
         pendingOAuth.cancel();
         pendingOAuth = null;

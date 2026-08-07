@@ -94,6 +94,7 @@ export type {
   BalanceEvent,
   CodexQuota,
   CodexQuotaEvent,
+  ModelEndpointInfo,
   SettingsPatch,
   QQConfigPatch,
   OutgoingCommand,
