@@ -58,6 +58,7 @@ import {
 import {
   type CheckpointVerdict,
   type ChoiceVerdict,
+  type CodexQuota,
   type ConfirmationChoice,
   type ExternalSessionApp,
   type ExternalSessionSource,
@@ -343,6 +344,7 @@ type State = {
   settings: Settings | null;
   qq: QQDesktopSettingsState | null;
   balance: Balance | null;
+  codexQuota: CodexQuota | null;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
   mcpSpecs: McpSpecInfo[];
@@ -1109,6 +1111,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           infos: ev.balanceInfos ?? [],
         },
       };
+    case "$codex_quota":
+      return { ...state, codexQuota: ev.quota };
     case "$qq_settings":
       return {
         ...state,
@@ -1160,6 +1164,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           version: ev.version,
         },
         oauthWaiting: ev.openaiOAuth?.signedIn ? false : state.oauthWaiting,
+        // Quota is only meaningful while a ChatGPT (gpt-*) model is active —
+        // drop stale numbers the moment the model leaves the OpenAI family.
+        codexQuota: ev.model.startsWith("gpt-") ? state.codexQuota : null,
       };
     }
     case "$session_loaded": {
@@ -1644,6 +1651,7 @@ function TabRuntime({
     settings: null,
     qq: null,
     balance: null,
+    codexQuota: null,
     mentionResults: null,
     mentionPreview: null,
     mcpSpecs: [],
@@ -1730,6 +1738,10 @@ function TabRuntime({
   );
   const saveSettings = useCallback(
     (patch: SettingsPatch) => sendRpc({ cmd: "settings_save", ...patch }),
+    [sendRpc],
+  );
+  const refreshCodexQuota = useCallback(
+    () => sendRpc({ cmd: "codex_quota_get" }),
     [sendRpc],
   );
   const applySettingsPatch = useCallback(
@@ -2865,6 +2877,8 @@ function TabRuntime({
         <StatusBar
           settings={state.settings}
           balance={state.balance}
+          codexQuota={state.codexQuota}
+          onRefreshCodexQuota={refreshCodexQuota}
           usage={state.usage}
           busy={state.busy}
           ready={state.ready}

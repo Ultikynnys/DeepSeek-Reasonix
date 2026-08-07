@@ -73,6 +73,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     settings: null,
     qq: null,
     balance: null,
+    codexQuota: null,
     mentionResults: null,
     mentionPreview: null,
     mcpSpecs: [],

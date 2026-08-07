@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { I } from "../icons";
 import { t } from "../i18n";
 import type { Balance, Settings, UsageStats } from "../App";
-import type { JobInfo } from "../protocol";
+import type { CodexQuota, JobInfo } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { localizeShortcutText } from "./shortcut";
 
@@ -22,6 +22,8 @@ function tokenLabel(n: number): string {
 export function StatusBar({
   settings,
   balance,
+  codexQuota,
+  onRefreshCodexQuota,
   usage,
   busy,
   ready,
@@ -38,6 +40,8 @@ export function StatusBar({
 }: {
   settings: Settings | null;
   balance: Balance | null;
+  codexQuota: CodexQuota | null;
+  onRefreshCodexQuota?: () => void;
   usage: UsageStats;
   busy: boolean;
   ready: boolean;
@@ -147,6 +151,23 @@ export function StatusBar({
         <span className="v vio">{settings?.model ?? "—"}</span>
         <span className="v">{settings?.reasoningEffort ?? "high"}</span>
       </span>
+      {settings?.model.startsWith("gpt-5.6") && codexQuota ? (
+        <span
+          className="seg"
+          title={t("statusbar.codexQuotaTitle", {
+            used: codexQuota.used,
+            limit: codexQuota.limit,
+            currency: codexQuota.currency ?? t("statusbar.codexCredits"),
+          })}
+          style={onRefreshCodexQuota ? { cursor: "pointer" } : undefined}
+          onClick={onRefreshCodexQuota}
+        >
+          <I.coin size={11} style={{ color: "var(--accent)" }} />
+          <span>{t("statusbar.codexQuota")}</span>
+          <span className="v acc">{Math.round(codexQuota.usedPct)}%</span>
+          <span className="conv">{`${codexQuota.used} / ${codexQuota.limit}`}</span>
+        </span>
+      ) : null}
       <span
         className="seg"
         title={t("statusbar.switchCurrency")}

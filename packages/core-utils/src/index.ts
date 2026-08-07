@@ -92,6 +92,8 @@ export type {
   QQSettingsEvent,
   BalanceInfoItem,
   BalanceEvent,
+  CodexQuota,
+  CodexQuotaEvent,
   SettingsPatch,
   QQConfigPatch,
   OutgoingCommand,

@@ -13,6 +13,8 @@ import type {
   ChoiceOption,
   ChoiceRequiredEvent,
   ChoiceVerdict,
+  CodexQuota,
+  CodexQuotaEvent,
   ConfirmRequiredEvent,
   ConfirmationChoice,
   CtxBreakdownEvent,
@@ -80,6 +82,8 @@ export type {
   ChoiceOption,
   ChoiceRequiredEvent,
   ChoiceVerdict,
+  CodexQuota,
+  CodexQuotaEvent,
   ConfirmRequiredEvent,
   ConfirmationChoice,
   CtxBreakdownEvent,
@@ -314,6 +318,7 @@ export type IncomingEvent = { tabId?: string } & (
   | SettingsEvent
   | QQSettingsEvent
   | BalanceEvent
+  | CodexQuotaEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent
   | StepCompletedEvent

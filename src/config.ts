@@ -32,14 +32,9 @@ export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
 ];
 
 /** GPT-5.6 family (Sol/Terra/Luna) — OpenAI's flagship series (2026-07 GA).
- *  `gpt-5.6` is an alias for `gpt-5.6-sol`. All tiers accept
+ *  The bare `gpt-5.6` alias is deliberately NOT offered. All tiers accept
  *  reasoning_effort none|low|medium|high|xhigh|max. */
-export const GPT56_MODELS: readonly string[] = [
-  "gpt-5.6",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-];
+export const GPT56_MODELS: readonly string[] = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 
 /** Everything the default endpoints accept without a custom baseUrl, across providers. */
 export const SUPPORTED_MODELS: readonly string[] = [...SUPPORTED_OFFICIAL_MODELS, ...GPT56_MODELS];

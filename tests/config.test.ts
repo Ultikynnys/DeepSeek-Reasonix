@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  DEFAULT_MODEL,
   type DesktopOpenTab,
+  SUPPORTED_MODELS,
   addProjectPathAllowed,
   addProjectShellAllowed,
   clearOpenAIOAuth,
@@ -371,6 +373,18 @@ describe("config", () => {
     it("loadModel keeps gpt-5.6 ids on the official endpoints", () => {
       writeConfig({ model: "gpt-5.6-sol" }, path);
       expect(loadModel(path)).toBe("gpt-5.6-sol");
+    });
+
+    it("the bare gpt-5.6 alias is not offered — only sol/terra/luna, stale configs clamp", () => {
+      expect(SUPPORTED_MODELS).not.toContain("gpt-5.6");
+      for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+        expect(SUPPORTED_MODELS).toContain(id);
+      }
+      // A stale config still carrying the alias must not be usable: saveModel
+      // rejects it and loadModel clamps to the default model.
+      expect(() => saveModel("gpt-5.6", path)).toThrow(/Unsupported model/);
+      writeConfig({ model: "gpt-5.6" }, path);
+      expect(loadModel(path)).toBe(DEFAULT_MODEL);
     });
 
     it("loadEndpointForModel: config openaiApiKey beats the DeepSeek apiKey fallback", () => {

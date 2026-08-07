@@ -9,6 +9,7 @@ import {
   beginOAuthFlow,
   buildAuthorizeUrl,
   exchangeOAuthCode,
+  fetchCodexQuota,
   oauthAccount,
   openAIClientId,
   pkcePair,
@@ -326,5 +327,66 @@ describe("oauth", () => {
     expect(openAIClientId()).toBe("DRivsnm2Mu42T3KOpqdtwB3NYviHYzwD");
     process.env.OPENAI_OAUTH_CLIENT_ID = "registered-cid";
     expect(openAIClientId()).toBe("registered-cid");
+  });
+
+  describe("fetchCodexQuota", () => {
+    /** Creds far from expiry — the refresh path would otherwise consume the fetch mock. */
+    const creds = { accessToken: "at-1", refreshToken: "rt-1", expiresAt: Date.now() + 3_600_000 };
+
+    it("parses the nested weekly_quota_usage/limit shape with amounts and currency", async () => {
+      saveOpenAIOAuth(creds, cfgPath);
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          weekly_quota_usage: { amount: 42, currency: "credits" },
+          weekly_quota_limit: { amount: 100, currency: "credits" },
+        }),
+      );
+      const q = await fetchCodexQuota(cfgPath);
+      expect(q).not.toBeNull();
+      expect(q!.used).toBe(42);
+      expect(q!.limit).toBe(100);
+      expect(q!.usedPct).toBe(42);
+      expect(q!.currency).toBe("credits");
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("https://chatgpt.com/backend-api/codex/quota");
+      expect((init.headers as Record<string, string>)["OAI-Product-Sku"]).toBe("codex");
+      expect((init.headers as Record<string, string>).authorization).toBe("Bearer at-1");
+    });
+
+    it("parses the flat numeric used/limit shape and string amounts inside objects", async () => {
+      saveOpenAIOAuth(creds, cfgPath);
+      fetchMock.mockResolvedValueOnce(jsonResponse({ used: 12.5, limit: 50 }));
+      const flat = await fetchCodexQuota(cfgPath);
+      expect(flat!.used).toBe(12.5);
+      expect(flat!.limit).toBe(50);
+      expect(flat!.usedPct).toBe(25);
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          quota_usage: { amount: "30" },
+          quota_limit: { amount: 200 },
+        }),
+      );
+      const nested = await fetchCodexQuota(cfgPath);
+      expect(nested!.used).toBe(30);
+      expect(nested!.limit).toBe(200);
+      expect(nested!.usedPct).toBe(15);
+    });
+
+    it("returns null without OAuth creds and never fetches", async () => {
+      expect(await fetchCodexQuota(cfgPath)).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("returns null on rejection, malformed payloads, and non-positive limits", async () => {
+      saveOpenAIOAuth(creds, cfgPath);
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: "nope" }, 401));
+      expect(await fetchCodexQuota(cfgPath)).toBeNull();
+      fetchMock.mockResolvedValueOnce(jsonResponse({ whatever: true }));
+      expect(await fetchCodexQuota(cfgPath)).toBeNull();
+      fetchMock.mockResolvedValueOnce(jsonResponse({ used: 10, limit: 0 }));
+      expect(await fetchCodexQuota(cfgPath)).toBeNull();
+      fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+      expect(await fetchCodexQuota(cfgPath)).toBeNull();
+    });
   });
 });

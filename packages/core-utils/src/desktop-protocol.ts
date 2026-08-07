@@ -378,6 +378,26 @@ export interface BalanceEvent {
   balanceInfos: BalanceInfoItem[];
 }
 
+/** ChatGPT-plan weekly Codex quota (daemon source: src/oauth.ts fetchCodexQuota).
+ *  `null` payload means "no data" — not signed in, rejected, or malformed —
+ *  the UI degrades to no chip instead of a wrong number. */
+export interface CodexQuota {
+  /** Credits used this week, cumulative (server-reported). */
+  used: number;
+  /** Weekly credit limit. */
+  limit: number;
+  /** used / limit × 100. */
+  usedPct: number;
+  /** Unit the backend reports (typically "credits"). */
+  currency?: string;
+  fetchedAt: number;
+}
+
+export interface CodexQuotaEvent {
+  type: "$codex_quota";
+  quota: CodexQuota | null;
+}
+
 // ---- commands ----
 
 export interface SettingsPatch {
@@ -444,6 +464,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "oauth_signout" }
   | { cmd: "settings_get" }
   | ({ cmd: "settings_save" } & SettingsPatch)
+  | { cmd: "codex_quota_get" }
   | { cmd: "qq_status_get" }
   | { cmd: "qq_connect" }
   | { cmd: "qq_disconnect" }

@@ -1109,7 +1109,6 @@ export function OpenAISection({
 const KNOWN_MODELS = [
   "deepseek-v4-flash",
   "deepseek-v4-pro",
-  "gpt-5.6",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",

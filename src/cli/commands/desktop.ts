@@ -11,6 +11,7 @@ import type {
   BtwResultEvent,
   CheckpointRequiredEvent,
   ChoiceRequiredEvent,
+  CodexQuotaEvent,
   ConfirmRequiredEvent,
   CtxBreakdownEvent,
   JobInfo,
@@ -165,6 +166,7 @@ import {
 import {
   type OAuthFlow,
   beginOAuthFlow,
+  fetchCodexQuota,
   oauthAccount,
   resolveOpenAIToken,
   signOutOpenAI,
@@ -255,6 +257,7 @@ type EmittableEvent =
   | SettingsEvent
   | QQSettingsEvent
   | BalanceEvent
+  | CodexQuotaEvent
   | MentionResultsEvent
   | MentionPreviewEvent
   | RetryResultEvent
@@ -482,6 +485,7 @@ function emitSettings(tab: Tab): void {
     },
     tab.id,
   );
+  void emitCodexQuota(tab);
 }
 
 function emitQQSettings(tab: Tab): void {
@@ -519,6 +523,14 @@ async function emitBalance(tab: Tab): Promise<void> {
     },
     tab.id,
   );
+}
+
+/** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs
+ *  only (the endpoint needs the OAuth token); null → UI hides the chip. */
+async function emitCodexQuota(tab: Tab): Promise<void> {
+  if (providerForModel(tab.currentModel) !== "openai") return;
+  const quota = await fetchCodexQuota().catch(() => null);
+  emit({ type: "$codex_quota", quota }, tab.id);
 }
 
 function emitSessions(tab: Tab): void {
@@ -1624,6 +1636,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           emitSessions(tab);
           void emitBalance(tab);
+          void emitCodexQuota(tab);
           if (tab.hooks.some((h) => h.event === "Stop")) {
             const stopReport = await runHooks({
               hooks: tab.hooks,
@@ -2647,6 +2660,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "settings_get") {
       emitSettings(tab);
+      return;
+    }
+    if (msg.cmd === "codex_quota_get") {
+      void emitCodexQuota(tab);
       return;
     }
     if (msg.cmd === "qq_status_get") {

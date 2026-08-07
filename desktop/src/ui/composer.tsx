@@ -824,7 +824,6 @@ function Popup({
 const KNOWN_MODELS: readonly string[] = [
   "deepseek-v4-flash",
   "deepseek-v4-pro",
-  "gpt-5.6",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
