@@ -293,6 +293,8 @@ export interface TranslationSchema {
     repeatToolCallWarning: string;
     stormStuck: string;
     stormSuppressed: string;
+    emptyResponseRetry: string;
+    emptyResponseGiveUp: string;
     forcingSummary: string;
   };
   errors: {

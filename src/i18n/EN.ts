@@ -695,6 +695,10 @@ export const EN: TranslationSchema = {
     stormStuck:
       "Stopped a stuck retry loop — the model kept calling the same tool with identical args after a self-correction nudge. Try /retry, rephrase, or rule out the underlying blocker.",
     stormSuppressed: "Suppressed {count} repeated tool call(s) — same name + args fired 3+ times.",
+    emptyResponseRetry:
+      "The model returned an empty response (no text, no reasoning, no tool calls) — retrying once.",
+    emptyResponseGiveUp:
+      "The model returned an empty response twice in a row — ending the turn without an answer. Try again or /retry.",
     forcingSummary:
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
   },

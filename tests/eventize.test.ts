@@ -190,7 +190,7 @@ describe("Eventizer.consume", () => {
     expect(s.id).toBeGreaterThan(u.id);
   });
 
-  it("maps compaction_start / compaction_end into card lifecycle events", () => {
+  it("maps compaction_start / compaction_end into card lifecycle events (user /compact)", () => {
     const e = new Eventizer();
     e.consume(lev({ turn: 1 }), ctx); // burn turn-start
     const start = e.consume(
@@ -198,7 +198,7 @@ describe("Eventizer.consume", () => {
         turn: 1,
         role: "compaction_start",
         compactionId: "compaction-1",
-        compactionReason: "auto-context-pressure",
+        compactionReason: "user",
         compactionKind: "fold",
         aggressive: true,
       }),
@@ -208,7 +208,7 @@ describe("Eventizer.consume", () => {
     expect(start[0]).toMatchObject({
       type: "compaction.started",
       compactionId: "compaction-1",
-      reason: "auto-context-pressure",
+      reason: "user",
       kind: "fold",
       aggressive: true,
     });
@@ -218,6 +218,7 @@ describe("Eventizer.consume", () => {
         turn: 1,
         role: "compaction_end",
         compactionId: "compaction-1",
+        compactionReason: "user",
         compactionKind: "fold",
         folded: true,
         beforeMessages: 243,
@@ -251,15 +252,44 @@ describe("Eventizer.consume", () => {
       prunedTokens: 4200,
       droppedFiles: ["src/dead.ts", "src/old.ts"],
     });
-    // A folded log REPLACES the conversation view — the kernel records it so
-    // the projection stays replayable after compaction.
+    // User-triggered /compact runs idle — a folded log REPLACES the
+    // conversation view, so the kernel records it for replay.
     expect(end[1]).toMatchObject({
       type: "session.compacted",
-      reason: "auto-context-pressure",
+      reason: "user",
       beforeMessages: 243,
       afterMessages: 63,
     });
     expect((end[1] as { replacementMessages: unknown[] }).replacementMessages).toHaveLength(2);
+  });
+
+  it("auto fold never emits session.compacted — a mid-turn swap would orphan the live turn", () => {
+    const e = new Eventizer();
+    e.consume(lev({ turn: 1 }), ctx); // burn turn-start
+    const end = e.consume(
+      lev({
+        turn: 1,
+        role: "compaction_end",
+        compactionId: "compaction-auto",
+        compactionReason: "auto-context-pressure",
+        compactionKind: "fold",
+        folded: true,
+        beforeMessages: 243,
+        afterMessages: 63,
+        summaryChars: 2912,
+        summary: "recap text",
+        replacementMessages: [
+          { role: "assistant", content: "[compaction summary] recap text" },
+          { role: "user", content: "keep me" },
+        ],
+      }),
+      ctx,
+    );
+    // Card lifecycle only — the replacement is applied on the next session
+    // load, never while the loop is mid-turn.
+    expect(end.length).toBe(1);
+    expect(end[0]).toMatchObject({ type: "compaction.finished", folded: true });
+    expect(end.find((x) => x.type === "session.compacted")).toBeUndefined();
   });
 
   it("auto fold opening a new turn still synthesizes model.turn.started", () => {

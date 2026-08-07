@@ -843,3 +843,95 @@ describe("Desktop App reducer — compaction file triage", () => {
     expect(next.messages.at(-1)).toMatchObject({ kind: "assistant", turn: 2 });
   });
 });
+
+describe("Desktop App reducer — model.final content", () => {
+  const turnStarted = {
+    type: "model.turn.started" as const,
+    id: 1,
+    ts: "2026-05-27T00:00:00.000Z",
+    turn: 1,
+    model: "deepseek-v4-flash",
+    reasoningEffort: "high",
+    prefixHash: "h",
+  };
+
+  it("renders abort content when nothing streamed (no silent empty bubble)", () => {
+    const state = reduce(initialState(), { t: "incoming", event: turnStarted });
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.final",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        content: "[aborted by user — no response produced.]",
+        toolCalls: [],
+        usage: {},
+        costUsd: 0,
+      },
+    });
+    const assistant = next.messages.find((m) => m.kind === "assistant");
+    expect(assistant?.kind).toBe("assistant");
+    if (assistant?.kind !== "assistant") return;
+    expect(assistant.pending).toBe(false);
+    expect(assistant.segments).toHaveLength(1);
+    expect(assistant.segments[0]).toMatchObject({
+      kind: "text",
+      text: "[aborted by user — no response produced.]",
+    });
+  });
+
+  it("does not duplicate content already streamed as deltas", () => {
+    let state = reduce(initialState(), { t: "incoming", event: turnStarted });
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.delta",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        channel: "content",
+        text: "partial answer",
+      },
+    });
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.final",
+        id: 3,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        content: "partial answer",
+        toolCalls: [],
+        usage: {},
+        costUsd: 0,
+      },
+    });
+    const assistant = next.messages.find((m) => m.kind === "assistant");
+    if (assistant?.kind !== "assistant") throw new Error("no assistant message");
+    expect(assistant.segments).toHaveLength(1);
+    expect(assistant.segments[0]).toMatchObject({ kind: "text", text: "partial answer" });
+  });
+
+  it("skips forcedSummary finals — the compaction card renders that content", () => {
+    const state = reduce(initialState(), { t: "incoming", event: turnStarted });
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.final",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        content: "[aborted by user (Esc) — interrupted turn discarded. Ask again when ready.]",
+        toolCalls: [],
+        usage: {},
+        costUsd: 0,
+        forcedSummary: true,
+      },
+    });
+    const assistant = next.messages.find((m) => m.kind === "assistant");
+    if (assistant?.kind !== "assistant") throw new Error("no assistant message");
+    expect(assistant.segments).toHaveLength(0);
+    expect(assistant.pending).toBe(false);
+  });
+});

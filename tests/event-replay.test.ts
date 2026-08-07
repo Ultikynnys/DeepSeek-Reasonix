@@ -73,7 +73,7 @@ describe("event-log replay round-trip", () => {
     expect(projections.session.currentTurn).toBe(1);
   });
 
-  it("fold replays as compaction card + session.compacted — the conversation view is replaced", async () => {
+  it("user /compact replays as compaction card + session.compacted — the conversation view is replaced", async () => {
     const path = join(dir, "fold.events.jsonl");
     const sink = openEventSink(path);
     const eventizer = new Eventizer();
@@ -87,9 +87,66 @@ describe("event-log replay round-trip", () => {
     ))
       sink.append(out);
 
-    // Turn-start fold of turn 2: the loop yields the card pair and snapshots
-    // the post-fold log; the eventizer must emit session.compacted so replay
-    // sees the REPLACED conversation, not the pre-fold one.
+    // User-triggered /compact runs idle: the loop yields the card pair and
+    // snapshots the post-fold log; the eventizer must emit session.compacted
+    // so replay sees the REPLACED conversation, not the pre-fold one.
+    const replacement = [
+      { role: "assistant", content: "[compaction summary] recap of earlier turns" },
+      { role: "user", content: "list files in src" },
+    ];
+    for (const out of eventizer.consume(
+      lev({
+        turn: 2,
+        role: "compaction_start",
+        compactionId: "c1",
+        compactionReason: "user",
+        compactionKind: "fold",
+      }),
+      ctx,
+    ))
+      sink.append(out);
+    for (const out of eventizer.consume(
+      lev({
+        turn: 2,
+        role: "compaction_end",
+        compactionId: "c1",
+        compactionReason: "user",
+        compactionKind: "fold",
+        folded: true,
+        beforeMessages: 3,
+        afterMessages: 2,
+        summaryChars: 45,
+        summary: "recap of earlier turns",
+        replacementMessages: replacement,
+      }),
+      ctx,
+    ))
+      sink.append(out);
+    await sink.close();
+
+    const projections = replay(readEventLogFile(path));
+    expect(projections.conversation.messages).toEqual(replacement);
+    expect(projections.conversation.pendingToolCalls).toEqual([]);
+    expect(projections.session.currentTurn).toBe(2);
+  });
+
+  it("auto fold records the card but keeps the pre-fold conversation view", async () => {
+    const path = join(dir, "autofold.events.jsonl");
+    const sink = openEventSink(path);
+    const eventizer = new Eventizer();
+
+    sink.append(eventizer.emitSessionOpened(0, "autofold", 0));
+    sink.append(eventizer.emitUserMessage(1, "list files in src"));
+    for (const out of eventizer.consume(
+      lev({ turn: 1, role: "assistant_final", content: "Let me check." }),
+      ctx,
+    ))
+      sink.append(out);
+
+    // Mid-turn auto fold: session.compacted is deliberately NOT emitted — the
+    // UI keeps the pre-fold transcript so the live turn's events (which carry
+    // absolute loop turns) still find their assistant card. The replacement is
+    // applied on the next session load instead.
     const replacement = [
       { role: "assistant", content: "[compaction summary] recap of earlier turns" },
       { role: "user", content: "list files in src" },
@@ -110,6 +167,7 @@ describe("event-log replay round-trip", () => {
         turn: 2,
         role: "compaction_end",
         compactionId: "c1",
+        compactionReason: "auto-context-pressure",
         compactionKind: "fold",
         folded: true,
         beforeMessages: 3,
@@ -124,8 +182,11 @@ describe("event-log replay round-trip", () => {
     await sink.close();
 
     const projections = replay(readEventLogFile(path));
-    expect(projections.conversation.messages).toEqual(replacement);
-    expect(projections.conversation.pendingToolCalls).toEqual([]);
+    // Pre-fold conversation survives — no session.compacted swap.
+    expect(projections.conversation.messages).toEqual([
+      { role: "user", content: "list files in src" },
+      { role: "assistant", content: "Let me check." },
+    ]);
     expect(projections.session.currentTurn).toBe(2);
   });
 

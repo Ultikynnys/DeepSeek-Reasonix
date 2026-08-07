@@ -146,7 +146,17 @@ export class Eventizer {
         // conversation projection stays replayable after compaction, exactly like
         // tool results and assistant finals are. The reducer swaps its message
         // list on this event (the one event that doesn't append).
-        if (ev.folded && ev.replacementMessages) {
+        //
+        // USER-triggered /compact ONLY. Auto folds (turn-start / post-response)
+        // run MID-TURN: swapping the list renumbers every message (user turns
+        // become array positions, assistant turns become dense counts) while the
+        // loop keeps counting absolute turns, so the rest of the live turn's
+        // events (deltas, tool cards, final) target a turn number that no longer
+        // exists in the UI and are silently dropped — the turn renders as
+        // "silently thinking" then ends with nothing. The running compaction
+        // card already communicates the auto fold; the next session load
+        // applies the replacement.
+        if (ev.folded && ev.replacementMessages && ev.compactionReason === "user") {
           out.push(
             this.sessionCompactedEvent(
               ev.turn,

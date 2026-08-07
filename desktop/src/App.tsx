@@ -1222,7 +1222,17 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         usage,
         messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          return { ...m, pending: false };
+          // Abort-settled finals (emitAbortedFinal) carry the abort notice in
+          // `content`, but the deltas never streamed it — append it so the card
+          // isn't a silent empty bubble ("turn ended without any thinking").
+          // Skip when text already streamed (would duplicate) or the content
+          // belongs to a forced summary (the compaction card renders it).
+          const hasText = m.segments.some((s) => s.kind === "text");
+          const segments =
+            !ev.forcedSummary && !hasText && ev.content
+              ? appendTextSegment(m.segments, "text", ev.content)
+              : m.segments;
+          return { ...m, segments, pending: false };
         }),
       };
     }

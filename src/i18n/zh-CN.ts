@@ -666,6 +666,8 @@ export const zhCN: TranslationSchema = {
     stormStuck:
       "已停止卡死的重试循环 — 模型在自纠提示后仍以相同参数重复调用同一工具。请尝试 /retry、换种说法，或排查底层阻塞。",
     stormSuppressed: "已抑制 {count} 次重复工具调用 — 同一名称 + 参数触发 3 次以上。",
+    emptyResponseRetry: "模型返回了空响应（无文本、无推理、无工具调用）— 将重试一次。",
+    emptyResponseGiveUp: "模型连续两次返回空响应 — 本轮结束且未产生回答。请重试或使用 /retry。",
     forcingSummary:
       "上下文 {before}/{ctxMax}（{pct}%）— 基于已收集到的内容强制总结。请运行 /compact、/clear 或 /new 重置。",
   },

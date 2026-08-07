@@ -225,6 +225,8 @@ export class CacheFirstLoop {
 
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
+  /** Latched once per turn — the empty-completion guard retries exactly once. */
+  private _emptyResponseRetried = false;
   private context!: ContextManager;
   /** Stable ids for compaction card events — pairs compaction_start with compaction_end. */
   private _compactionSeq = 0;
@@ -809,6 +811,7 @@ export class CacheFirstLoop {
     this.repair.resetStorm();
     this._turnSelfCorrected = false;
     this._foldedThisTurn = false;
+    this._emptyResponseRetried = false;
     // Fresh controller for this turn: the prior step's signal has
     // already fired (or stayed clean); either way we don't want its
     // state to bleed into the new turn.
@@ -1072,6 +1075,38 @@ export class CacheFirstLoop {
 
       this.scratch.reasoning = reasoningContent || null;
 
+      // Empty-completion guard: content, reasoning AND tool calls all empty is
+      // never a legitimate model answer — the API glitched (empty stream,
+      // truncated queue slot, provider hiccup). Ending the turn silently here
+      // is the "chat went dead" bug: the message sits in the log, the turn is
+      // done, and nothing was ever rendered. Retry ONCE (the empty response is
+      // NOT appended to the log — there is nothing to show the model), then
+      // give up loudly instead of a second silent exit.
+      if (
+        assistantContent.length === 0 &&
+        reasoningContent.length === 0 &&
+        toolCalls.length === 0
+      ) {
+        if (!this._emptyResponseRetried) {
+          this._emptyResponseRetried = true;
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "high",
+            content: t("loop.emptyResponseRetry"),
+          };
+          continue;
+        }
+        yield {
+          turn: this._turn,
+          role: "warning",
+          severity: "high",
+          content: t("loop.emptyResponseGiveUp"),
+        };
+        this._steerQueue.length = 0;
+        return;
+      }
+
       const { calls: repairedCalls, report } = this.repair.process(
         toolCalls,
         reasoningContent || null,
@@ -1272,6 +1307,7 @@ export class CacheFirstLoop {
       role: "compaction_end",
       content: "",
       compactionId,
+      compactionReason: reason,
       compactionKind: kind,
       folded: result.folded,
       beforeMessages: result.beforeMessages,

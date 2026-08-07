@@ -53,6 +53,50 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.log.length).toBe(2); // user + assistant
   });
 
+  it("retries once when the model returns a fully empty completion, then recovers", async () => {
+    const client = makeClient([{ content: "" }, { content: "recovered" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    // One visible retry warning, then the second attempt answered normally.
+    expect(events.filter((e) => e.role === "warning").length).toBe(1);
+    const finals = events.filter((e) => e.role === "assistant_final");
+    expect(finals.length).toBe(1);
+    expect(finals[0]?.content).toBe("recovered");
+    expect(events[events.length - 1]?.role).toBe("done");
+    // The empty completion was NOT appended to the log — only user + answer.
+    expect(loop.log.length).toBe(2);
+  });
+
+  it("gives up loudly after two consecutive empty completions instead of a silent turn", async () => {
+    const client = makeClient([{ content: "" }, { content: "" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    const warnings = events.filter((e) => e.role === "warning");
+    expect(warnings.length).toBe(2);
+    expect(warnings[0]?.content).toContain("retrying");
+    expect(warnings[1]?.content).toContain("twice");
+    // No final, no done — the turn ends after the give-up warning, but the
+    // user saw why instead of a silent dead turn.
+    expect(events.some((e) => e.role === "assistant_final")).toBe(false);
+    expect(events.some((e) => e.role === "done")).toBe(false);
+    // Nothing from the failed attempts landed in the log.
+    expect(loop.log.length).toBe(1);
+  });
+
   it("records cache hit telemetry from API usage", async () => {
     const client = makeClient([
       {

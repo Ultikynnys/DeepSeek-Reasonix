@@ -178,6 +178,20 @@ describe("registerSubagentTool", () => {
         const body = init?.body ? JSON.parse(init.body) : {};
         const tools = (body.tools ?? []) as Array<{ function: { name: string } }>;
         seenToolNames.push(tools.map((t) => t.function.name));
+        // The child loop streams (stream: true) — a non-SSE body parses to
+        // zero frames and looks like an empty completion, tripping the loop's
+        // empty-response retry and doubling the call count.
+        if (body.stream === true) {
+          const frames = [
+            `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "fine" } }] })}\n\n`,
+            `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
+            "data: [DONE]\n\n",
+          ];
+          return new Response(new TextEncoder().encode(frames.join("")), {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }
         return new Response(
           JSON.stringify({
             choices: [
