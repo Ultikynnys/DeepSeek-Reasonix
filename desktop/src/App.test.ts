@@ -41,6 +41,7 @@ vi.mock("./theme", () => ({
 }));
 
 import { reduce } from "./App";
+import type { ModelTurnStartedEvent } from "./protocol";
 import { getThreadMaxWidth } from "./ui/thread-layout";
 
 function initialState(): Parameters<typeof reduce>[0] {
@@ -152,6 +153,7 @@ describe("Desktop App reducer — usage", () => {
         ts: "2026-05-27T00:00:00.000Z",
         turn: 1,
         content: "ok",
+        toolCalls: [],
         usage: { prompt_tokens: 1234, completion_tokens: 56, total_tokens: 1290 },
         costUsd: 0.001,
       },
@@ -845,8 +847,8 @@ describe("Desktop App reducer — compaction file triage", () => {
 });
 
 describe("Desktop App reducer — model.final content", () => {
-  const turnStarted = {
-    type: "model.turn.started" as const,
+  const turnStarted: ModelTurnStartedEvent = {
+    type: "model.turn.started",
     id: 1,
     ts: "2026-05-27T00:00:00.000Z",
     turn: 1,

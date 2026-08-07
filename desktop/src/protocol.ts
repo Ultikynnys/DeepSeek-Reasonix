@@ -174,6 +174,16 @@ export type Usage = {
   prompt_cache_miss_tokens?: number;
 };
 
+/** Mirror of the daemon's ToolCall (src/types.ts) — rides model.final. */
+export type WireToolCall = {
+  id?: string;
+  type?: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+
 export type ModelFinalEvent = {
   type: "model.final";
   id: number;
@@ -181,8 +191,11 @@ export type ModelFinalEvent = {
   turn: number;
   content: string;
   reasoningContent?: string;
-  usage?: Usage;
-  costUsd?: number;
+  toolCalls: ReadonlyArray<WireToolCall>;
+  usage: Usage;
+  costUsd: number;
+  /** True iff this was the no-tools wrap-up after budget / abort / context guard. */
+  forcedSummary?: boolean;
 };
 
 export type ToolPreparingEvent = {
