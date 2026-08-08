@@ -96,10 +96,8 @@ export function normalizeCodexWindow(raw: JsonObject): CodexQuotaWindow | null {
   };
 }
 
-/** Parse the official `/wham/usage` payload. The backend has shipped both a
- *  root-level `{ plan_type, rate_limit }` envelope and a nested
- *  `{ rate_limits: { plan_type, rate_limit } }` envelope, so accept both
- *  without making the UI depend on a field's position. */
+/** Parse `/wham/usage` — accepts both root-level `{plan_type, rate_limit}` and
+ *  nested `{rate_limits: {plan_type, rate_limit}}` envelopes. */
 export function parseCodexQuotaPayload(payload: unknown): CodexQuota | null {
   const data = asObject(payload);
   if (!data) return null;
