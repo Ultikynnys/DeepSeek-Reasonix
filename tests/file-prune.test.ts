@@ -297,7 +297,7 @@ describe("fold integration — the prune step", () => {
       apiKey: "sk-test",
       fetch: vi.fn(async (_url: unknown, init: { body?: string } | undefined) => {
         capturedBodies.push(JSON.parse(init?.body ?? "{}") as { messages: ChatMessage[] });
-        return okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+        return okJsonResponse({ choices: [{ message: { content: "summary of messages" } }] });
       }),
     });
     const loop = new CacheFirstLoop({
@@ -370,7 +370,7 @@ describe("fold integration — the prune step", () => {
 
     // Committed log: summary first, live exchange survives untouched.
     const msgs = loop.log.entries;
-    expect(msgs[0]?.content).toContain("SUMMARY");
+    expect(msgs[0]?.content).toContain("summary of messages");
     const liveInLog = msgs.find((m) => m.tool_call_id === "call-live");
     expect(liveInLog?.content).toContain("LIVE BODY");
     // The dead content is gone from the log entirely (head replaced).
@@ -380,7 +380,9 @@ describe("fold integration — the prune step", () => {
   it("never prunes reads from the active exchange, even under a forced fold", async () => {
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      fetch: vi.fn(async () => okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] })),
+      fetch: vi.fn(async () =>
+        okJsonResponse({ choices: [{ message: { content: "summary of messages" } }] }),
+      ),
     });
     const loop = new CacheFirstLoop({
       client,
@@ -423,7 +425,9 @@ describe("fold integration — the prune step", () => {
   it("a noop fold leaves the log untouched — pruning never leaks without a commit", async () => {
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      fetch: vi.fn(async () => okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] })),
+      fetch: vi.fn(async () =>
+        okJsonResponse({ choices: [{ message: { content: "summary of messages" } }] }),
+      ),
     });
     const loop = new CacheFirstLoop({
       client,
