@@ -315,11 +315,6 @@ export const de: TranslationSchema = {
       ...EN.slash.title,
       description: "Modell bitten, diese Sitzung anhand des Gesprächs umzubenennen",
     },
-    qq: {
-      ...EN.slash.qq,
-      description:
-        "QQ-Kanal verbinden, inspizieren oder trennen (erste Verbindung führt durch App-ID / App-Secret-Setup)",
-    },
     setup: { ...EN.slash.setup, description: "Erinnert dich daran, `reasonix setup` auszuführen" },
     semantic: {
       ...EN.slash.semantic,
@@ -371,16 +366,6 @@ export const de: TranslationSchema = {
       description: "Gespeicherte Edit-Diff ausgeben (ID weglassen für neuesten nicht-rückgängigen)",
     },
     commit: { ...EN.slash.commit, description: "git add -A && git commit -m ..." },
-    checkpoint: {
-      ...EN.slash.checkpoint,
-      argsHint: "[Name|Liste|<ID> löschen]",
-      description:
-        "Jede Datei, die die Sitzung berührt hat, als Schnappschuss sichern (Cursor-artiger interner Speicher, nicht Git). /checkpoint allein listet auf.",
-    },
-    restore: {
-      ...EN.slash.restore,
-      description: "Dateien auf einen benannten Checkpoint zurücksetzen (siehe /checkpoint list)",
-    },
     plan: {
       ...EN.slash.plan,
       argsHint: "[Ein|Aus]",
@@ -612,7 +597,6 @@ export const de: TranslationSchema = {
     steerCommandRejected: "▸ Befehle sind deaktiviert, während ein Turn gesteuert wird",
     btwUsage: "▸ /btw <Frage> — eine Randfrage stellen, ohne den Gesprächskontext zu verschmutzen.",
     btwHeader: "≫ btw",
-    restoreCodeOnly: "▸ /restore ist nur im Code-Modus verfügbar",
     hookUserPromptSubmit: "UserPromptSubmit-Hook",
     hookStop: "Stop-Hook",
     atMentions: "▸ @mentions: {parts}",
@@ -633,8 +617,6 @@ export const de: TranslationSchema = {
     alwaysAllowed: '▸ "{prefix}" für {dir} dauerhaft erlaubt',
     runningCommand: "▸ führe aus: {cmd}",
     startingBackground: "▸ starte (Hintergrund): {cmd}",
-    checkpointSaved:
-      "⛁ Checkpoint gespeichert · {id} · {count} Datei(en) · /restore {id} zum Zurücksetzen",
     continuingAfter: "▸ fortgesetzt nach {label}{counter}",
     planStoppedAt: "▸ Plan angehalten bei {label}{counter}",
     revisingAfter: "▸ überarbeite nach {label} — {feedback}",
@@ -839,58 +821,6 @@ export const de: TranslationSchema = {
       titleStarted: "▸ benenne Sitzung...",
       titleFailed: "▸ Sitzungstitel fehlgeschlagen: {reason}",
     },
-    qq: {
-      ...EN.handlers.qq,
-      unavailable: "/qq ist in dieser Sitzung nicht verfügbar.",
-      connecting: "QQ: verbinde...",
-      connectFailed: "QQ-Verbindung fehlgeschlagen: {reason}",
-      disconnecting: "QQ: trenne...",
-      disconnectFailed: "QQ-Trennung fehlgeschlagen: {reason}",
-      usage: "Verwendung: /qq connect [appId appSecret [sandbox]] | /qq status | /qq disconnect",
-      promptAppId:
-        "QQ-Setup: gib deine QQ-Open-Platform-App-ID ein, dann Enter. Tippe /cancel zum Abbrechen.",
-      promptAppSecret:
-        "QQ-Setup: gib dein QQ-Open-Platform-App-Secret ein, dann Enter. Tippe /cancel zum Abbrechen.",
-      setupWaitingAppId: "Warte auf App-ID",
-      setupWaitingAppSecret: "Warte auf App-Secret",
-      setupCancelled: "QQ-Setup abgebrochen.",
-      credentialsRequired: "QQ-App-ID und App-Secret sind erforderlich.",
-      connected:
-        "QQ im {mode}-Modus verbunden. Es wird bei zukünftigen Starts automatisch gestartet.",
-      alreadyConnected: "QQ ist bereits im {mode}-Modus verbunden. Autostart ist aktiviert.",
-      disconnected: "QQ getrennt. Autostart ist deaktiviert.",
-      status:
-        "QQ: {connected}, Autostart {enabled}, Anmeldedaten {configured}, App-ID {appId}, {sandbox}, Zugriff {access}, aktueller Modus {mode}.",
-      statusSetup: "QQ: Setup läuft — {step}",
-      stateConnected: "verbunden",
-      stateDisconnected: "getrennt",
-      stateEnabled: "aktiviert",
-      stateDisabled: "deaktiviert",
-      stateConfigured: "konfiguriert",
-      stateNotConfigured: "Nicht konfiguriert",
-      sandbox: "Sandbox",
-      production: "Produktion",
-      none: "keine",
-      modeChat: "Chat",
-      modeCode: "Code",
-      accessOwner: "Besitzer {owner}",
-      accessOwnerWithAllowlist: "Besitzer {owner}, Allowlist {count}",
-      accessAllowlist: "Allowlist {count}",
-      accessRuntime: "Erstabsender (nur zur Laufzeit, {owner})",
-      accessOpen: "Offen (ungebunden)",
-      lockAlreadyRunning:
-        "QQ-Kanal läuft bereits in Prozess {pid}. Stoppe diesen Prozess, bevor du einen weiteren QQ-Kanal startest.",
-      unauthorizedMessage:
-        "QQ hat Nachricht von nicht autorisierter OpenID {openid} ignoriert. Aktueller Zugriff: {access}.",
-      runtimeBound:
-        "QQ hat diesen Lauf vorübergehend an den Erstabsender {openid} gebunden. Setze `qq.ownerOpenId` in der Konfiguration, um den Zugriff dauerhaft zu machen.",
-      missingAppId: "QQ-App-ID erforderlich. Führe `/qq connect` zum Konfigurieren aus.",
-      missingAppSecret: "QQ-App-Secret erforderlich. Führe `/qq connect` zum Konfigurieren aus.",
-      authFailed:
-        "QQ-Bot-Authentifizierung fehlgeschlagen — überprüfe deine App-ID und dein App-Secret.",
-      readyTimeout:
-        "QQ-Bot hat READY nicht innerhalb von 15s erhalten — überprüfe deine App-ID und dein App-Secret.",
-    },
     admin: {
       ...EN.handlers.admin,
       doctorNeedsTui: "/doctor benötigt einen TUI-Kontext (postDoctor angeschlossen).",
@@ -961,30 +891,6 @@ export const de: TranslationSchema = {
       commitUsage:
         'Verwendung: /commit "deine Commit-Nachricht"  — führt `git add -A && git commit -m "…"` in {root} aus',
       walkCodeOnly: "/walk ist nur innerhalb von `reasonix code` verfügbar.",
-      checkpointCodeOnly:
-        "/checkpoint ist nur innerhalb von `reasonix code` verfügbar — der Chat-Modus wendet keine Edits an.",
-      checkpointNone:
-        "Noch keine Checkpoints — `/checkpoint <name>` sichert jede Datei, die die Sitzung berührt hat. Später mit `/restore <name>` wiederherstellbar.",
-      checkpointHeader: "◈ Checkpoints · {count} gespeichert",
-      checkpointRestoreHint:
-        "  /restore <name|id> · /checkpoint forget <id> · /checkpoint <name> zum Hinzufügen",
-      checkpointForgetUsage: "Verwendung: /checkpoint forget <id|name>",
-      checkpointNoMatch: '▸ kein Checkpoint gefunden für "{name}" — siehe /checkpoint list',
-      checkpointDeleted: "▸ Checkpoint {id} gelöscht ({name})",
-      checkpointDeleteFailed: "▸ Konnte {id} nicht löschen (bereits entfernt?)",
-      checkpointSaveUsage:
-        "Verwendung: /checkpoint <name>   (oder /checkpoint list zum Anzeigen vorhandener)",
-      checkpointSavedEmpty:
-        '▸ Checkpoint "{name}" gespeichert ({id}) — aber es wurden noch keine Dateien berührt, daher ist es eine leere Basislinie. Nach diesem Punkt vorgenommene Edits können rückgängig gemacht werden.',
-      checkpointSaved:
-        '▸ Checkpoint "{name}" gespeichert ({id}) — {files} Datei(en), {size} KB. Wiederherstellen: /restore {name}',
-      restoreCodeOnly: "/restore ist nur innerhalb von `reasonix code` verfügbar.",
-      restoreUsage: "Verwendung: /restore <name|id>   (siehe /checkpoint list für IDs)",
-      restoreNoMatch: '▸ kein Checkpoint gefunden für "{target}" — versuche /checkpoint list',
-      restoreInfo: '▸ "{name}" ({id}) wiederhergestellt von {when}',
-      restoreWrote: "  · {count} Datei(en) zurückgeschrieben",
-      restoreRemoved: "  · {count} Datei(en) entfernt (existierten zum Checkpoint-Zeitpunkt nicht)",
-      restoreSkipped: "  ✗ {count} Datei(en) übersprungen:",
       cwdCodeOnly: "/cwd ist nur innerhalb von `reasonix code` verfügbar.",
       cwdUsage:
         "Verwendung: /cwd <pfad>   (aktuelles Root: {current}). Richtet Dateisystem-/Shell-/Memory-Tools auf <pfad> neu aus.",
@@ -1914,15 +1820,6 @@ export const de: TranslationSchema = {
       "MCP-Start abgebrochen — {count} Server übersprungen. Führe /mcp aus, um es erneut zu versuchen, sobald du das zugrunde liegende Problem behoben hast.",
     toolsReady: "Tools bereit",
     warnLabel: "Warn",
-  },
-  checkpointPicker: {
-    ...EN.checkpointPicker,
-    title: "Checkpoint wiederherstellen — {workspace}",
-    header: " ◈ REASONIX · Checkpoint auswählen ",
-    empty: "  Noch keine Checkpoints in diesem Arbeitsbereich - siehe /checkpoint zum Erstellen",
-    more: "     … {hidden} weitere",
-    footer: "  ↑↓ auswählen  ·  ⏎ wiederherstellen  ·  [d] vergessen  ·  Esc beenden",
-    footerEmpty: "  Esc beenden",
   },
   planReviseConfirm: {
     ...EN.planReviseConfirm,

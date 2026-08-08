@@ -244,19 +244,6 @@ export type RetryResultEvent = { type: "$retry_result"; text: string };
 
 export type BtwResultEvent = { type: "$btw_result"; question: string; answer: string };
 
-/** Reply to a rewind RPC. `turn` is the 0-based index of the user message the
- *  log was truncated before — the index the UI sent, so the UI can cut its
- *  thread at the clicked message. `text` is that message's content, prefilled
- *  into the composer so the user can re-send it. */
-export type RewindResultEvent = { type: "$rewind_result"; turn: number; text: string };
-
-/** The user-turn range whose turn snapshots are retained (rewind targets).
- *  `null` when no snapshots exist (fresh session, or reload before the first
- *  turn) — nothing is rewindable. Messages outside the window gray out; their
- *  snapshots were cleared to bound storage. */
-export type RewindWindow = { min: number; max: number };
-export type RewindWindowEvent = { type: "$rewind_window"; window: RewindWindow | null };
-
 export interface JobInfo {
   id: number;
   tabId: string;
@@ -380,19 +367,6 @@ export interface ModelEndpointInfo {
   oauthAccount?: string;
 }
 
-export interface QQSettingsEvent {
-  type: "$qq_settings";
-  appId?: string;
-  appSecret?: string;
-  sandbox: boolean;
-  enabled: boolean;
-  configured: boolean;
-  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
-  lastError?: string;
-  appIdPreview?: string;
-  access: string;
-}
-
 export interface BalanceInfoItem {
   currency: string;
   total: number;
@@ -470,12 +444,6 @@ export interface SettingsPatch {
   showSystemEvents?: boolean;
 }
 
-export interface QQConfigPatch {
-  appId?: string;
-  appSecret?: string;
-  sandbox: boolean;
-}
-
 /** An image to attach to a user message. Clipboard paste flows ship the
  *  bytes the UI already encoded; drag-and-drop ships a path the daemon reads
  *  (the webview has no fs access for arbitrary OS paths). */
@@ -534,10 +502,6 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "settings_get" }
   | ({ cmd: "settings_save" } & SettingsPatch)
   | { cmd: "codex_quota_get" }
-  | { cmd: "qq_status_get" }
-  | { cmd: "qq_connect" }
-  | { cmd: "qq_disconnect" }
-  | ({ cmd: "qq_config_save" } & QQConfigPatch)
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
   | { cmd: "mention_picked"; path: string }
@@ -554,6 +518,5 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "jobs_stop_all" }
   | { cmd: "compact_history" }
   | { cmd: "retry" }
-  | { cmd: "rewind"; userTurn: number }
   | { cmd: "btw"; text: string }
 );

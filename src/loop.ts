@@ -10,14 +10,6 @@ import {
   truncateForModelByTokens,
 } from "./mcp/registry.js";
 
-import {
-  collectWorkspaceSnapshotPaths,
-  createCheckpoint,
-  deleteCheckpoint,
-  loadCheckpoint,
-  mergeCheckpointInto,
-  reconstructWorkspaceTo,
-} from "./code/checkpoints.js";
 import { ContextManager, type FoldResult, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
@@ -187,11 +179,6 @@ export class CacheFirstLoop {
   /** Files the model has read this session; gates edit_file / multi_edit so SEARCH text matches on-disk bytes. Cleared on fold / mechanical truncate (the model's byte-level view of the elided history is gone). In-memory only — naturally empty on resume. */
   readonly readTracker = new ReadTracker();
 
-  /** How many per-turn workspace snapshots a session keeps. Older snapshots
-   *  are folded into the next-oldest and deleted — rewinds to those turns are
-   *  refused and the UI grays them out. */
-  static readonly REWIND_SNAPSHOT_RETENTION = 2;
-
   // Mutable via configure() — slash commands in the TUI / library callers tweak
   // these mid-session so users don't have to restart.
   model: string;
@@ -353,17 +340,6 @@ export class CacheFirstLoop {
       getFewShots: () => this.prefix.fewShots,
       onLogRewrite: () => this.readTracker.reset(),
     });
-
-    // Track file-modifying tool calls so we can snapshot at turn boundaries.
-    this.tools.setAuditListener(({ name, args }) => {
-      if (!this._rootDir) return;
-      const paths = fileModPaths(name, args);
-      for (const p of paths) {
-        if (!this._touchedFiles.has(p)) {
-          this._touchedFiles.set(p, this._turn);
-        }
-      }
-    });
   }
 
   /** Replace older turns with one summary message; keep tail within keepRecentTokens budget. */
@@ -447,10 +423,6 @@ export class CacheFirstLoop {
     // injects it as a user message and the next turn leaks prior intent.
     this._steerQueue.length = 0;
     this._steerConsumed = false;
-    // Per-turn snapshots are scoped to the session; /new starts fresh.
-    this.deleteTurnCheckpointFiles();
-    this._touchedFiles.clear();
-    this._turnCheckpoints.clear();
     this._userTurnCount = 0;
     let systemRebuilt = false;
     if (this._rebuildSystem) {
@@ -486,10 +458,6 @@ export class CacheFirstLoop {
     this._inflight.clear();
     this._steerQueue.length = 0;
     this._steerConsumed = false;
-    // Snapshots are scoped to the workspace root; switching resets tracking.
-    this.deleteTurnCheckpointFiles();
-    this._touchedFiles.clear();
-    this._turnCheckpoints.clear();
     this._userTurnCount = 0;
     this.sessionName = opts.sessionName;
     if (this._rebuildSystem) {
@@ -512,12 +480,6 @@ export class CacheFirstLoop {
       this.stream = opts.stream;
     }
     if (opts.reasoningEffort !== undefined) this.reasoningEffort = opts.reasoningEffort;
-  }
-
-  /** Set the project root for per-turn file snapshots. Call before step() in code mode.
-   *  Pass `null` to disable snapshots (non-code / chat mode). */
-  setRootDir(dir: string | null): void {
-    this._rootDir = dir;
   }
 
   /** `null` disables the cap; any change re-arms the 80% warning. */
@@ -638,14 +600,8 @@ export class CacheFirstLoop {
   }
   private _inflightCounter = 0;
 
-  /** Files touched this session → the first turn number they were modified (1-indexed). */
-  private readonly _touchedFiles = new Map<string, number>();
-  /** Checkpoints keyed by userTurnIndex (0-indexed count of user messages). */
-  private readonly _turnCheckpoints = new Map<number, string>();
   /** Running count of user turns processed so far. */
   private _userTurnCount = 0;
-  /** Project root for per-turn file snapshots. `null` = snapshots disabled (non-code mode). */
-  private _rootDir: string | null = null;
 
   private buildMessages(): ChatMessage[] {
     const healedMessages = this.healActiveLogBeforeSend();
@@ -705,41 +661,10 @@ export class CacheFirstLoop {
     }
   }
 
-  /** Delete auto turn-snapshot files for the current root (best-effort). */
-  private deleteTurnCheckpointFiles(): void {
-    if (!this._rootDir) return;
-    for (const id of this._turnCheckpoints.values()) {
-      try {
-        deleteCheckpoint(this._rootDir, id);
-      } catch {
-        void 0; /* best-effort disk cleanup */
-      }
-    }
-  }
-
   private discardLogFrom(index: number): void {
     const preserved = this.log.entries.slice(0, index).map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
     this.persistLog(preserved);
-  }
-
-  /** Keep at most REWIND_SNAPSHOT_RETENTION turn snapshots: fold the oldest
-   *  into the next-oldest (reconstruction needs a self-sufficient chain) and
-   *  delete its checkpoint file. */
-  private evictOldSnapshots(): void {
-    if (!this._rootDir) return;
-    while (this._turnCheckpoints.size > CacheFirstLoop.REWIND_SNAPSHOT_RETENTION) {
-      const minKey = Math.min(...this._turnCheckpoints.keys());
-      const nextId = this._turnCheckpoints.get(minKey + 1);
-      const minId = this._turnCheckpoints.get(minKey);
-      if (!minId || !nextId) break;
-      try {
-        mergeCheckpointInto(this._rootDir, minId, nextId);
-      } catch {
-        void 0; // Best-effort — the map entry is dropped either way.
-      }
-      this._turnCheckpoints.delete(minKey);
-    }
   }
 
   /** Drop the last user message + everything after; caller re-sends. Persists to session file. */
@@ -759,101 +684,6 @@ export class CacheFirstLoop {
     this.log.compactInPlace(preserved);
     this.persistLog(preserved);
     return userText;
-  }
-
-  /** Rewind to the N-th user turn (0-indexed, relative to the current log).
-   *  Drops that turn + everything after and restores its file snapshot.
-   *  Out-of-range N (folded head) clamps to the newest boundary. */
-  rewindToUserTurn(userTurnIndex: number): string | null {
-    const entries = this.log.entries;
-    let count = 0;
-    let targetIdx = -1;
-    for (let i = 0; i < entries.length; i++) {
-      if (entries[i]!.role !== "user") continue;
-      if (count === userTurnIndex) {
-        targetIdx = i;
-        break;
-      }
-      count++;
-    }
-    if (targetIdx < 0) {
-      // Walk back from the end — the newest user entry is the closest boundary.
-      for (let i = entries.length - 1; i >= 0; i--) {
-        if (entries[i]!.role === "user") {
-          targetIdx = i;
-          break;
-        }
-      }
-      if (targetIdx < 0) return null;
-      // Recompute count: checkpoint/file bookkeeping below must use the ACTUAL
-      // boundary's user position (the requested index was beyond the log).
-      count = 0;
-      for (let i = 0; i < targetIdx; i++) {
-        if (entries[i]!.role === "user") count++;
-      }
-    }
-    const actualIndex = count;
-    // Snapshots older than the retention window were evicted — their file
-    // state can't be reconstructed. Refuse instead of silently truncating
-    // without a file restore (the UI grays those messages out).
-    if (this._rootDir && this._turnCheckpoints.size > 0) {
-      const minKey = Math.min(...this._turnCheckpoints.keys());
-      if (actualIndex < minKey) return null;
-    }
-    const raw = entries[targetIdx]!.content;
-    const userText = typeof raw === "string" ? raw : "";
-    const preserved = entries.slice(0, targetIdx).map((m) => ({ ...m }));
-    this.log.compactInPlace(preserved);
-    this.persistLog(preserved);
-
-    // Restore files to the state at the start of this user turn. Workspace
-    // reconstruction: checkpoints ≤ the rewind point define the target state
-    // (newest wins per path), files only in later snapshots were created
-    // during rewound turns (tools or shell) and are deleted.
-    if (this._rootDir) {
-      try {
-        const upTo: string[] = [];
-        const after: string[] = [];
-        for (const [key, id] of this._turnCheckpoints) {
-          if (key <= actualIndex) upTo.push(id);
-          else after.push(id);
-        }
-        reconstructWorkspaceTo(this._rootDir, upTo, after);
-      } catch {
-        void 0; // Best-effort; conversation rewind already succeeded.
-      }
-    }
-
-    // Prune touched-files tracking to only files from before this turn.
-    for (const [path, turn] of this._touchedFiles) {
-      if (turn > actualIndex) this._touchedFiles.delete(path);
-    }
-    // Prune checkpoints from this turn onward (map + snapshot files on disk).
-    for (const key of this._turnCheckpoints.keys()) {
-      if (key >= actualIndex) {
-        const id = this._turnCheckpoints.get(key);
-        this._turnCheckpoints.delete(key);
-        if (id && this._rootDir) {
-          try {
-            deleteCheckpoint(this._rootDir, id);
-          } catch {
-            void 0; // Best-effort disk cleanup.
-          }
-        }
-      }
-    }
-    this._userTurnCount = actualIndex;
-
-    return userText;
-  }
-
-  /** The retained turn-snapshot range — the rewindable user turns. `null`
-   *  when no snapshots exist (fresh session, or after reload before the
-   *  first turn). The desktop UI grays messages outside this window. */
-  rewindWindow(): { min: number; max: number } | null {
-    if (this._turnCheckpoints.size === 0) return null;
-    const keys = [...this._turnCheckpoints.keys()];
-    return { min: Math.min(...keys), max: Math.max(...keys) };
   }
 
   async *step(userInput: string, images?: ReadonlyArray<string>): AsyncGenerator<LoopEvent> {
@@ -921,34 +751,6 @@ export class CacheFirstLoop {
       }
     }
     this._turn++;
-    // Per-turn workspace snapshot: rewind must revert shell-modified files
-    // too, not just file-tool edits. Full coverage of rootDir (except
-    // .git/.reasonix), incremental via mtime+size; restore reconstructs.
-    if (this._rootDir) {
-      const userTurnIndex = this._userTurnCount;
-      try {
-        const prevId = this._turnCheckpoints.get(userTurnIndex - 1);
-        const prev = prevId ? loadCheckpoint(this._rootDir, prevId) : null;
-        const paths = collectWorkspaceSnapshotPaths(this._rootDir, {
-          prev,
-          extra: [...this._touchedFiles.keys()],
-        });
-        const meta = createCheckpoint({
-          rootDir: this._rootDir,
-          name: `auto-turn-${userTurnIndex}`,
-          source: "auto-session-start",
-          paths,
-          skipUnreadable: true,
-        });
-        this._turnCheckpoints.set(userTurnIndex, meta.id);
-        this.evictOldSnapshots();
-      } catch (err) {
-        // Snapshot failure shouldn't block the turn — but LOG it
-        process.stderr.write(
-          `reasonix: turn snapshot failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
-    }
     this._userTurnCount++;
     this.scratch.reset();
     // A fresh user turn is a new intent — don't let StormBreaker's

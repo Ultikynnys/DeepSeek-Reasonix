@@ -31,8 +31,6 @@ export const EventType = {
   effectMemoryWritten: "effect.memory.written",
   planSubmitted: "plan.submitted",
   planStepCompleted: "plan.step.completed",
-  checkpointCreated: "checkpoint.created",
-  checkpointRestored: "checkpoint.restored",
   hookFired: "hook.fired",
   policyBudgetWarning: "policy.budget.warning",
   policyBudgetBlocked: "policy.budget.blocked",
@@ -172,23 +170,6 @@ export interface PlanStepCompletedEvent extends EventBase {
   notes?: string;
   /** Raw payload echoed for replay; mirrors what the tool returned. */
   completion: StepCompletion;
-}
-
-export interface CheckpointCreatedEvent extends EventBase {
-  type: typeof EventType.checkpointCreated;
-  checkpointId: string;
-  name: string;
-  source: "manual" | "auto-session-start" | "auto-pre-restore";
-  fileCount: number;
-  bytes: number;
-}
-
-export interface CheckpointRestoredEvent extends EventBase {
-  type: typeof EventType.checkpointRestored;
-  checkpointId: string;
-  restored: number;
-  removed: number;
-  skipped: number;
 }
 
 export interface HookFiredEvent extends EventBase {
@@ -336,8 +317,6 @@ export type Event =
   | MemoryWrittenEvent
   | PlanSubmittedEvent
   | PlanStepCompletedEvent
-  | CheckpointCreatedEvent
-  | CheckpointRestoredEvent
   | HookFiredEvent
   | BudgetWarningEvent
   | BudgetBlockedEvent
@@ -391,7 +370,6 @@ export interface PlanView {
 
 export interface WorkspaceView {
   filesTouched: ReadonlyMap<string, "create" | "edit" | "delete">;
-  lastCheckpointId: string | null;
 }
 
 export interface CapabilityView {

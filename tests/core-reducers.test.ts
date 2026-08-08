@@ -308,23 +308,6 @@ describe("workspace reducer", () => {
     expect(v.filesTouched.get("a.ts")).toBe("edit");
     expect(v.filesTouched.get("b.ts")).toBe("create");
   });
-
-  it("checkpoint.created sets lastCheckpointId", () => {
-    const v = workspace(
-      emptyWorkspace(),
-      ev<Event>({
-        type: "checkpoint.created",
-        ts,
-        turn: 1,
-        checkpointId: "cp-1",
-        name: "wip",
-        source: "manual",
-        fileCount: 2,
-        bytes: 100,
-      }),
-    );
-    expect(v.lastCheckpointId).toBe("cp-1");
-  });
 });
 
 describe("capabilities reducer", () => {
@@ -427,17 +410,14 @@ describe("replay determinism", () => {
 
   it("apply composes all reducers", () => {
     const e: Event = ev<Event>({
-      type: "checkpoint.created",
+      type: "session.opened",
       ts,
-      turn: 1,
-      checkpointId: "cp-x",
-      name: "wip",
-      source: "manual",
-      fileCount: 0,
-      bytes: 0,
+      turn: 0,
+      name: "test session",
+      resumedFromTurn: 0,
     });
     const next = apply(emptyProjections(), e);
-    expect(next.workspace.lastCheckpointId).toBe("cp-x");
-    expect(next.session.currentTurn).toBe(1);
+    expect(next.session.name).toBe("test session");
+    expect(next.session.openedAt).toBe(ts);
   });
 });

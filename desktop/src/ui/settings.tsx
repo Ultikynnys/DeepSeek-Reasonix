@@ -11,12 +11,6 @@ import type {
   SkillInfo,
 } from "../protocol";
 import {
-  type QQDesktopSettingsState,
-  describeQQRowSummary,
-  getQQConnectIntent,
-  getQQStatusLabel,
-} from "../qq-settings";
-import {
   FONT_FAMILY,
   FONT_SCALE,
   type FontFamily,
@@ -90,7 +84,6 @@ export function SettingsModal({
   memory,
   memoryDetail,
   memoryResult,
-  qq,
   onClose,
   onSave,
   onSaveApiKey,
@@ -99,11 +92,6 @@ export function SettingsModal({
   onOAuthCancel,
   onOAuthSignOut,
   onSaveOpenAIApiKey,
-  onLoadQQ,
-  onConnectQQ,
-  onDisconnectQQ,
-  onSaveQQConfig,
-  onOpenQQApplyLink,
   onPickWorkspace,
   onAddMcpSpec,
   onRemoveMcpSpec,
@@ -135,7 +123,6 @@ export function SettingsModal({
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
   memoryResult: { ok: boolean; message: string } | null;
-  qq: QQDesktopSettingsState | null;
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
   onSaveApiKey: (key: string) => void;
@@ -144,11 +131,6 @@ export function SettingsModal({
   onOAuthCancel: () => void;
   onOAuthSignOut: () => void;
   onSaveOpenAIApiKey: (key: string) => void;
-  onLoadQQ: () => void;
-  onConnectQQ: () => void;
-  onDisconnectQQ: () => void;
-  onSaveQQConfig: (patch: { appId?: string; appSecret?: string; sandbox: boolean }) => void;
-  onOpenQQApplyLink: () => void;
   onPickWorkspace: () => void;
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
@@ -165,7 +147,6 @@ export function SettingsModal({
   onDismissMemoryResult: () => void;
 }) {
   const [page, setPage] = useState<PageId>(initialPage ?? "general");
-  const [qqConfigureOpen, setQQConfigureOpen] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -291,196 +272,10 @@ export function SettingsModal({
               <PageBilling balance={balance} usage={usage} currency={currency} />
             )}
             {page === "shortcuts" && <PageShortcuts />}
-            {page === "general" ? (
-              <>
-                <QQChannelSection
-                  qq={qq}
-                  configureOpen={qqConfigureOpen}
-                  onOpenConfigure={() => {
-                    onLoadQQ();
-                    setQQConfigureOpen(true);
-                  }}
-                  onCloseConfigure={() => setQQConfigureOpen(false)}
-                  onConnect={onConnectQQ}
-                  onDisconnect={onDisconnectQQ}
-                  onSaveConfig={onSaveQQConfig}
-                  onSaveAndConnect={(patch) => {
-                    onSaveQQConfig(patch);
-                    onConnectQQ();
-                  }}
-                  onOpenApplyLink={onOpenQQApplyLink}
-                />
-              </>
-            ) : null}
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-export function QQChannelSection({
-  qq,
-  configureOpen,
-  onOpenConfigure,
-  onCloseConfigure,
-  onConnect,
-  onDisconnect,
-  onSaveConfig,
-  onSaveAndConnect,
-  onOpenApplyLink,
-}: {
-  qq: QQDesktopSettingsState | null;
-  configureOpen: boolean;
-  onOpenConfigure: () => void;
-  onCloseConfigure: () => void;
-  onConnect: () => void;
-  onDisconnect: () => void;
-  onSaveConfig: (patch: { appId?: string; appSecret?: string; sandbox: boolean }) => void;
-  onSaveAndConnect: (patch: { appId?: string; appSecret?: string; sandbox: boolean }) => void;
-  onOpenApplyLink: () => void;
-}) {
-  const current = qq ?? {
-    appId: undefined,
-    appSecret: undefined,
-    sandbox: true,
-    enabled: false,
-    configured: false,
-    runtimeState: "disconnected",
-    access: "open (unbound)",
-  };
-  const [appId, setAppId] = useState(current.appId ?? "");
-  const [appSecret, setAppSecret] = useState(current.appSecret ?? "");
-  const [sandbox, setSandbox] = useState(current.sandbox ?? true);
-
-  useEffect(() => {
-    setAppId(current.appId ?? "");
-    setAppSecret(current.appSecret ?? "");
-    setSandbox(current.sandbox ?? true);
-  }, [current.appId, current.appSecret, current.sandbox]);
-
-  const savePatch = { appId, appSecret, sandbox };
-
-  return (
-    <section className="section">
-      <div className="stitle">{t("settings.qqSection")}</div>
-      {!configureOpen ? (
-        <div className="setting-row qq-setting-row">
-          <div className="l">
-            <div className="n">{t("settings.qqTitle")}</div>
-            <div className="h">{describeQQRowSummary(current)}</div>
-          </div>
-          <div className="qq-row-actions">
-            <button
-              type="button"
-              className={`btn qq-status-btn qq-status-${
-                current.runtimeState === "connected"
-                  ? "on"
-                  : current.runtimeState === "connecting"
-                    ? "connecting"
-                    : current.runtimeState === "failed"
-                      ? "failed"
-                      : "off"
-              }`}
-              onClick={() => {
-                if (getQQConnectIntent(current) === "configure") {
-                  onOpenConfigure();
-                  return;
-                }
-                if (current.runtimeState === "connected") {
-                  onDisconnect();
-                  return;
-                }
-                onConnect();
-              }}
-            >
-              {getQQStatusLabel(current)}
-            </button>
-            <button type="button" className="btn" onClick={onOpenConfigure}>
-              {t("settings.qqConfigure")}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="qq-config-card">
-          <div className="qq-config-head">
-            <div>
-              <div className="n">{t("settings.qqConfigureTitle")}</div>
-              <div className="h">{t("settings.qqConfigureHint")}</div>
-            </div>
-            <button type="button" className="btn" onClick={onCloseConfigure}>
-              {t("settings.qqBack")}
-            </button>
-          </div>
-          <div className="setting-row">
-            <div className="l">
-              <div className="n">{t("settings.qqAppId")}</div>
-            </div>
-            <input
-              className="field mono"
-              value={appId}
-              onChange={(e) => setAppId(e.target.value)}
-              placeholder="QQ Open Platform App ID"
-            />
-          </div>
-          <div className="setting-row">
-            <div className="l">
-              <div className="n">{t("settings.qqAppSecret")}</div>
-            </div>
-            <input
-              className="field mono"
-              type="password"
-              value={appSecret}
-              onChange={(e) => setAppSecret(e.target.value)}
-              placeholder="QQ Open Platform App Secret"
-            />
-          </div>
-          <div className="setting-row">
-            <div className="l">
-              <div className="n">{t("settings.qqEnvironment")}</div>
-            </div>
-            <div className="seg-ctrl">
-              <button type="button" data-on={sandbox} onClick={() => setSandbox(true)}>
-                {t("settings.qqSandbox")}
-              </button>
-              <button type="button" data-on={!sandbox} onClick={() => setSandbox(false)}>
-                {t("settings.qqProduction")}
-              </button>
-            </div>
-          </div>
-          <div className="setting-row">
-            <div className="l">
-              <div className="n">{t("settings.qqApplyLabel")}</div>
-            </div>
-            <button type="button" className="btn" onClick={onOpenApplyLink}>
-              {t("settings.qqApplyAction")}
-            </button>
-          </div>
-          <div className="qq-config-actions">
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                onSaveConfig(savePatch);
-                onCloseConfigure();
-              }}
-            >
-              {t("settings.qqSave")}
-            </button>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => {
-                onSaveAndConnect(savePatch);
-                onCloseConfigure();
-              }}
-            >
-              {t("settings.qqSaveAndConnect")}
-            </button>
-          </div>
-        </div>
-      )}
-    </section>
   );
 }
 

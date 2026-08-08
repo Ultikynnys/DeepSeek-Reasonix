@@ -69,7 +69,6 @@ function makeState(): AppState {
     },
     sessions: [],
     settings: null,
-    qq: null,
     balance: null,
     mentionResults: null,
     mentionPreview: null,

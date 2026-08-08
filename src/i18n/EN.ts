@@ -352,11 +352,6 @@ export const EN: TranslationSchema = {
     },
     sessions: { description: "list saved sessions (current marked with ▸)" },
     title: { description: "ask the model to rename this session from the conversation" },
-    qq: {
-      description:
-        "connect, inspect, or disconnect the QQ channel for this session (first connect guides App ID / App Secret setup)",
-      argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
-    },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
       description: "show semantic_search status — built? Ollama installed? how to enable",
@@ -394,15 +389,6 @@ export const EN: TranslationSchema = {
       argsHint: "[id]",
     },
     commit: { description: "git add -A && git commit -m ...", argsHint: '"msg"' },
-    checkpoint: {
-      description:
-        "snapshot every file the session has touched (Cursor-style internal store, not git). /checkpoint alone lists.",
-      argsHint: "[name|list|forget <id>]",
-    },
-    restore: {
-      description: "roll back files to a named checkpoint (see /checkpoint list)",
-      argsHint: "<name|id>",
-    },
     plan: {
       description: "toggle read-only plan mode (writes bounced until submit_plan + approval)",
       argsHint: "[on|off]",
@@ -603,7 +589,6 @@ export const EN: TranslationSchema = {
     btwUsage: "▸ /btw <question> — ask a side question without polluting the conversation context.",
     btwHeader: "≫ btw",
     btwFailed: "/btw failed",
-    restoreCodeOnly: "▸ /restore is code-mode only",
     hookUserPromptSubmit: "UserPromptSubmit hook",
     hookStop: "Stop hook",
     atMentions: "▸ @mentions: {parts}",
@@ -624,8 +609,6 @@ export const EN: TranslationSchema = {
     alwaysAllowed: '▸ always allowed "{prefix}" for {dir}',
     runningCommand: "▸ running: {cmd}",
     startingBackground: "▸ starting (background): {cmd}",
-    checkpointSaved:
-      "⛁ checkpoint saved · {id} · {count} file{s} · /restore {id} to roll back this step",
     continuingAfter: "▸ continuing after {label}{counter}",
     planStoppedAt: "▸ plan stopped at {label}{counter}",
     revisingAfter: "▸ revising after {label} — {feedback}",
@@ -819,54 +802,6 @@ export const EN: TranslationSchema = {
       titleStarted: "▸ naming session…",
       titleFailed: "▸ session title failed: {reason}",
     },
-    qq: {
-      unavailable: "/qq is not available in this session.",
-      connecting: "QQ: connecting…",
-      connectFailed: "QQ connect failed: {reason}",
-      disconnecting: "QQ: disconnecting…",
-      disconnectFailed: "QQ disconnect failed: {reason}",
-      usage: "Usage: /qq connect [appId appSecret [sandbox]] | /qq status | /qq disconnect",
-      promptAppId:
-        "QQ setup: enter your QQ Open Platform App ID, then press Enter. Type /cancel to abort.",
-      promptAppSecret:
-        "QQ setup: enter your QQ Open Platform App Secret, then press Enter. Type /cancel to abort.",
-      setupWaitingAppId: "waiting for App ID",
-      setupWaitingAppSecret: "waiting for App Secret",
-      setupCancelled: "QQ setup cancelled.",
-      credentialsRequired: "QQ App ID and App Secret are required.",
-      connected: "QQ connected in {mode} mode. It will auto-start on future launches.",
-      alreadyConnected: "QQ is already connected in {mode} mode. Auto-start is enabled.",
-      disconnected: "QQ disconnected. Auto-start is disabled.",
-      status:
-        "QQ: {connected}, auto-start {enabled}, credentials {configured}, appId {appId}, {sandbox}, access {access}, current mode {mode}.",
-      statusSetup: "QQ: setup in progress — {step}",
-      stateConnected: "connected",
-      stateDisconnected: "disconnected",
-      stateEnabled: "enabled",
-      stateDisabled: "disabled",
-      stateConfigured: "configured",
-      stateNotConfigured: "not configured",
-      sandbox: "sandbox",
-      production: "production",
-      none: "none",
-      modeChat: "chat",
-      modeCode: "code",
-      accessOwner: "owner {owner}",
-      accessOwnerWithAllowlist: "owner {owner}, allowlist {count}",
-      accessAllowlist: "allowlist {count}",
-      accessRuntime: "first-sender (runtime only, {owner})",
-      accessOpen: "open (unbound)",
-      lockAlreadyRunning:
-        "QQ channel is already running in process {pid}. Stop that process before starting another QQ channel.",
-      unauthorizedMessage:
-        "QQ ignored message from unauthorized openid {openid}. Current access: {access}.",
-      runtimeBound:
-        "QQ temporarily bound this run to first sender {openid}. Set `qq.ownerOpenId` in config to persist access.",
-      missingAppId: "QQ App ID is required. Run `/qq connect` to configure.",
-      missingAppSecret: "QQ App Secret is required. Run `/qq connect` to configure.",
-      authFailed: "QQ bot authentication failed — check your App ID and App Secret.",
-      readyTimeout: "QQ bot did not receive READY within 15s — check your App ID and App Secret.",
-    },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",
       doctorRunning: "⚕ Doctor — running health checks…",
@@ -928,29 +863,6 @@ export const EN: TranslationSchema = {
       commitUsage:
         'usage: /commit "your commit message"  — runs `git add -A && git commit -m "…"` in {root}',
       walkCodeOnly: "/walk is only available inside `reasonix code`.",
-      checkpointCodeOnly:
-        "/checkpoint is only available inside `reasonix code` — chat mode doesn't apply edits.",
-      checkpointNone:
-        "no checkpoints yet — `/checkpoint <name>` snapshots every file the session has touched. Restore later with `/restore <name>`.",
-      checkpointHeader: "◈ checkpoints · {count} stored",
-      checkpointRestoreHint:
-        "  /restore <name|id> · /checkpoint forget <id> · /checkpoint <name> to add",
-      checkpointForgetUsage: "usage: /checkpoint forget <id|name>",
-      checkpointNoMatch: '▸ no checkpoint matching "{name}" — see /checkpoint list',
-      checkpointDeleted: "▸ deleted checkpoint {id} ({name})",
-      checkpointDeleteFailed: "▸ failed to delete {id} (already gone?)",
-      checkpointSaveUsage: "usage: /checkpoint <name>   (or /checkpoint list to see existing)",
-      checkpointSavedEmpty:
-        '▸ checkpoint "{name}" saved ({id}) — but no files have been touched yet, so it\'s an empty baseline. Edits made after this point will be revertable.',
-      checkpointSaved:
-        '▸ checkpoint "{name}" saved ({id}) — {files} file{s}, {size} KB. Restore: /restore {name}',
-      restoreCodeOnly: "/restore is only available inside `reasonix code`.",
-      restoreUsage: "usage: /restore <name|id>   (see /checkpoint list for ids)",
-      restoreNoMatch: '▸ no checkpoint matching "{target}" — try /checkpoint list',
-      restoreInfo: '▸ restored "{name}" ({id}) from {when}',
-      restoreWrote: "  · wrote back {count} file{s}",
-      restoreRemoved: "  · removed {count} file{s} (didn't exist at checkpoint time)",
-      restoreSkipped: "  ✗ {count} file{s} skipped:",
       cwdCodeOnly: "/cwd is only available inside `reasonix code`.",
       cwdUsage:
         "usage: /cwd <path>   (current root: {current}). Re-points filesystem / shell / memory tools to <path>.",
@@ -1829,14 +1741,6 @@ export const EN: TranslationSchema = {
       "MCP startup aborted — {count} server(s) skipped. Run /mcp to retry once you've fixed the underlying issue.",
     toolsReady: "tools ready",
     warnLabel: "warn",
-  },
-  checkpointPicker: {
-    title: "restore a checkpoint \u2014 {workspace}",
-    header: " \u25c8 REASONIX \u00b7 pick a checkpoint ",
-    empty: "  no checkpoints in this workspace yet - see /checkpoint to make one",
-    more: "     \u2026 {hidden} more",
-    footer: "  \u2191\u2193 pick  \u00b7  \u23ce restore  \u00b7  [d] forget  \u00b7  esc quit",
-    footerEmpty: "  esc quit",
   },
   planReviseConfirm: {
     title: "plan revision proposed",

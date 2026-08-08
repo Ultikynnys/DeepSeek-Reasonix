@@ -218,14 +218,11 @@ export {
   parseEditBlocks,
   applyEditBlock,
   applyEditBlocks,
-  snapshotBeforeEdits,
-  restoreSnapshots,
 } from "./code/edit-blocks.js";
 export type {
   EditBlock,
   ApplyResult,
   ApplyStatus,
-  EditSnapshot,
 } from "./code/edit-blocks.js";
 export { CODE_SYSTEM_PROMPT, codeSystemPrompt } from "./code/prompt.js";
 export type { CodeSystemPromptOptions } from "./code/prompt.js";

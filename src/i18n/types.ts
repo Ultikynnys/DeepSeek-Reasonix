@@ -202,7 +202,6 @@ export interface TranslationSchema {
     btwUsage: string;
     btwHeader: string;
     btwFailed: string;
-    restoreCodeOnly: string;
     hookUserPromptSubmit: string;
     hookStop: string;
     atMentions: string;
@@ -223,7 +222,6 @@ export interface TranslationSchema {
     alwaysAllowed: string;
     runningCommand: string;
     startingBackground: string;
-    checkpointSaved: string;
     continuingAfter: string;
     planStoppedAt: string;
     revisingAfter: string;
@@ -905,14 +903,6 @@ export interface TranslationSchema {
     abortedHint: string;
     toolsReady: string;
     warnLabel: string;
-  };
-  checkpointPicker: {
-    title: string;
-    header: string;
-    empty: string;
-    more: string;
-    footer: string;
-    footerEmpty: string;
   };
   planReviseConfirm: {
     title: string;

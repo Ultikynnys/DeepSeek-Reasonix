@@ -71,7 +71,6 @@ function makeState(messages: ChatMessage[] = []): AppState {
     },
     sessions: [],
     settings: null,
-    qq: null,
     balance: null,
     mentionResults: null,
     mentionPreview: null,
@@ -87,7 +86,7 @@ function makeState(messages: ChatMessage[] = []): AppState {
   };
 }
 
-describe("desktop incoming QQ/user message rendering", () => {
+describe("desktop incoming remote message rendering", () => {
   it("appends remote user.message into the desktop transcript and marks the tab busy", () => {
     const state = makeState([{ kind: "assistant", turn: 1, segments: [], pending: false }]);
     const next = applyIncoming(state, {
@@ -95,13 +94,13 @@ describe("desktop incoming QQ/user message rendering", () => {
       id: 42,
       ts: "2026-05-19T12:00:00Z",
       turn: 0,
-      text: "hello from qq",
+      text: "hello from remote",
     } as IncomingEvent);
 
     expect(next.busy).toBe(true);
     expect(next.messages.at(-1)).toEqual({
       kind: "user",
-      text: "hello from qq",
+      text: "hello from remote",
       clientId: "remote-42",
       turn: 2,
     });

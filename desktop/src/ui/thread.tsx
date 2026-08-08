@@ -43,21 +43,11 @@ export const UserMsg = memo(function UserMsg({
   images,
   time,
   skill,
-  userIndex,
-  disabled,
-  grayed,
-  onRewind,
 }: {
   text: string;
   images?: string[];
   time?: string;
   skill?: SkillOrigin;
-  /** 0-based position among user messages — what the backend expects for rewind. */
-  userIndex: number;
-  disabled?: boolean;
-  /** Snapshot evicted (retention window) — rewind unavailable, message dimmed. */
-  grayed?: boolean;
-  onRewind?: (userIndex: number, text: string) => void;
 }) {
   useLang();
   const [copied, setCopied] = useState(false);
@@ -71,7 +61,7 @@ export const UserMsg = memo(function UserMsg({
     }
   };
   return (
-    <div className={`msg user${grayed ? " grayed" : ""}`}>
+    <div className="msg user">
       <div className="avatar">YOU</div>
       <div className="body">
         <div className="who">
@@ -96,17 +86,6 @@ export const UserMsg = memo(function UserMsg({
         ) : null}
         <div className="msg-text">{text}</div>
         <div className="msg-actions">
-          {onRewind ? (
-            <button
-              type="button"
-              className="rewind-btn"
-              disabled={disabled || grayed}
-              onClick={() => onRewind(userIndex, text)}
-              title={grayed ? t("thread.rewindUnavailable") : t("cards.checkpointRewind")}
-            >
-              <I.rotate size={11} />
-            </button>
-          ) : null}
           <button
             type="button"
             className={`copy-btn ${copied ? "done" : ""}`}

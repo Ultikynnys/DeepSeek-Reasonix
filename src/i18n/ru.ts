@@ -295,11 +295,6 @@ export const ru: TranslationSchema = {
       description: "список сохранённых сессий (текущая отмечена ▸)",
     },
     title: { ...EN.slash.title, description: "попросить модель переименовать сессию из разговора" },
-    qq: {
-      ...EN.slash.qq,
-      description:
-        "подключить, проверить или отключить QQ-канал для этой сессии (первое подключение проводит через App ID / App Secret настройку)",
-    },
     setup: { ...EN.slash.setup, description: "напоминает выйти и запустить `reasonix setup`" },
     semantic: {
       ...EN.slash.semantic,
@@ -346,15 +341,6 @@ export const ru: TranslationSchema = {
       description: "показать сохранённый diff правки (без ID — новейшая неотменённая)",
     },
     commit: { ...EN.slash.commit, description: "git add -A && git commit -m ..." },
-    checkpoint: {
-      ...EN.slash.checkpoint,
-      description:
-        "сделать снимок каждого файла, которого касалась сессия (внутреннее хранилище, не git). /checkpoint без аргументов — список.",
-    },
-    restore: {
-      ...EN.slash.restore,
-      description: "откатить файлы к именованному checkpoint (см. /checkpoint list)",
-    },
     plan: {
       ...EN.slash.plan,
       description:

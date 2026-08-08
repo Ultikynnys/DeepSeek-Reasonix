@@ -18,8 +18,8 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
-import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
+import { memo, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { CommandPalette, ToastStack, buildCommands, useCommandPalette } from "./CommandPalette";
 import { WorkspaceProvider } from "./Markdown";
 import { type AbortDraftSource, nextAbortDraftCandidate, restoreAbortedDraft } from "./abort-draft";
 import { formatBytes } from "./format";
@@ -50,13 +50,11 @@ import {
   type PlanStep,
   type PlanVerdict,
   type RevisionVerdict,
-  type RewindWindow,
   type SettingsPatch,
   type SkillInfo,
   type UserImageAttachment,
   rpcSend,
 } from "./protocol";
-import type { QQDesktopSettingsState } from "./qq-settings";
 import {
   type SlashSettingsCommand,
   buildSlashSettingsDescriptors,
@@ -366,7 +364,6 @@ type State = {
   sessions: SessionInfo[];
   externalImportSources: ExternalSessionApp[];
   settings: Settings | null;
-  qq: QQDesktopSettingsState | null;
   balance: Balance | null;
   codexQuota: CodexQuota | null;
   /** True between a statusbar chip click and the $codex_quota reply — the chip shows a refresh indicator. */
@@ -376,7 +373,6 @@ type State = {
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
   mcpSpecs: McpSpecInfo[];
-  rewindWindow: RewindWindow | null;
   mcpBridged: boolean;
   skills: SkillInfo[];
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
@@ -397,6 +393,14 @@ type State = {
   retryNonce: number;
   /** True between oauth_begin_result and the flow's terminal state — settings card spinner. */
   oauthWaiting: boolean;
+  /** Current turn's activity status — shown as a live indicator below the streaming assistant message. */
+  turnStatus: "thinking" | "reasoning" | "calling_tool" | "waiting_tool" | "responding" | null;
+  /** Tool name currently being prepared/called — displayed in the turn status line. */
+  turnStatusTool: string | null;
+  /** Timestamp (ms) of the last model/tool event — used to detect "stuck" state. */
+  turnLastEventMs: number;
+  /** Elapsed ms since the turn started (computed from turnLastEventMs in the component). */
+  turnElapsedMs: number;
 };
 
 export type SessionFile = {
@@ -973,6 +977,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ...state,
         busy: false,
         activeSkill: null,
+        turnStatus: null,
+        turnStatusTool: null,
         pendingConfirms: [],
         pendingPathAccess: [],
         pendingChoices: [],
@@ -1154,21 +1160,6 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         codexQuotaReason: ev.reason ?? null,
         codexQuotaRefreshing: false,
       };
-    case "$qq_settings":
-      return {
-        ...state,
-        qq: {
-          appId: ev.appId,
-          appSecret: ev.appSecret,
-          sandbox: ev.sandbox,
-          enabled: ev.enabled,
-          configured: ev.configured,
-          runtimeState: ev.runtimeState,
-          lastError: ev.lastError,
-          appIdPreview: ev.appIdPreview,
-          access: ev.access,
-        },
-      };
     case "$settings": {
       const prevWs = state.settings?.workspaceDir;
       const wsChanged = prevWs !== undefined && prevWs !== ev.workspaceDir;
@@ -1284,6 +1275,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ...state,
         busy: false,
         activeSkill: null,
+        turnStatus: null,
+        turnStatusTool: null,
         oauthWaiting: ev.message.includes("OAuth") ? false : state.oauthWaiting,
         messages: [
           ...settled,
@@ -1295,11 +1288,14 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, oauthWaiting: true };
     case "model.turn.started":
       if (state.messages.some((m) => m.kind === "assistant" && m.turn === ev.turn)) {
-        return { ...state, model: ev.model };
+        return { ...state, model: ev.model, turnLastEventMs: Date.now() };
       }
       return {
         ...state,
         model: ev.model,
+        turnStatus: "thinking",
+        turnStatusTool: null,
+        turnLastEventMs: Date.now(),
         messages: [
           ...state.messages,
           { kind: "assistant", turn: ev.turn, segments: [], pending: true },
@@ -1308,6 +1304,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "model.delta":
       return {
         ...state,
+        turnStatus: ev.channel === "reasoning" ? "reasoning" : "responding",
+        turnLastEventMs: Date.now(),
         messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           if (ev.channel === "content") {
@@ -1359,6 +1357,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "tool.preparing":
       return {
         ...state,
+        turnStatus: "calling_tool",
+        turnStatusTool: ev.name,
+        turnLastEventMs: Date.now(),
         messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           if (m.segments.some((s) => s.kind === "tool" && s.callId === ev.callId)) return m;
@@ -1381,6 +1382,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       const adds = extractToolFiles(ev.name, ev.args);
       return {
         ...state,
+        turnStatus: "calling_tool",
+        turnStatusTool: ev.name,
+        turnLastEventMs: Date.now(),
         sessionFiles: mergeSessionFiles(state.sessionFiles, adds),
         messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
@@ -1412,6 +1416,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "tool.result":
       return {
         ...state,
+        turnStatus: "waiting_tool",
+        turnLastEventMs: Date.now(),
         messages: state.messages.map((m) => {
           if (m.kind !== "assistant") return m;
           let mutated = false;
@@ -1511,32 +1517,6 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     }
     case "$retry_result":
       return { ...state, retryText: ev.text, retryNonce: state.retryNonce + 1 };
-    case "$rewind_result": {
-      // The backend truncated the log to before the (ev.turn+1)-th user
-      // message — the 0-based index this tab sent. Mirror it by cutting the
-      // thread at that message: list order mirrors log order, so the prefix
-      // survives exactly. Position cut, not turn comparison: after a /compact
-      // swap, assistant turns are dense counts that no longer line up with
-      // user turns, so "turn <= ev.turn" would keep/drop the wrong messages.
-      let seen = 0;
-      let cut = state.messages.length;
-      for (const [i, m] of state.messages.entries()) {
-        if (m.kind !== "user") continue;
-        if (seen === ev.turn) {
-          cut = i;
-          break;
-        }
-        seen++;
-      }
-      return {
-        ...state,
-        messages: state.messages.slice(0, cut),
-        retryText: ev.text,
-        retryNonce: state.retryNonce + 1,
-      };
-    }
-    case "$rewind_window":
-      return { ...state, rewindWindow: ev.window };
     case "$btw_result":
       return {
         ...state,
@@ -1698,7 +1678,6 @@ function TabRuntime({
     sessions: [],
     externalImportSources: [],
     settings: null,
-    qq: null,
     balance: null,
     codexQuota: null,
     codexQuotaRefreshing: false,
@@ -1718,7 +1697,10 @@ function TabRuntime({
     queuedSends: [],
     retryNonce: 0,
     oauthWaiting: false,
-    rewindWindow: null,
+    turnStatus: null,
+    turnStatusTool: null,
+    turnLastEventMs: 0,
+    turnElapsedMs: 0,
   });
   useLang();
   useDisableTextAssist();
@@ -1727,7 +1709,14 @@ function TabRuntime({
   const [pendingImages, setPendingImages] = useState<
     Array<{ id: string; thumbnail: string; wire: UserImageAttachment }>
   >([]);
-  const [toast, setToast] = useState<{ msg: string; yolo?: boolean } | null>(null);
+  type ToastItem = { id: number; msg: string; severity?: "error" | "warning" | "info" | "success"; yolo?: boolean };
+  let toastNextId = 0;
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const pushToast = useCallback((msg: string, opts?: { severity?: ToastItem["severity"]; yolo?: boolean; duration?: number }) => {
+    const id = ++toastNextId;
+    setToasts((prev) => [...prev, { id, msg, severity: opts?.severity, yolo: opts?.yolo }]);
+    window.setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), opts?.duration ?? 3000);
+  }, []);
   const [splashOn, setSplashOn] = useState<boolean>(() => shouldShowSplash());
   const [wdOpen, setWdOpen] = useState(false);
   const [wdAnchor, setWdAnchor] = useState<
@@ -1806,14 +1795,6 @@ function TabRuntime({
     },
     [saveSettings],
   );
-  const loadQQSettings = useCallback(() => sendRpc({ cmd: "qq_status_get" }), [sendRpc]);
-  const connectQQ = useCallback(() => sendRpc({ cmd: "qq_connect" }), [sendRpc]);
-  const disconnectQQ = useCallback(() => sendRpc({ cmd: "qq_disconnect" }), [sendRpc]);
-  const saveQQConfig = useCallback(
-    (patch: { appId?: string; appSecret?: string; sandbox: boolean }) =>
-      sendRpc({ cmd: "qq_config_save", ...patch }),
-    [sendRpc],
-  );
   const saveApiKey = useCallback(
     (key: string) => sendRpc({ cmd: "setup_save_key", key }),
     [sendRpc],
@@ -1849,10 +1830,9 @@ function TabRuntime({
     }
   }, [clearAbortDraft, saveSettings, state.settings?.workspaceDir]);
 
-  const flashToast = useCallback((msg: string, opts?: { yolo?: boolean; duration?: number }) => {
-    setToast({ msg, yolo: opts?.yolo });
-    window.setTimeout(() => setToast(null), opts?.duration ?? 1600);
-  }, []);
+  const flashToast = useCallback((msg: string, opts?: { severity?: "error" | "warning" | "info" | "success"; yolo?: boolean; duration?: number }) => {
+    pushToast(msg, opts);
+  }, [pushToast]);
 
   // Vision attachments (ChatGPT models only): paste carries bytes from the
   // webview; picked/dropped files ship a path the daemon reads. Pending
@@ -2124,17 +2104,6 @@ function TabRuntime({
     }
   }, [state.retryNonce]);
 
-  const onRewindUserMsg = useCallback(
-    (userIndex: number, text: string) => {
-      // Rewinding mid-stream would truncate the log under a running turn.
-      if (state.busy) return;
-      setDraft(text);
-      composerRef.current?.focus();
-      sendRpc({ cmd: "rewind", userTurn: userIndex });
-    },
-    [sendRpc, state.busy],
-  );
-
   useEffect(() => {
     if (state.busy || !state.ready || state.queuedSends.length === 0) return;
     const next = state.queuedSends[0];
@@ -2332,11 +2301,6 @@ function TabRuntime({
     if (state.busy) return;
     sendRpc({ cmd: "jobs_list" });
   }, [active, state.busy, sendRpc]);
-
-  useEffect(() => {
-    if (!active) return;
-    loadQQSettings();
-  }, [active, loadQQSettings]);
 
   useEffect(() => {
     // Every TabRuntime stays mounted (display:none on inactive), so each registers its own keydown — without this gate Cmd+N would fire newChat() in every tab and wipe the inactive ones' sessions.
@@ -2550,20 +2514,18 @@ function TabRuntime({
   ];
 
   const elapsed = useElapsed(state.busy);
-  // userIndexAt[i] = number of user messages before index i (the rewind index
-  // the backend expects). Built once per messages change in O(n) instead of
-  // the O(n) scan per user message the old helper paid — O(n²) per render at
-  // transcript scale, which is exactly what made long conversations janky.
-  const userIndexAt = useMemo(() => {
-    const msgs = state.messages;
-    const arr = new Uint32Array(msgs.length);
-    let n = 0;
-    for (let i = 0; i < msgs.length; i++) {
-      arr[i] = n;
-      if (msgs[i]?.kind === "user") n++;
+  // Track how long the current turn has been stuck (no events received)
+  const [stuckSec, setStuckSec] = useState(0);
+  useEffect(() => {
+    if (!state.busy || !state.turnLastEventMs) {
+      setStuckSec(0);
+      return;
     }
-    return arr;
-  }, [state.messages]);
+    const id = window.setInterval(() => {
+      setStuckSec(Math.floor((Date.now() - state.turnLastEventMs) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [state.busy, state.turnLastEventMs]);
   const workspaceLabel = state.settings?.workspaceDir
     ? state.settings.workspaceDir.split(/[\\/]/).pop() || "workspace"
     : "Reasonix";
@@ -2774,13 +2736,6 @@ function TabRuntime({
                       const dividerLabel = `turn ${m.turn}`;
                       const prev = state.messages[i - 1];
                       const needsDivider = !prev || prev.kind === "user";
-                      const userIndex = userIndexAt[i] ?? 0;
-                      // Snapshot retention: only the last 2 user turns keep
-                      // their snapshots; older messages gray out (rewind off).
-                      const rewindable =
-                        state.rewindWindow !== null &&
-                        userIndex >= state.rewindWindow.min &&
-                        userIndex <= state.rewindWindow.max;
                       return (
                         <div key={`u-${m.turn}`} data-turn={m.turn}>
                           {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
@@ -2788,10 +2743,6 @@ function TabRuntime({
                             text={m.text}
                             images={m.images}
                             skill={m.skill}
-                            userIndex={userIndex}
-                            grayed={!rewindable}
-                            disabled={state.busy || !rewindable}
-                            onRewind={onRewindUserMsg}
                           />
                         </div>
                       );
@@ -2957,7 +2908,19 @@ function TabRuntime({
                   state.busy
                     ? state.activeSkill
                       ? `Skill · ${state.activeSkill.name}`
-                      : "Reasoning"
+                      : state.turnStatus === "thinking"
+                        ? t("app.status.thinking")
+                        : state.turnStatus === "reasoning"
+                          ? t("app.status.reasoning")
+                          : state.turnStatus === "calling_tool" && state.turnStatusTool
+                            ? `${t("app.status.callingTool")} ${state.turnStatusTool}`
+                            : state.turnStatus === "waiting_tool"
+                              ? t("app.status.waitingTool")
+                              : state.turnStatus === "responding"
+                                ? t("app.status.responding")
+                                : stuckSec > 30
+                                  ? t("app.status.stuck", { sec: stuckSec })
+                                  : t("app.status.thinking")
                     : undefined
                 }
                 busyElapsedMs={elapsed}
@@ -3090,7 +3053,6 @@ function TabRuntime({
             memory={state.memory}
             memoryDetail={state.memoryDetail}
             memoryResult={state.memoryResult}
-            qq={state.qq}
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
             onSaveApiKey={saveApiKey}
@@ -3102,13 +3064,6 @@ function TabRuntime({
             }}
             onOAuthSignOut={() => sendRpc({ cmd: "oauth_signout" })}
             onSaveOpenAIApiKey={(key) => sendRpc({ cmd: "setup_save_openai_key", key })}
-            onLoadQQ={loadQQSettings}
-            onConnectQQ={connectQQ}
-            onDisconnectQQ={disconnectQQ}
-            onSaveQQConfig={saveQQConfig}
-            onOpenQQApplyLink={() =>
-              openUrl("https://q.qq.com/qqbot/openclaw/login.html").catch(() => undefined)
-            }
             onPickWorkspace={pickWorkspace}
             onAddMcpSpec={addMcpSpec}
             onRemoveMcpSpec={removeMcpSpec}
@@ -3138,7 +3093,7 @@ function TabRuntime({
           />
         ) : null}
 
-        <Toast message={toast} />
+        <ToastStack items={toasts} />
 
         {splashOn ? <Splash onDone={() => setSplashOn(false)} /> : null}
       </div>
@@ -3975,10 +3930,19 @@ function UpdateOverlay({
 
 type TabMeta = { id: string; workspaceDir?: string; busy?: boolean };
 
+type GlobalToast = { id: number; msg: string; severity?: "error" | "warning" | "info" | "success" };
+let globalToastId = 0;
+
 export function App() {
   const [tabs, setTabs] = useState<TabMeta[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
   const [startupFailure, setStartupFailure] = useState<StartupFailureState | null>(null);
+  const [globalToasts, setGlobalToasts] = useState<GlobalToast[]>([]);
+  const pushGlobalToast = useCallback((msg: string, severity?: GlobalToast["severity"]) => {
+    const id = ++globalToastId;
+    setGlobalToasts((prev) => [...prev, { id, msg, severity }]);
+    window.setTimeout(() => setGlobalToasts((prev) => prev.filter((t) => t.id !== id)), severity === "error" ? 6000 : 3500);
+  }, []);
   const [startupRetryNonce, setStartupRetryNonce] = useState(0);
   const dispatchersRef = useRef<Map<string, TabDispatcher>>(new Map());
   const pendingEventsRef = useRef<Map<string, TabAction[]>>(new Map());
@@ -4346,6 +4310,13 @@ export function App() {
             const target = tabId;
             if (target) {
               flushTabDeltas(target);
+              // Surface errors / warnings as global toasts so they're never hidden
+              if (ev.type === "$error" || ev.type === "error") {
+                pushGlobalToast(ev.message, "error");
+              }
+              if (ev.type === "warning") {
+                pushGlobalToast(ev.text, "warning");
+              }
               if (ev.type === "$mention_results") {
                 deliverToTab(target, {
                   t: "mention_results",
@@ -4432,17 +4403,21 @@ export function App() {
   }, [activeTabId]);
 
   const openTab = useCallback(() => {
-    rpcSend({ cmd: "tab_open" }).catch((err) => console.error("tab_open failed", err));
-  }, []);
+    rpcSend({ cmd: "tab_open" }).catch((err) => {
+      const msg = `Failed to open new tab: ${err instanceof Error ? err.message : String(err)}`;
+      pushGlobalToast(msg, "error");
+    });
+  }, [pushGlobalToast]);
 
   const closeTab = useCallback(
     (id: string) => {
       if (tabs.length <= 1) return;
-      rpcSend({ cmd: "tab_close", tabId: id }).catch((err) =>
-        console.error("tab_close failed", err),
-      );
+      rpcSend({ cmd: "tab_close", tabId: id }).catch((err) => {
+        const msg = `Failed to close tab: ${err instanceof Error ? err.message : String(err)}`;
+        pushGlobalToast(msg, "error");
+      });
     },
-    [tabs.length],
+    [tabs.length, pushGlobalToast],
   );
 
   useEffect(() => {
@@ -4573,6 +4548,7 @@ export function App() {
           onDismiss={() => setPendingUpdate(null)}
         />
       ) : null}
+      <ToastStack items={globalToasts} />
     </>
   );
 }

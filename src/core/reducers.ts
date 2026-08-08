@@ -38,7 +38,7 @@ export function emptyPlan(): PlanView {
 }
 
 export function emptyWorkspace(): WorkspaceView {
-  return { filesTouched: new Map(), lastCheckpointId: null };
+  return { filesTouched: new Map() };
 }
 
 export function emptyCapabilities(): CapabilityView {
@@ -169,8 +169,7 @@ export const workspace: Reducer<WorkspaceView> = (v, ev) => {
       next.set(ev.path, ev.mode);
       return { ...v, filesTouched: next };
     }
-    case EventType.checkpointCreated:
-      return { ...v, lastCheckpointId: ev.checkpointId };
+
     default:
       return v;
   }

@@ -46,16 +46,11 @@ import type {
   PlanStep,
   PlanVerdict,
   ProtocolErrorEvent,
-  QQConfigPatch,
-  QQSettingsEvent,
   ReadyEvent,
   ReasoningEffort,
   RetryResultEvent,
   RevisionRequiredEvent,
   RevisionVerdict,
-  RewindResultEvent,
-  RewindWindow,
-  RewindWindowEvent,
   SessionCompactedEvent,
   SessionEmptyEvent,
   SessionImportResultEvent,
@@ -118,16 +113,11 @@ export type {
   PlanStep,
   PlanVerdict,
   ProtocolErrorEvent,
-  QQConfigPatch,
-  QQSettingsEvent,
   ReadyEvent,
   ReasoningEffort,
   RetryResultEvent,
   RevisionRequiredEvent,
   RevisionVerdict,
-  RewindResultEvent,
-  RewindWindow,
-  RewindWindowEvent,
   SessionCompactedEvent,
   SessionEmptyEvent,
   SessionImportResultEvent,
@@ -323,7 +313,6 @@ export type IncomingEvent = { tabId?: string } & (
   | SessionEmptyEvent
   | NeedsSetupEvent
   | SettingsEvent
-  | QQSettingsEvent
   | BalanceEvent
   | CodexQuotaEvent
   | CheckpointRequiredEvent
@@ -357,8 +346,6 @@ export type IncomingEvent = { tabId?: string } & (
   | KernelErrorEvent
   | RetryResultEvent
   | BtwResultEvent
-  | RewindResultEvent
-  | RewindWindowEvent
   | { type: "oauth_begin_result"; url: string }
 );
 
