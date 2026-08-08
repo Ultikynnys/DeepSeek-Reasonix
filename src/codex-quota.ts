@@ -6,6 +6,9 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { CodexQuota, CodexQuotaWindow } from "@reasonix/core-utils";
+import { createLogger } from "./logging.js";
+
+const log = createLogger("codex-quota");
 
 export const FIVE_HOUR_MINUTES = 300;
 export const WEEKLY_MINUTES = 10080;
@@ -43,13 +46,14 @@ function isHardFailure(reason: string): boolean {
   );
 }
 
-/** Remember a failure and warn once per distinct reason — a missing codex
- *  binary must not re-log on every 60s poll. */
+/** Remember a failure and log once per distinct reason — a missing codex
+ *  binary must not re-log on every 60s poll. Uses debug level so it doesn't
+ *  alarm users in the desktop console; the statusbar tooltip shows the reason. */
 function rememberFailure(reason: string): void {
   lastFailure = { reason, at: Date.now(), hard: isHardFailure(reason) };
   if (reason !== lastWarnedReason) {
     lastWarnedReason = reason;
-    console.warn(`reasonix: codex quota — ${reason}`);
+    log.debug(`quota fetch failed — ${reason}`);
   }
 }
 

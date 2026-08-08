@@ -18,6 +18,7 @@ import type {
   BtwResultEvent,
   CheckpointRequiredEvent,
   ChoiceRequiredEvent,
+  CodexQuota,
   CodexQuotaEvent,
   ConfirmRequiredEvent,
   CtxBreakdownEvent,
@@ -70,6 +71,7 @@ import {
 import { pickPrimaryBalance } from "../../client.js";
 import { codeSystemPrompt } from "../../code/prompt.js";
 import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
+import { fetchCodexQuotaViaOAuth, resolveCodexTransport } from "../../codex-backend.js";
 import { fetchCodexQuotaDetailed } from "../../codex-quota.js";
 import {
   DEFAULT_MODEL,
@@ -160,6 +162,7 @@ import {
   type LoopAbortOptions,
   type LoopEvent,
 } from "../../index.js";
+import { createLogger } from "../../logging.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
 import {
   type ModelPrefs,
@@ -641,19 +644,35 @@ async function emitBalance(tab: Tab): Promise<void> {
 /** Last API-reported weekly usage — delta to the next fetch = percent points consumed since (each $turn_complete refetches). */
 let lastCodexQuotaUsedPct: number | null = null;
 
-/** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only; `turnUsedPct` = weekly usedPercent delta since the previous fetch. `force` bypasses the failure cooldown for explicit user retries (statusbar click-to-retry). */
+/** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only.
+ *  Tries OAuth HTTP first (no codex CLI needed); falls back to the codex CLI. */
 async function emitCodexQuota(tab: Tab, force = false): Promise<void> {
   if (providerForModel(tab.currentModel) !== "openai") return;
-  const { quota, reason } = await fetchCodexQuotaDetailed(15_000, { force }).catch((err) => ({
+
+  // Primary: fetch via OAuth HTTP (works without the codex CLI installed).
+  let quota: CodexQuota | null = null;
+  let reason: string | null = null;
+
+  const oauthResult = await fetchCodexQuotaViaOAuth(10_000).catch((err) => ({
     quota: null,
     reason: (err as Error).message,
   }));
+  if (oauthResult.quota) {
+    quota = oauthResult.quota;
+  } else {
+    // Fallback: codex CLI (requires `npm i -g @openai/codex`).
+    const cliResult = await fetchCodexQuotaDetailed(15_000, { force }).catch((err) => ({
+      quota: null,
+      reason: (err as Error).message,
+    }));
+    quota = cliResult.quota;
+    reason = oauthResult.reason ?? cliResult.reason;
+  }
+
   if (quota) {
     let turnUsedPct: number | null = null;
     const weeklyUsedPct = quota.weekly?.usedPercent ?? null;
     if (weeklyUsedPct !== null) {
-      // Rollover (weekly reset) makes the delta negative — keep the previous
-      // measurement as the baseline and report no turn cost for this fetch.
       if (lastCodexQuotaUsedPct !== null && weeklyUsedPct >= lastCodexQuotaUsedPct) {
         turnUsedPct = weeklyUsedPct - lastCodexQuotaUsedPct;
       }
@@ -1021,19 +1040,27 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   const toolset = tab.toolset;
   applyPlanMode(toolset.tools, loadEditMode());
   const ep = loadEndpointForModel(tab.currentModel);
+  const isOpenAI =
+    providerForModel(tab.currentModel) === "openai" && ep.baseUrl === "https://api.openai.com/v1";
+  const log = createLogger("desktop");
+  if (isOpenAI) {
+    const keyStatus = ep.apiKey ? "static key present, " : "no static key, ";
+    log.debug(
+      `model ${tab.currentModel} → OpenAI; ${keyStatus}Codex backend transport enabled (plan quota)`,
+    );
+  } else {
+    log.debug(`model ${tab.currentModel} → DeepSeek; endpoint ${ep.baseUrl ?? "default"}`);
+  }
   const client = new DeepSeekClient({
     apiKey: ep.apiKey,
     baseUrl: ep.baseUrl,
-    // OAuth tokens refresh per request — attached only when no static key
-    // exists AND the endpoint is api.openai.com (env/config keys win; OAuth
-    // tokens are audience-locked to api.openai.com, so a custom baseUrl
-    // never receives one).
-    apiKeyResolver:
-      providerForModel(tab.currentModel) === "openai" &&
-      !ep.apiKey &&
-      ep.baseUrl === "https://api.openai.com/v1"
-        ? () => resolveOpenAIToken()
-        : undefined,
+    // OAuth tokens refresh per request — fallback for when the Codex backend
+    // transport declines (no OAuth creds or token refresh failed). Without
+    // OAuth, the static API key is used and requests bill to platform credits.
+    apiKeyResolver: isOpenAI ? () => resolveOpenAIToken() : undefined,
+    // Primary path: when OAuth creds exist, route through the ChatGPT Codex
+    // backend so requests consume plan quota (free), not platform credits.
+    transportResolver: isOpenAI ? () => resolveCodexTransport() : undefined,
   });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = tab.currentReasoningEffort;
@@ -1161,15 +1188,15 @@ export function installDesktopCrashGuards(
 
 export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   loadDotenv();
+  const log = createLogger("desktop");
+  log.info(`Reasonix desktop daemon starting (${opts.model ?? "default model"})`);
   // Tauri spawns the bundled Node from the GUI process, which never runs the
   // user's shell init (`.bashrc` / `.zshrc` / profile). Probe the login shell
   // once so nvm / asdf / fnm / volta / mise PATH entries reach `run_command`
   // children too (#1252). No-op on Windows — system PATH already covers GUI apps.
   const augmented = augmentProcessPath();
   if (augmented.added.length > 0) {
-    process.stderr.write(
-      `[desktop] augmented PATH with ${augmented.added.length} login-shell entries\n`,
-    );
+    log.debug(`augmented PATH with ${augmented.added.length} login-shell entries`);
   }
   installDesktopCrashGuards();
 

@@ -1,7 +1,10 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
 import { loadRateLimit, providerForModel, resolveBaseUrlEnv } from "./config.js";
+import { createLogger } from "./logging.js";
 import { type RetryOptions, fetchWithRetry } from "./retry.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
+
+const log = createLogger("client");
 
 export class Usage {
   constructor(
@@ -98,6 +101,13 @@ export interface ModelList {
   data: ModelInfo[];
 }
 
+export interface ResolvedTransport {
+  /** Full URL to POST to (replaces `${baseUrl}/chat/completions`). */
+  endpoint: string;
+  /** Headers to merge on top of the defaults — Authorization is replaced. */
+  headers: Record<string, string>;
+}
+
 export interface DeepSeekClientOptions {
   apiKey?: string;
   baseUrl?: string;
@@ -110,6 +120,8 @@ export interface DeepSeekClientOptions {
    *  When it returns a value it wins over `apiKey`; when it returns undefined
    *  the static key (or the constructor's env fallback) is used. */
   apiKeyResolver?: () => Promise<string | undefined>;
+  /** Per-request transport override for plan-quota billing via Codex backend. */
+  transportResolver?: () => Promise<ResolvedTransport | null>;
 }
 
 // DeepSeek's strict JSON parser rejects lone UTF-16 surrogate escapes
@@ -163,17 +175,19 @@ export class DeepSeekClient {
   private readonly _fetch: typeof fetch;
   private readonly minChatIntervalMs: number;
   private readonly apiKeyResolver?: () => Promise<string | undefined>;
+  private readonly transportResolver?: () => Promise<ResolvedTransport | null>;
   private nextChatRequestAt = 0;
 
   constructor(opts: DeepSeekClientOptions = {}) {
     const apiKey = opts.apiKey ?? process.env.DEEPSEEK_API_KEY;
-    if (!apiKey && !opts.apiKeyResolver) {
+    if (!apiKey && !opts.apiKeyResolver && !opts.transportResolver) {
       throw new Error(
         "No API key: set DEEPSEEK_API_KEY (deepseek-* models) or OPENAI_API_KEY (gpt-* models) in .env, or pass apiKey to DeepSeekClient.",
       );
     }
     this.apiKey = apiKey ?? "";
     this.apiKeyResolver = opts.apiKeyResolver;
+    this.transportResolver = opts.transportResolver;
     let url = opts.baseUrl ?? resolveBaseUrlEnv() ?? "https://api.deepseek.com";
     // Manual trim — `/\/+$/` is O(n²) on slash-heavy non-matches per CodeQL js/polynomial-redos.
     while (url.endsWith("/")) url = url.slice(0, -1);
@@ -202,6 +216,12 @@ export class DeepSeekClient {
       if (resolved) return resolved;
     }
     return this.apiKey;
+  }
+
+  /** Resolved per request — transport override or null (falls through to baseUrl+apiKey). */
+  private async resolveTransport(): Promise<ResolvedTransport | null> {
+    if (!this.transportResolver) return null;
+    return this.transportResolver();
   }
 
   private async waitForChatRateLimit(signal?: AbortSignal): Promise<void> {
@@ -325,15 +345,20 @@ export class DeepSeekClient {
 
     try {
       await this.waitForChatRateLimit(signal);
+      const transport = await this.resolveTransport();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (transport) {
+        log.verbose(`chat → ${transport.endpoint}`);
+        Object.assign(headers, transport.headers);
+      } else {
+        headers.Authorization = `Bearer ${await this.resolveApiKey()}`;
+      }
       const resp = await fetchWithRetry(
         this._fetch,
-        `${this.baseUrl}/chat/completions`,
+        transport?.endpoint ?? `${this.baseUrl}/chat/completions`,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${await this.resolveApiKey()}`,
-            "Content-Type": "application/json",
-          },
+          headers,
           body: stringifyJsonTransport(this.buildPayload(opts, false)),
           signal,
         },
@@ -373,16 +398,23 @@ export class DeepSeekClient {
       // Only the initial fetch is retried. Once the server has started sending
       // the stream body we do NOT retry — a mid-stream retry would re-bill and
       // desync the session context.
+      const transport = await this.resolveTransport();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      };
+      if (transport) {
+        log.verbose(`stream → ${transport.endpoint}`);
+        Object.assign(headers, transport.headers);
+      } else {
+        headers.Authorization = `Bearer ${await this.resolveApiKey()}`;
+      }
       resp = await fetchWithRetry(
         this._fetch,
-        `${this.baseUrl}/chat/completions`,
+        transport?.endpoint ?? `${this.baseUrl}/chat/completions`,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${await this.resolveApiKey()}`,
-            "Content-Type": "application/json",
-            Accept: "text/event-stream",
-          },
+          headers,
           body: stringifyJsonTransport(this.buildPayload(opts, true)),
           signal,
         },

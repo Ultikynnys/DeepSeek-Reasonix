@@ -1,4 +1,5 @@
 import { DeepSeekClient } from "../client.js";
+import { resolveCodexTransport } from "../codex-backend.js";
 import {
   DEFAULT_MODEL,
   type EditMode,
@@ -116,17 +117,16 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
       let subagentClient = subagentClients.get(model);
       if (!subagentClient) {
         const ep = loadEndpointForModel(model);
+        const isOpenAI =
+          providerForModel(model) === "openai" && ep.baseUrl === "https://api.openai.com/v1";
         subagentClient = new DeepSeekClient({
           apiKey: ep.apiKey,
           baseUrl: ep.baseUrl,
-          // OAuth tokens refresh per request — only when no static key exists
-          // (env/config keys win; OAuth tokens are audience-locked to api.openai.com).
-          apiKeyResolver:
-            providerForModel(model) === "openai" &&
-            !ep.apiKey &&
-            ep.baseUrl === "https://api.openai.com/v1"
-              ? () => resolveOpenAIToken()
-              : undefined,
+          // OAuth fallback — when Codex backend is unavailable the static key is used
+          // (bills platform credits). OAuth tokens are audience-locked to api.openai.com.
+          apiKeyResolver: isOpenAI ? () => resolveOpenAIToken() : undefined,
+          // Primary: route through ChatGPT Codex backend for plan-quota billing.
+          transportResolver: isOpenAI ? () => resolveCodexTransport() : undefined,
         });
         subagentClients.set(model, subagentClient);
       }
