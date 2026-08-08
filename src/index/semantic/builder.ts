@@ -5,7 +5,6 @@ import { type ResolvedIndexConfig, defaultIndexConfig } from "../config.js";
 import { walkChunks } from "./chunker.js";
 import type { CodeChunk, SkipReason } from "./chunker.js";
 import { embed, embedAll, probeOllama } from "./embedding.js";
-import type { EmbedOptions } from "./embedding.js";
 import {
   compareIndexIdentity,
   normalize,
@@ -13,7 +12,7 @@ import {
   readIndexMeta,
   wipeStoreFiles,
 } from "./store.js";
-import type { IndexEntry, IndexIdentity, IndexMismatch, SearchHit } from "./store.js";
+import type { IndexEntry, IndexIdentity, SearchHit } from "./store.js";
 
 export const INDEX_DIR_NAME = path.join(".reasonix", "semantic");
 
@@ -237,16 +236,6 @@ export async function querySemantic(
   const qvec = await embed(query, { ...resolved, signal: opts.signal });
   normalize(qvec);
   return store.search(qvec, opts.topK ?? 8, opts.minScore ?? 0.3);
-}
-
-export async function indexExists(root: string): Promise<boolean> {
-  const meta = path.join(root, INDEX_DIR_NAME, "index.meta.json");
-  try {
-    await fs.access(meta);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export async function indexCompatible(

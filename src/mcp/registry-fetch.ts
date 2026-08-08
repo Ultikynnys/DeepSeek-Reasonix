@@ -8,7 +8,6 @@ import { reasonixHome } from "../reasonix-home.js";
 import { MCP_CATALOG } from "./catalog.js";
 import type {
   CacheFile,
-  CachePagination,
   RegistryEntry,
   RegistryInstall,
   RegistrySource,

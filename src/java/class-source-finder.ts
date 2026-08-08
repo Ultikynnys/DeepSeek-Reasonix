@@ -79,7 +79,7 @@ export class ClassSourceFinder {
     try {
       const content = readJarEntry(resolvedJarPath, classEntry);
       if (!content) return { found: false, method: "not-found" };
-      const source = await this.decompileFromJar(resolvedJarPath, content.data, fullyQualifiedName);
+      const source = await this.decompileFromJar(content.data, fullyQualifiedName);
       return { found: true, source, method: "jar", sourcePath: resolvedJarPath };
     } catch (err) {
       return { found: false, method: "not-found" };
@@ -168,7 +168,7 @@ export class ClassSourceFinder {
       try {
         const content = readJarEntry(jarPath, classEntry);
         if (content) {
-          const source = await this.decompileFromJar(jarPath, content.data, fqn);
+          const source = await this.decompileFromJar(content.data, fqn);
           return { found: true, source, method: "m2-jar", sourcePath: jarPath };
         }
       } catch {
@@ -216,11 +216,7 @@ export class ClassSourceFinder {
     }
   }
 
-  private async decompileFromJar(
-    jarPath: string,
-    classBytes: Buffer,
-    fqn: string,
-  ): Promise<string> {
+  private async decompileFromJar(classBytes: Buffer, fqn: string): Promise<string> {
     const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "reasonix-java-src-"));
 
     try {

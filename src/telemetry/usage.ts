@@ -1,11 +1,9 @@
 /** Append-only JSONL of per-turn tokens + cost; best-effort writes, never blocks the turn. No prompts/completions logged. */
 
 import {
-  appendFileSync,
   closeSync,
   existsSync,
   fstatSync,
-  mkdirSync,
   openSync,
   readSync,
   renameSync,
@@ -13,7 +11,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { DAY_MS, formatBytes } from "@reasonix/core-utils";
 import type { Usage } from "../client.js";
 import { appendJsonlLine, countJsonlLines, parseJsonl, readJsonlLines } from "../core/jsonl.js";

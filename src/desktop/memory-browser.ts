@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { basename, resolve } from "node:path";
-import type { MemoryEntryDetail, MemoryEntryInfo, MemoryEntryKind } from "@reasonix/core-utils";
+import type { MemoryEntryDetail, MemoryEntryInfo } from "@reasonix/core-utils";
 import { readProjectMemory } from "../memory/project.js";
 import {
   type MemoryEntry,

@@ -1,6 +1,5 @@
 import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
-import { PlanProposedError, PlanRevisionProposedError } from "./plan-errors.js";
 import type { PlanStep, PlanStepRisk, StepCompletion, StepEvidence } from "./plan-types.js";
 
 const SUBMIT_PLAN_DESCRIPTION =

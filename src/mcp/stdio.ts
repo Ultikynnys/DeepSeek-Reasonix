@@ -2,7 +2,6 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { BaseMcpTransport } from "./base-transport.js";
-import { syntheticRpcError } from "./transport-utils.js";
 import { JSONRPC_VERSION } from "./types.js";
 import type { JsonRpcMessage } from "./types.js";
 

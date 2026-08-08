@@ -2,7 +2,6 @@
 
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { atomicWriteSync } from "./core/atomic-write.js";

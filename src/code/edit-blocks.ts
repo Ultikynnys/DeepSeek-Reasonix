@@ -13,13 +13,12 @@ import {
   realpathSync,
   renameSync,
   unlinkSync,
-  writeFileSync,
   writeSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { looksLikeAbsoluteSystemPath, pathIsUnder } from "@reasonix/core-utils/path-utils";
 import { tmpSiblingPath } from "../core/atomic-write.js";
-import { type FileEncoding, decodeFileBuffer, encodeFile } from "./file-encoding.js";
+import { decodeFileBuffer, encodeFile } from "./file-encoding.js";
 
 export interface EditBlock {
   /** Path as written by the model — relative to rootDir, or absolute. */

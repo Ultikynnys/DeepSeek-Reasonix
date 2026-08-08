@@ -10,11 +10,11 @@ export interface ResponsesInputItem {
 
 function contentParts(content: ChatMessage["content"]): ResponsesInputItem[] {
   if (content === null || content === undefined) return [];
-  if (typeof content === "string") return content ? [{ type: "input_text", text: content }] : [];
+  if (typeof content === "string") return content ? [{ type: "output_text", text: content }] : [];
   const parts: ResponsesInputItem[] = [];
   for (const part of content) {
     if (part.type === "text") {
-      if (part.text) parts.push({ type: "input_text", text: part.text });
+      if (part.text) parts.push({ type: "output_text", text: part.text });
     } else {
       // Responses input_image takes the URL as a bare string (chat
       // completions wraps it in { url, detail }).

@@ -1,5 +1,5 @@
 import type { ToolRegistry } from "../../tools.js";
-import { indexCompatible, indexExists, querySemantic } from "./builder.js";
+import { indexCompatible, querySemantic } from "./builder.js";
 import type { SearchHit } from "./store.js";
 
 type SemanticToolOptions = {

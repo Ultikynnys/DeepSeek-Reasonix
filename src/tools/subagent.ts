@@ -108,10 +108,6 @@ ${NEGATIVE_CLAIM_RULE}
 
 ${TUI_FORMATTING_RULES}`;
 
-function defaultSubagentSystem(modelId: string): string {
-  return `${SUBAGENT_BASE_SYSTEM}\n\n${escalationContract(modelId)}`;
-}
-
 const DEFAULT_MAX_RESULT_CHARS = 8000;
 // Subagents default to flash — their work is read-and-synthesize
 // (explore, research), which doesn't need the 12× pro tier. Skill

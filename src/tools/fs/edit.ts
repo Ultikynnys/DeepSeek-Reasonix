@@ -1,5 +1,4 @@
 import { promises as fs } from "node:fs";
-import * as pathMod from "node:path";
 import { lineEndingOf, locateSingleMatch } from "../../code/edit-blocks.js";
 import { type FileEncoding, decodeFileBuffer, encodeFile } from "../../code/file-encoding.js";
 import { displayRel } from "./rel.js";

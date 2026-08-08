@@ -14,11 +14,9 @@ import {
 } from "@reasonix/core-utils";
 import type {
   BalanceEvent,
-  BalanceInfoItem,
   BtwResultEvent,
   CheckpointRequiredEvent,
   ChoiceRequiredEvent,
-  CodexQuota,
   CodexQuotaEvent,
   ConfirmRequiredEvent,
   CtxBreakdownEvent,
@@ -50,7 +48,6 @@ import type {
   SessionLoadedEvent,
   SessionsEvent,
   SettingsEvent,
-  SkillInfo,
   SkillsEvent,
   StepCompletedEvent,
   TabClosedEvent,
@@ -71,7 +68,6 @@ import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
 import { fetchCodexQuotaViaOAuth, resolveCodexTransport } from "../../codex-backend.js";
 import {
   DEFAULT_MODEL,
-  type DesktopOpenTab,
   bridgeEndpointEnv,
   isPlausibleKey,
   isReasoningEffort,
@@ -115,18 +111,10 @@ import {
 import { Eventizer } from "../../core/eventize.js";
 import { EventType } from "../../core/events.js";
 import type { Event as KernelEvent } from "../../core/events.js";
-import {
-  type CheckpointVerdict,
-  type ChoiceVerdict,
-  type PlanVerdict,
-  type RevisionVerdict,
-  pauseGate,
-} from "../../core/pause-gate.js";
+import { pauseGate } from "../../core/pause-gate.js";
 import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { augmentProcessPath } from "../../desktop/login-shell-path.js";
 import {
-  type MemoryEntryDetail,
-  type MemoryEntryInfo,
   collectMemoryEntriesForWorkspace,
   deleteMemoryEntry,
   exportMemories,
@@ -1145,52 +1133,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   let first: Tab;
-
-  function activeDesktopTab(): Tab | undefined {
-    return (lastActiveTabId ? tabs.get(lastActiveTabId) : undefined) ?? first;
-  }
-
-  function parseIndexedChoice(text: string): number {
-    const rawIndex = text.match(/^(\d+)/)?.[1];
-    return rawIndex ? Number.parseInt(rawIndex, 10) - 1 : -1;
-  }
-
-  function parseRunPermissionChoice(text: string): "run_once" | "always_allow" | "deny" {
-    const lower = text.toLowerCase();
-    if (lower.includes("1") || lower.includes("run")) return "run_once";
-    if (lower.includes("2") || lower.includes("always")) return "always_allow";
-    return "deny";
-  }
-
-  function parsePlanChoice(text: string): "approve" | "refine" | "cancel" {
-    const lower = text.toLowerCase();
-    if (lower.includes("1") || lower.includes("approve")) return "approve";
-    if (lower.includes("2") || lower.includes("refine")) return "refine";
-    return "cancel";
-  }
-
-  function parseCheckpointChoice(text: string): "continue" | "revise" | "stop" {
-    const lower = text.toLowerCase();
-    if (lower.includes("1") || lower.includes("continue")) return "continue";
-    if (lower.includes("2") || lower.includes("revise")) return "revise";
-    return "stop";
-  }
-
-  function parseRevisionChoice(text: string): "accept" | "reject" | "cancel" {
-    const lower = text.toLowerCase();
-    if (lower.includes("1") || lower.includes("accept")) return "accept";
-    if (lower.includes("2") || lower.includes("reject")) return "reject";
-    return "cancel";
-  }
-
-  function stripFollowupPrefix(text: string): string {
-    return text
-      .replace(
-        /^(?:\d+\s*|approve\s*|refine\s*|cancel\s*|continue\s*|revise\s*|stop\s*|accept\s*|reject\s*|run\s*|always\s*|deny\s*)/iu,
-        "",
-      )
-      .trim();
-  }
 
   /** Synchronous tab construction — no I/O. All cheap, disk-only events (`$settings`, `$sessions`, `$memory`, `$skills`, `$mcp_specs`) can fire against this immediately. The heavy bits (`buildCodeToolset`, MCP probes, runtime construction) happen in `initTabToolset` so the UI shell paints without waiting for them. */
   function createTabSkeleton(initialDir?: string, restoreId?: string): Tab {

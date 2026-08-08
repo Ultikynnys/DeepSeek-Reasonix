@@ -2,13 +2,8 @@ import { type DeepSeekClient, Usage } from "./client.js";
 import type { ReasoningEffort } from "./config.js";
 import type { PauseGate } from "./core/pause-gate.js";
 import { pauseGate as defaultPauseGate } from "./core/pause-gate.js";
-import { type HookPayload, type ResolvedHook, runHooks } from "./hooks.js";
-import {
-  DEFAULT_MAX_RESULT_CHARS,
-  DEFAULT_MAX_RESULT_TOKENS,
-  truncateForModel,
-  truncateForModelByTokens,
-} from "./mcp/registry.js";
+import { type ResolvedHook, runHooks } from "./hooks.js";
+import { DEFAULT_MAX_RESULT_CHARS, DEFAULT_MAX_RESULT_TOKENS } from "./mcp/registry.js";
 
 import { ContextManager, type FoldResult, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
@@ -58,7 +53,7 @@ import {
   patchSessionMeta,
   rewriteSession,
 } from "./memory/session.js";
-import { type RepairReport, ToolCallRepair } from "./repair/index.js";
+import { ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
 import { ToolRegistry, isReadOnlyTool } from "./tools.js";
 import { ReadTracker } from "./tools/read-tracker.js";
@@ -140,32 +135,6 @@ function shrinkMessageForRetention(message: ChatMessage): ChatMessage {
   return (
     shrinkOversizedToolCallArgsByTokens([message], DEFAULT_MAX_RESULT_TOKENS).messages[0] ?? message
   );
-}
-
-/** Extract relative paths that a file-modifying tool call targets. Used by the
- *  audit listener to track which files each turn touches for per-turn snapshots. */
-function fileModPaths(name: string, args: Record<string, unknown>): string[] {
-  switch (name) {
-    case "edit_file":
-    case "write_file":
-    case "delete_file":
-    case "create_directory":
-    case "delete_directory":
-      return typeof args.path === "string" ? [args.path] : [];
-    case "multi_edit": {
-      const edits = args.edits as Array<{ path?: string }> | undefined;
-      return edits?.map((e) => e.path).filter((p): p is string => typeof p === "string") ?? [];
-    }
-    case "move_file":
-    case "copy_file": {
-      const out: string[] = [];
-      if (typeof args.source === "string") out.push(args.source);
-      if (typeof args.destination === "string") out.push(args.destination);
-      return out;
-    }
-    default:
-      return [];
-  }
 }
 
 export class CacheFirstLoop {
@@ -398,78 +367,65 @@ export class CacheFirstLoop {
     this.persistLog(kept);
   }
 
-  /** "New chat" — drops in-memory messages, archives the on-disk transcript so it survives in Sessions, keeps sessionName so the prefix cache stays warm. Re-runs the system-prompt builder if one was wired (issue #778: REASONIX.md edits otherwise need a restart). */
-  clearLog(): { dropped: number; archived: string | null; systemRebuilt: boolean } {
-    const dropped = this.log.length;
-    this.log.compactInPlace([]);
-    let archived: string | null = null;
-    if (this.sessionName) {
-      try {
-        archived = archiveSession(this.sessionName);
-        if (archived === null) this.persistLog([]);
-      } catch (err) {
-        /* disk issue shouldn't block the in-memory clear — but LOG */
-        process.stderr.write(
-          `reasonix: session reset persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
+  private archiveCurrentSession(action: "reset" | "switch"): string | null {
+    if (!this.sessionName) return null;
+    try {
+      const archived = archiveSession(this.sessionName);
+      if (archived === null) this.persistLog([]);
+      return archived;
+    } catch (err) {
+      /* disk issue shouldn't block the in-memory reset — but LOG */
+      process.stderr.write(
+        `reasonix: session ${action} persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return null;
     }
+  }
+
+  private resetTransientState(): void {
     this.scratch.reset();
     this._inflight.clear();
-    this.stats.reset();
-    this._turn = 0;
-    this._budgetWarned = false;
     // Drain leftover steer text — otherwise the first step() after /new
     // injects it as a user message and the next turn leaks prior intent.
     this._steerQueue.length = 0;
     this._steerConsumed = false;
     this._userTurnCount = 0;
-    let systemRebuilt = false;
-    if (this._rebuildSystem) {
-      try {
-        systemRebuilt = this.prefix.replaceSystem(this._rebuildSystem());
-      } catch (err) {
-        /* builder threw — keep prior system rather than crash /new, but LOG */
-        process.stderr.write(
-          `reasonix: system prompt rebuild failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
+  }
+
+  private rebuildSystemPrompt(): boolean {
+    if (!this._rebuildSystem) return false;
+    try {
+      return this.prefix.replaceSystem(this._rebuildSystem());
+    } catch (err) {
+      /* builder threw — keep prior system rather than crash a reset, but LOG */
+      process.stderr.write(
+        `reasonix: system prompt rebuild failed — ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return false;
     }
+  }
+
+  /** "New chat" — drops in-memory messages, archives the on-disk transcript so it survives in Sessions, keeps sessionName so the prefix cache stays warm. Re-runs the system-prompt builder if one was wired (issue #778: REASONIX.md edits otherwise need a restart). */
+  clearLog(): { dropped: number; archived: string | null; systemRebuilt: boolean } {
+    const dropped = this.log.length;
+    this.log.compactInPlace([]);
+    const archived = this.archiveCurrentSession("reset");
+    this.resetTransientState();
+    this.stats.reset();
+    this._turn = 0;
+    this._budgetWarned = false;
+    const systemRebuilt = this.rebuildSystemPrompt();
     return { dropped, archived, systemRebuilt };
   }
 
   /** `/cwd` follow-through — archives the previous session, drops in-memory state, repoints sessionName, and rebuilds the system prompt against whatever the rebuilder closure now resolves (the caller is expected to have already updated the root the closure reads). */
   switchWorkspace(opts: { sessionName: string }): { dropped: number; archived: string | null } {
     const dropped = this.log.length;
-    let archived: string | null = null;
-    if (this.sessionName) {
-      try {
-        archived = archiveSession(this.sessionName);
-        if (archived === null) this.persistLog([]);
-      } catch (err) {
-        /* disk issue shouldn't block the in-memory swap — but LOG */
-        process.stderr.write(
-          `reasonix: session switch persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
-    }
+    const archived = this.archiveCurrentSession("switch");
     this.log.compactInPlace([]);
-    this.scratch.reset();
-    this._inflight.clear();
-    this._steerQueue.length = 0;
-    this._steerConsumed = false;
-    this._userTurnCount = 0;
+    this.resetTransientState();
     this.sessionName = opts.sessionName;
-    if (this._rebuildSystem) {
-      try {
-        this.prefix.replaceSystem(this._rebuildSystem());
-      } catch (err) {
-        /* builder threw — keep prior system rather than crash /cwd, but LOG */
-        process.stderr.write(
-          `reasonix: system prompt rebuild failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-      }
-    }
+    this.rebuildSystemPrompt();
     return { dropped, archived };
   }
 

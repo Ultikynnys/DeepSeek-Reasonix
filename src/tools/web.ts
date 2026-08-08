@@ -124,7 +124,7 @@ async function fetchSearchApi(
 }
 
 /** Guarded `JSON.parse` — throws `engineParseError` on malformed JSON. */
-function parseSearchJson<T>(raw: string, status: number, parseError: string): T {
+function parseSearchJson<T>(raw: string, parseError: string): T {
   try {
     return JSON.parse(raw) as T;
   } catch {
@@ -449,7 +449,6 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
   const raw = await resp.text();
   const data = parseSearchJson<MetasoSearchResponse>(
     raw,
-    resp.status,
     t("webErrors.metasoParseError", { status: resp.status }),
   );
 
@@ -573,7 +572,6 @@ async function searchPerplexity(
   const raw = await resp.text();
   const data = parseSearchJson<PerplexityResponse>(
     raw,
-    resp.status,
     t("webErrors.perplexityParseError", { status: resp.status }),
   );
 
@@ -629,7 +627,6 @@ async function searchExa(query: string, opts: WebSearchOptions = {}): Promise<Se
   const raw = await resp.text();
   const data = parseSearchJson<ExaAnswerResponse>(
     raw,
-    resp.status,
     t("webErrors.exaParseError", { status: resp.status }),
   );
 
@@ -731,7 +728,6 @@ async function searchBrave(query: string, opts: WebSearchOptions = {}): Promise<
   const raw = await resp.text();
   const data = parseSearchJson<BraveSearchResponse>(
     raw,
-    resp.status,
     t("webErrors.braveParseError", { status: resp.status }),
   );
 
@@ -1033,10 +1029,6 @@ function walkExtract(node: WalkableNode, out: string[]): void {
   if (isBreak) out.push("\n");
   for (const child of node.childNodes) walkExtract(child, out);
   if (isBreak) out.push("\n");
-}
-
-function stripHtml(s: string): string {
-  return parseHtml(s).text;
 }
 
 const HTML_ENTITIES: Readonly<Record<string, string>> = {

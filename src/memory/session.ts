@@ -2,7 +2,6 @@
 
 import { execFileSync } from "node:child_process";
 import {
-  appendFileSync,
   chmodSync,
   copyFileSync,
   existsSync,
@@ -14,7 +13,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
 import { DAY_MS, sanitizeFilename } from "@reasonix/core-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";

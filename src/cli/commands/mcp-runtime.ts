@@ -1,5 +1,5 @@
 import { normalizeMcpConfig, readConfig } from "../../config.js";
-import { type McpLifecycleEvent, formatMcpLifecycleEvent } from "../../desktop/mcp-lifecycle.js";
+import { formatMcpLifecycleEvent } from "../../desktop/mcp-lifecycle.js";
 import { formatMcpSlowToast } from "../../desktop/mcp-toast.js";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
