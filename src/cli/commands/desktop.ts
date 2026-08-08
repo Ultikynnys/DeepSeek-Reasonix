@@ -1623,11 +1623,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (tab.mcpRuntime) {
       try {
-        await tab.mcpRuntime.closeAll();
+        // closeAll's loop iterates every MCP client sequentially with no
+        // per-client timeout — one hung streamable-http close can stall
+        // the whole tab close.  Race the entire batch against 5 s so
+        // $tab_closed still fires.
+        const DEADLINE = 5000;
+        await Promise.race([
+          tab.mcpRuntime.closeAll(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("timed out after 5 s")), DEADLINE),
+          ),
+        ]);
       } catch (err) {
         // MCP shutdown errors aren't actionable here either — but LOG
         process.stderr.write(
-          `reasonix: tab MCP shutdown failed — ${err instanceof Error ? err.message : String(err)}\n`,
+          `reasonix: tab MCP closeAll failed — ${err instanceof Error ? err.message : String(err)}\n`,
         );
       }
     }
@@ -2532,7 +2542,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "tab_close") {
-      void closeTab(tab);
+      closeTab(tab).catch((err) => {
+        process.stderr.write(
+          `reasonix: closeTab rejected — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      });
       return;
     }
     if (msg.cmd === "mcp_specs_get") {
