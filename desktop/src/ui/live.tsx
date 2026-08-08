@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 
@@ -7,35 +7,48 @@ export function fmtElapsed(ms: number): string {
   return s < 10 ? `${s.toFixed(1)}s` : `${Math.floor(s)}s`;
 }
 
-export function useElapsed(active: boolean, startAt?: number): number {
-  const [ms, setMs] = useState(0);
+/** A span that displays an auto-updating elapsed-time counter using direct
+ *  DOM mutation. This avoids React re-renders on every tick — the timer
+ *  update never cascades through the component tree. */
+export function TimerSpan({
+  active,
+  startAt,
+  className,
+  format,
+}: {
+  active: boolean;
+  startAt?: number;
+  className?: string;
+  format?: (ms: number) => string;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
   const start = useRef<number | null>(null);
+  const fmt = format ?? fmtElapsed;
+
   useEffect(() => {
     if (!active) {
-      setMs(0);
+      if (ref.current) ref.current.textContent = "";
       start.current = null;
       return;
     }
     start.current = startAt ?? performance.now();
-    // 250ms, not 80ms: the tick re-renders the whole TabRuntime tree, and
-    // while busy that happened 12.5×/s. 4Hz is still smooth for a tenths
-    // display and cuts the per-turn render load ~3×.
     const id = setInterval(() => {
-      if (start.current !== null) setMs(performance.now() - start.current);
+      if (start.current !== null && ref.current) {
+        ref.current.textContent = fmt(performance.now() - start.current);
+      }
     }, 250);
     return () => clearInterval(id);
-  }, [active, startAt]);
-  return ms;
+  }, [active, startAt, fmt]);
+
+  return <span ref={ref} className={className} />;
 }
 
 export function ThinkingPill({
   phase = "thinking",
   label,
-  elapsedMs,
 }: {
   phase?: "queued" | "thinking" | "tool";
   label: string;
-  elapsedMs: number;
 }) {
   const color =
     phase === "queued" ? "var(--muted)" : phase === "tool" ? "var(--warning)" : "var(--accent)";
@@ -49,7 +62,7 @@ export function ThinkingPill({
       <span className="label">
         <span className="sh">{label}</span>
       </span>
-      <span className="timer">{fmtElapsed(elapsedMs)}</span>
+      <TimerSpan active className="timer" />
     </div>
   );
 }
@@ -75,12 +88,10 @@ export function LiveReasoning({ lines }: { lines: string[] }) {
 export function ToolRunningCard({
   kind = "tool",
   name,
-  elapsedMs,
   logLines,
 }: {
   kind?: "shell" | "fetch" | "search" | "tool";
   name: string;
-  elapsedMs: number;
   logLines?: { text: string; tone?: "ok" | "dim" }[];
 }) {
   useLang();
@@ -107,7 +118,7 @@ export function ToolRunningCard({
           aria-label={t("live.running")}
           title={t("live.running")}
         />
-        <span className="timer">{fmtElapsed(elapsedMs)}</span>
+        <TimerSpan active className="timer" />
       </div>
       {logLines && logLines.length > 0 ? (
         <div className="live-log">
@@ -133,7 +144,7 @@ export function ToolRunningCard({
   );
 }
 
-export function PendingUserMsg({ text, elapsedMs }: { text: string; elapsedMs: number }) {
+export function PendingUserMsg({ text }: { text: string }) {
   useLang();
   return (
     <div className="msg user">
@@ -141,9 +152,13 @@ export function PendingUserMsg({ text, elapsedMs }: { text: string; elapsedMs: n
       <div className="body">
         <div className="who">
           <span className="name">{t("live.you")}</span>
-          <span className="time">
-            {t("live.secondsAgo", { seconds: (elapsedMs / 1000).toFixed(1) })}
-          </span>
+          <TimerSpan
+            active
+            className="time"
+            format={(ms) =>
+              t("live.secondsAgo", { seconds: (ms / 1000).toFixed(1) })
+            }
+          />
         </div>
         <div className="msg-text user-pending">{text}</div>
         <div className="user-status">

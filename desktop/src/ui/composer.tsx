@@ -18,7 +18,7 @@ import { isImagePath, resolveImagePath } from "../image-attach";
 import type { EditMode, ReasoningEffort } from "../protocol";
 import { DEFAULT_COMPOSER_ROWS, applyComposerTextareaAutosize } from "./composer-sizing";
 import { activationHandler } from "./keyboard";
-import { fmtElapsed } from "./live";
+import { TimerSpan } from "./live";
 import { Shortcut } from "./shortcut";
 export type { EditMode, ReasoningEffort };
 
@@ -136,7 +136,6 @@ export function Composer({
   disabled,
   busy,
   busyLabel,
-  busyElapsedMs,
   modelLabel,
   reasoningEffort,
   onModelChange,
@@ -168,7 +167,6 @@ export function Composer({
   busy?: boolean;
   /** Replaces the hint-row left side while the agent is running — typically "Reasoning" or "Skill · <name>". */
   busyLabel?: string;
-  busyElapsedMs?: number;
   modelLabel: string;
   reasoningEffort: ReasoningEffort;
   onModelChange: (model: string) => void;
@@ -571,7 +569,7 @@ export function Composer({
               <span className="composer-busy-status">
                 <span className="composer-busy-pip" />
                 <span className="composer-busy-label">{busyLabel}</span>
-                <span className="composer-busy-time">{fmtElapsed(busyElapsedMs ?? 0)}</span>
+                <TimerSpan active={busy ?? false} className="composer-busy-time" />
               </span>
               <span className="grow" />
               <ModeSwitch mode={editMode} onChange={onEditModeChange} />

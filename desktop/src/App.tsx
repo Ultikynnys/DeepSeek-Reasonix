@@ -89,7 +89,6 @@ import { ContextPanel } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
 import { JumpBar } from "./ui/jump-bar";
 import { activationHandler, escapeHandler } from "./ui/keyboard";
-import { useElapsed } from "./ui/live";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Sidebar } from "./ui/sidebar";
@@ -2513,7 +2512,6 @@ function TabRuntime({
     })),
   ];
 
-  const elapsed = useElapsed(state.busy);
   // Track how long the current turn has been stuck (no events received)
   const [stuckSec, setStuckSec] = useState(0);
   useEffect(() => {
@@ -2923,7 +2921,6 @@ function TabRuntime({
                                   : t("app.status.thinking")
                     : undefined
                 }
-                busyElapsedMs={elapsed}
                 textareaRef={composerRef}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
                 reasoningEffort={state.settings?.reasoningEffort ?? "high"}

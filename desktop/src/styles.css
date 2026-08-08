@@ -343,14 +343,13 @@ html[data-platform="macos"] .app {
 }
 .tab .dot[data-state="running"] {
   background: var(--accent);
-  box-shadow: 0 0 0 0 currentColor;
-  animation: pulse 1.6s ease-out infinite;
   color: var(--accent);
+  animation: dot-pulse 1.6s ease-in-out infinite;
 }
 .tab .dot[data-state="await"] {
   background: var(--warning);
   color: var(--warning);
-  animation: pulse 1.6s ease-out infinite;
+  animation: dot-pulse 1.6s ease-in-out infinite;
 }
 .tab .dot[data-state="done"] {
   background: var(--success);
@@ -811,15 +810,13 @@ html[data-platform="macos"] .titlebar .tb-left {
   color: #fff;
 }
 
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 currentColor;
-  }
-  70% {
-    box-shadow: 0 0 0 6px transparent;
-  }
+@keyframes dot-pulse {
+  0%,
   100% {
-    box-shadow: 0 0 0 0 transparent;
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
   }
 }
 
@@ -4619,21 +4616,20 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   }
 }
 
-/* shimmer for streaming text */
+/* shimmer for streaming text — opacity pulse on static accent color,
+   avoids background-clip:text + background-position animation which forces
+   a GPU text-mask recomposite on every frame in WebView2. */
 .shimmer {
-  background: linear-gradient(90deg, var(--fg-2) 0%, var(--accent) 50%, var(--fg-2) 100%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shim 2.2s linear infinite;
+  color: var(--accent);
+  animation: text-shimmer 1.8s ease-in-out infinite;
 }
-@keyframes shim {
-  0% {
-    background-position: 100% 0;
-  }
+@keyframes text-shimmer {
+  0%,
   100% {
-    background-position: -100% 0;
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
   }
 }
 
@@ -4689,12 +4685,8 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 }
 
 .thinking .label .sh {
-  background: linear-gradient(90deg, var(--muted) 0%, var(--accent) 50%, var(--muted) 100%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shim 2.2s linear infinite;
+  color: var(--accent);
+  animation: text-shimmer 1.8s ease-in-out infinite;
 }
 
 .thinking .timer {
@@ -4810,20 +4802,18 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   background: linear-gradient(
     90deg,
     var(--panel) 0%,
-    var(--panel-2) 40%,
     var(--card-hover) 50%,
-    var(--panel-2) 60%,
     var(--panel) 100%
   );
-  background-size: 220% 100%;
-  animation: shimmer-bg 1.4s linear infinite;
+  animation: skel-shimmer 1.6s ease-in-out infinite;
 }
-@keyframes shimmer-bg {
-  0% {
-    background-position: 100% 0;
-  }
+@keyframes skel-shimmer {
+  0%,
   100% {
-    background-position: -100% 0;
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.75;
   }
 }
 .skel-line.w-90 {
@@ -7204,10 +7194,10 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 @keyframes yolo-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 2px oklch(68% 0.2 25 / 0.18);
+    opacity: 0.7;
   }
   50% {
-    box-shadow: 0 0 0 3px oklch(68% 0.2 25 / 0.32);
+    opacity: 1;
   }
 }
 .ms-seg {
