@@ -150,6 +150,15 @@ export interface TabOpenedEvent {
 
 export type TabClosedEvent = { type: "$tab_closed" };
 
+/** Authoritative tab list, emitted at the END of a `desktop_resync`. The
+ *  frontend replaces its tab set with this snapshot — stale tabs left over
+ *  from an older backend generation (id reuse across restarts) get pruned
+ *  instead of living on as ghosts that route events to the wrong tab. */
+export interface TabsSnapshotEvent {
+  type: "$tabs_snapshot";
+  tabs: { id: string; workspaceDir: string; active: boolean }[];
+}
+
 export type McpSpecStatus = "configured" | "handshake" | "connected" | "failed" | "disabled";
 
 export interface McpSpecInfo {
@@ -297,6 +306,9 @@ export interface SessionLoadedEvent {
     cacheMissTokens: number;
     totalCompletionTokens: number;
   };
+  /** Set on `desktop_resync` re-emits — the frontend must not let a resync
+   *  echo clobber a live streaming transcript (same session, busy). */
+  resync?: boolean;
 }
 
 /** A fold committed and REPLACED the conversation — the chat must swap its

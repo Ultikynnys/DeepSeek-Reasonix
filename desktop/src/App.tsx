@@ -1210,6 +1210,13 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     }
     case "$session_loaded": {
+      // A resync echo of the session we're ALREADY streaming must not
+      // clobber the live transcript — the on-disk snapshot is behind the
+      // deltas the backend keeps sending, and busy=false here would let
+      // the user send a second message into a running turn. Genuine
+      // `session_load` RPCs are never marked `resync`, so a real switch
+      // (different session, or same session while idle) still applies.
+      if (ev.resync && state.busy && ev.name === state.currentSession) return state;
       const sessionName = ev.name;
       const loaded = mapLoadedMessages(ev.messages);
       const sessionFiles = deriveSessionFiles(loaded);
@@ -3980,6 +3987,16 @@ export function App() {
     tabsRef.current = tabs;
   }, [tabs]);
 
+  // Mirror of activeTabId for listener closures — the startup effect must
+  // NOT re-run on every tab switch (it tears down and re-fires desktop_resync,
+  // which echoes $session_loaded and clobbers a live conversation). Listeners
+  // read the ref instead of the state value so they stay current without
+  // re-running the effect.
+  const activeTabIdRef = useRef(activeTabId);
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "installing" | "error">("idle");
   const [updateProgress, setUpdateProgress] = useState<{
@@ -4176,7 +4193,7 @@ export function App() {
   }, [pendingUpdate]);
 
   // Startup setup: spawn the RPC daemon, wire tab/settings listeners, retry via nonce.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: startupRetryNonce is a nonce re-run trigger (retryStartup bumps it; never read in the body) — activeTabId drives theme inheritance inside listeners
+  // biome-ignore lint/correctness/useExhaustiveDependencies: startupRetryNonce is a nonce re-run trigger (retryStartup bumps it; never read in the body) — activeTabId is mirrored into activeTabIdRef so listeners stay current without re-running setup (and re-firing desktop_resync) on every tab switch
   useEffect(() => {
     let cancelled = false;
     const cleanups: Array<() => void> = [];
@@ -4224,7 +4241,7 @@ export function App() {
               setTabThemes((prev) => {
                 if (prev[tabId]) return prev;
                 const stored = readTabTheme(localStorage, tabId);
-                const inherit = prev[activeTabId] ?? DEFAULT_TAB_THEME;
+                const inherit = prev[activeTabIdRef.current] ?? DEFAULT_TAB_THEME;
                 const next = stored ?? inherit;
                 writeTabTheme(localStorage, tabId, next);
                 return { ...prev, [tabId]: next };
@@ -4251,6 +4268,45 @@ export function App() {
               dispatchersRef.current.delete(tabId);
               pendingEventsRef.current.delete(tabId);
               pendingDeltasRef.current.delete(tabId);
+              return;
+            }
+
+            if (ev.type === "$tabs_snapshot") {
+              // Authoritative tab set (backend emitted it at the END of a
+              // desktop_resync). Replace the tab list wholesale so tabs left
+              // over from an older backend generation (whose ids were
+              // re-minted after a restart) get pruned instead of living on
+              // as ghosts that route events to the wrong tab.
+              const ids = new Set(ev.tabs.map((t) => t.id));
+              setTabs((prev) => {
+                const busyById = new Map(prev.map((t) => [t.id, t.busy]));
+                return ev.tabs.map((t) => ({
+                  id: t.id,
+                  workspaceDir: t.workspaceDir,
+                  busy: busyById.get(t.id),
+                }));
+              });
+              for (const id of Array.from(dispatchersRef.current.keys())) {
+                if (!ids.has(id)) {
+                  dispatchersRef.current.delete(id);
+                  pendingEventsRef.current.delete(id);
+                  pendingDeltasRef.current.delete(id);
+                }
+              }
+              setTabThemes((prev) => {
+                let next = prev;
+                for (const id of Object.keys(prev)) {
+                  if (!ids.has(id)) {
+                    const { [id]: _dropped, ...rest } = next;
+                    next = rest;
+                    clearTabTheme(localStorage, id);
+                  }
+                }
+                return next;
+              });
+              setActiveTabId((prev) =>
+                ids.has(prev) ? prev : (ev.tabs.find((t) => t.active)?.id ?? ""),
+              );
               return;
             }
 
@@ -4364,7 +4420,7 @@ export function App() {
       cancelled = true;
       for (const c of cleanups) c();
     };
-  }, [deliverToTab, startupRetryNonce, activeTabId]);
+  }, [deliverToTab, startupRetryNonce]);
 
   // Tell the backend which tab is focused so a restart can reopen on it (#1244).
   useEffect(() => {

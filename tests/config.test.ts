@@ -987,6 +987,20 @@ describe("config", () => {
       ]);
     });
 
+    it("round-trips the tab id so restarts reuse it (no t1..tN re-mint collisions)", () => {
+      saveDesktopOpenTabs(
+        [
+          { dir: "/a", id: "t3", session: "s-a", active: true },
+          { dir: "/b", id: "t8" },
+        ],
+        path,
+      );
+      expect(loadDesktopOpenTabs(path)).toEqual([
+        { dir: "/a", id: "t3", session: "s-a", active: true },
+        { dir: "/b", id: "t8" },
+      ]);
+    });
+
     it("reads the legacy bare-string format", () => {
       writeConfig({ desktopOpenTabs: ["/a", "/b"] as unknown as DesktopOpenTab[] }, path);
       expect(loadDesktopOpenTabs(path)).toEqual([{ dir: "/a" }, { dir: "/b" }]);

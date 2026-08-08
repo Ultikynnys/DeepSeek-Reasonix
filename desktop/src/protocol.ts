@@ -70,6 +70,7 @@ import type {
   StepCompletedEvent,
   TabClosedEvent,
   TabOpenedEvent,
+  TabsSnapshotEvent,
   TurnCompleteEvent,
   UserImageAttachment,
   WebSearchEngineName,
@@ -331,6 +332,7 @@ export type IncomingEvent = { tabId?: string } & (
   | MentionPreviewEvent
   | TabOpenedEvent
   | TabClosedEvent
+  | TabsSnapshotEvent
   | McpSpecsEvent
   | SkillsEvent
   | CtxBreakdownEvent

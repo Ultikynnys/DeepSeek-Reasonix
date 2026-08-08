@@ -57,6 +57,7 @@ import type {
   StepCompletedEvent,
   TabClosedEvent,
   TabOpenedEvent,
+  TabsSnapshotEvent,
   UserImageAttachment,
 } from "@reasonix/core-utils";
 import {
@@ -275,6 +276,7 @@ type EmittableEvent =
   | RewindWindowEvent
   | TabOpenedEvent
   | TabClosedEvent
+  | TabsSnapshotEvent
   | McpSpecsEvent
   | SkillsEvent
   | CtxBreakdownEvent
@@ -639,10 +641,10 @@ async function emitBalance(tab: Tab): Promise<void> {
 /** Last API-reported weekly usage — delta to the next fetch = percent points consumed since (each $turn_complete refetches). */
 let lastCodexQuotaUsedPct: number | null = null;
 
-/** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only; `turnUsedPct` = weekly usedPercent delta since the previous fetch. */
-async function emitCodexQuota(tab: Tab): Promise<void> {
+/** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only; `turnUsedPct` = weekly usedPercent delta since the previous fetch. `force` bypasses the failure cooldown for explicit user retries (statusbar click-to-retry). */
+async function emitCodexQuota(tab: Tab, force = false): Promise<void> {
   if (providerForModel(tab.currentModel) !== "openai") return;
-  const { quota, reason } = await fetchCodexQuotaDetailed().catch((err) => ({
+  const { quota, reason } = await fetchCodexQuotaDetailed(15_000, { force }).catch((err) => ({
     quota: null,
     reason: (err as Error).message,
   }));
@@ -928,7 +930,10 @@ function nextTabId(): string {
 }
 
 function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
-  const name = `desktop-${timestampSuffix()}-${tabCounter}`;
+  // Seconds precision — a 12-digit (minute) timestamp would mint the same
+  // name for two new_chats in the same minute, silently resurrecting the
+  // previous conversation's jsonl in the "new" chat.
+  const name = `desktop-${timestampSuffix(14)}-${tabCounter}`;
   try {
     patchSessionMeta(name, prefs ? { workspace: rootDir, ...prefs } : { workspace: rootDir });
   } catch {
@@ -1459,12 +1464,18 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   /** Synchronous tab construction — no I/O. All cheap, disk-only events (`$settings`, `$sessions`, `$memory`, `$skills`, `$mcp_specs`) can fire against this immediately. The heavy bits (`buildCodeToolset`, MCP probes, runtime construction) happen in `initTabToolset` so the UI shell paints without waiting for them. */
-  function createTabSkeleton(initialDir?: string): Tab {
+  function createTabSkeleton(initialDir?: string, restoreId?: string): Tab {
     const dir = resolve(initialDir ?? opts.dir ?? loadWorkspaceDir() ?? process.cwd());
     pushRecentWorkspace(dir);
     const model = opts.model || loadModel() || DEFAULT_MODEL;
+    // Restored tabs keep their persisted id so a backend restart doesn't
+    // re-mint t1..tN over the frontend's still-open tabs. Bump the counter
+    // past the restored id so freshly opened tabs never collide with it.
+    const id = restoreId ?? nextTabId();
+    const idMatch = /^t(\d+)$/.exec(id);
+    if (idMatch) tabCounter = Math.max(tabCounter, Number(idMatch[1]));
     const tab: Tab = {
-      id: nextTabId(),
+      id,
       rootDir: dir,
       currentSession: "",
       currentModel: model,
@@ -1575,6 +1586,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       saveDesktopOpenTabs(
         Array.from(tabs.values()).map((t) => ({
           dir: t.rootDir,
+          id: t.id,
           session: t.currentSession || undefined,
           active: t.id === lastActiveTabId,
         })),
@@ -2177,9 +2189,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // exists. emitBalance was already fire-and-forget.
   function bootstrapTab(
     initialDir?: string,
-    restore?: { session?: string; active?: boolean },
+    restore?: { id?: string; session?: string; active?: boolean },
   ): Tab {
-    const tab = createTabSkeleton(initialDir);
+    const tab = createTabSkeleton(initialDir, restore?.id);
     // Reopen the conversation the tab had, if its jsonl is still readable.
     let restoredMessages: LoadedMessage[] | undefined;
     if (restore?.session) {
@@ -2403,6 +2415,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         void emitBalance(t);
         // Re-emit session_loaded so the resumed session's messages and
         // usage stats (cost, tokens, cache%) are restored on the frontend.
+        // Marked `resync` so the frontend can ignore the echo when it's
+        // mid-turn — the live transcript is newer than the disk snapshot.
         if (t.currentSession) {
           try {
             const msgs = buildLoadedMessages(loadSessionMessages(t.currentSession));
@@ -2418,6 +2432,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
                   cacheMissTokens: meta.cacheMissTokens ?? 0,
                   totalCompletionTokens: meta.totalCompletionTokens ?? 0,
                 },
+                resync: true,
               },
               t.id,
             );
@@ -2427,6 +2442,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
         emitCtxBreakdown(t);
       }
+      // Authoritative tab set at the END of the burst — the frontend prunes
+      // tabs this list doesn't contain (ghosts left by an older backend
+      // generation whose ids were re-minted after a restart).
+      emit({
+        type: "$tabs_snapshot",
+        tabs: Array.from(tabs.values()).map((t) => ({
+          id: t.id,
+          workspaceDir: t.rootDir,
+          active: t.id === lastActiveTabId,
+        })),
+      });
       return;
     }
     if (msg.cmd === "jobs_list") {
@@ -2444,9 +2470,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
     const tab = msg.tabId ? tabs.get(msg.tabId) : first;
     if (!tab) {
-      // No tabId on the emit ⇒ the renderer's per-tab router drops it
-      // silently. Surface to stderr instead so it's at least visible
-      // when the desktop is launched from a terminal.
+      if (msg.cmd === "tab_close" && msg.tabId) {
+        // Ghost tab — id no longer known backend-side (re-minted after a
+        // restart, or already closed). Ack the close so the frontend removes
+        // it immediately instead of leaving a zombie until the next resync.
+        emit({ type: "$tab_closed" }, msg.tabId);
+        return;
+      }
+      // Unknown tabId — the renderer's per-tab router drops the event
+      // silently. Surface to stderr instead so it's at least visible when
+      // the desktop is launched from a terminal.
       process.stderr.write(
         `rpc dispatch: unknown tabId=${msg.tabId} for cmd=${msg.cmd} — dropping\n`,
       );
@@ -2836,7 +2869,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "codex_quota_get") {
-      void emitCodexQuota(tab);
+      void emitCodexQuota(tab, true);
       return;
     }
     if (msg.cmd === "qq_status_get") {

@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   WEEKLY_MINUTES,
+  clearCodexQuotaCache,
   fetchCodexQuota,
   fetchCodexQuotaDetailed,
   normalizeCodexWindow,
@@ -39,6 +40,12 @@ function fakeCodexServer(byMethod: Record<string, unknown>, opts: { delayMs?: nu
   });
   return proc;
 }
+
+beforeEach(() => {
+  // The failure cache is module-level — a remembered ENOENT from a previous
+  // test would make later tests skip spawning and return the cached reason.
+  clearCodexQuotaCache();
+});
 
 afterEach(() => {
   vi.resetAllMocks();
@@ -135,6 +142,52 @@ describe("fetchCodexQuotaDetailed (codex app-server RPC)", () => {
     const { quota, reason } = await fetchCodexQuotaDetailed(50);
     expect(quota).toBeNull();
     expect(reason).toContain("timed out");
+  });
+
+  it("remembers a spawn failure and skips re-spawning during the cooldown", async () => {
+    spawnMock.mockImplementation(() => {
+      throw new Error("spawn codex ENOENT");
+    });
+    const first = await fetchCodexQuotaDetailed();
+    expect(first.reason).toContain("ENOENT");
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    // Second fetch within the cooldown must not re-spawn the missing binary —
+    // this is the 40-line console spam fixed by the failure cache.
+    const second = await fetchCodexQuotaDetailed();
+    expect(second.reason).toContain("ENOENT");
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("force bypasses the failure cooldown for an explicit user retry", async () => {
+    spawnMock.mockImplementation(() => {
+      throw new Error("spawn codex ENOENT");
+    });
+    await fetchCodexQuotaDetailed();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    await fetchCodexQuotaDetailed(15_000, { force: true });
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the remembered failure after a successful fetch", async () => {
+    spawnMock.mockImplementation(() => {
+      throw new Error("spawn codex ENOENT");
+    });
+    await fetchCodexQuotaDetailed();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    // Success resets the cache — force past the cooldown, then a plain
+    // fetch must spawn again instead of serving the remembered failure.
+    fakeCodexServer({
+      initialize: {},
+      "account/read": { account: { planType: "plus" } },
+      "account/rateLimits/read": {
+        rateLimits: { primary: { windowDurationMins: 10080, usedPercent: 5 } },
+      },
+    });
+    const ok = await fetchCodexQuotaDetailed(15_000, { force: true });
+    expect(ok.quota?.weekly?.usedPercent).toBe(5);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    await fetchCodexQuotaDetailed();
+    expect(spawnMock).toHaveBeenCalledTimes(3);
   });
 
   it("fetchCodexQuota returns just the quota object", async () => {

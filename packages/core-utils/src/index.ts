@@ -71,6 +71,7 @@ export type {
   MentionPreviewEvent,
   TabOpenedEvent,
   TabClosedEvent,
+  TabsSnapshotEvent,
   McpSpecStatus,
   McpSpecInfo,
   McpSpecsEvent,

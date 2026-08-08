@@ -10,6 +10,49 @@ import type { CodexQuota, CodexQuotaWindow } from "@reasonix/core-utils";
 export const FIVE_HOUR_MINUTES = 300;
 export const WEEKLY_MINUTES = 10080;
 
+/** Cooldowns before re-spawning the codex app-server after a failed fetch.
+ *  Hard failures (binary missing / spawn errors) are cached much longer —
+ *  soft failures (401, network, malformed payload, timeout) only briefly. */
+const HARD_FAILURE_COOLDOWN_MS = 30 * 60_000;
+const SOFT_FAILURE_COOLDOWN_MS = 2 * 60_000;
+
+interface QuotaFailureCache {
+  reason: string;
+  at: number;
+  hard: boolean;
+}
+
+let lastFailure: QuotaFailureCache | null = null;
+let lastWarnedReason: string | null = null;
+
+/** Clear the remembered failure — lets an explicit user action (sign-in,
+ *  install, click-to-retry) get a fresh attempt without waiting out the
+ *  cooldown. Also resets the log-once dedupe. */
+export function clearCodexQuotaCache(): void {
+  lastFailure = null;
+  lastWarnedReason = null;
+}
+
+/** Spawn/startup-level problems are "hard": the binary is missing or the
+ *  process cannot start, so the failure will repeat identically. */
+function isHardFailure(reason: string): boolean {
+  return (
+    reason.includes("codex app-server error") ||
+    reason.includes("failed to start codex app-server") ||
+    reason.includes("spawn codex")
+  );
+}
+
+/** Remember a failure and warn once per distinct reason — a missing codex
+ *  binary must not re-log on every 60s poll. */
+function rememberFailure(reason: string): void {
+  lastFailure = { reason, at: Date.now(), hard: isHardFailure(reason) };
+  if (reason !== lastWarnedReason) {
+    lastWarnedReason = reason;
+    console.warn(`reasonix: codex quota — ${reason}`);
+  }
+}
+
 interface CodexRpcResponse {
   id?: number;
   result?: unknown;
@@ -132,17 +175,24 @@ function buildQuota(account: unknown, limits: unknown): CodexQuota {
   };
 }
 
-/** Weekly Codex quota for the signed-in ChatGPT plan via the official
- *  app-server protocol. `reason` explains a null quota for UI diagnosis. */
-export async function fetchCodexQuotaDetailed(timeoutMs = 15_000): Promise<CodexQuotaResult> {
+/** Weekly Codex quota via the official app-server protocol; `reason`
+ *  explains a null quota for UI diagnosis. Failures are remembered (hard
+ *  30 min, soft 2 min); `force` bypasses the cache for click-to-retry. */
+export async function fetchCodexQuotaDetailed(
+  timeoutMs = 15_000,
+  opts: { force?: boolean } = {},
+): Promise<CodexQuotaResult> {
+  if (!opts.force && lastFailure && Date.now() - lastFailure.at < cooldownFor(lastFailure)) {
+    // Remembered failure — reuse it instead of re-spawning the app-server.
+    return { quota: null, reason: lastFailure.reason };
+  }
   let client: CodexRpcClient;
   try {
     client = new CodexRpcClient();
   } catch (err) {
     // Binary missing / not on PATH — surfaced in the statusbar tooltip.
-    const reason = (err as Error).message;
-    console.warn(`reasonix: codex quota — ${reason}`);
-    return { quota: null, reason };
+    rememberFailure((err as Error).message);
+    return { quota: null, reason: (err as Error).message };
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
@@ -164,15 +214,20 @@ export async function fetchCodexQuotaDetailed(timeoutMs = 15_000): Promise<Codex
       })(),
       deadline,
     ]);
+    lastFailure = null;
     return { quota, reason: null };
   } catch (err) {
     const reason = (err as Error).message;
-    console.warn(`reasonix: codex quota — ${reason}`);
+    rememberFailure(reason);
     return { quota: null, reason };
   } finally {
     if (timer) clearTimeout(timer);
     client.close();
   }
+}
+
+function cooldownFor(failure: QuotaFailureCache): number {
+  return failure.hard ? HARD_FAILURE_COOLDOWN_MS : SOFT_FAILURE_COOLDOWN_MS;
 }
 
 export async function fetchCodexQuota(timeoutMs?: number): Promise<CodexQuota | null> {

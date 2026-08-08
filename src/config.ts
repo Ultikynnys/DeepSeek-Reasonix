@@ -1372,6 +1372,10 @@ export function pushRecentWorkspace(dir: string, path: string = defaultConfigPat
 /** Desktop only — one open tab's restorable state. */
 export interface DesktopOpenTab {
   dir: string;
+  /** Tab id (t1, t2, …) — persisted so a restarted backend reuses the same
+   *  ids instead of re-minting t1..tN that collide with the frontend's still-
+   *  open tabs (events then route to the wrong tab). */
+  id?: string;
   /** Session the tab had loaded; reopened on boot if its jsonl still exists. */
   session?: string;
   /** Whether this was the focused tab. */
@@ -1393,7 +1397,7 @@ export function loadDesktopOpenTabs(path: string = defaultConfigPath()): Desktop
       (entry as DesktopOpenTab).dir.length > 0
     ) {
       const e = entry as DesktopOpenTab;
-      out.push({ dir: e.dir, session: e.session, active: e.active });
+      out.push({ dir: e.dir, id: e.id, session: e.session, active: e.active });
     }
   }
   return out;
@@ -1408,6 +1412,7 @@ export function saveDesktopOpenTabs(
     .filter((t) => t && typeof t.dir === "string" && t.dir.length > 0)
     .map((t) => {
       const e: DesktopOpenTab = { dir: t.dir };
+      if (t.id) e.id = t.id;
       if (t.session) e.session = t.session;
       if (t.active) e.active = true;
       return e;
