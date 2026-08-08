@@ -621,7 +621,7 @@ export const de: typeof en = {
     codexRefreshing: "…",
     codexReason: "Letzte Aktualisierung fehlgeschlagen — {reason}",
     codexNoData:
-      "Codex-Kontingent · keine Daten — Codex-CLI installieren und mit ChatGPT anmelden (`npm i -g @openai/codex`) · zum Wiederholen klicken",
+      "Codex-Kontingent · keine Daten — bei ChatGPT anmelden (Einstellungen → OpenAI), um den Kontingentverbrauch zu sehen · zum Wiederholen klicken",
     codexLeft: "übrig",
     thisTurnQuotaTitle: "Dieser Turn hat {pct}% des wöchentlichen Codex-Kontingents verbraucht",
     authOauth: "OAuth",

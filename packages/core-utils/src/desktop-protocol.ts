@@ -396,10 +396,10 @@ export interface CodexQuotaWindow {
   resetsAt: string | null;
 }
 
-/** ChatGPT-plan Codex quota (daemon source: src/codex-quota.ts, the official
- *  Codex app-server protocol). `null` payload means "no data" — codex CLI
- *  missing or not signed in, rejected, or malformed — the UI degrades to no
- *  chip instead of a wrong number. */
+/** ChatGPT-plan Codex quota (daemon source: src/codex-backend.ts, OAuth fetch
+ *  of the official codex rate_limits endpoint — no codex CLI needed). `null`
+ *  payload means "no data" — not signed in, rejected, or malformed — the UI
+ *  degrades to no chip instead of a wrong number. */
 export interface CodexQuota {
   /** Plan type from account/read (e.g. "plus", "pro"), or null. */
   plan: string | null;

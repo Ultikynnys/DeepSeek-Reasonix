@@ -98,14 +98,14 @@ export function isDeepSeekHost(baseUrl: string | undefined | null): boolean {
 export type UpstreamLabel = "DeepSeek" | "OpenAI" | "Upstream";
 
 /** Brand for error copy — "DeepSeek" from the raw prefix, refined to "OpenAI"
- *  when the failed host is api.openai.com (gpt models); everything else stays
- *  a generic "Upstream". */
+ *  for api.openai.com / chatgpt.com hosts; everything else stays "Upstream". */
 function upstreamLabel(rawPrefix: string, upstreamHost: string | undefined): UpstreamLabel {
   if (rawPrefix === "DeepSeek") return "DeepSeek";
   if (upstreamHost === undefined) return "Upstream";
   try {
     const host = new URL(upstreamHost).hostname.toLowerCase();
     if (host === "api.openai.com" || host.endsWith(".openai.com")) return "OpenAI";
+    if (host === "chatgpt.com" || host.endsWith(".chatgpt.com")) return "OpenAI";
   } catch {
     /* keep generic */
   }
@@ -181,9 +181,16 @@ function extractDeepSeekErrorMessage(body: string): string {
   try {
     const parsed = JSON.parse(trimmed);
     if (parsed && typeof parsed === "object") {
-      const obj = parsed as { error?: { message?: unknown }; message?: unknown };
+      const obj = parsed as {
+        error?: { message?: unknown };
+        message?: unknown;
+        // FastAPI-style envelope (e.g. the ChatGPT codex backend's
+        // {"detail":"Unsupported parameter: messages"}).
+        detail?: unknown;
+      };
       if (obj.error && typeof obj.error.message === "string") return obj.error.message;
       if (typeof obj.message === "string") return obj.message;
+      if (typeof obj.detail === "string") return obj.detail;
     }
   } catch {
     /* not JSON — fall through */

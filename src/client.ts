@@ -1,6 +1,11 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
 import { loadRateLimit, providerForModel, resolveBaseUrlEnv } from "./config.js";
 import { createLogger } from "./logging.js";
+import {
+  buildResponsesPayload,
+  parseResponsesOutput,
+  responsesErrorFromData,
+} from "./responses-api.js";
 import { type RetryOptions, fetchWithRetry } from "./retry.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
 
@@ -30,15 +35,18 @@ export class Usage {
       typeof u.prompt_cache_hit_tokens === "number" ||
       typeof u.prompt_cache_miss_tokens === "number" ||
       typeof u.prompt_eval_count === "number" ||
-      typeof u.eval_count === "number"
+      typeof u.eval_count === "number" ||
+      // OpenAI Responses API usage names (codex backend / /v1/responses).
+      typeof u.input_tokens === "number" ||
+      typeof u.output_tokens === "number"
     );
   }
 
   static fromApi(raw: RawUsage | undefined | null): Usage {
     const u = raw ?? {};
-    const promptTokens = u.prompt_tokens ?? u.prompt_eval_count ?? 0;
-    const completionTokens = u.completion_tokens ?? u.eval_count ?? 0;
-    const cacheHitTokens = u.prompt_cache_hit_tokens ?? 0;
+    const promptTokens = u.prompt_tokens ?? u.prompt_eval_count ?? u.input_tokens ?? 0;
+    const completionTokens = u.completion_tokens ?? u.eval_count ?? u.output_tokens ?? 0;
+    const cacheHitTokens = u.prompt_cache_hit_tokens ?? u.input_tokens_details?.cached_tokens ?? 0;
     const cacheMissTokens =
       u.prompt_cache_miss_tokens ?? Math.max(0, promptTokens - cacheHitTokens);
     return new Usage(
@@ -106,6 +114,10 @@ export interface ResolvedTransport {
   endpoint: string;
   /** Headers to merge on top of the defaults — Authorization is replaced. */
   headers: Record<string, string>;
+  /** When "responses", the endpoint speaks the OpenAI Responses API (e.g. the
+   *  ChatGPT Codex backend) — payloads use `input` instead of `messages` and
+   *  responses parse from the `output` array / Responses SSE events. */
+  api?: "responses";
 }
 
 export interface DeepSeekClientOptions {
@@ -224,6 +236,52 @@ export class DeepSeekClient {
     return this.transportResolver();
   }
 
+  /** Timer + combined-signal pair for one request — the caller clears the
+   *  timer in its finally. Combining keeps timeoutMs reaching fetch (#1535). */
+  private withTimeout(signal?: AbortSignal): {
+    signal: AbortSignal;
+    timer: ReturnType<typeof setTimeout>;
+  } {
+    const ctrl = new AbortController();
+    const timer = setTimeout(
+      () => ctrl.abort(new Error(`Model request timed out after ${this.timeoutMs}ms`)),
+      this.timeoutMs,
+    );
+    return { signal: signal ? AbortSignal.any([signal, ctrl.signal]) : ctrl.signal, timer };
+  }
+
+  /** Shared chat/stream plumbing: rate-limit wait, transport/header
+   *  resolution, POST. Only the initial fetch is retried — a mid-stream
+   *  retry would re-bill and desync the session context. */
+  private async prepareRequest(
+    opts: ChatRequestOptions,
+    stream: boolean,
+    signal: AbortSignal,
+  ): Promise<{ transport: ResolvedTransport | null; resp: Response }> {
+    await this.waitForChatRateLimit(signal);
+    const transport = await this.resolveTransport();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (stream) headers.Accept = "text/event-stream";
+    if (transport) {
+      log.verbose(`${stream ? "stream" : "chat"} → ${transport.endpoint}`);
+      Object.assign(headers, transport.headers);
+    } else {
+      headers.Authorization = `Bearer ${await this.resolveApiKey()}`;
+    }
+    const resp = await fetchWithRetry(
+      this._fetch,
+      transport?.endpoint ?? `${this.baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers,
+        body: stringifyJsonTransport(this.buildPayload(opts, stream, transport)),
+        signal,
+      },
+      { ...this.retry, signal },
+    );
+    return { transport, resp };
+  }
+
   private async waitForChatRateLimit(signal?: AbortSignal): Promise<void> {
     if (this.minChatIntervalMs <= 0) return;
     const now = Date.now();
@@ -243,7 +301,17 @@ export class DeepSeekClient {
     });
   }
 
-  private buildPayload(opts: ChatRequestOptions, stream: boolean) {
+  private buildPayload(
+    opts: ChatRequestOptions,
+    stream: boolean,
+    transport: ResolvedTransport | null,
+  ) {
+    // The ChatGPT Codex backend speaks the Responses API — chat-completions
+    // fields (messages, stream_options, max_tokens, ...) are rejected with a
+    // 400, so the whole payload is converted.
+    if (transport?.api === "responses") {
+      return buildResponsesPayload(opts, stream);
+    }
     const payload: Record<string, unknown> = {
       model: opts.model,
       messages: opts.messages,
@@ -337,40 +405,26 @@ export class DeepSeekClient {
   }
 
   async chat(opts: ChatRequestOptions): Promise<ChatResponse> {
-    const ctrl = new AbortController();
-    const timer = setTimeout(
-      () => ctrl.abort(new Error(`Model request timed out after ${this.timeoutMs}ms`)),
-      this.timeoutMs,
-    );
-    // Combine — `opts.signal ?? ctrl.signal` orphans the timer when the
-    // caller passes a signal, so timeoutMs never reaches fetch.
-    const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
-
+    const { signal, timer } = this.withTimeout(opts.signal);
     try {
-      await this.waitForChatRateLimit(signal);
-      const transport = await this.resolveTransport();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (transport) {
-        log.verbose(`chat → ${transport.endpoint}`);
-        Object.assign(headers, transport.headers);
-      } else {
-        headers.Authorization = `Bearer ${await this.resolveApiKey()}`;
-      }
-      const resp = await fetchWithRetry(
-        this._fetch,
-        transport?.endpoint ?? `${this.baseUrl}/chat/completions`,
-        {
-          method: "POST",
-          headers,
-          body: stringifyJsonTransport(this.buildPayload(opts, false)),
-          signal,
-        },
-        { ...this.retry, signal },
-      );
+      const { transport, resp } = await this.prepareRequest(opts, false, signal);
       if (!resp.ok) {
         throw new Error(`${this._errorPrefix()} ${resp.status}: ${await resp.text()}`);
       }
       const data: any = await resp.json();
+      if (transport?.api === "responses") {
+        // Responses envelope — output items + usage under input/output_tokens.
+        const errMessage = responsesErrorFromData(data);
+        if (errMessage) throw new Error(`${this._errorPrefix()} ${resp.status}: ${errMessage}`);
+        const parsed = parseResponsesOutput(data);
+        return {
+          content: parsed.content,
+          reasoningContent: parsed.reasoningContent,
+          toolCalls: parsed.toolCalls,
+          usage: Usage.fromApi(data.usage ?? data),
+          raw: data,
+        };
+      }
       const choice = data.choices?.[0]?.message ?? {};
       return {
         content: choice.content ?? "",
@@ -385,44 +439,11 @@ export class DeepSeekClient {
   }
 
   async *stream(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
-    const ctrl = new AbortController();
-    const timer = setTimeout(
-      () => ctrl.abort(new Error(`Model stream timed out after ${this.timeoutMs}ms`)),
-      this.timeoutMs,
-    );
-    // Combine — `opts.signal ?? ctrl.signal` orphans the timer when the
-    // caller passes a signal, leaving a stalled SSE body to hang forever
-    // on reader.read() (issue #1535).
-    const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
-
+    const { signal, timer } = this.withTimeout(opts.signal);
+    let transport: ResolvedTransport | null = null;
     let resp: Response;
     try {
-      await this.waitForChatRateLimit(signal);
-      // Only the initial fetch is retried. Once the server has started sending
-      // the stream body we do NOT retry — a mid-stream retry would re-bill and
-      // desync the session context.
-      const transport = await this.resolveTransport();
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      };
-      if (transport) {
-        log.verbose(`stream → ${transport.endpoint}`);
-        Object.assign(headers, transport.headers);
-      } else {
-        headers.Authorization = `Bearer ${await this.resolveApiKey()}`;
-      }
-      resp = await fetchWithRetry(
-        this._fetch,
-        transport?.endpoint ?? `${this.baseUrl}/chat/completions`,
-        {
-          method: "POST",
-          headers,
-          body: stringifyJsonTransport(this.buildPayload(opts, true)),
-          signal,
-        },
-        { ...this.retry, signal },
-      );
+      ({ transport, resp } = await this.prepareRequest(opts, true, signal));
     } catch (err) {
       clearTimeout(timer);
       throw err;
@@ -436,6 +457,13 @@ export class DeepSeekClient {
 
     const queue: StreamChunk[] = [];
     let done = false;
+    let streamError: Error | null = null;
+    const responsesMode = transport?.api === "responses";
+    // Responses streams tool-call arguments incrementally; some backends only
+    // emit the full snapshot in output_item.done — the fallback below covers
+    // that case. Tracked per output slot so the snapshot never double-appends
+    // arguments that already arrived as deltas.
+    const argDeltaIndices = new Set<number>();
     const parser = createParser({
       onEvent: (ev: EventSourceMessage) => {
         if (!ev.data || ev.data === "[DONE]") {
@@ -444,6 +472,75 @@ export class DeepSeekClient {
         }
         try {
           const json = JSON.parse(ev.data);
+          if (responsesMode) {
+            const chunk: StreamChunk = { raw: json };
+            const outputIndex: number = json.output_index ?? 0;
+            switch (json.type) {
+              case "response.output_text.delta":
+                if (typeof json.delta === "string" && json.delta.length > 0) {
+                  chunk.contentDelta = json.delta;
+                }
+                break;
+              case "response.reasoning_summary_text.delta":
+              case "response.reasoning_text.delta":
+                if (typeof json.delta === "string" && json.delta.length > 0) {
+                  chunk.reasoningDelta = json.delta;
+                }
+                break;
+              case "response.output_item.added": {
+                const item = json.item;
+                if (item?.type === "function_call") {
+                  chunk.toolCallDelta = {
+                    index: outputIndex,
+                    id: item.call_id,
+                    name: item.name,
+                    argumentsDelta: "",
+                  };
+                }
+                break;
+              }
+              case "response.function_call_arguments.delta":
+                if (typeof json.delta === "string") {
+                  argDeltaIndices.add(outputIndex);
+                  chunk.toolCallDelta = { index: outputIndex, argumentsDelta: json.delta };
+                }
+                break;
+              case "response.output_item.done": {
+                const item = json.item;
+                if (item?.type === "function_call" && !argDeltaIndices.has(outputIndex)) {
+                  chunk.toolCallDelta = {
+                    index: outputIndex,
+                    id: item.call_id,
+                    name: item.name,
+                    argumentsDelta: item.arguments,
+                  };
+                }
+                break;
+              }
+              case "response.completed":
+                if (json.response?.usage) chunk.usage = Usage.fromApi(json.response.usage);
+                chunk.finishReason = json.response?.status === "incomplete" ? "incomplete" : "stop";
+                break;
+              case "response.incomplete":
+                chunk.finishReason = "incomplete";
+                break;
+              case "response.failed":
+                streamError = new Error(
+                  `${this._errorPrefix()} 400: ${json.message ?? json.code ?? "response failed"}`,
+                );
+                break;
+            }
+            if (
+              chunk.contentDelta !== undefined ||
+              chunk.reasoningDelta !== undefined ||
+              chunk.toolCallDelta !== undefined ||
+              chunk.usage !== undefined ||
+              chunk.finishReason !== undefined
+            ) {
+              queue.push(chunk);
+            }
+            return;
+          }
           const delta = json.choices?.[0]?.delta ?? {};
           const finishReason = json.choices?.[0]?.finish_reason ?? undefined;
           const chunk: StreamChunk = { raw: json, finishReason };
@@ -486,6 +583,7 @@ export class DeepSeekClient {
           continue;
         }
         if (done) break;
+        if (streamError) throw streamError;
         let value: Uint8Array | undefined;
         let streamDone: boolean;
         try {
@@ -501,6 +599,7 @@ export class DeepSeekClient {
         if (streamDone) break;
         parser.feed(decoder.decode(value, { stream: true }));
       }
+      if (streamError) throw streamError;
       while (queue.length > 0) yield queue.shift()!;
     } finally {
       clearTimeout(timer);

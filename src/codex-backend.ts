@@ -11,28 +11,48 @@ const log = createLogger("codex");
 /** ChatGPT plan-quota endpoint (OpenAI Responses-API compatible). */
 export const CODEX_BACKEND_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 
-/** Resolves a Codex backend transport when OAuth creds are available; null → API key fallback. */
-export async function resolveCodexTransport(): Promise<ResolvedTransport | null> {
-  const accessToken = await resolveOpenAIToken();
-  if (!accessToken) {
-    log.debug("no OAuth token available — using API key fallback");
-    return null;
-  }
+interface CodexAuth {
+  accessToken: string;
+  accountId: string;
+}
 
+type CodexAuthResult =
+  | { ok: true; accessToken: string; accountId: string }
+  | { ok: false; reason: string };
+
+/** Shared OAuth resolution for the model transport and the quota fetch:
+ *  access_token + ChatGPT account id from the JWT, or a UI-ready reason. */
+async function resolveCodexAuth(): Promise<CodexAuthResult> {
+  const accessToken = await resolveOpenAIToken();
+  if (!accessToken) return { ok: false, reason: "no OAuth token" };
   // Extract the ChatGPT account id from the access_token JWT claims.
   const accountId = accountFromIdToken(accessToken);
-  if (!accountId) {
-    log.debug("OAuth token present but no ChatGPT account id — using API key fallback");
+  if (!accountId) return { ok: false, reason: "no ChatGPT account id in token" };
+  return { ok: true, accessToken, accountId };
+}
+
+function codexHeaders(auth: CodexAuth): Record<string, string> {
+  return {
+    Authorization: `Bearer ${auth.accessToken}`,
+    "ChatGPT-Account-Id": auth.accountId,
+  };
+}
+
+/** Resolves a Codex backend transport when OAuth creds are available; null → API key fallback. */
+export async function resolveCodexTransport(): Promise<ResolvedTransport | null> {
+  const auth = await resolveCodexAuth();
+  if (!auth.ok) {
+    log.debug(`${auth.reason} — using API key fallback`);
     return null;
   }
 
-  log.debug(`Codex backend active — account ${accountId}`);
+  log.debug(`Codex backend active — account ${auth.accountId}`);
   return {
     endpoint: CODEX_BACKEND_ENDPOINT,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "ChatGPT-Account-Id": accountId,
-    },
+    headers: codexHeaders(auth),
+    // The backend speaks the OpenAI Responses API — the client converts the
+    // payload (input instead of messages) and parses Responses envelopes/SSE.
+    api: "responses",
   };
 }
 
@@ -65,24 +85,17 @@ export interface CodexQuotaResult {
 }
 
 /** Fetch ChatGPT plan quota via the Codex backend API using OAuth.
- *  Returns null when OAuth isn't available or the endpoint is unreachable —
- *  callers fall back to the codex CLI path. */
+ *  Returns null when OAuth isn't available or the endpoint is unreachable. */
 export async function fetchCodexQuotaViaOAuth(timeoutMs = 10_000): Promise<CodexQuotaResult> {
-  const accessToken = await resolveOpenAIToken();
-  if (!accessToken) return { quota: null, reason: "no OAuth token" };
-
-  const accountId = accountFromIdToken(accessToken);
-  if (!accountId) return { quota: null, reason: "no ChatGPT account id in token" };
+  const auth = await resolveCodexAuth();
+  if (!auth.ok) return { quota: null, reason: auth.reason };
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
   try {
     const resp = await fetch(CODEX_RATE_LIMITS_URL, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "ChatGPT-Account-Id": accountId,
-      },
+      headers: codexHeaders(auth),
       signal: ctrl.signal,
     });
 

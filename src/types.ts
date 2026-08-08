@@ -57,6 +57,10 @@ export interface RawUsage {
   prompt_eval_count?: number;
   /** Ollama native API: output tokens generated. */
   eval_count?: number;
+  /** OpenAI Responses API usage names (codex backend / /v1/responses). */
+  input_tokens?: number;
+  output_tokens?: number;
+  input_tokens_details?: { cached_tokens?: number };
 }
 
 export interface ChatRequestOptions {

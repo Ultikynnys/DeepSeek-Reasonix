@@ -5,6 +5,21 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed — ChatGPT-plan routing for gpt-* models.**
+
+- GPT models signed in with a ChatGPT account now speak the OpenAI Responses API to the Codex backend (`chatgpt.com/backend-api/codex/responses`): payloads are converted from chat-completions shape (`messages` → `input` items, top-level `instructions`, flat `tools`, `reasoning.effort`, no `stream_options`) and both streaming SSE (output_text / reasoning_summary_text deltas, function_call items, `response.completed` usage) and non-streaming envelopes are parsed. This fixes the hard failure `Bad request (OpenAI 400): {"detail":"Unsupported parameter: messages"}` that made every gpt-* turn fail for ChatGPT-plan users.
+- Responses-API usage (`input_tokens` / `output_tokens` / `input_tokens_details.cached_tokens`) maps into the existing token counters, so cost meters and the cache-hit ratio keep working on the Codex backend.
+- Codex-backend errors are branded "OpenAI" (chatgpt.com hosts) and the FastAPI-style `{"detail": …}` envelope is unwrapped — 4xx failures now read `OpenAI 400: Unsupported parameter: …` instead of raw JSON.
+
+**Fixed — Codex quota no longer requires the codex CLI.**
+
+- The quota chip now fetches purely via OAuth HTTP (`chatgpt.com/backend-api/codex/rate_limits`). The fallback that spawned the `codex` app-server and auto-ran `npm install -g @openai/codex` is removed, together with the "install the Codex CLI" tooltip; a no-data quota now points at the in-app ChatGPT sign-in (Settings → OpenAI) in EN / DE / 简体中文.
+
+**Internal — DRY cleanup.**
+
+- `client.ts`: `chat()` and `stream()` share one request-preparation path (timeout + signal merge, rate-limit wait, transport/header resolution, POST) instead of two ~30-line copies.
+- `codex-backend.ts`: transport and quota fetch share a single OAuth resolution + header builder; the duplicated codex CLI quota module (`src/codex-quota.ts`) and its tests are deleted.
+
 **Non-DeepSeek models — OpenAI GPT-5.6 family (Sol / Terra / Luna).**
 
 - New model options: `gpt-5.6` (alias for Sol), `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` selectable from the composer picker, Settings → Models, or `--model`.

@@ -69,7 +69,6 @@ import { pickPrimaryBalance } from "../../client.js";
 import { codeSystemPrompt } from "../../code/prompt.js";
 import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
 import { fetchCodexQuotaViaOAuth, resolveCodexTransport } from "../../codex-backend.js";
-import { fetchCodexQuotaDetailed } from "../../codex-quota.js";
 import {
   DEFAULT_MODEL,
   type DesktopOpenTab,
@@ -605,29 +604,16 @@ async function emitBalance(tab: Tab): Promise<void> {
 let lastCodexQuotaUsedPct: number | null = null;
 
 /** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only.
- *  Tries OAuth HTTP first (no codex CLI needed); falls back to the codex CLI. */
-async function emitCodexQuota(tab: Tab, force = false): Promise<void> {
+ *  OAuth HTTP fetch only (no codex CLI dependency). */
+async function emitCodexQuota(tab: Tab): Promise<void> {
   if (providerForModel(tab.currentModel) !== "openai") return;
-
-  // Primary: fetch via OAuth HTTP (works without the codex CLI installed).
-  let quota: CodexQuota | null = null;
-  let reason: string | null = null;
 
   const oauthResult = await fetchCodexQuotaViaOAuth(10_000).catch((err) => ({
     quota: null,
     reason: (err as Error).message,
   }));
-  if (oauthResult.quota) {
-    quota = oauthResult.quota;
-  } else {
-    // Fallback: codex CLI (requires `npm i -g @openai/codex`).
-    const cliResult = await fetchCodexQuotaDetailed(15_000, { force }).catch((err) => ({
-      quota: null,
-      reason: (err as Error).message,
-    }));
-    quota = cliResult.quota;
-    reason = oauthResult.reason ?? cliResult.reason;
-  }
+  const quota = oauthResult.quota;
+  const reason = oauthResult.reason;
 
   if (quota) {
     let turnUsedPct: number | null = null;
@@ -2612,7 +2598,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "codex_quota_get") {
-      void emitCodexQuota(tab, true);
+      void emitCodexQuota(tab);
       return;
     }
     if (msg.cmd === "settings_save") {

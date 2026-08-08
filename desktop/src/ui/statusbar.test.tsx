@@ -82,8 +82,8 @@ describe("StatusBar quota display", () => {
     expect(screen.getByText("codex")).toBeTruthy();
     expect(screen.queryByText("balance")).toBeNull();
     expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
-    // No data → the chip hints at installing the Codex CLI + signing in.
-    expect(screen.getByTitle(/install the Codex CLI/)).toBeTruthy();
+    // No data → the chip hints at the in-app ChatGPT sign-in (no codex CLI).
+    expect(screen.getByTitle(/sign in with ChatGPT/)).toBeTruthy();
   });
 
   it("shows the no-data hint regardless of auth state — the reason string carries the diagnosis", () => {
@@ -99,7 +99,7 @@ describe("StatusBar quota display", () => {
       codexQuota: null,
     });
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByTitle(/install the Codex CLI/)).toBeTruthy();
+    expect(screen.getByTitle(/sign in with ChatGPT/)).toBeTruthy();
   });
 
   it("treats any gpt-* model as an OpenAI tab (quota chips, not balance)", () => {
@@ -148,9 +148,9 @@ describe("StatusBar quota display", () => {
         },
       } as Settings,
       codexQuota: null,
-      codexQuotaReason: "failed to start codex app-server: spawn codex ENOENT",
+      codexQuotaReason: "no OAuth token",
     });
-    expect(screen.getByTitle(/install the Codex CLI/)).toBeTruthy();
-    expect(screen.getByTitle(/spawn codex ENOENT/)).toBeTruthy();
+    expect(screen.getByTitle(/sign in with ChatGPT/)).toBeTruthy();
+    expect(screen.getByTitle(/no OAuth token/)).toBeTruthy();
   });
 });

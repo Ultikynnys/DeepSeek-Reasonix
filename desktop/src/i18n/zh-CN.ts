@@ -376,7 +376,7 @@ export const zhCN: typeof en = {
     codexRefreshing: "…",
     codexReason: "上次刷新失败 — {reason}",
     codexNoData:
-      "Codex 配额 · 暂无数据 — 请安装 Codex CLI 并用 ChatGPT 登录（`npm i -g @openai/codex`）· 点击重试",
+      "Codex 配额 · 暂无数据 — 请在设置（设置 → OpenAI）中登录 ChatGPT 以查看套餐用量 · 点击重试",
     codexLeft: "剩余",
     thisTurnQuotaTitle: "本轮已消耗周配额 {pct}%",
     authOauth: "OAuth",

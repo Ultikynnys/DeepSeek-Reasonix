@@ -595,7 +595,7 @@ export const en = {
     codexRefreshing: "…",
     codexReason: "Last refresh failed — {reason}",
     codexNoData:
-      "Codex quota · no data — install the Codex CLI and sign in with ChatGPT (`npm i -g @openai/codex`) · click to retry",
+      "Codex quota · no data — sign in with ChatGPT (Settings → OpenAI) to see plan usage · click to retry",
     codexLeft: "left",
     thisTurnQuotaTitle: "This turn used {pct}% of the weekly Codex quota",
     authOauth: "oauth",
