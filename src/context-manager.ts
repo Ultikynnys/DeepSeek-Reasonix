@@ -46,6 +46,8 @@ export const FORCE_SUMMARY_THRESHOLD = 0.8;
  *  turns, session restores, and huge pastes. Shares HISTORY_FOLD_THRESHOLD (75%) so every
  *  request ships below the fold line regardless of turn shape. */
 export const TURN_START_FOLD_THRESHOLD = HISTORY_FOLD_THRESHOLD;
+/** Summaries shorter than this are degenerate model output — the fold fails loud instead of committing garbage. */
+export const HISTORY_FOLD_SUMMARY_MIN_CHARS = 16;
 // Base hard deadline for fold summaries so a hung request cannot stall the turn loop. The real
 // deadline scales with the size of the head being summarized: a fixed short cap deterministically
 // kills legitimate folds at large contexts (prefill + queue time grows with the prompt) — exactly
@@ -115,6 +117,8 @@ export interface FoldResult {
   summary?: string;
   /** Why the fold didn't happen, when the summarizer failed (as opposed to a legit nothing-to-fold noop). */
   error?: string;
+  /** Advisory warning on a successful fold — e.g. file triage failed, nothing dropped. */
+  warn?: string;
   /** Unique file paths whose read results were stubbed by the prune step. */
   prunedFiles?: number;
   /** Tokens saved by the prune step (content tokens − stub tokens). */
@@ -414,7 +418,16 @@ export class ContextManager {
       // already swallowed inside summarizeForFold (the abort path owns the
       // messaging), so error is only set for real failures.
       if (summary.error) return { ...noop, error: summary.error };
-      return noop;
+      // Empty output without an error is still a summarizer failure — a real
+      // fold of a >75% head can never legitimately produce zero content.
+      // Treating it as "nothing to fold" silently re-folds every turn.
+      return { ...noop, error: "summarizer returned empty content — fold skipped" };
+    }
+    if (summary.content.length < HISTORY_FOLD_SUMMARY_MIN_CHARS) {
+      return {
+        ...noop,
+        error: `summarizer returned a degenerate summary (${summary.content.length} chars) — fold skipped`,
+      };
     }
 
     // Step 3 — agent-driven file relevance triage. Steps 1-2 shrink the LOG;
@@ -431,8 +444,9 @@ export class ContextManager {
     const triage =
       allPaths.length > 0
         ? await this.triageFilesForFold(summary.content, allPaths)
-        : { keep: allPaths, drop: [] };
+        : { keep: allPaths, drop: [] as string[], warn: undefined };
     const droppedFiles = triage.drop;
+    const triageWarn = triage.warn;
 
     const memoTail =
       pinnedBodies.length > 0 ? `\n\n${SKILL_PIN_MEMO_HEADER}\n\n${pinnedBodies.join("\n\n")}` : "";
@@ -479,7 +493,7 @@ export class ContextManager {
     // rewrite. Both are synchronous, so this method cannot resolve until the
     // ENTIRE compacted log is on disk — the UI's "compacting history…" status
     // stays up until the write completes.
-    this.persistRewrite(replacement);
+    const persistError = this.persistRewrite(replacement);
     this.deps.onLogRewrite?.();
     return {
       folded: true,
@@ -487,6 +501,8 @@ export class ContextManager {
       afterMessages: replacement.length,
       summaryChars: summary.content.length,
       summary: summary.content,
+      ...(triageWarn ? { warn: triageWarn } : {}),
+      ...(persistError ? { error: persistError } : {}),
       ...(pruned.prunedFiles.length > 0
         ? { prunedFiles: pruned.prunedFiles.length, prunedTokens: pruned.tokensSaved }
         : {}),
@@ -507,7 +523,8 @@ export class ContextManager {
     }
     const kept = this.deps.log.entries.slice(0, -1);
     this.deps.log.compactInPlace([...kept]);
-    this.persistRewrite([...kept]);
+    const persistError = this.persistRewrite([...kept]);
+    if (persistError) process.stderr.write(`reasonix: ${persistError}\n`);
     return true;
   }
 
@@ -610,7 +627,7 @@ export class ContextManager {
   private async triageFilesForFold(
     summary: string,
     allPaths: string[],
-  ): Promise<{ keep: string[]; drop: string[] }> {
+  ): Promise<{ keep: string[]; drop: string[]; warn?: string }> {
     const messages: ChatMessage[] = [
       {
         role: "system",
@@ -648,20 +665,31 @@ export class ContextManager {
         resp.usage ?? new Usage(),
       );
       return parseFileTriage(resp.content, allPaths);
-    } catch {
+    } catch (err) {
       // Fail-open: relevance is advisory — the fold proceeds with no drops.
-      return { keep: allPaths, drop: [] };
+      // The failure is surfaced as a fold warning so the UI card explains
+      // why "Files in context" was not trimmed.
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        keep: allPaths,
+        drop: [],
+        warn: `file triage failed — no files dropped (${message})`,
+      };
     } finally {
       if (triageTimer) clearTimeout(triageTimer);
     }
   }
 
-  private persistRewrite(messages: ChatMessage[]): void {
-    if (!this.deps.sessionName) return;
+  /** Rewrite the on-disk session; null on success or a loud, UI-bound error
+   *  string — a compaction that dies on disk must not look durable. */
+  private persistRewrite(messages: ChatMessage[]): string | null {
+    if (!this.deps.sessionName) return null;
     try {
       rewriteSession(this.deps.sessionName, messages);
-    } catch {
-      /* disk full / perms — in-memory mutation still applies */
+      return null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return `compaction committed but failed to save the session — ${message}. The conversation will revert on reload.`;
     }
   }
 }

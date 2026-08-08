@@ -44,8 +44,11 @@ export class InflightSet {
     for (const fn of this._listeners) {
       try {
         fn();
-      } catch {
-        /* listener errors must not break the gate */
+      } catch (err) {
+        /* listener errors must not break the gate — but they must be LOUD */
+        process.stderr.write(
+          `reasonix: inflight listener failed — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
   }

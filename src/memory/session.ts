@@ -333,8 +333,11 @@ export function renameSession(oldName: string, newName: string): boolean {
     if (existsSync(oldP)) {
       try {
         renameSync(oldP, newP);
-      } catch {
-        /* sidecar rename failed — leave the jsonl rename in place */
+      } catch (err) {
+        /* sidecar rename failed — leave the jsonl rename in place, but LOG */
+        process.stderr.write(
+          `reasonix: session sidecar rename failed — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
   }
@@ -362,7 +365,7 @@ export function deleteSession(name: string): boolean {
       try {
         unlinkSync(sidecar);
       } catch {
-        /* expected when the sidecar doesn't exist */
+        void 0; /* expected when the sidecar doesn't exist */
       }
     }
     return true;
@@ -427,6 +430,6 @@ export function chmodPrivate(path: string): void {
   try {
     chmodSync(path, 0o600);
   } catch {
-    /* chmod not supported */
+    void 0; /* chmod not supported */
   }
 }

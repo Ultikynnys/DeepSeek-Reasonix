@@ -19,8 +19,11 @@ export function parseJsonl<T = unknown>(
     try {
       const value = JSON.parse(trimmed) as unknown;
       if (validate(value)) out.push(value);
-    } catch {
-      /* skip malformed line */
+    } catch (err) {
+      /* skip malformed line — but the corruption must be LOUD */
+      process.stderr.write(
+        `reasonix: JSONL parse skipped malformed line — ${err instanceof Error ? err.message : String(err)}\n`,
+      );
     }
   }
   return out;

@@ -114,7 +114,9 @@ describe("ContextManager fold timeout", () => {
         // Fold attempt 2's chat() succeeds on its first fetch.
         return calls <= 4
           ? serviceUnavailableResponse()
-          : okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+          : okJsonResponse({
+              choices: [{ message: { content: "SUMMARY of the conversation so far" } }],
+            });
       }),
     });
     const loop = new CacheFirstLoop({
@@ -138,7 +140,7 @@ describe("ContextManager fold timeout", () => {
     expect(result).toMatchObject({
       folded: true,
       beforeMessages,
-      summaryChars: 7,
+      summaryChars: 34,
     });
     expect(loop.log.length).toBeLessThan(beforeMessages);
     expect(calls).toBe(5);

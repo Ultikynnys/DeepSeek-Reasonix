@@ -134,6 +134,7 @@ export class Eventizer {
             summaryChars: ev.summaryChars ?? 0,
             summary: ev.summary,
             error: ev.foldError,
+            warn: ev.foldWarn,
             // The prune + triage payloads arrive on compaction_end; forward
             // them so the UI can render the card meta and drop files from the
             // "Files in context" panel (previously swallowed on this path).
@@ -519,6 +520,7 @@ export class Eventizer {
       summaryChars: number;
       summary?: string;
       error?: string;
+      warn?: string;
       prunedFiles?: number;
       prunedTokens?: number;
       droppedFiles?: string[];
@@ -537,6 +539,7 @@ export class Eventizer {
       summaryChars: result.summaryChars,
       ...(result.summary ? { summary: result.summary } : {}),
       ...(result.error ? { error: result.error } : {}),
+      ...(result.warn ? { warn: result.warn } : {}),
       ...(result.prunedFiles !== undefined ? { prunedFiles: result.prunedFiles } : {}),
       ...(result.prunedTokens !== undefined ? { prunedTokens: result.prunedTokens } : {}),
       ...(result.droppedFiles !== undefined ? { droppedFiles: result.droppedFiles } : {}),

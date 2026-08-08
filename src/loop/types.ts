@@ -90,6 +90,8 @@ export interface LoopEvent {
   summary?: string;
   /** compaction_end: why the fold didn't happen, when the summarizer failed. */
   foldError?: string;
+  /** compaction_end: advisory warning on a successful fold — e.g. file triage failed, nothing dropped. */
+  foldWarn?: string;
   /** compaction_end: unique file paths whose read results were pruned by the fold's prune step. */
   prunedFiles?: number;
   /** compaction_end: tokens saved by the prune step. */

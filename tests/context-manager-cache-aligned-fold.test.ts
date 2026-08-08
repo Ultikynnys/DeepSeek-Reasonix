@@ -170,7 +170,7 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     const captured: CapturedRequest[] = [];
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      fetch: fakeFetch(captured, "summary."),
+      fetch: fakeFetch(captured, "summary for the conversation."),
     });
     const loop = new CacheFirstLoop({
       client,
@@ -330,7 +330,9 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
         if (content.includes("[FILES TO CLASSIFY]")) {
           throw new Error("triage model unavailable");
         }
-        return jsonOkResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+        return jsonOkResponse({
+          choices: [{ message: { content: "SUMMARY of the conversation so far" } }],
+        });
       }) as unknown as typeof fetch,
     });
     const loop = new CacheFirstLoop({
@@ -363,6 +365,8 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     // The fold still commits — relevance is advisory, never a fold-killer.
     expect(result.folded).toBe(true);
     expect(result.droppedFiles).toBeUndefined();
+    // The triage failure is LOUD — the fold card explains why nothing dropped.
+    expect(result.warn).toMatch(/file triage failed/);
     expect(loop.log.entries[0]!.content as string).not.toContain("<files-dropped-from-context>");
   });
 });

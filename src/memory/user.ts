@@ -220,8 +220,11 @@ export class MemoryStore {
         const name = entry.slice(0, -3);
         try {
           out.push(this.read(scope, name));
-        } catch {
-          // malformed file — skip rather than fail the whole list
+        } catch (err) {
+          // malformed file — skip rather than fail the whole list, but LOG
+          process.stderr.write(
+            `reasonix: user memory file corrupt — ${err instanceof Error ? err.message : String(err)}\n`,
+          );
         }
       }
     }

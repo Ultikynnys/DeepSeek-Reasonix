@@ -39,7 +39,10 @@ export function writeJsonFileSilently(
     const dir = dirname(path);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(path, JSON.stringify(data, null, opts.pretty ? 2 : undefined), "utf8");
-  } catch {
-    /* cache is best-effort — a failed write just means we'll re-fetch */
+  } catch (err) {
+    /* cache is best-effort — a failed write just means we'll re-fetch, but the failure must be LOUD */
+    process.stderr.write(
+      `reasonix: JSON cache write failed — ${err instanceof Error ? err.message : String(err)}\n`,
+    );
   }
 }

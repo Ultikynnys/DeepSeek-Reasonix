@@ -278,6 +278,8 @@ export type CompactionFinishedEvent = {
   summary?: string;
   /** Why the fold didn't happen, when the summarizer failed (timeout / API error). */
   error?: string;
+  /** Advisory warning on a successful fold — e.g. file triage failed, nothing dropped. */
+  warn?: string;
   /** Unique file paths whose read results were pruned by the fold's prune step. */
   prunedFiles?: number;
   /** Tokens saved by the prune step. */

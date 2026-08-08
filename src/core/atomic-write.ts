@@ -34,7 +34,7 @@ export function atomicWriteSync(
     try {
       fs.chmodSync(tmp, mode);
     } catch {
-      /* platform without chmod */
+      void 0; /* platform without chmod */
     }
     try {
       fs.renameSync(tmp, path);
@@ -44,20 +44,20 @@ export function atomicWriteSync(
       try {
         fs.chmodSync(path, mode);
       } catch {
-        /* platform without chmod */
+        void 0; /* platform without chmod */
       }
     }
   } catch (err) {
     try {
       fs.unlinkSync(tmp);
     } catch {
-      /* tmp may already be gone or never existed */
+      void 0; /* tmp may already be gone or never existed */
     }
     throw err;
   }
   try {
     fs.unlinkSync(tmp);
   } catch {
-    /* rename consumed it on the happy path; only present after EXDEV fallback */
+    void 0; /* rename consumed it on the happy path; only present after EXDEV fallback */
   }
 }

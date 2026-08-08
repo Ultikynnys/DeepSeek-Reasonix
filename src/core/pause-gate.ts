@@ -107,8 +107,11 @@ export class PauseGate {
       for (const fn of this._listeners) {
         try {
           fn(request);
-        } catch {
-          /* listener error shouldn't break the gate */
+        } catch (err) {
+          /* listener error shouldn't break the gate — but must be LOUD */
+          process.stderr.write(
+            `reasonix: pause gate listener failed — ${err instanceof Error ? err.message : String(err)}\n`,
+          );
         }
       }
     });
@@ -195,8 +198,11 @@ export class PauseGate {
         default:
           break;
       }
-    } catch {
-      /* audit path must never break the gate */
+    } catch (err) {
+      /* audit path must never break the gate — but the failure must be LOUD */
+      process.stderr.write(
+        `reasonix: pause gate audit event failed — ${err instanceof Error ? err.message : String(err)}\n`,
+      );
     }
   }
 }

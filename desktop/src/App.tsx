@@ -167,6 +167,8 @@ export type AssistantSegment =
       summaryChars?: number;
       summary?: string;
       error?: string;
+      /** Advisory warning on a successful fold — e.g. file triage failed, nothing dropped. */
+      warn?: string;
       /** Unique file paths whose read results were pruned by the fold's prune step. */
       prunedFiles?: number;
       /** Tokens saved by the prune step. */
@@ -1479,6 +1481,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           summaryChars: ev.summaryChars,
           ...(ev.summary ? { summary: ev.summary } : {}),
           ...(ev.error ? { error: ev.error } : {}),
+          ...(ev.warn ? { warn: ev.warn } : {}),
           ...(ev.prunedFiles ? { prunedFiles: ev.prunedFiles } : {}),
           ...(ev.prunedTokens ? { prunedTokens: ev.prunedTokens } : {}),
           ...(ev.droppedFiles?.length ? { droppedFiles: ev.droppedFiles } : {}),

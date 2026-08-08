@@ -418,6 +418,7 @@ export function CompactionCard({
   prunedTokens,
   droppedFiles,
   summary,
+  warn,
   error,
 }: {
   /** running → spinner; done → folded result; failed → error; idle → nothing to fold. */
@@ -436,6 +437,8 @@ export function CompactionCard({
   /** File paths the fold's triage step classified as no longer relevant. */
   droppedFiles?: string[];
   summary?: string;
+  /** Advisory warning on a successful fold — e.g. file triage failed, nothing dropped. */
+  warn?: string;
   error?: string;
 }) {
   useLang();
@@ -503,7 +506,10 @@ export function CompactionCard({
   ) : summary ? (
     <div className="compaction-body">
       <Markdown source={summary} />
+      {warn ? <div className="compaction-warn">{warn}</div> : null}
     </div>
+  ) : warn ? (
+    <div className="compaction-body">{warn}</div>
   ) : null;
   return (
     <Card

@@ -111,7 +111,7 @@ describe("ContextManager fold preserves skill-pin bodies", () => {
   });
 
   it("does not break tool_call/tool pairing when stubbing pinned bodies", async () => {
-    const client = makeClient([{ content: "summary text." }]);
+    const client = makeClient([{ content: "summary of the text." }]);
     const loop = new CacheFirstLoop({
       client,
       prefix: new ImmutablePrefix({ system: "s" }),

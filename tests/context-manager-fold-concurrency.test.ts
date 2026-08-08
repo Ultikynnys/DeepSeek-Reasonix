@@ -39,7 +39,9 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
           name: "read_file",
           content: "the read result",
         });
-        return okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+        return okJsonResponse({
+          choices: [{ message: { content: "SUMMARY of the conversation so far" } }],
+        });
       }),
     });
     const loop = new CacheFirstLoop({
@@ -62,7 +64,7 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
     const result = await loop.compactHistory({ keepRecentTokens: 40 });
     expect(result.folded).toBe(true);
     // The synthesized summary travels on FoldResult so the UI card can render it.
-    expect(result.summary).toBe("SUMMARY");
+    expect(result.summary).toBe("SUMMARY of the conversation so far");
 
     const msgs = loop.log.entries;
     expect(msgs[0]?.content).toContain("SUMMARY");
@@ -146,7 +148,9 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
       fetch: vi.fn(async () => {
         // Let the abort land before the summary response arrives.
         await Promise.resolve();
-        return okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+        return okJsonResponse({
+          choices: [{ message: { content: "SUMMARY of the conversation so far" } }],
+        });
       }),
     });
     const loop = new CacheFirstLoop({
@@ -174,7 +178,11 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
     // lands in the summarized head and the model never sees the read.
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      fetch: vi.fn(async () => okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] })),
+      fetch: vi.fn(async () =>
+        okJsonResponse({
+          choices: [{ message: { content: "SUMMARY of the conversation so far" } }],
+        }),
+      ),
     });
     const loop = new CacheFirstLoop({
       client,
@@ -251,7 +259,9 @@ describe("ContextManager fold concurrency + failure surfacing", () => {
       fetch: vi.fn(async () => {
         // A concurrent compaction / clear swapped the log array mid-fold.
         loop.log.compactInPlace([replacement]);
-        return okJsonResponse({ choices: [{ message: { content: "SUMMARY" } }] });
+        return okJsonResponse({
+          choices: [{ message: { content: "SUMMARY of the conversation so far" } }],
+        });
       }),
     });
     const loop = new CacheFirstLoop({

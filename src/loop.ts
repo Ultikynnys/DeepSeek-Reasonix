@@ -400,8 +400,12 @@ export class CacheFirstLoop {
     if (this.sessionName) {
       try {
         appendSessionMessage(this.sessionName, retained);
-      } catch {
-        /* disk full or permission denied shouldn't kill the chat */
+      } catch (err) {
+        // Disk full or permission denied shouldn't kill the chat — but the
+        // failure must be LOUD, never a silent drop of the on-disk transcript.
+        process.stderr.write(
+          `reasonix: session append failed — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
   }
@@ -427,8 +431,11 @@ export class CacheFirstLoop {
       try {
         archived = archiveSession(this.sessionName);
         if (archived === null) this.persistLog([]);
-      } catch {
-        /* disk issue shouldn't block the in-memory clear */
+      } catch (err) {
+        /* disk issue shouldn't block the in-memory clear — but LOG */
+        process.stderr.write(
+          `reasonix: session reset persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
     this.scratch.reset();
@@ -449,8 +456,11 @@ export class CacheFirstLoop {
     if (this._rebuildSystem) {
       try {
         systemRebuilt = this.prefix.replaceSystem(this._rebuildSystem());
-      } catch {
-        /* builder threw — keep prior system rather than crash /new */
+      } catch (err) {
+        /* builder threw — keep prior system rather than crash /new, but LOG */
+        process.stderr.write(
+          `reasonix: system prompt rebuild failed — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
     return { dropped, archived, systemRebuilt };
@@ -464,8 +474,11 @@ export class CacheFirstLoop {
       try {
         archived = archiveSession(this.sessionName);
         if (archived === null) this.persistLog([]);
-      } catch {
-        /* disk issue shouldn't block the in-memory swap */
+      } catch (err) {
+        /* disk issue shouldn't block the in-memory swap — but LOG */
+        process.stderr.write(
+          `reasonix: session switch persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
     this.log.compactInPlace([]);
@@ -482,8 +495,11 @@ export class CacheFirstLoop {
     if (this._rebuildSystem) {
       try {
         this.prefix.replaceSystem(this._rebuildSystem());
-      } catch {
-        /* builder threw — keep prior system rather than crash /cwd */
+      } catch (err) {
+        /* builder threw — keep prior system rather than crash /cwd, but LOG */
+        process.stderr.write(
+          `reasonix: system prompt rebuild failed — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
     return { dropped, archived };
@@ -524,9 +540,12 @@ export class CacheFirstLoop {
     let args: Record<string, unknown> = {};
     try {
       args = JSON.parse(call.function?.arguments ?? "{}") ?? {};
-    } catch {
+    } catch (err) {
       // Malformed args → fall through to the static flag below; the
-      // dynamic check would've thrown anyway.
+      // dynamic check would've thrown anyway. But LOG the corrupt payload.
+      process.stderr.write(
+        `reasonix: malformed tool call arguments — ${err instanceof Error ? err.message : String(err)}\n`,
+      );
     }
     return !isReadOnlyTool(def, args);
   }
@@ -671,13 +690,18 @@ export class CacheFirstLoop {
     this._discardAbortRequested = false;
   }
 
-  /** Persist the on-disk transcript after an in-memory mutation; a disk failure must never block the loop. */
-  private persistLog(messages: ChatMessage[]): void {
-    if (!this.sessionName) return;
+  /** Persist the on-disk transcript after an in-memory mutation; a disk failure
+   *  must never block the loop, but it must never be silent either. */
+  private persistLog(messages: ChatMessage[]): boolean {
+    if (!this.sessionName) return true;
     try {
       rewriteSession(this.sessionName, messages);
-    } catch {
-      /* disk full / perms — the in-memory log still applies */
+      return true;
+    } catch (err) {
+      process.stderr.write(
+        `reasonix: session persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return false;
     }
   }
 
@@ -688,7 +712,7 @@ export class CacheFirstLoop {
       try {
         deleteCheckpoint(this._rootDir, id);
       } catch {
-        /* best-effort disk cleanup */
+        void 0; /* best-effort disk cleanup */
       }
     }
   }
@@ -712,7 +736,7 @@ export class CacheFirstLoop {
       try {
         mergeCheckpointInto(this._rootDir, minId, nextId);
       } catch {
-        // Best-effort — the map entry is dropped either way.
+        void 0; // Best-effort — the map entry is dropped either way.
       }
       this._turnCheckpoints.delete(minKey);
     }
@@ -796,7 +820,7 @@ export class CacheFirstLoop {
         }
         reconstructWorkspaceTo(this._rootDir, upTo, after);
       } catch {
-        // Best-effort; conversation rewind already succeeded.
+        void 0; // Best-effort; conversation rewind already succeeded.
       }
     }
 
@@ -813,7 +837,7 @@ export class CacheFirstLoop {
           try {
             deleteCheckpoint(this._rootDir, id);
           } catch {
-            // Best-effort disk cleanup.
+            void 0; // Best-effort disk cleanup.
           }
         }
       }
@@ -918,8 +942,11 @@ export class CacheFirstLoop {
         });
         this._turnCheckpoints.set(userTurnIndex, meta.id);
         this.evictOldSnapshots();
-      } catch {
-        // Snapshot failure shouldn't block the turn.
+      } catch (err) {
+        // Snapshot failure shouldn't block the turn — but LOG it
+        process.stderr.write(
+          `reasonix: turn snapshot failed — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
     this._userTurnCount++;
@@ -1188,8 +1215,12 @@ export class CacheFirstLoop {
             totalCompletionTokens: this.stats.cumulativeCompletionTokens,
             lastPromptTokens: last?.usage.promptTokens,
           });
-        } catch {
-          // Best-effort; don't crash the turn loop on a write failure.
+        } catch (err) {
+          // Best-effort; don't crash the turn loop on a write failure — but
+          // never silent: a lost cost/usage update is real data loss.
+          process.stderr.write(
+            `reasonix: session meta patch failed — ${err instanceof Error ? err.message : String(err)}\n`,
+          );
         }
       }
 
@@ -1435,6 +1466,7 @@ export class CacheFirstLoop {
       summaryChars: result.summaryChars,
       ...(result.summary ? { summary: result.summary } : {}),
       ...(result.error ? { foldError: result.error } : {}),
+      ...(result.warn ? { foldWarn: result.warn } : {}),
       ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
       ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
       ...(result.droppedFiles?.length ? { droppedFiles: result.droppedFiles } : {}),
