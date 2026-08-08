@@ -9,7 +9,19 @@ import {
   normalizeCodexWindow,
 } from "../src/codex-quota.js";
 
-vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
+// Use a plain function for exec (not vi.fn) so vi.resetAllMocks() in
+// afterEach doesn't clear the implementation — otherwise the Promise in
+// fetchCodexQuotaDetailed never settles and the test times out.
+vi.mock("node:child_process", () => {
+  function execMock(_cmd: string, ...args: unknown[]) {
+    const opts = args[0];
+    const cb = args[1];
+    const callback = typeof opts === "function" ? opts : typeof cb === "function" ? cb : null;
+    if (callback) (callback as (err: Error) => void)(new Error("npm not available in test"));
+    return {} as any;
+  }
+  return { spawn: vi.fn(), exec: execMock };
+});
 
 const spawnMock = vi.mocked(spawn);
 
@@ -133,8 +145,8 @@ describe("fetchCodexQuotaDetailed (codex app-server RPC)", () => {
     });
     const { quota, reason } = await fetchCodexQuotaDetailed();
     expect(quota).toBeNull();
-    expect(reason).toContain("failed to start codex app-server");
-    expect(reason).toContain("ENOENT");
+    // Auto-install is triggered first; when that also fails the reason reflects the install failure.
+    expect(reason).toContain("failed to install codex CLI");
   });
 
   it("times out and kills a hung app-server", async () => {
@@ -149,12 +161,13 @@ describe("fetchCodexQuotaDetailed (codex app-server RPC)", () => {
       throw new Error("spawn codex ENOENT");
     });
     const first = await fetchCodexQuotaDetailed();
-    expect(first.reason).toContain("ENOENT");
+    // Auto-install is triggered and fails in test; the failure is then cached.
+    expect(first.reason).toContain("failed to install codex CLI");
     expect(spawnMock).toHaveBeenCalledTimes(1);
     // Second fetch within the cooldown must not re-spawn the missing binary —
     // this is the 40-line console spam fixed by the failure cache.
     const second = await fetchCodexQuotaDetailed();
-    expect(second.reason).toContain("ENOENT");
+    expect(second.reason).toContain("failed to install codex CLI");
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 

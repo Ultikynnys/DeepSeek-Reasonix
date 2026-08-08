@@ -3,7 +3,7 @@
 // Requires the codex CLI installed (`npm i -g @openai/codex`) and signed in
 // with the ChatGPT account; the CLI owns its credentials, so no config read.
 
-import { spawn } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { CodexQuota, CodexQuotaWindow } from "@reasonix/core-utils";
 import { createLogger } from "./logging.js";
@@ -27,6 +27,7 @@ interface QuotaFailureCache {
 
 let lastFailure: QuotaFailureCache | null = null;
 let lastWarnedReason: string | null = null;
+let codexInstallAttempted = false;
 
 /** Clear the remembered failure — lets an explicit user action (sign-in,
  *  install, click-to-retry) get a fresh attempt without waiting out the
@@ -34,6 +35,7 @@ let lastWarnedReason: string | null = null;
 export function clearCodexQuotaCache(): void {
   lastFailure = null;
   lastWarnedReason = null;
+  codexInstallAttempted = false;
 }
 
 /** Spawn/startup-level problems are "hard": the binary is missing or the
@@ -194,9 +196,30 @@ export async function fetchCodexQuotaDetailed(
   try {
     client = new CodexRpcClient();
   } catch (err) {
-    // Binary missing / not on PATH — surfaced in the statusbar tooltip.
-    rememberFailure((err as Error).message);
-    return { quota: null, reason: (err as Error).message };
+    const reason = (err as Error).message;
+    // Auto-install the codex CLI when the binary is missing — one attempt per session.
+    if (!codexInstallAttempted && reason.includes("spawn codex")) {
+      codexInstallAttempted = true;
+      try {
+        log.info("codex CLI not found — installing @openai/codex (one-time)…");
+        await new Promise<void>((resolve, reject) => {
+          exec("npm install -g @openai/codex", { timeout: 120_000 }, (err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+        log.info("codex CLI installed — retrying spawn");
+        client = new CodexRpcClient();
+      } catch (installErr) {
+        const installReason = `failed to install codex CLI: ${(installErr as Error).message}`;
+        rememberFailure(installReason);
+        return { quota: null, reason: installReason };
+      }
+    } else {
+      // Binary missing / not on PATH — surfaced in the statusbar tooltip.
+      rememberFailure(reason);
+      return { quota: null, reason };
+    }
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {

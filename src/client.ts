@@ -250,6 +250,9 @@ export class DeepSeekClient {
       stream,
     };
     if (stream) payload.stream_options = { include_usage: true };
+    // OpenAI now requires explicit `store: false` — omitting it returns
+    // 400 {"detail":"Store must be set to false"}.  DeepSeek ignores it.
+    if (providerForModel(opts.model) === "openai") payload.store = false;
     if (opts.tools?.length) payload.tools = opts.tools;
     if (opts.temperature !== undefined) payload.temperature = opts.temperature;
     if (opts.maxTokens !== undefined) payload.max_tokens = opts.maxTokens;
