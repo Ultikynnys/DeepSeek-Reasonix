@@ -1,11 +1,7 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
 import { loadRateLimit, providerForModel, resolveBaseUrlEnv } from "./config.js";
 import { createLogger } from "./logging.js";
-import {
-  buildResponsesPayload,
-  parseResponsesOutput,
-  responsesErrorFromData,
-} from "./responses-api.js";
+import { buildResponsesPayload } from "./responses-api.js";
 import { type RetryOptions, fetchWithRetry } from "./retry.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
 
@@ -405,26 +401,21 @@ export class DeepSeekClient {
   }
 
   async chat(opts: ChatRequestOptions): Promise<ChatResponse> {
+    // The ChatGPT Codex backend (Responses API) requires stream:true —
+    // non-streaming requests return 400 {"detail":"Stream must be set to true"}.
+    // Resolve the transport early so we can route to an internal streaming
+    // collector when needed, matching what the main turn loop already does.
+    const transport = await this.resolveTransport();
+    if (transport?.api === "responses") {
+      return this.chatViaStream(opts);
+    }
     const { signal, timer } = this.withTimeout(opts.signal);
     try {
-      const { transport, resp } = await this.prepareRequest(opts, false, signal);
+      const { resp } = await this.prepareRequest(opts, false, signal);
       if (!resp.ok) {
         throw new Error(`${this._errorPrefix()} ${resp.status}: ${await resp.text()}`);
       }
       const data: any = await resp.json();
-      if (transport?.api === "responses") {
-        // Responses envelope — output items + usage under input/output_tokens.
-        const errMessage = responsesErrorFromData(data);
-        if (errMessage) throw new Error(`${this._errorPrefix()} ${resp.status}: ${errMessage}`);
-        const parsed = parseResponsesOutput(data);
-        return {
-          content: parsed.content,
-          reasoningContent: parsed.reasoningContent,
-          toolCalls: parsed.toolCalls,
-          usage: Usage.fromApi(data.usage ?? data),
-          raw: data,
-        };
-      }
       const choice = data.choices?.[0]?.message ?? {};
       return {
         content: choice.content ?? "",
@@ -436,6 +427,45 @@ export class DeepSeekClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** Collect a streaming response into a single ChatResponse — used when the
+   *  transport requires streaming (Codex/Responses API). */
+  private async chatViaStream(opts: ChatRequestOptions): Promise<ChatResponse> {
+    let content = "";
+    let reasoning = "";
+    const toolCallBuilders = new Map<number, { id?: string; name?: string; args: string }>();
+    let usage = new Usage();
+    let raw: unknown;
+
+    for await (const chunk of this.stream(opts)) {
+      if (chunk.contentDelta) content += chunk.contentDelta;
+      if (chunk.reasoningDelta) reasoning += chunk.reasoningDelta;
+      if (chunk.toolCallDelta) {
+        const tc = chunk.toolCallDelta;
+        let builder = toolCallBuilders.get(tc.index);
+        if (!builder) {
+          builder = { id: tc.id, name: tc.name, args: "" };
+          toolCallBuilders.set(tc.index, builder);
+        }
+        if (tc.id) builder.id = tc.id;
+        if (tc.name) builder.name = tc.name;
+        if (tc.argumentsDelta) builder.args += tc.argumentsDelta;
+      }
+      if (chunk.usage) usage = chunk.usage;
+      if (chunk.raw !== undefined) raw = chunk.raw;
+    }
+
+    const toolCalls: ToolCall[] = [];
+    for (const [, b] of toolCallBuilders) {
+      toolCalls.push({
+        id: b.id,
+        type: "function" as const,
+        function: { name: b.name ?? "", arguments: b.args },
+      });
+    }
+
+    return { content, reasoningContent: reasoning || null, toolCalls, usage, raw };
   }
 
   async *stream(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {

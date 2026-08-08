@@ -1,6 +1,7 @@
 import { COMPACTION_SUMMARY_MARKER, buildFilesDroppedMarker } from "@reasonix/core-utils";
 import type { DeepSeekClient } from "./client.js";
 import { Usage } from "./client.js";
+import { providerForModel } from "./config.js";
 import { pruneUnusedFileReads } from "./file-prune.js";
 import {
   buildFileTriageInstruction,
@@ -411,7 +412,7 @@ export class ContextManager {
     const prunedHeadTokens = prunedHead.reduce((acc, m) => acc + countMessageTokens(m), 0);
 
     const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(prunedHead);
-    const summary = await this.summarizeForFold(prunedHead, pinnedNames, prunedHeadTokens);
+    const summary = await this.summarizeForFold(prunedHead, pinnedNames, prunedHeadTokens, model);
     if (!summary.content) {
       // Summarizer failure — surface it so the loop can warn instead of the
       // "compacting history…" status silently no-opping. Turn aborts are
@@ -443,7 +444,7 @@ export class ContextManager {
     const allPaths = collectContextFilePaths(all);
     const triage =
       allPaths.length > 0
-        ? await this.triageFilesForFold(summary.content, allPaths)
+        ? await this.triageFilesForFold(summary.content, allPaths, model)
         : { keep: allPaths, drop: [] as string[], warn: undefined };
     const droppedFiles = triage.drop;
     const triageWarn = triage.warn;
@@ -532,16 +533,20 @@ export class ContextManager {
     messagesToSummarize: ChatMessage[],
     pinnedSkillNames: string[],
     headTokens: number,
+    activeModel: string,
   ): Promise<{ content: string; reasoningContent: string; error?: string }> {
-    const summaryModel = "deepseek-v4-flash";
+    // Pick a cheap model valid for the current transport: the Codex backend
+    // rejects DeepSeek model names; the DeepSeek endpoint rejects GPT names.
+    const summaryModel =
+      providerForModel(activeModel) === "openai" ? "gpt-4o-mini" : "deepseek-v4-flash";
     const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
     const agentSystem = this.deps.getSystemPrompt();
     const fewShots = this.deps.getFewShots?.() ?? [];
     const tools = this.deps.getToolSpecs?.() ?? [];
     const instruction = buildFoldSummaryInstruction(pinnedSkillNames);
-    // The fold summarizer runs on a DeepSeek model (deepseek-v4-flash), which
-    // rejects OpenAI image content parts (400) — collapse them to a text
-    // placeholder so a session with image attachments can still fold.
+    // DeepSeek models reject OpenAI image content parts (400) — collapse them
+    // to a text placeholder so a session with image attachments can still fold.
+    // GPT models accept images natively, but the placeholder is harmless either way.
     const foldSafe = healed.map((m) =>
       Array.isArray(m.content) ? { ...m, content: contentPartsToTextForDeepSeek(m.content) } : m,
     );
@@ -627,6 +632,7 @@ export class ContextManager {
   private async triageFilesForFold(
     summary: string,
     allPaths: string[],
+    activeModel: string,
   ): Promise<{ keep: string[]; drop: string[]; warn?: string }> {
     const messages: ChatMessage[] = [
       {
@@ -649,21 +655,19 @@ export class ContextManager {
         reject(new Error("file-triage-timeout"));
       }, FILE_TRIAGE_TIMEOUT_MS);
     });
+    const triageModel =
+      providerForModel(activeModel) === "openai" ? "gpt-4o-mini" : FILE_TRIAGE_MODEL;
     try {
       const resp = await Promise.race([
         this.deps.client.chat({
-          model: FILE_TRIAGE_MODEL,
+          model: triageModel,
           messages,
           signal: triageCtrl.signal,
           thinking: "disabled",
         }),
         deadlinePromise,
       ]);
-      this.deps.stats.record(
-        this.deps.getCurrentTurn(),
-        FILE_TRIAGE_MODEL,
-        resp.usage ?? new Usage(),
-      );
+      this.deps.stats.record(this.deps.getCurrentTurn(), triageModel, resp.usage ?? new Usage());
       return parseFileTriage(resp.content, allPaths);
     } catch (err) {
       // Fail-open: relevance is advisory — the fold proceeds with no drops.

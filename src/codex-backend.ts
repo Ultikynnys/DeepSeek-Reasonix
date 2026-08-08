@@ -58,19 +58,36 @@ export async function resolveCodexTransport(): Promise<ResolvedTransport | null>
 
 // ── OAuth-based quota fetch (no codex CLI dependency) ──────────────────────
 
-const CODEX_RATE_LIMITS_URL = "https://chatgpt.com/backend-api/codex/rate_limits";
+/** Official Codex usage endpoint used by the Codex client for ChatGPT accounts. */
+export const CODEX_QUOTA_ENDPOINT = "https://chatgpt.com/backend-api/wham/usage";
+/** Kept as a compatibility fallback for older ChatGPT backend deployments. */
+const LEGACY_CODEX_QUOTA_ENDPOINT = "https://chatgpt.com/backend-api/codex/rate_limits";
 const FIVE_HOUR_MINUTES = 300;
 const WEEKLY_MINUTES = 10080;
+
+type JsonObject = Record<string, unknown>;
+
+function asObject(value: unknown): JsonObject | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : null;
+}
 
 function toNumber(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
-function normalizeWindow(raw: Record<string, unknown>): CodexQuotaWindow | null {
-  const windowMinutes = toNumber(raw.windowDurationMins);
-  const usedPercent = toNumber(raw.usedPercent);
-  if (windowMinutes === undefined || usedPercent === undefined) return null;
-  const resetsAt = toNumber(raw.resetsAt);
+function windowMinutesFromSeconds(seconds: number | undefined): number | undefined {
+  return seconds !== undefined && seconds > 0 ? Math.ceil(seconds / 60) : undefined;
+}
+
+/** Normalize both the current WHAM snake_case response and the older
+ *  camelCase rate_limits response into the wire format used by the ribbon. */
+export function normalizeCodexWindow(raw: JsonObject): CodexQuotaWindow | null {
+  const windowMinutes =
+    toNumber(raw.windowDurationMins) ??
+    windowMinutesFromSeconds(toNumber(raw.limit_window_seconds));
+  const usedPercent = toNumber(raw.usedPercent) ?? toNumber(raw.used_percent);
+  if (windowMinutes === undefined || windowMinutes <= 0 || usedPercent === undefined) return null;
+  const resetsAt = toNumber(raw.resetsAt) ?? toNumber(raw.reset_at);
   return {
     windowMinutes,
     usedPercent,
@@ -79,57 +96,112 @@ function normalizeWindow(raw: Record<string, unknown>): CodexQuotaWindow | null 
   };
 }
 
+/** Parse the official `/wham/usage` payload. The backend has shipped both a
+ *  root-level `{ plan_type, rate_limit }` envelope and a nested
+ *  `{ rate_limits: { plan_type, rate_limit } }` envelope, so accept both
+ *  without making the UI depend on a field's position. */
+export function parseCodexQuotaPayload(payload: unknown): CodexQuota | null {
+  const data = asObject(payload);
+  if (!data) return null;
+  const envelope = asObject(data.rate_limits) ?? data;
+  const rateLimit =
+    asObject(envelope.rate_limit) ??
+    asObject(envelope.rateLimits) ??
+    asObject(data.rate_limit) ??
+    asObject(data.rateLimits);
+  if (!rateLimit) return null;
+
+  const windows = [
+    rateLimit.primary_window ?? rateLimit.primaryWindow ?? rateLimit.primary,
+    rateLimit.secondary_window ?? rateLimit.secondaryWindow ?? rateLimit.secondary,
+  ]
+    .map(asObject)
+    .filter((window): window is JsonObject => window !== null)
+    .map(normalizeCodexWindow)
+    .filter((window): window is CodexQuotaWindow => window !== null);
+  if (windows.length === 0) return null;
+
+  const planValue = [
+    envelope.plan_type,
+    envelope.planType,
+    data.plan_type,
+    data.planType,
+    data.plan,
+  ].find((value): value is string => typeof value === "string" && value.length > 0);
+  return {
+    plan: planValue ?? null,
+    fiveHour: windows.find((window) => window.windowMinutes === FIVE_HOUR_MINUTES) ?? null,
+    weekly: windows.find((window) => window.windowMinutes === WEEKLY_MINUTES) ?? null,
+    fetchedAt: Date.now(),
+  };
+}
+
 export interface CodexQuotaResult {
   quota: CodexQuota | null;
   reason: string | null;
 }
 
+/** Fetch and parse one Codex usage endpoint. The official client uses the
+ *  `codex-cli` user agent for this request; without it some deployments return
+ *  a generic no-data response even when the OAuth token is valid. */
+async function fetchQuotaEndpoint(
+  url: string,
+  auth: CodexAuth,
+  signal: AbortSignal,
+): Promise<CodexQuotaResult> {
+  const resp = await fetch(url, {
+    headers: { ...codexHeaders(auth), "User-Agent": "codex-cli" },
+    signal,
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    const reason = `${url} returned ${resp.status}${body ? `: ${body.slice(0, 200)}` : ""}`;
+    log.debug(reason);
+    return { quota: null, reason };
+  }
+
+  const quota = parseCodexQuotaPayload(await resp.json());
+  if (!quota) {
+    const reason = `${url} response contained no usable rate-limit windows`;
+    log.debug(reason);
+    return { quota: null, reason };
+  }
+
+  const windows = [quota.fiveHour, quota.weekly].filter(
+    (window): window is CodexQuotaWindow => window !== null,
+  );
+  const detail = windows
+    .map((window) => `${window.windowMinutes}m: ${window.remainingPercent}%`)
+    .join(", ");
+  log.debug(`Codex usage: ${detail}`);
+  return { quota, reason: null };
+}
+
 /** Fetch ChatGPT plan quota via the Codex backend API using OAuth.
- *  Returns null when OAuth isn't available or the endpoint is unreachable. */
+ *  The current Codex client reads `/wham/usage`; the legacy endpoint remains
+ *  a fallback for older ChatGPT backend deployments. */
 export async function fetchCodexQuotaViaOAuth(timeoutMs = 10_000): Promise<CodexQuotaResult> {
   const auth = await resolveCodexAuth();
   if (!auth.ok) return { quota: null, reason: auth.reason };
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const reasons: string[] = [];
 
   try {
-    const resp = await fetch(CODEX_RATE_LIMITS_URL, {
-      headers: codexHeaders(auth),
-      signal: ctrl.signal,
-    });
-
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      log.debug(`rate_limits HTTP ${resp.status}: ${body.slice(0, 200)}`);
-      return { quota: null, reason: `rate_limits returned ${resp.status}` };
+    for (const endpoint of [CODEX_QUOTA_ENDPOINT, LEGACY_CODEX_QUOTA_ENDPOINT]) {
+      try {
+        const result = await fetchQuotaEndpoint(endpoint, auth, ctrl.signal);
+        if (result.quota) return result;
+        if (result.reason) reasons.push(result.reason);
+      } catch (err) {
+        const reason = `${endpoint} fetch failed: ${(err as Error).message}`;
+        log.debug(reason);
+        reasons.push(reason);
+      }
     }
-
-    const data = (await resp.json()) as Record<string, unknown>;
-    const rateLimits = (data as { rateLimits?: { primary?: unknown; secondary?: unknown } })
-      ?.rateLimits;
-
-    const windows = [rateLimits?.primary, rateLimits?.secondary]
-      .filter((w): w is Record<string, unknown> => !!w && typeof w === "object")
-      .map(normalizeWindow)
-      .filter((w): w is CodexQuotaWindow => w !== null);
-
-    const detail = windows.map((w) => `${w.windowMinutes}m: ${w.remainingPercent}%`).join(", ");
-    log.debug(`rate_limits: ${windows.length} windows — ${detail}`);
-
-    return {
-      quota: {
-        plan: null,
-        fiveHour: windows.find((w) => w.windowMinutes === FIVE_HOUR_MINUTES) ?? null,
-        weekly: windows.find((w) => w.windowMinutes === WEEKLY_MINUTES) ?? null,
-        fetchedAt: Date.now(),
-      },
-      reason: null,
-    };
-  } catch (err) {
-    const reason = `rate_limits fetch failed: ${(err as Error).message}`;
-    log.debug(reason);
-    return { quota: null, reason };
+    return { quota: null, reason: reasons.join("; ") || "no quota data" };
   } finally {
     clearTimeout(timer);
   }

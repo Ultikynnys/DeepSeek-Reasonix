@@ -32,16 +32,6 @@ function sseFetch(events: string[]): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
-function jsonFetch(status: number, body: unknown): typeof fetch {
-  return vi.fn(
-    async () =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { "Content-Type": "application/json" },
-      }),
-  ) as unknown as typeof fetch;
-}
-
 describe("Responses payload conversion (codex backend)", () => {
   it("sends input/instructions/flat tools/reasoning.effort — never chat-completions fields", async () => {
     const spy = vi.fn(
@@ -178,35 +168,17 @@ describe("Responses payload conversion (codex backend)", () => {
   });
 });
 
-describe("Responses non-streaming chat()", () => {
-  it("parses output items: message content, reasoning summary, function_call", async () => {
+describe("Responses chat() → internal streaming (Codex requires stream:true)", () => {
+  it("collects streamed output into a ChatResponse: text, reasoning, tool calls, usage", async () => {
     const client = codexClient(
-      jsonFetch(200, {
-        id: "resp_1",
-        output: [
-          {
-            type: "reasoning",
-            summary: [{ type: "summary_text", text: "thinking about it" }],
-          },
-          {
-            type: "message",
-            role: "assistant",
-            content: [{ type: "output_text", text: "the answer" }],
-          },
-          {
-            type: "function_call",
-            call_id: "call_9",
-            name: "edit_file",
-            arguments: '{"path":"a.ts"}',
-          },
-        ],
-        usage: {
-          input_tokens: 100,
-          output_tokens: 20,
-          total_tokens: 120,
-          input_tokens_details: { cached_tokens: 40 },
-        },
-      }),
+      sseFetch([
+        'data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_9","name":"edit_file","arguments":""}}\n\n',
+        'data: {"type":"response.reasoning_summary_text.delta","delta":"thinking about it"}\n\n',
+        'data: {"type":"response.output_text.delta","delta":"the answer"}\n\n',
+        'data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\\"path\\":\\"a.ts\\"}"}\n\n',
+        'data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_9","name":"edit_file","arguments":"{\\"path\\":\\"a.ts\\"}"}}\n\n',
+        'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120,"input_tokens_details":{"cached_tokens":40}}}}\n\n',
+      ]),
     );
     const resp = await client.chat({
       model: "gpt-5.6-sol",
@@ -227,11 +199,15 @@ describe("Responses non-streaming chat()", () => {
     expect(resp.usage.promptCacheHitTokens).toBe(40);
   });
 
-  it("throws the embedded error message from an HTTP-200 error envelope", async () => {
-    const client = codexClient(jsonFetch(200, { error: { message: "quota exceeded" } }));
+  it("throws a formatted error on response.failed", async () => {
+    const client = codexClient(
+      sseFetch([
+        'data: {"type":"response.failed","code":"invalid_prompt","message":"quota exceeded"}\n\n',
+      ]),
+    );
     await expect(
       client.chat({ model: "gpt-5.6-sol", messages: [{ role: "user", content: "hi" }] }),
-    ).rejects.toThrow(/^Upstream 200: quota exceeded/);
+    ).rejects.toThrow(/^Upstream 400: quota exceeded/);
   });
 });
 
