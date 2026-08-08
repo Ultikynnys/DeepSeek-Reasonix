@@ -3,11 +3,11 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { Check, Copy, ExternalLink, FileText } from "lucide-react";
 import {
   Children,
+  type ReactNode,
   cloneElement,
   createContext,
   isValidElement,
   memo,
-  type ReactNode,
   useContext,
   useState,
 } from "react";
@@ -153,10 +153,9 @@ function FilePill({ path, line }: { path: string; line?: string }) {
     }
   };
   return (
-    <span
+    <button
+      type="button"
       className={`file-pill ${done ? "done" : ""}`}
-      role="button"
-      tabIndex={0}
       onClick={openInEditor}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -174,7 +173,7 @@ function FilePill({ path, line }: { path: string; line?: string }) {
       <span className="file-pill-path">{path}</span>
       {line && <span className="file-pill-line">:{line}</span>}
       {done && <Check size={10} className="file-pill-check" />}
-    </span>
+    </button>
   );
 }
 
@@ -238,6 +237,7 @@ function normalizeMathDelimiters(source: string): string {
     .replace(/\\\(/g, "$$")
     .replace(/\\\)/g, "$$");
   // Restore protected sequences
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: NUL sentinel cannot appear in normal text — the marker is the point
   result = result.replace(/\x00LB\x00/g, "\\\\[");
   return result;
 }
@@ -346,7 +346,8 @@ export function extractFencedLang(children: ReactNode): string {
 function flattenChildText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(flattenChildText).join("");
-  if (isValidElement(node)) return flattenChildText((node.props as { children?: ReactNode }).children);
+  if (isValidElement(node))
+    return flattenChildText((node.props as { children?: ReactNode }).children);
   return "";
 }
 

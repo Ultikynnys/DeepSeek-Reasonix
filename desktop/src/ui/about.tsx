@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatBytes } from "../format";
 import { t } from "../i18n";
 import { I } from "../icons";
+import { escapeHandler } from "./keyboard";
 
 const REPO_URL = "https://github.com/Ultikynnys/DeepSeek-Reasonix";
 const RELEASES_PAGE = `${REPO_URL}/releases`;
@@ -85,9 +86,18 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   return (
-    <div className="about-mask" onClick={onClose}>
-      <div className="about-modal" onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="about-close" onClick={onClose} aria-label={t("about.close")}>
+    <div className="about-mask" onClick={onClose} onKeyDown={escapeHandler(onClose)} tabIndex={-1}>
+      <div
+        className="about-modal"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="about-close"
+          onClick={onClose}
+          aria-label={t("about.close")}
+        >
           <I.x size={14} />
         </button>
         <div className="about-brand">

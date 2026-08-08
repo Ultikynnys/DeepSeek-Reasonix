@@ -70,13 +70,29 @@ import { type RepairReport, ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
 import { ToolRegistry, isReadOnlyTool } from "./tools.js";
 import { ReadTracker } from "./tools/read-tracker.js";
-import type { ChatMessage, ToolCall } from "./types.js";
+import type { ChatMessage, ToolCall, UserContentPart } from "./types.js";
 
 export const MID_TURN_STEER_WRAPPER =
   "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]";
 
 function formatSteerUserMessage(content: string): string {
   return [MID_TURN_STEER_WRAPPER, content].join("\n");
+}
+
+/** User content for the log/request: plain text when no images are attached
+ *  (byte-identical to pre-vision behavior — keeps the prefix cache stable),
+ *  OpenAI content parts when images are attached (detail:"low", 85 tokens). */
+function buildUserContent(
+  text: string,
+  images?: ReadonlyArray<string>,
+): string | UserContentPart[] {
+  if (!images || images.length === 0) return text;
+  const parts: UserContentPart[] = [];
+  if (text.length > 0) parts.push({ type: "text", text });
+  for (const url of images) {
+    parts.push({ type: "image_url", image_url: { url, detail: "low" } });
+  }
+  return parts;
 }
 
 export {
@@ -816,7 +832,7 @@ export class CacheFirstLoop {
     return { min: Math.min(...keys), max: Math.max(...keys) };
   }
 
-  async *step(userInput: string): AsyncGenerator<LoopEvent> {
+  async *step(userInput: string, images?: ReadonlyArray<string>): AsyncGenerator<LoopEvent> {
     // Per-turn abort-state guarantee: whenever this generator completes —
     // normally, via an abort path, or because the consumer broke the
     // for-await (generator.return() delegates through `yield*`, so this
@@ -829,13 +845,16 @@ export class CacheFirstLoop {
     // abort forward (carryAbort) and instantly kills the user's next
     // message — the "have to send it a second time" bug.
     try {
-      yield* this.stepTurn(userInput);
+      yield* this.stepTurn(userInput, images);
     } finally {
       if (this._turnAbort.signal.aborted) this.resetAbortState();
     }
   }
 
-  private async *stepTurn(userInput: string): AsyncGenerator<LoopEvent> {
+  private async *stepTurn(
+    userInput: string,
+    images?: ReadonlyArray<string>,
+  ): AsyncGenerator<LoopEvent> {
     // Reset per-turn flags.
     this._steerConsumed = false;
 
@@ -947,7 +966,7 @@ export class CacheFirstLoop {
     // first round-trip still leaves the message in the log; the user can
     // /retry without re-typing.
     const turnStartLogIndex = this.log.length;
-    this.appendAndPersist({ role: "user", content: userInput });
+    this.appendAndPersist({ role: "user", content: buildUserContent(userInput, images) });
     const toolSpecs = this.prefix.tools();
     const rateLimitState = { shown: false };
 
@@ -1488,9 +1507,13 @@ export class CacheFirstLoop {
     };
   }
 
-  async run(userInput: string, onEvent?: (ev: LoopEvent) => void): Promise<string> {
+  async run(
+    userInput: string,
+    onEvent?: (ev: LoopEvent) => void,
+    images?: ReadonlyArray<string>,
+  ): Promise<string> {
     let final = "";
-    for await (const ev of this.step(userInput)) {
+    for await (const ev of this.step(userInput, images)) {
       onEvent?.(ev);
       if (ev.role === "assistant_final") final = ev.content;
       if (ev.role === "done") break;

@@ -279,7 +279,7 @@ export type LoadedSegment =
     };
 
 export type LoadedMessage =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; images?: string[] }
   | {
       kind: "assistant";
       turn: number;
@@ -396,23 +396,35 @@ export interface BalanceEvent {
   balanceInfos: BalanceInfoItem[];
 }
 
-/** ChatGPT-plan weekly Codex quota (daemon source: src/oauth.ts fetchCodexQuota).
- *  `null` payload means "no data" — not signed in, rejected, or malformed —
- *  the UI degrades to no chip instead of a wrong number. */
+/** One quota window reported by the Codex app-server (account/rateLimits/read).
+ *  Windows are identified by `windowMinutes`, never by position — OpenAI has
+ *  changed which buckets appear for different plans (issue #32707). */
+export interface CodexQuotaWindow {
+  /** Window length in minutes — 300 = 5-hour, 10080 = weekly. */
+  windowMinutes: number;
+  /** Server-reported usage in this window (0-100+). */
+  usedPercent: number;
+  /** 100 - usedPercent — the statusbar's "% left". Computed once, daemon-side. */
+  remainingPercent: number;
+  /** ISO timestamp of the next reset, or null when the server didn't report one. */
+  resetsAt: string | null;
+}
+
+/** ChatGPT-plan Codex quota (daemon source: src/codex-quota.ts, the official
+ *  Codex app-server protocol). `null` payload means "no data" — codex CLI
+ *  missing or not signed in, rejected, or malformed — the UI degrades to no
+ *  chip instead of a wrong number. */
 export interface CodexQuota {
-  /** Credits used this week, cumulative (server-reported). Null when the
-   *  backend only reports a percent (wham/usage fallback). */
-  used: number | null;
-  /** Weekly credit limit. Null when the backend only reports a percent. */
-  limit: number | null;
-  /** used / limit × 100 — or the server-reported percent directly. */
-  usedPct: number;
-  /** Unit the backend reports (typically "credits"). */
-  currency?: string;
-  /** Credits consumed since the previous measurement (fetches fire on every
-   *  $turn_complete). Null until a second measurement exists — first fetch,
-   *  weekly rollover, or a failed fetch. Pure API numbers, no cost conversion. */
-  turnCost?: number | null;
+  /** Plan type from account/read (e.g. "plus", "pro"), or null. */
+  plan: string | null;
+  /** 5-hour window, when the plan reports one (some plans only report weekly). */
+  fiveHour: CodexQuotaWindow | null;
+  /** Weekly window — the primary ribbon value. */
+  weekly: CodexQuotaWindow | null;
+  /** Percentage points of the weekly window consumed since the previous fetch
+   *  (fetches fire on every $turn_complete). Null until a second measurement
+   *  exists. Pure API numbers, no cost conversion. */
+  turnUsedPct?: number | null;
   fetchedAt: number;
 }
 
@@ -452,15 +464,34 @@ export interface QQConfigPatch {
   sandbox: boolean;
 }
 
+/** An image to attach to a user message. Clipboard paste flows ship the
+ *  bytes the UI already encoded; drag-and-drop ships a path the daemon reads
+ *  (the webview has no fs access for arbitrary OS paths). */
+export type UserImageAttachment =
+  | { source: "clipboard"; dataUrl: string }
+  | { source: "file"; path: string };
+
 export type OutgoingCommand = { tabId?: string } & (
-  | { cmd: "user_input"; text: string }
+  | { cmd: "user_input"; text: string; images?: UserImageAttachment[] }
   | { cmd: "abort" }
   | { cmd: "cancel_tool" }
-  | { cmd: "confirm_response"; id: number; response: import("./permission-types.js").ConfirmationChoice }
+  | {
+      cmd: "confirm_response";
+      id: number;
+      response: import("./permission-types.js").ConfirmationChoice;
+    }
   | { cmd: "choice_response"; id: number; response: import("./permission-types.js").ChoiceVerdict }
   | { cmd: "plan_response"; id: number; response: import("./permission-types.js").PlanVerdict }
-  | { cmd: "checkpoint_response"; id: number; response: import("./permission-types.js").CheckpointVerdict }
-  | { cmd: "revision_response"; id: number; response: import("./permission-types.js").RevisionVerdict }
+  | {
+      cmd: "checkpoint_response";
+      id: number;
+      response: import("./permission-types.js").CheckpointVerdict;
+    }
+  | {
+      cmd: "revision_response";
+      id: number;
+      response: import("./permission-types.js").RevisionVerdict;
+    }
   | { cmd: "session_list" }
   | { cmd: "desktop_resync" }
   | { cmd: "session_delete"; name: string }

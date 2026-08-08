@@ -29,11 +29,10 @@ function renderBar(overrides: Partial<Parameters<typeof StatusBar>[0]> = {}) {
 }
 
 const GPT_QUOTA: CodexQuota = {
-  used: 42,
-  limit: 100,
-  usedPct: 42,
-  currency: "credits",
-  turnCost: 2.5,
+  plan: "plus",
+  fiveHour: { windowMinutes: 300, usedPercent: 50, remainingPercent: 50, resetsAt: null },
+  weekly: { windowMinutes: 10080, usedPercent: 42, remainingPercent: 58, resetsAt: null },
+  turnUsedPct: 2.5,
   fetchedAt: 0,
 };
 
@@ -51,15 +50,14 @@ describe("StatusBar quota display", () => {
     expect(screen.queryByText(/left/)).toBeNull();
   });
 
-  it("shows weekly quota left (%, credits) and turn cost % of quota for gpt-5.6 tabs", () => {
+  it("shows weekly quota % left + plan and this-turn % for gpt-5.6 tabs", () => {
     renderBar({
       settings: { model: "gpt-5.6-sol" } as Settings,
       codexQuota: GPT_QUOTA,
     });
     expect(screen.getByText(/58%\s*left/)).toBeTruthy();
-    expect(screen.getByText(/58 \/ 100/)).toBeTruthy();
+    expect(screen.getByText("plus")).toBeTruthy();
     expect(screen.getByText(/2\.5%/)).toBeTruthy();
-    expect(screen.getByText(/2\.50 credits/)).toBeTruthy();
     // Balance and $ amounts are replaced by the pure quota numbers.
     expect(screen.queryByText("balance")).toBeNull();
     expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
@@ -68,7 +66,7 @@ describe("StatusBar quota display", () => {
   it("shows an em dash until a second quota measurement exists", () => {
     renderBar({
       settings: { model: "gpt-5.6-sol" } as Settings,
-      codexQuota: { ...GPT_QUOTA, turnCost: null },
+      codexQuota: { ...GPT_QUOTA, turnUsedPct: null },
     });
     expect(screen.getByText(/58%\s*left/)).toBeTruthy();
     expect(screen.getByText("—")).toBeTruthy();
@@ -84,11 +82,11 @@ describe("StatusBar quota display", () => {
     expect(screen.getByText("codex")).toBeTruthy();
     expect(screen.queryByText("balance")).toBeNull();
     expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
-    // Not signed in → the chip hints at signing in with OpenAI.
-    expect(screen.getByTitle(/sign in with OpenAI/)).toBeTruthy();
+    // No data → the chip hints at installing the Codex CLI + signing in.
+    expect(screen.getByTitle(/install the Codex CLI/)).toBeTruthy();
   });
 
-  it("tells signed-in gpt tabs that the quota is unavailable rather than hinting to sign in", () => {
+  it("shows the no-data hint regardless of auth state — the reason string carries the diagnosis", () => {
     renderBar({
       settings: {
         model: "gpt-5.6-sol",
@@ -101,8 +99,7 @@ describe("StatusBar quota display", () => {
       codexQuota: null,
     });
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
-    expect(screen.queryByTitle(/sign in with OpenAI/)).toBeNull();
-    expect(screen.getByTitle(/unavailable right now/)).toBeTruthy();
+    expect(screen.getByTitle(/install the Codex CLI/)).toBeTruthy();
   });
 
   it("treats any gpt-* model as an OpenAI tab (quota chips, not balance)", () => {
@@ -115,14 +112,18 @@ describe("StatusBar quota display", () => {
     expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
   });
 
-  it("renders percent-only quota when the backend reports no absolute used/limit (wham fallback)", () => {
+  it("falls back to the ChatGPT label when the plan is unknown", () => {
     renderBar({
       settings: { model: "gpt-5.6-sol" } as Settings,
-      codexQuota: { used: null, limit: null, usedPct: 75, currency: "credits", fetchedAt: 0 },
+      codexQuota: {
+        plan: null,
+        fiveHour: null,
+        weekly: { windowMinutes: 10080, usedPercent: 75, remainingPercent: 25, resetsAt: null },
+        fetchedAt: 0,
+      },
     });
     expect(screen.getByText(/25%\s*left/)).toBeTruthy();
-    expect(screen.getByText("codex")).toBeTruthy();
-    expect(screen.queryByText(/\/\s*100/)).toBeNull();
+    expect(screen.getByText("ChatGPT")).toBeTruthy();
     expect(screen.queryByText("balance")).toBeNull();
   });
 
@@ -147,9 +148,9 @@ describe("StatusBar quota display", () => {
         },
       } as Settings,
       codexQuota: null,
-      codexQuotaReason: "401 Unauthorized from https://chatgpt.com/backend-api/wham/usage",
+      codexQuotaReason: "failed to start codex app-server: spawn codex ENOENT",
     });
-    expect(screen.getByTitle(/unavailable right now/)).toBeTruthy();
-    expect(screen.getByTitle(/401 Unauthorized/)).toBeTruthy();
+    expect(screen.getByTitle(/install the Codex CLI/)).toBeTruthy();
+    expect(screen.getByTitle(/spawn codex ENOENT/)).toBeTruthy();
   });
 });

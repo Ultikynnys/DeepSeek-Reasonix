@@ -18,8 +18,8 @@ import {
   DEFAULT_CONTEXT_TOKENS,
   type SessionStats,
 } from "./telemetry/stats.js";
-import { countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
-import type { ChatMessage, ToolSpec } from "./types.js";
+import { IMAGE_DETAIL_LOW_TOKENS, countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
+import type { ChatMessage, ToolSpec, UserContentPart } from "./types.js";
 
 function extractPinnedConstraints(systemPrompt: string): string {
   // matchAll because the system prompt can carry multiple blocks under the same
@@ -132,7 +132,18 @@ export interface FoldResult {
 // thinking-mode sessions. No chat-template wrapper here — that would
 // double-count.
 function countMessageTokens(m: ChatMessage): number {
-  let n = countTokensBounded(typeof m.content === "string" ? m.content : "");
+  let n = 0;
+  if (typeof m.content === "string") {
+    n += countTokensBounded(m.content);
+  } else if (Array.isArray(m.content)) {
+    for (const part of m.content) {
+      if (part.type === "text") {
+        n += countTokensBounded(part.text);
+      } else if (part.type === "image_url") {
+        n += IMAGE_DETAIL_LOW_TOKENS;
+      }
+    }
+  }
   if (m.role === "assistant") {
     if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
       n += countTokensBounded(JSON.stringify(m.tool_calls));
@@ -154,6 +165,17 @@ function buildFoldSummaryInstruction(pinnedSkillNames: string[]): string {
   if (pinnedSkillNames.length === 0) return base;
   const list = pinnedSkillNames.map((n) => `"${n}"`).join(", ");
   return `${base} The following skill memos are pinned verbatim and appended after your summary — do NOT quote or paraphrase their bodies: ${list}.`;
+}
+
+/** The fold summarizer runs on a DeepSeek model (deepseek-v4-flash), which
+ *  rejects OpenAI image content parts (400) — collapse them to a text
+ *  placeholder so a session with image attachments can still fold. */
+function contentPartsToTextForDeepSeek(parts: UserContentPart[]): string {
+  const text = parts
+    .map((p) => (p.type === "text" ? p.text : "[image attached]"))
+    .filter((s) => s.length > 0)
+    .join("\n");
+  return text || "[image attached]";
 }
 
 // Dedupe by name, last invocation wins. Read-only — leaves head bytes unchanged so the
@@ -500,10 +522,16 @@ export class ContextManager {
     const fewShots = this.deps.getFewShots?.() ?? [];
     const tools = this.deps.getToolSpecs?.() ?? [];
     const instruction = buildFoldSummaryInstruction(pinnedSkillNames);
+    // The fold summarizer runs on a DeepSeek model (deepseek-v4-flash), which
+    // rejects OpenAI image content parts (400) — collapse them to a text
+    // placeholder so a session with image attachments can still fold.
+    const foldSafe = healed.map((m) =>
+      Array.isArray(m.content) ? { ...m, content: contentPartsToTextForDeepSeek(m.content) } : m,
+    );
     const messages: ChatMessage[] = [
       { role: "system", content: agentSystem },
       ...fewShots.map((m) => ({ ...m })),
-      ...healed,
+      ...foldSafe,
       { role: "user", content: instruction },
     ];
     // Deliberately NOT wired to the turn's abort signal: compaction is

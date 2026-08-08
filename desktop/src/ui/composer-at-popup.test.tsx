@@ -160,4 +160,56 @@ describe("desktop Composer @ popup", () => {
 
     expect(container.querySelector(".popup-list.at-popup-list")).not.toBeNull();
   });
+
+  it("routes a mentioned image file to onPickImage when the model is image-capable", async () => {
+    const onPickImage = vi.fn();
+    const setDraft = vi.fn();
+    const { container, rerender, onMentionQuery } = renderComposer({
+      imageCapable: true,
+      onPickImage,
+      setDraft,
+    });
+    const textarea = container.querySelector("textarea");
+    if (!textarea) throw new Error("missing textarea");
+
+    fireEvent.change(textarea, { target: { value: "@sho" } });
+    await waitFor(() => expect(onMentionQuery).toHaveBeenCalled());
+    const nonce = onMentionQuery.mock.calls[0]?.[1] as number;
+
+    rerender(
+      <Composer
+        draft="@sho"
+        setDraft={setDraft}
+        onSend={vi.fn()}
+        onAbort={vi.fn()}
+        disabled={false}
+        busy={false}
+        modelLabel="gpt-5.6-sol"
+        reasoningEffort="high"
+        onModelChange={vi.fn()}
+        onEffortChange={vi.fn()}
+        editMode="review"
+        onEditModeChange={vi.fn()}
+        textareaRef={createRef<HTMLTextAreaElement>()}
+        slashCommands={[]}
+        onMentionQuery={onMentionQuery}
+        onMentionPreview={vi.fn()}
+        onMentionPicked={vi.fn()}
+        mentionResults={{ nonce, query: "sho", results: ["assets/shot.png"] }}
+        workspaceDir="/repo"
+        imageCapable
+        onPickImage={onPickImage}
+      />,
+    );
+
+    // Typing already exercised setDraft — clear so the click's effect is
+    // isolated: the image mention must attach, not insert @text.
+    setDraft.mockClear();
+    fireEvent.click(container.querySelectorAll(".popup-item")[0]!);
+
+    // The workspace-relative mention resolves against the composer workspaceDir
+    // and attaches as a vision pending image — no @text, no draft change.
+    expect(onPickImage).toHaveBeenCalledWith("/repo/assets/shot.png");
+    expect(setDraft).not.toHaveBeenCalled();
+  });
 });

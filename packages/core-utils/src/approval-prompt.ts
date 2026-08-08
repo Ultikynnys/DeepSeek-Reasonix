@@ -21,13 +21,7 @@ import type {
   RevisionVerdict,
 } from "./permission-types.js";
 
-export type ApprovalPromptKind =
-  | "shell"
-  | "path"
-  | "plan"
-  | "checkpoint"
-  | "revision"
-  | "choice";
+export type ApprovalPromptKind = "shell" | "path" | "plan" | "checkpoint" | "revision" | "choice";
 
 export type ApprovalTone = "warn" | "error" | "info" | "accent";
 
@@ -100,13 +94,8 @@ function shellPrompt(
   const command = String(payload.command ?? "");
   const cwd = payload.cwd ? String(payload.cwd) : undefined;
   const timeoutSec =
-    !isBackground && typeof payload.timeoutSec === "number"
-      ? payload.timeoutSec
-      : undefined;
-  const waitSec =
-    isBackground && typeof payload.waitSec === "number"
-      ? payload.waitSec
-      : undefined;
+    !isBackground && typeof payload.timeoutSec === "number" ? payload.timeoutSec : undefined;
+  const waitSec = isBackground && typeof payload.waitSec === "number" ? payload.waitSec : undefined;
   const prefix = derivePrefix(command);
 
   const meta: Record<string, string> = {};
@@ -147,10 +136,7 @@ function shellPrompt(
   };
 }
 
-function pathPrompt(
-  id: number,
-  payload: Record<string, unknown>,
-): ApprovalPrompt {
+function pathPrompt(id: number, payload: Record<string, unknown>): ApprovalPrompt {
   const path = String(payload.path ?? "");
   const intent = payload.intent === "write" ? "write" : "read";
   const toolName = String(payload.toolName ?? "");
@@ -193,10 +179,7 @@ function pathPrompt(
   };
 }
 
-function planPrompt(
-  id: number,
-  payload: Record<string, unknown>,
-): ApprovalPrompt {
+function planPrompt(id: number, payload: Record<string, unknown>): ApprovalPrompt {
   const plan = String(payload.plan ?? "");
   const summary = payload.summary ? String(payload.summary) : undefined;
   const steps = Array.isArray(payload.steps) ? payload.steps : [];
@@ -221,15 +204,11 @@ function planPrompt(
   };
 }
 
-function checkpointPrompt(
-  id: number,
-  payload: Record<string, unknown>,
-): ApprovalPrompt {
+function checkpointPrompt(id: number, payload: Record<string, unknown>): ApprovalPrompt {
   const titleText = String(payload.title ?? "step complete");
   const result = String(payload.result ?? "");
   const notes = payload.notes ? String(payload.notes) : undefined;
-  const completed =
-    typeof payload.completed === "number" ? payload.completed : 0;
+  const completed = typeof payload.completed === "number" ? payload.completed : 0;
   const total = typeof payload.total === "number" ? payload.total : 0;
 
   const meta: Record<string, string> = {};
@@ -254,14 +233,9 @@ function checkpointPrompt(
   };
 }
 
-function revisionPrompt(
-  id: number,
-  payload: Record<string, unknown>,
-): ApprovalPrompt {
+function revisionPrompt(id: number, payload: Record<string, unknown>): ApprovalPrompt {
   const reason = String(payload.reason ?? "");
-  const remainingSteps = Array.isArray(payload.remainingSteps)
-    ? payload.remainingSteps
-    : [];
+  const remainingSteps = Array.isArray(payload.remainingSteps) ? payload.remainingSteps : [];
   const summary = payload.summary ? String(payload.summary) : undefined;
   const subtitle = summary ?? (reason.length > 80 ? `${reason.slice(0, 80)}…` : reason);
 
@@ -283,10 +257,7 @@ function revisionPrompt(
   };
 }
 
-function choicePrompt(
-  id: number,
-  payload: Record<string, unknown>,
-): ApprovalPrompt {
+function choicePrompt(id: number, payload: Record<string, unknown>): ApprovalPrompt {
   const question = String(payload.question ?? "Choose an option");
   const rawOptions = Array.isArray(payload.options) ? payload.options : [];
   const allowCustom = payload.allowCustom !== false;
@@ -317,12 +288,7 @@ export function resolveApprovalPrompt(
   prompt: ApprovalPrompt,
   actionId: string,
   secondaryInput?: string,
-):
-  | ConfirmationChoice
-  | PlanVerdict
-  | CheckpointVerdict
-  | RevisionVerdict
-  | ChoiceVerdict {
+): ConfirmationChoice | PlanVerdict | CheckpointVerdict | RevisionVerdict | ChoiceVerdict {
   const action = prompt.actions.find((a) => a.id === actionId);
 
   // Fallback when the action is missing or unrecognised — return the safest
@@ -368,12 +334,7 @@ export function resolveApprovalPrompt(
 
 function safeDefaultForKind(
   kind: ApprovalPromptKind,
-):
-  | ConfirmationChoice
-  | PlanVerdict
-  | CheckpointVerdict
-  | RevisionVerdict
-  | ChoiceVerdict {
+): ConfirmationChoice | PlanVerdict | CheckpointVerdict | RevisionVerdict | ChoiceVerdict {
   switch (kind) {
     case "shell":
     case "path":

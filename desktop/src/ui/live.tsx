@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { I } from "../icons";
 import { t, useLang } from "../i18n";
+import { I } from "../icons";
 
 export function fmtElapsed(ms: number): string {
   const s = ms / 1000;
@@ -38,11 +38,7 @@ export function ThinkingPill({
   elapsedMs: number;
 }) {
   const color =
-    phase === "queued"
-      ? "var(--muted)"
-      : phase === "tool"
-        ? "var(--warning)"
-        : "var(--accent)";
+    phase === "queued" ? "var(--muted)" : phase === "tool" ? "var(--warning)" : "var(--accent)";
   return (
     <div className="thinking">
       <span className="dots" style={{ color }}>
@@ -66,6 +62,7 @@ export function LiveReasoning({ lines }: { lines: string[] }) {
         <span className="dot" /> {t("live.reasoning")}
       </div>
       {lines.map((line, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: reasoning stream is append-only; order never changes
         <div key={i}>
           {line}
           {i === lines.length - 1 ? <span className="stream-caret" /> : null}
@@ -88,7 +85,15 @@ export function ToolRunningCard({
 }) {
   useLang();
   const ic =
-    kind === "shell" ? <I.terminal size={12} /> : kind === "fetch" ? <I.globe size={12} /> : kind === "search" ? <I.search size={12} /> : <I.wrench size={12} />;
+    kind === "shell" ? (
+      <I.terminal size={12} />
+    ) : kind === "fetch" ? (
+      <I.globe size={12} />
+    ) : kind === "search" ? (
+      <I.search size={12} />
+    ) : (
+      <I.wrench size={12} />
+    );
   return (
     <div className="skel-card">
       <div className="h">
@@ -96,13 +101,19 @@ export function ToolRunningCard({
         <span className="kind">{kind}</span>
         <span style={{ color: "var(--fg)", fontWeight: 500 }}>{name}</span>
         <span className="grow" />
-        <span className="spin-meta" role="img" aria-label={t("live.running")} title={t("live.running")} />
+        <span
+          className="spin-meta"
+          role="img"
+          aria-label={t("live.running")}
+          title={t("live.running")}
+        />
         <span className="timer">{fmtElapsed(elapsedMs)}</span>
       </div>
       {logLines && logLines.length > 0 ? (
         <div className="live-log">
           {logLines.map((ln, i) => (
             <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: render-time snapshot; animation stagger needs the index anyway
               key={i}
               className={`line ${ln.tone ?? ""}`}
               style={{ animationDelay: `${i * 0.25}s` }}

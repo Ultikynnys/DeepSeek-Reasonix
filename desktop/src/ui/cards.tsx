@@ -1,7 +1,7 @@
-import { memo, useContext, useMemo, useState, type ReactNode } from "react";
-import { I } from "../icons";
+import { type ReactNode, memo, useContext, useMemo, useState } from "react";
 import { Markdown, WorkspaceContext, openWithEditor, resolveAgainstWorkspace } from "../Markdown";
 import { t, useLang } from "../i18n";
+import { I } from "../icons";
 import { Shortcut } from "./shortcut";
 
 type Tone = "default" | "success" | "warning" | "danger" | "accent" | "violet";
@@ -121,15 +121,25 @@ export type PlanItem = {
   note?: string;
 };
 
-function derivePlanBadge(items: PlanItem[]): { state: "running" | "done" | "failed" | "waiting" | "blocked"; label: string } {
-  if (items.some((x) => x.status === "failed")) return { state: "failed", label: t("planBadge.failed") };
-  if (items.some((x) => x.status === "blocked")) return { state: "blocked", label: t("planBadge.blocked") };
-  if (items.some((x) => x.status === "active")) return { state: "running", label: t("planBadge.running") };
-  if (items.length > 0 && items.every((x) => x.status === "done")) return { state: "done", label: t("planBadge.done") };
+function derivePlanBadge(items: PlanItem[]): {
+  state: "running" | "done" | "failed" | "waiting" | "blocked";
+  label: string;
+} {
+  if (items.some((x) => x.status === "failed"))
+    return { state: "failed", label: t("planBadge.failed") };
+  if (items.some((x) => x.status === "blocked"))
+    return { state: "blocked", label: t("planBadge.blocked") };
+  if (items.some((x) => x.status === "active"))
+    return { state: "running", label: t("planBadge.running") };
+  if (items.length > 0 && items.every((x) => x.status === "done"))
+    return { state: "done", label: t("planBadge.done") };
   return { state: "waiting", label: t("planBadge.pending") };
 }
 
-function StatusIcon({ state, label }: { state: "running" | "done" | "failed" | "waiting" | "blocked"; label: string }) {
+function StatusIcon({
+  state,
+  label,
+}: { state: "running" | "done" | "failed" | "waiting" | "blocked"; label: string }) {
   switch (state) {
     case "running":
       return <span className="spin-meta" role="img" aria-label={label} title={label} />;
@@ -178,7 +188,9 @@ export function PlanCardView({ items, title }: { items: PlanItem[]; title?: stri
                 </div>
               ) : null}
             </div>
-            <span className="stat">{it.status === "active" ? <span className="spin" /> : null}</span>
+            <span className="stat">
+              {it.status === "active" ? <span className="spin" /> : null}
+            </span>
           </li>
         ))}
       </ul>
@@ -187,6 +199,31 @@ export function PlanCardView({ items, title }: { items: PlanItem[]; title?: stri
 }
 
 // ---- Reasoning ----
+
+/** Render `code` and **bold** fragments from model reasoning as React nodes
+ *  (no dangerouslySetInnerHTML — the text is model output, not trusted HTML). */
+function inlineReasoningNodes(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  const re = /`([^`]+)`|\*\*([^*]+)\*\*/g;
+  let last = 0;
+  let n = 0;
+  for (const m of text.matchAll(re)) {
+    if (m.index! > last) out.push(text.slice(last, m.index!));
+    out.push(
+      m[1] !== undefined ? (
+        <span className="hl" key={n}>
+          {m[1]}
+        </span>
+      ) : (
+        <strong key={n}>{m[2]}</strong>
+      ),
+    );
+    n += 1;
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
 
 export function ReasoningCard({
   text,
@@ -230,14 +267,8 @@ export function ReasoningCard({
       <div className="reason">
         <div className="stream">
           {text.split(/\n\n+/).map((para, i) => (
-            <p
-              key={i}
-              dangerouslySetInnerHTML={{
-                __html: para
-                  .replace(/`([^`]+)`/g, '<span class="hl">$1</span>')
-                  .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>"),
-              }}
-            />
+            // biome-ignore lint/suspicious/noArrayIndexKey: static paragraph snapshot, no reordering
+            <p key={i}>{inlineReasoningNodes(para)}</p>
           ))}
         </div>
         {model || tokens !== undefined ? (
@@ -317,16 +348,19 @@ export function ShellCard({
             {output.split("\n").map((ln, i) => {
               if (ln.startsWith(" ✓") || ln.startsWith("✓"))
                 return (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: static output snapshot
                   <div key={i}>
                     <span className="ok">{ln}</span>
                   </div>
                 );
               if (ln.startsWith(" ✗") || ln.startsWith("✗") || /error/i.test(ln))
                 return (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: static output snapshot
                   <div key={i}>
                     <span className="err">{ln}</span>
                   </div>
                 );
+              // biome-ignore lint/suspicious/noArrayIndexKey: static output snapshot
               return <div key={i}>{ln}</div>;
             })}
           </pre>
@@ -449,7 +483,9 @@ export function CompactionCard({
           ) : null}
         </span>
       ) : null}
-      {!running && reason === "user" ? <span className="meta-label">{t("cards.compactionManual")}</span> : null}
+      {!running && reason === "user" ? (
+        <span className="meta-label">{t("cards.compactionManual")}</span>
+      ) : null}
     </>
   );
   const body = running ? (
@@ -671,15 +707,14 @@ export function DiffCard({
           )}
         </>
       }
-      headRight={
-        <OpenFileButton path={filename} line={openLine} label={t("cards.openInEditor")} />
-      }
+      headRight={<OpenFileButton path={filename} line={openLine} label={t("cards.openInEditor")} />}
     >
       <div className="diff">
         <div className="lines">
           {lines.map((ln, i) => {
             if (ln.t === "hunk")
               return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: static diff snapshot
                 <div key={i} className="ln hunk">
                   <span className="code">{ln.s}</span>
                 </div>
@@ -688,6 +723,7 @@ export function DiffCard({
             const l = ln.t === "ctx" ? ln.l : ln.t === "rm" ? ln.l : undefined;
             const r = ln.t === "ctx" ? ln.r : ln.t === "add" ? ln.r : undefined;
             return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static diff snapshot
               <div key={i} className={`ln ${cls}`}>
                 <span className="num">{l ?? ""}</span>
                 <span className="num">{r ?? ""}</span>
@@ -725,7 +761,11 @@ export function DiffCard({
 
 // ---- Error ----
 
-export function ErrorCard({ message, hint, code }: { message: string; hint?: ReactNode; code?: string }) {
+export function ErrorCard({
+  message,
+  hint,
+  code,
+}: { message: string; hint?: ReactNode; code?: string }) {
   useLang();
   return (
     <Card
@@ -758,13 +798,15 @@ export function WebSearchCard({ query, results }: { query: string; results: Sear
       meta={
         <>
           <span>"{query}"</span>
-          <span className="pill-tag ok">{results.length} {t("cards.hits")}</span>
+          <span className="pill-tag ok">
+            {results.length} {t("cards.hits")}
+          </span>
         </>
       }
     >
       <div className="search-results">
-        {results.map((r, i) => (
-          <div className="search-result" key={i}>
+        {results.map((r) => (
+          <div className="search-result" key={r.url}>
             <div className="url">
               <span className="favicon" />
               <span>{r.url}</span>
@@ -820,8 +862,8 @@ export function SubagentCard({
       }
     >
       <div className="sub-card">
-        {children.map((c, i) => (
-          <div className="sub-row" key={i}>
+        {children.map((c) => (
+          <div className="sub-row" key={`${c.avatar}-${c.what}-${c.role}`}>
             <span className="av">{c.avatar}</span>
             <div className="what">
               <div>{c.what}</div>
@@ -853,10 +895,15 @@ export function MemoryCard({ rows }: { rows: MemRow[] }) {
       icon={<I.bookmark size={12} />}
       kind="memory"
       name={t("cards.memoryName")}
-      meta={<span>+ {rows.length} {t("cards.memoryCountSuffix")}</span>}
+      meta={
+        <span>
+          + {rows.length} {t("cards.memoryCountSuffix")}
+        </span>
+      }
     >
       <div className="mem">
         {rows.map((m, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: memory rows are a static snapshot (texts can repeat)
           <div className="mem-row" key={i}>
             <span className="scope">{m.scope}</span>
             <span className="txt">{m.txt}</span>

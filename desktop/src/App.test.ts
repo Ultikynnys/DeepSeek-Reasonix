@@ -483,15 +483,15 @@ describe("desktop thread layout", () => {
     const side = 244;
     const ctx = 320;
 
-    expect(
-      getThreadMaxWidth({ viewportWidth: 1000, visibleSide: side, visibleCtx: ctx }),
-    ).toBe(580);
-    expect(
-      getThreadMaxWidth({ viewportWidth: 1400, visibleSide: side, visibleCtx: ctx }),
-    ).toBe(756);
-    expect(
-      getThreadMaxWidth({ viewportWidth: 1800, visibleSide: side, visibleCtx: ctx }),
-    ).toBe(1120);
+    expect(getThreadMaxWidth({ viewportWidth: 1000, visibleSide: side, visibleCtx: ctx })).toBe(
+      580,
+    );
+    expect(getThreadMaxWidth({ viewportWidth: 1400, visibleSide: side, visibleCtx: ctx })).toBe(
+      756,
+    );
+    expect(getThreadMaxWidth({ viewportWidth: 1800, visibleSide: side, visibleCtx: ctx })).toBe(
+      1120,
+    );
   });
 });
 
@@ -566,9 +566,11 @@ describe("Desktop App reducer — compaction card lifecycle", () => {
     const first = next.messages[1];
     const last = next.messages[3];
     expect(first?.kind === "assistant" && first.segments.length).toBe(1);
-    expect(
-      last?.kind === "assistant" && last.segments.at(-1),
-    ).toMatchObject({ kind: "compaction", id: "compaction-last", state: "running" });
+    expect(last?.kind === "assistant" && last.segments.at(-1)).toMatchObject({
+      kind: "compaction",
+      id: "compaction-last",
+      state: "running",
+    });
   });
 
   it("creates an assistant message when no assistant exists (idle /compact)", () => {
@@ -585,9 +587,12 @@ describe("Desktop App reducer — compaction card lifecycle", () => {
     });
     expect(next.messages).toHaveLength(1);
     expect(next.messages[0]?.kind).toBe("assistant");
-    expect(
-      next.messages[0]?.kind === "assistant" && next.messages[0].segments[0],
-    ).toMatchObject({ kind: "compaction", id: "compaction-u1", state: "running", reason: "user" });
+    expect(next.messages[0]?.kind === "assistant" && next.messages[0].segments[0]).toMatchObject({
+      kind: "compaction",
+      id: "compaction-u1",
+      state: "running",
+      reason: "user",
+    });
   });
 
   it("fills the card on compaction.finished — done state carries the fold numbers", () => {
@@ -597,7 +602,14 @@ describe("Desktop App reducer — compaction card lifecycle", () => {
         {
           kind: "assistant" as const,
           turn: 1,
-          segments: [{ kind: "compaction" as const, id: "compaction-1", state: "running" as const, reason: "auto-context-pressure" as const }],
+          segments: [
+            {
+              kind: "compaction" as const,
+              id: "compaction-1",
+              state: "running" as const,
+              reason: "auto-context-pressure" as const,
+            },
+          ],
           pending: false,
         },
       ],
@@ -617,8 +629,7 @@ describe("Desktop App reducer — compaction card lifecycle", () => {
         summary: "recap",
       },
     });
-    const seg =
-      next.messages[0]?.kind === "assistant" ? next.messages[0].segments[0] : undefined;
+    const seg = next.messages[0]?.kind === "assistant" ? next.messages[0].segments[0] : undefined;
     expect(seg).toMatchObject({
       kind: "compaction",
       state: "done",
@@ -637,8 +648,18 @@ describe("Desktop App reducer — compaction card lifecycle", () => {
           kind: "assistant" as const,
           turn: 1,
           segments: [
-            { kind: "compaction" as const, id: "c-1", state: "running" as const, reason: "user" as const },
-            { kind: "compaction" as const, id: "c-2", state: "running" as const, reason: "auto-context-pressure" as const },
+            {
+              kind: "compaction" as const,
+              id: "c-1",
+              state: "running" as const,
+              reason: "user" as const,
+            },
+            {
+              kind: "compaction" as const,
+              id: "c-2",
+              state: "running" as const,
+              reason: "auto-context-pressure" as const,
+            },
           ],
           pending: false,
         },
@@ -674,7 +695,12 @@ describe("Desktop App reducer — compaction card lifecycle", () => {
       },
     });
     const segs = next2.messages[0]?.kind === "assistant" ? next2.messages[0].segments : [];
-    expect(segs[0]).toMatchObject({ kind: "compaction", id: "c-1", state: "failed", error: "summary request timed out" });
+    expect(segs[0]).toMatchObject({
+      kind: "compaction",
+      id: "c-1",
+      state: "failed",
+      error: "summary request timed out",
+    });
     expect(segs[1]).toMatchObject({ kind: "compaction", id: "c-2", state: "idle" });
   });
 });
@@ -1088,5 +1114,65 @@ describe("Desktop App reducer — OpenAI OAuth flow state", () => {
     const state = { ...initialState(), oauthWaiting: true };
     const next = reduce(state, { t: "oauth_waiting", waiting: false });
     expect(next.oauthWaiting).toBe(false);
+  });
+});
+
+describe("Desktop App reducer — image attachments", () => {
+  it("send_user with images attaches them to the optimistic user message", () => {
+    const next = reduce(initialState(), {
+      t: "send_user",
+      text: "what does this show?",
+      clientId: "c-img-1",
+      images: ["data:image/png;base64,AAAA"],
+    });
+    const user = next.messages.find((m) => m.kind === "user");
+    expect(user).toMatchObject({
+      kind: "user",
+      text: "what does this show?",
+      clientId: "c-img-1",
+      images: ["data:image/png;base64,AAAA"],
+    });
+  });
+
+  it("send_user without images omits the images field", () => {
+    const next = reduce(initialState(), { t: "send_user", text: "hi", clientId: "c-2" });
+    const user = next.messages.find((m) => m.kind === "user");
+    expect(user).toMatchObject({ kind: "user", text: "hi" });
+    expect(user).not.toHaveProperty("images");
+  });
+
+  it("$session_loaded maps user images through to the thread", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$session_loaded",
+        name: "sess-img",
+        messages: [
+          {
+            kind: "user",
+            text: "what does this show?",
+            images: ["data:image/png;base64,AAAA"],
+          },
+          {
+            kind: "assistant",
+            turn: 1,
+            segments: [{ kind: "text", text: "a chart" }],
+            pending: false,
+          },
+        ],
+        carryover: {
+          totalCostUsd: 0,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          totalCompletionTokens: 0,
+        },
+      },
+    });
+    const user = next.messages.find((m) => m.kind === "user");
+    expect(user).toMatchObject({
+      kind: "user",
+      text: "what does this show?",
+      images: ["data:image/png;base64,AAAA"],
+    });
   });
 });

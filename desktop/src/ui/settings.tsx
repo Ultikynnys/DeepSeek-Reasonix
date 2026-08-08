@@ -11,10 +11,10 @@ import type {
   SkillInfo,
 } from "../protocol";
 import {
+  type QQDesktopSettingsState,
   describeQQRowSummary,
   getQQConnectIntent,
   getQQStatusLabel,
-  type QQDesktopSettingsState,
 } from "../qq-settings";
 import {
   FONT_FAMILY,
@@ -27,7 +27,25 @@ import {
   type ThemeStyle,
   themeForStyle,
 } from "../theme";
+import { activationHandler, escapeHandler } from "./keyboard";
 import { Shortcut, type ShortcutKey } from "./shortcut";
+
+/** Render i18n hint strings that embed `<code>…</code>` tags as styled fragments
+ *  (no dangerouslySetInnerHTML — the markup is translator-authored, but React nodes keep it static). */
+function hintNodes(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  const re = /<code>([^<]+)<\/code>/g;
+  let last = 0;
+  let n = 0;
+  for (const m of text.matchAll(re)) {
+    if (m.index! > last) out.push(text.slice(last, m.index!));
+    out.push(<code key={n}>{m[1]}</code>);
+    n += 1;
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
 
 export type PageId =
   | "general"
@@ -135,7 +153,12 @@ export function SettingsModal({
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
   onReadMemory: (path: string) => void;
-  onWriteMemory: (scope: "global" | "project", name: string, description: string, body: string) => void;
+  onWriteMemory: (
+    scope: "global" | "project",
+    name: string,
+    description: string,
+    body: string,
+  ) => void;
   onDeleteMemory: (path: string) => void;
   onExportMemories: () => void;
   onImportMemories: (json: string) => void;
@@ -155,8 +178,17 @@ export function SettingsModal({
   }, [onClose]);
   const currentMeta = PAGE_META.find((p) => p.id === page) ?? PAGE_META[0]!;
   return (
-    <div className="settings-mask" onClick={onClose}>
-      <div className="settings" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="settings-mask"
+      onClick={onClose}
+      onKeyDown={escapeHandler(onClose)}
+      tabIndex={-1}
+    >
+      <div
+        className="settings"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
         <nav className="settings-side">
           <div className="sg">{t("settings.title")}</div>
           {PAGE_META.map((p) => (
@@ -165,6 +197,7 @@ export function SettingsModal({
               className="row"
               data-active={page === p.id}
               onClick={() => setPage(p.id)}
+              onKeyDown={activationHandler(() => setPage(p.id))}
             >
               <span className="ico">{I[p.icon]({ size: 13 })}</span>
               <span>{t(`settings.page${p.id[0]!.toUpperCase()}${p.id.slice(1)}Label` as any)}</span>
@@ -324,7 +357,7 @@ export function QQChannelSection({
     setAppId(current.appId ?? "");
     setAppSecret(current.appSecret ?? "");
     setSandbox(current.sandbox ?? true);
-  }, [current.appId, current.appSecret, current.sandbox, configureOpen]);
+  }, [current.appId, current.appSecret, current.sandbox]);
 
   const savePatch = { appId, appSecret, sandbox };
 
@@ -649,7 +682,12 @@ function PageGeneral({
           </div>
           <div className="seg-ctrl">
             {getSupportedLangs().map((code) => (
-              <button type="button" key={code} data-on={lang === code} onClick={() => setLang(code)}>
+              <button
+                type="button"
+                key={code}
+                data-on={lang === code}
+                onClick={() => setLang(code)}
+              >
                 {getLangLabel(code)}
               </button>
             ))}
@@ -763,7 +801,13 @@ function PageGeneral({
 
 const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
   engine: "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
-  patchKey: "metasoApiKey" | "tavilyApiKey" | "perplexityApiKey" | "exaApiKey" | "braveApiKey" | "ollamaApiKey";
+  patchKey:
+    | "metasoApiKey"
+    | "tavilyApiKey"
+    | "perplexityApiKey"
+    | "exaApiKey"
+    | "braveApiKey"
+    | "ollamaApiKey";
   signupUrl: string;
 }> = [
   { engine: "metaso", patchKey: "metasoApiKey", signupUrl: "https://metaso.cn/settings/api" },
@@ -844,7 +888,13 @@ function WebSearchApiKeyRow({
   onSave,
 }: {
   engine: "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
-  patchKey: "metasoApiKey" | "tavilyApiKey" | "perplexityApiKey" | "exaApiKey" | "braveApiKey" | "ollamaApiKey";
+  patchKey:
+    | "metasoApiKey"
+    | "tavilyApiKey"
+    | "perplexityApiKey"
+    | "exaApiKey"
+    | "braveApiKey"
+    | "ollamaApiKey";
   signupUrl: string;
   prefix?: string;
   onSave: (patch: SettingsPatch) => void;
@@ -997,9 +1047,7 @@ export function OpenAISection({
           <div className="l">
             <div className="n">{t("settings.openaiSignedIn")}</div>
             <div className="h">
-              {account
-                ? t("settings.openaiAccount", { account })
-                : t("settings.openaiTokenSet")}
+              {account ? t("settings.openaiAccount", { account }) : t("settings.openaiTokenSet")}
             </div>
           </div>
           <button type="button" className="btn" onClick={onSignOut} disabled={waiting}>
@@ -1020,12 +1068,7 @@ export function OpenAISection({
                 {t("settings.openaiCancel")}
               </button>
             )}
-            <button
-              type="button"
-              className="btn primary"
-              onClick={onBegin}
-              disabled={waiting}
-            >
+            <button type="button" className="btn primary" onClick={onBegin} disabled={waiting}>
               {t("settings.openaiSignIn")}
             </button>
           </div>
@@ -1126,6 +1169,7 @@ function PageModels({
               className="mcard"
               data-on={settings.model === id}
               onClick={() => onSave({ model: id })}
+              onKeyDown={activationHandler(() => onSave({ model: id }))}
             >
               <div className="nm">{id}</div>
             </div>
@@ -1282,7 +1326,7 @@ function PageMCP({
         <div className="setting-row">
           <div className="l">
             <div className="n">{t("settings.mcpSpecLabel")}</div>
-            <div className="h" dangerouslySetInnerHTML={{ __html: t("settings.mcpSpecFormat") }} />
+            <div className="h">{hintNodes(t("settings.mcpSpecFormat"))}</div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <input
@@ -1360,9 +1404,7 @@ function PageSkills({
                   className="field"
                   style={{ marginLeft: "auto", minWidth: 96 }}
                   value={subagentModels[s.name] ?? "flash"}
-                  onChange={(e) =>
-                    setSubagentModel(s.name, e.target.value as "flash" | "pro")
-                  }
+                  onChange={(e) => setSubagentModel(s.name, e.target.value as "flash" | "pro")}
                   title={t("settings.subagentModelHint")}
                 >
                   <option value="flash">{t("settings.subagentModelFlash")}</option>
@@ -1475,6 +1517,7 @@ function PageMemory({
                 data-active={detail?.path === m.path}
                 key={m.path}
                 onClick={() => onRead(m.path)}
+                onKeyDown={activationHandler(() => onRead(m.path))}
               >
                 <span className="memory-kind">{m.kind.replace("_", " ")}</span>
                 <span className="memory-name">{m.description || m.name}</span>
@@ -1658,6 +1701,7 @@ function PageShortcuts() {
     <section className="section">
       <div className="kbd-grid">
         {rows.map((s, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: static shortcut rows snapshot
           <SectionRow key={i} nm={s.nm} keys={s.keys} />
         ))}
       </div>

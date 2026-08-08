@@ -31,9 +31,16 @@ function follow(url, dest, redirects = 5) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
       const status = res.statusCode ?? 0;
-      if ((status === 301 || status === 302 || status === 307 || status === 308) && res.headers.location && redirects > 0) {
+      if (
+        (status === 301 || status === 302 || status === 307 || status === 308) &&
+        res.headers.location &&
+        redirects > 0
+      ) {
         res.resume();
-        follow(new URL(res.headers.location, url).toString(), dest, redirects - 1).then(resolve, reject);
+        follow(new URL(res.headers.location, url).toString(), dest, redirects - 1).then(
+          resolve,
+          reject,
+        );
         return;
       }
       if (status !== 200) {
@@ -47,7 +54,9 @@ function follow(url, dest, redirects = 5) {
       res.on("data", (chunk) => {
         got += chunk.length;
         if (total && Date.now() - last > 250) {
-          process.stdout.write(`\r  ${(got / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB`);
+          process.stdout.write(
+            `\r  ${(got / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB`,
+          );
           last = Date.now();
         }
       });

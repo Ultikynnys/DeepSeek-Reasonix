@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { I } from "../icons";
 import { t, useLang } from "../i18n";
+import { I } from "../icons";
 import type { JobInfo } from "../protocol";
+import { activationHandler, escapeHandler } from "./keyboard";
 import { Shortcut } from "./shortcut";
 
 export function JobsPop({
@@ -42,8 +43,12 @@ export function JobsPop({
   if (!open) return null;
 
   return (
-    <div className="jobs-mask" onClick={onClose}>
-      <div className="jobs-pop" onClick={(e) => e.stopPropagation()}>
+    <div className="jobs-mask" onClick={onClose} onKeyDown={escapeHandler(onClose)} tabIndex={-1}>
+      <div
+        className="jobs-pop"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
         <div className="jobs-head">
           <span className="ico">
             <I.cpu size={13} />
@@ -97,8 +102,8 @@ export function JobsPop({
             </span>
             <span className="grow" />
             <span>
-              <Shortcut keys={["mod", "J"]} /> {t("jobs.kbToggle")} ·{" "}
-              <Shortcut keys={["esc"]} /> {t("jobs.kbClose")}
+              <Shortcut keys={["mod", "J"]} /> {t("jobs.kbToggle")} · <Shortcut keys={["esc"]} />{" "}
+              {t("jobs.kbClose")}
             </span>
           </div>
         </div>
@@ -132,7 +137,11 @@ function JobRow({
   void tick;
   return (
     <div className="job-row" data-status={job.running ? "running" : "exited"}>
-      <div className="jr-main" onClick={() => setExp((v) => !v)}>
+      <div
+        className="jr-main"
+        onClick={() => setExp((v) => !v)}
+        onKeyDown={activationHandler(() => setExp((v) => !v))}
+      >
         <span className="jr-state">
           {job.running ? (
             <span className="spin" />

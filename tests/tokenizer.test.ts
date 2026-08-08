@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_BOUNDED_TOKENIZE_CHARS,
+  IMAGE_DETAIL_LOW_TOKENS,
   countTokens,
   countTokensBounded,
   encode,
@@ -223,6 +224,20 @@ describe("estimateConversationTokens", () => {
       { role: "user", content: undefined },
     ]);
     expect(n).toBeGreaterThan(0);
+  });
+
+  it("counts OpenAI image_url parts at the 85-token detail:low rate", () => {
+    const textOnly = estimateConversationTokens([{ role: "user", content: "what is this?" }]);
+    const withImage = estimateConversationTokens([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "what is this?" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+        ],
+      },
+    ]);
+    expect(withImage - textOnly).toBe(IMAGE_DETAIL_LOW_TOKENS);
   });
 });
 

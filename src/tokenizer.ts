@@ -6,6 +6,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { LruCache } from "./core/lru.js";
+import type { UserContentPart } from "./types.js";
+
+/** OpenAI bills image_url parts at 85 tokens at detail:"low" — the fixed detail
+ *  level the loop attaches images with (see loop.step). DeepSeek models never
+ *  receive image parts, so this only feeds gpt-* token estimates. */
+export const IMAGE_DETAIL_LOW_TOKENS = 85;
 
 interface AddedToken {
   id: number;
@@ -515,7 +521,7 @@ function cachedBoundedTokens(s: string): number {
 function tokensForMessage(
   m: {
     role?: string;
-    content?: string | null;
+    content?: string | UserContentPart[] | null;
     tool_calls?: unknown;
     reasoning_content?: string | null;
   },
@@ -524,6 +530,14 @@ function tokensForMessage(
   let n = 0;
   if (typeof m.content === "string" && m.content.length > 0) {
     n += cachedBoundedTokens(m.content);
+  } else if (Array.isArray(m.content)) {
+    for (const part of m.content) {
+      if (part.type === "text" && part.text.length > 0) {
+        n += cachedBoundedTokens(part.text);
+      } else if (part.type === "image_url") {
+        n += IMAGE_DETAIL_LOW_TOKENS;
+      }
+    }
   }
   if (m.role === "assistant") {
     if (
@@ -545,7 +559,7 @@ function tokensForMessage(
 export function estimateConversationTokens(
   messages: Array<{
     role?: string;
-    content?: string | null;
+    content?: string | UserContentPart[] | null;
     tool_calls?: unknown;
     tool_call_id?: string;
     reasoning_content?: string | null;
@@ -578,7 +592,7 @@ export function estimateConversationTokens(
 export function estimateRequestTokens(
   messages: Array<{
     role?: string;
-    content?: string | null;
+    content?: string | UserContentPart[] | null;
     tool_calls?: unknown;
     tool_call_id?: string;
     reasoning_content?: string | null;

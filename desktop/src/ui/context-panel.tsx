@@ -7,6 +7,7 @@ import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
+import { activationHandler } from "./keyboard";
 
 type Tab = "files" | "tools" | "memory" | "rules";
 
@@ -44,7 +45,12 @@ export function ContextPanel({
   memoryDetail: MemoryDetail | null;
   memoryResult: { ok: boolean; message: string } | null;
   onReadMemory: (path: string) => void;
-  onWriteMemory: (scope: "global" | "project", name: string, description: string, body: string) => void;
+  onWriteMemory: (
+    scope: "global" | "project",
+    name: string,
+    description: string,
+    body: string,
+  ) => void;
   onDeleteMemory: (path: string) => void;
   onExportMemories: () => void;
   onImportMemories: (json: string) => void;
@@ -69,16 +75,36 @@ export function ContextPanel({
   return (
     <aside className="ctx">
       <div className="ctx-tabs">
-        <div className="ctx-tab" data-active={tab === "files"} onClick={() => setTab("files")}>
+        <div
+          className="ctx-tab"
+          data-active={tab === "files"}
+          onClick={() => setTab("files")}
+          onKeyDown={activationHandler(() => setTab("files"))}
+        >
           {t("contextPanel.filesTab")}
         </div>
-        <div className="ctx-tab" data-active={tab === "tools"} onClick={() => setTab("tools")}>
+        <div
+          className="ctx-tab"
+          data-active={tab === "tools"}
+          onClick={() => setTab("tools")}
+          onKeyDown={activationHandler(() => setTab("tools"))}
+        >
           {t("contextPanel.toolsTab")}
         </div>
-        <div className="ctx-tab" data-active={tab === "memory"} onClick={() => setTab("memory")}>
+        <div
+          className="ctx-tab"
+          data-active={tab === "memory"}
+          onClick={() => setTab("memory")}
+          onKeyDown={activationHandler(() => setTab("memory"))}
+        >
           {t("contextPanel.memoryTab")}
         </div>
-        <div className="ctx-tab" data-active={tab === "rules"} onClick={() => setTab("rules")}>
+        <div
+          className="ctx-tab"
+          data-active={tab === "rules"}
+          onClick={() => setTab("rules")}
+          onKeyDown={activationHandler(() => setTab("rules"))}
+        >
           {t("contextPanel.rulesTab")}
         </div>
       </div>
@@ -88,8 +114,7 @@ export function ContextPanel({
           <div className="h">
             <span>{t("contextPanel.contextTokens")}</span>
             <span className="right">
-              {(reserved + used + cached).toLocaleString()} /{" "}
-              {ctxMax.toLocaleString()}
+              {(reserved + used + cached).toLocaleString()} / {ctxMax.toLocaleString()}
             </span>
           </div>
           <div className="meter">
@@ -259,6 +284,7 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
                 title={n.path}
                 style={{ paddingLeft: 4 + n.depth * 14 }}
                 onClick={() => void openContextFile(n.path, settings)}
+                onKeyDown={activationHandler(() => void openContextFile(n.path, settings))}
               >
                 <span className="ico">
                   <I.file size={12} />
@@ -270,7 +296,11 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
                 <span
                   className="dot"
                   data-s={n.status}
-                  title={n.status === "m" ? t("contextPanel.fileModified") : t("contextPanel.fileInContext")}
+                  title={
+                    n.status === "m"
+                      ? t("contextPanel.fileModified")
+                      : t("contextPanel.fileInContext")
+                  }
                 />
                 <button
                   type="button"
@@ -461,9 +491,12 @@ function CtxMemory({
               data-active={detail?.path === m.path}
               key={m.path}
               onClick={() => onRead(m.path)}
+              onKeyDown={activationHandler(() => onRead(m.path))}
             >
               <span className="scope" data-s={m.scope}>
-                {m.scope === "project" ? t("contextPanel.scopeProject") : t("contextPanel.scopeGlobal")}
+                {m.scope === "project"
+                  ? t("contextPanel.scopeProject")
+                  : t("contextPanel.scopeGlobal")}
               </span>
               <span className="txt">{m.description || m.name}</span>
               <button
@@ -510,7 +543,12 @@ function CtxMemory({
             onChange={(e) => setBody(e.target.value)}
           />
           <div className="mem-composer-actions">
-            <button type="button" className="btn small" disabled={!name.trim() || !body.trim()} onClick={submit}>
+            <button
+              type="button"
+              className="btn small"
+              disabled={!name.trim() || !body.trim()}
+              onClick={submit}
+            >
               {t("contextPanel.saveMemory")}
             </button>
             <button type="button" className="btn small ghost" onClick={() => setComposing(false)}>
@@ -534,13 +572,23 @@ function CtxRules({ settings }: { settings: Settings | null }) {
       ? [{ p: "*", allow: true, desc: t("contextPanel.ruleYolo") }]
       : editMode === "auto"
         ? [
-            { p: "read_file, list_directory, search_files, *", allow: true, desc: t("contextPanel.ruleReadOnly") },
-            { p: "run_command (allowlist)", allow: true, desc: t("contextPanel.ruleShellAllowlist") },
-            { p: "edit_file, write_file, run_command (other)", allow: false, desc: t("contextPanel.ruleWritesAsk") },
+            {
+              p: "read_file, list_directory, search_files, *",
+              allow: true,
+              desc: t("contextPanel.ruleReadOnly"),
+            },
+            {
+              p: "run_command (allowlist)",
+              allow: true,
+              desc: t("contextPanel.ruleShellAllowlist"),
+            },
+            {
+              p: "edit_file, write_file, run_command (other)",
+              allow: false,
+              desc: t("contextPanel.ruleWritesAsk"),
+            },
           ]
-        : [
-            { p: "*", allow: false, desc: t("contextPanel.ruleReview") },
-          ];
+        : [{ p: "*", allow: false, desc: t("contextPanel.ruleReview") }];
   return (
     <div className="ctx-block">
       <div className="h">

@@ -50,8 +50,8 @@ export function Shortcut({
   const mac = isMacPlatform();
   return (
     <span className={["shortcut", className].filter(Boolean).join(" ")}>
-      {keys.map((key, index) => (
-        <kbd key={`${key}-${index}`} data-key={key}>
+      {keys.map((key) => (
+        <kbd key={key} data-key={key}>
           {keyLabel(key, mac)}
         </kbd>
       ))}

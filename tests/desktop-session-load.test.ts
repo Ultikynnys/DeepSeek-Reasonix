@@ -4,13 +4,16 @@ import type { ChatMessage } from "../src/types.js";
 
 type BuildLoadedMessages = (records: ChatMessage[]) => Array<{
   kind: "assistant" | "user";
+  text?: string;
+  images?: string[];
   segments?: Array<{ kind: string; text?: string; args?: string; result?: string }>;
 }>;
 
 describe("desktop session loading", () => {
+  const buildLoadedMessages = (desktopCommand as { buildLoadedMessages?: BuildLoadedMessages })
+    .buildLoadedMessages;
+
   it("elides old heavy assistant segments before sending $session_loaded", () => {
-    const buildLoadedMessages = (desktopCommand as { buildLoadedMessages?: BuildLoadedMessages })
-      .buildLoadedMessages;
     expect(typeof buildLoadedMessages).toBe("function");
 
     const huge = "desktop retained field\n".repeat(900);
@@ -45,5 +48,34 @@ describe("desktop session loading", () => {
     expect(text?.text?.length).toBeLessThan(huge.length / 10);
     expect(tool?.args?.length).toBeLessThan(huge.length / 10);
     expect(tool?.result?.length).toBeLessThan(huge.length / 10);
+  });
+
+  it("extracts text + image data URLs from OpenAI user content arrays", () => {
+    const records: ChatMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "what does this show?" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+        ],
+      },
+    ];
+    const loaded = buildLoadedMessages!(records);
+    const user = loaded[0];
+    expect(user?.kind).toBe("user");
+    if (user?.kind === "user") {
+      expect(user.text).toBe("what does this show?");
+      expect(user.images).toEqual(["data:image/png;base64,AAAA"]);
+    }
+  });
+
+  it("keeps plain-text user records without an images field", () => {
+    const loaded = buildLoadedMessages!([{ role: "user", content: "just text" }]);
+    const user = loaded[0];
+    expect(user?.kind).toBe("user");
+    if (user?.kind === "user") {
+      expect(user.text).toBe("just text");
+      expect(user.images).toBeUndefined();
+    }
   });
 });

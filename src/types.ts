@@ -28,11 +28,18 @@ export interface ToolCall {
   };
 }
 
+/** OpenAI multimodal content part — ChatGPT-family models accept these in
+ *  user messages; DeepSeek models reject them (400), so image parts are
+ *  gated off for non-OpenAI providers before they reach the client. */
+export type UserContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } };
+
 export type Role = "system" | "user" | "assistant" | "tool";
 
 export interface ChatMessage {
   role: Role;
-  content?: string | null;
+  content?: string | UserContentPart[] | null;
   name?: string;
   tool_call_id?: string;
   tool_calls?: ToolCall[];

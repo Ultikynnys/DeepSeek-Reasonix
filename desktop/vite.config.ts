@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { type Plugin, defineConfig } from "vite";
 
@@ -45,8 +45,14 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@reasonix/core-utils/compaction": resolve(__dirname, "../packages/core-utils/src/compaction.ts"),
-      "@reasonix/core-utils/derive-prefix": resolve(__dirname, "../packages/core-utils/src/derive-prefix.ts"),
+      "@reasonix/core-utils/compaction": resolve(
+        __dirname,
+        "../packages/core-utils/src/compaction.ts",
+      ),
+      "@reasonix/core-utils/derive-prefix": resolve(
+        __dirname,
+        "../packages/core-utils/src/derive-prefix.ts",
+      ),
       "@reasonix/core-utils": resolve(__dirname, "../packages/core-utils/src/index.ts"),
     },
   },

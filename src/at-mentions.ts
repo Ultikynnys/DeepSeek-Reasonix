@@ -3,6 +3,7 @@
 import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { AT_MENTION_PATTERN } from "@reasonix/core-utils";
 import { TtlLruCache } from "./core/lru.js";
 import {
   type GitignoreLayer,
@@ -490,8 +491,8 @@ function fuzzySubseqScore(needle: string, target: string): number | null {
   return quality + lengthPenalty;
 }
 
-/** Word-boundary anchor rejects `@` embedded in emails / social handles; trailing `.` stripped before lookup. */
-export const AT_MENTION_PATTERN = /(?<=^|\s)@([\p{L}\p{N}_./\\-]+)/gu;
+/** Re-exported from core-utils — the single source of the mention grammar. */
+export { AT_MENTION_PATTERN };
 
 export interface AtMentionExpansion {
   /** The raw `@path` token as it appeared in the text. */

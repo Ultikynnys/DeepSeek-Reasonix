@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  resolveApprovalPrompt,
-  toApprovalPrompt,
-} from "../src/approval-prompt.js";
+import { resolveApprovalPrompt, toApprovalPrompt } from "../src/approval-prompt.js";
 
 describe("toApprovalPrompt", () => {
   describe("shell (run_command)", () => {
@@ -147,7 +144,11 @@ describe("toApprovalPrompt", () => {
       const p = toApprovalPrompt({
         id: 4,
         kind: "plan_proposed",
-        payload: { plan: "Step 1\nStep 2\nStep 3", summary: "Refactor auth layer", steps: [{}, {}] },
+        payload: {
+          plan: "Step 1\nStep 2\nStep 3",
+          summary: "Refactor auth layer",
+          steps: [{}, {}],
+        },
       });
       expect(p.kind).toBe("plan");
       expect(p.tone).toBe("accent");
@@ -162,7 +163,7 @@ describe("toApprovalPrompt", () => {
         kind: "plan_proposed",
         payload: { plan: "a".repeat(100) },
       });
-      expect(p.subtitle).toBe("a".repeat(80) + "…");
+      expect(p.subtitle).toBe(`${("a").repeat(80)}…`);
     });
 
     it("has approve/refine/cancel actions", () => {

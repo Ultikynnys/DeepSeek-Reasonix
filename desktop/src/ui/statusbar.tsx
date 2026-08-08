@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { I } from "../icons";
-import { t } from "../i18n";
 import type { Balance, Settings, UsageStats } from "../App";
+import { t } from "../i18n";
+import { I } from "../icons";
 import type { CodexQuota, JobInfo } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
+import { activationHandler } from "./keyboard";
 import { localizeShortcutText } from "./shortcut";
 
 const USD_TO_CNY = 7.2;
@@ -118,29 +119,23 @@ export function StatusBar({
   const openaiTab = !!settings?.model?.startsWith("gpt-");
   const quota = codexQuota && openaiTab ? codexQuota : null;
   const showQuota = !!quota;
-  const quotaCurrency = quota?.currency ?? t("statusbar.codexCredits");
-  const quotaLimit = quota?.limit ?? 0;
-  const quotaUsed = quota?.used ?? null;
-  const quotaTurnCost = quota?.turnCost ?? null;
-  // Absolute credit numbers are null when the backend only reported a
-  // percent (wham/usage fallback) — the chip then shows "% left" alone.
-  const quotaLeft =
-    showQuota && quotaUsed !== null && quotaLimit > 0
-      ? Math.max(0, quotaLimit - quotaUsed)
-      : null;
-  const quotaLeftPct = showQuota ? Math.max(0, 100 - (quota?.usedPct ?? 0)) : 0;
-  const quotaTitle = showQuota
-    ? quotaLeft !== null
-      ? t("statusbar.codexQuotaTitle", {
-          left: Math.round(quotaLeft),
-          limit: Math.round(quotaLimit),
-          currency: quotaCurrency,
-        })
-      : t("statusbar.codexQuotaPctTitle", { left: Math.round(quotaLeftPct) })
-    : openaiAuth === "oauth"
-      ? t("statusbar.codexUnavailable")
-      : t("statusbar.codexNoData");
-  // A failed fetch stays diagnosable: append the server/network reason to the tooltip.
+  const quotaWeekly = quota?.weekly ?? null;
+  const quotaFiveHour = quota?.fiveHour ?? null;
+  // Official app-server format: windows carry remainingPercent (100 - usedPercent)
+  // and an ISO resetsAt — the chip shows "% left" + plan, no credit amounts.
+  const quotaLeftPct = quotaWeekly ? Math.round(quotaWeekly.remainingPercent) : 0;
+  const quotaTurnPct = quota?.turnUsedPct ?? null;
+  const quotaTitle = quotaWeekly
+    ? t("statusbar.codexQuotaTitle", {
+        left: quotaLeftPct,
+        resets: quotaWeekly.resetsAt ? new Date(quotaWeekly.resetsAt).toLocaleString() : "—",
+        plan: quota?.plan ?? "ChatGPT",
+      }) +
+      (quotaFiveHour
+        ? `\n${t("statusbar.codexFiveHourTitle", { left: Math.round(quotaFiveHour.remainingPercent) })}`
+        : "")
+    : t("statusbar.codexNoData");
+  // A failed fetch stays diagnosable: append the app-server reason to the tooltip.
   const quotaTitleWithReason =
     !showQuota && codexQuotaReason
       ? `${quotaTitle}\n${t("statusbar.codexReason", { reason: codexQuotaReason })}`
@@ -175,7 +170,9 @@ export function StatusBar({
         />
         <span>{apiHost}</span>
         {authLabel ? <span className="v">{authLabel}</span> : null}
-        <span className="v">{!ready ? t("statusbar.offline") : busy ? t("statusbar.busy") : t("statusbar.online")}</span>
+        <span className="v">
+          {!ready ? t("statusbar.offline") : busy ? t("statusbar.busy") : t("statusbar.online")}
+        </span>
       </span>
       <span className="seg" title={t("statusbar.cacheHit")}>
         <I.zap size={11} style={{ color: "var(--accent)" }} />
@@ -190,23 +187,16 @@ export function StatusBar({
       <span
         className="seg"
         title={
-          quotaTurnCost != null && quotaLimit > 0
-            ? t("statusbar.thisTurnQuotaTitle", {
-                pct: ((quotaTurnCost / quotaLimit) * 100).toFixed(1),
-                credits: quotaTurnCost.toFixed(2),
-                currency: quotaCurrency,
-              })
+          quotaTurnPct != null
+            ? t("statusbar.thisTurnQuotaTitle", { pct: quotaTurnPct.toFixed(1) })
             : undefined
         }
       >
         <I.coin size={11} />
         <span>{t("statusbar.thisTurn")}</span>
         {openaiTab ? (
-          quotaTurnCost != null && quotaLimit > 0 ? (
-            <>
-              <span className="v ok">{((quotaTurnCost / quotaLimit) * 100).toFixed(1)}%</span>
-              <span className="conv">{`${quotaTurnCost.toFixed(2)} ${quotaCurrency}`}</span>
-            </>
+          quotaTurnPct != null ? (
+            <span className="v ok">{quotaTurnPct.toFixed(1)}%</span>
           ) : (
             <span className="v ok">—</span>
           )
@@ -223,6 +213,7 @@ export function StatusBar({
       <span
         className={`seg jobs ${jobsOpen ? "active" : ""}`}
         onClick={onToggleJobs}
+        onKeyDown={onToggleJobs ? activationHandler(onToggleJobs) : undefined}
         title={localizeShortcutText(t("statusbar.jobsTip"))}
       >
         <I.cpu size={11} />
@@ -240,6 +231,11 @@ export function StatusBar({
             const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
             onOpenWorkdir({ bottom: window.innerHeight - r.top + 6, left: r.left });
           }}
+          onKeyDown={activationHandler((e) => {
+            if (!onOpenWorkdir) return;
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            onOpenWorkdir({ bottom: window.innerHeight - r.top + 6, left: r.left });
+          })}
         >
           <I.folder size={11} />
           <span className="v">{settings.workspaceDir.split(/[\\/]/).pop() || "ws"}</span>
@@ -249,6 +245,7 @@ export function StatusBar({
         className="seg"
         title={`model · effort ${settings?.reasoningEffort ?? "high"}`}
         onClick={onOpenSettings}
+        onKeyDown={activationHandler(onOpenSettings)}
       >
         <I.brain size={11} style={{ color: "var(--violet)" }} />
         <span className="v vio">{settings?.model ?? "—"}</span>
@@ -260,19 +257,16 @@ export function StatusBar({
           title={quotaTitleWithReason}
           style={onRefreshCodexQuota ? { cursor: "pointer" } : undefined}
           onClick={onRefreshCodexQuota}
+          onKeyDown={onRefreshCodexQuota ? activationHandler(onRefreshCodexQuota) : undefined}
         >
           <I.coin size={11} style={{ color: "var(--accent)" }} />
           <span>{t("statusbar.codexQuota")}</span>
-          {showQuota ? (
+          {showQuota && quotaWeekly ? (
             <>
               <span className="v acc">
-                {Math.round(quotaLeftPct)}% {t("statusbar.codexLeft")}
+                {quotaLeftPct}% {t("statusbar.codexLeft")}
               </span>
-              {quotaLeft !== null ? (
-                <span className="conv">{`${Math.round(quotaLeft)} / ${Math.round(quotaLimit)}`}</span>
-              ) : (
-                <span className="conv">{quotaCurrency}</span>
-              )}
+              <span className="conv">{quota?.plan ?? "ChatGPT"}</span>
             </>
           ) : codexQuotaRefreshing ? (
             <span className="v acc">{t("statusbar.codexRefreshing")}</span>
@@ -285,6 +279,7 @@ export function StatusBar({
           className="seg"
           title={t("statusbar.switchCurrency")}
           onClick={onToggleCurrency}
+          onKeyDown={activationHandler(onToggleCurrency)}
         >
           <I.coin size={11} />
           <span>{t("statusbar.balance")}</span>
@@ -302,6 +297,7 @@ export function StatusBar({
         className={`seg theme-trigger ${themeOpen ? "active" : ""}`}
         title={t("statusbar.switchTheme")}
         onClick={() => setThemeOpen((open) => !open)}
+        onKeyDown={activationHandler(() => setThemeOpen((open) => !open))}
       >
         {theme === THEME.DARK ? <I.moon size={11} /> : <I.sun size={11} />}
         <span className="v">
@@ -309,7 +305,12 @@ export function StatusBar({
         </span>
       </span>
       {themeOpen ? (
-        <div ref={themePopRef} className="theme-pop" role="menu" aria-label={t("settings.themeStyle")}>
+        <div
+          ref={themePopRef}
+          className="theme-pop"
+          role="menu"
+          aria-label={t("settings.themeStyle")}
+        >
           <div className="theme-pop-head">
             <div className="tt">{t("settings.themeStyle")}</div>
             <div className="ss">{t("statusbar.switchTheme")}</div>

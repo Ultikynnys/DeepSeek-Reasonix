@@ -4,7 +4,14 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { stdin } from "node:process";
 import { createInterface } from "node:readline";
-import { flattenText, toApprovalPrompt } from "@reasonix/core-utils";
+import {
+  MAX_IMAGE_BYTES,
+  flattenText,
+  imageMimeForExtension,
+  scanImageMentions,
+  stripMentionTokens,
+  toApprovalPrompt,
+} from "@reasonix/core-utils";
 import type {
   BalanceEvent,
   BalanceInfoItem,
@@ -50,6 +57,7 @@ import type {
   StepCompletedEvent,
   TabClosedEvent,
   TabOpenedEvent,
+  UserImageAttachment,
 } from "@reasonix/core-utils";
 import {
   type FileWithStats,
@@ -61,6 +69,7 @@ import {
 import { pickPrimaryBalance } from "../../client.js";
 import { codeSystemPrompt } from "../../code/prompt.js";
 import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
+import { fetchCodexQuotaDetailed } from "../../codex-quota.js";
 import {
   DEFAULT_MODEL,
   type DesktopOpenTab,
@@ -167,7 +176,6 @@ import {
 import {
   type OAuthFlow,
   beginOAuthFlow,
-  fetchCodexQuotaDetailed,
   oauthAccount,
   resolveOpenAIToken,
   signOutOpenAI,
@@ -383,6 +391,78 @@ function elideLoadedMessages(messages: LoadedMessage[]): LoadedMessage[] {
   });
 }
 
+/** Clipboard attachments already carry bytes as a data URL; dropped files ship
+ *  a path the daemon reads (the webview has no fs access for arbitrary OS
+ *  paths). Restricted to raster formats OpenAI accepts, size-capped. */
+async function resolveUserImages(
+  attachments: ReadonlyArray<UserImageAttachment>,
+): Promise<string[]> {
+  const out: string[] = [];
+  for (const att of attachments) {
+    if (att.source === "clipboard") {
+      if (!att.dataUrl.startsWith("data:image/")) {
+        throw new Error("clipboard payload is not a data:image URL");
+      }
+      out.push(att.dataUrl);
+      continue;
+    }
+    const stat = statSync(att.path);
+    if (stat.size > MAX_IMAGE_BYTES) {
+      throw new Error(
+        `image too large (${(stat.size / 1024 / 1024).toFixed(1)} MB > ${MAX_IMAGE_BYTES / 1024 / 1024} MB)`,
+      );
+    }
+    const ext = att.path.split(".").pop()?.toLowerCase() ?? "";
+    const mime = imageMimeForExtension(ext);
+    if (!mime) {
+      throw new Error(`unsupported image type ".${ext}" — use PNG, JPEG or WebP`);
+    }
+    const buf = await readFile(att.path);
+    out.push(`data:${mime};base64,${buf.toString("base64")}`);
+  }
+  return out;
+}
+
+/** OpenAI-only: `@path` mentions that resolve to an existing supported image
+ *  become vision attachments (the token is stripped from the text). Non-image
+ *  or missing mentions stay in the text for the model to reach via tools. */
+export async function extractImageMentions(
+  text: string,
+  rootDir: string,
+): Promise<{ text: string; attachments: UserImageAttachment[] }> {
+  const mentions = scanImageMentions(text, (p) => (isAbsolute(p) ? p : join(rootDir, p)));
+  // Existence is a daemon-only check — the webview has no fs access. Mentions
+  // whose files are missing keep their token so the model can investigate.
+  const existing = mentions.filter((m) => existsSync(m.path) && statSync(m.path).isFile());
+  return {
+    text: stripMentionTokens(text, existing),
+    attachments: existing.map((m) => ({ source: "file" as const, path: m.path })),
+  };
+}
+
+/** User records carry plain text for text-only turns and OpenAI content parts
+ *  when images are attached — extract the text and image data URLs for the
+ *  LoadedMessage wire shape. */
+function userLoadedMessage(content: ChatMessage["content"]): {
+  kind: "user";
+  text: string;
+  images?: string[];
+} {
+  if (typeof content === "string" || content === undefined || content === null) {
+    return { kind: "user", text: content ?? "" };
+  }
+  const textParts: string[] = [];
+  const images: string[] = [];
+  for (const part of content) {
+    if (part.type === "text" && part.text.length > 0) {
+      textParts.push(part.text);
+    } else if (part.type === "image_url") {
+      images.push(part.image_url.url);
+    }
+  }
+  return { kind: "user", text: textParts.join("\n"), images: images.length ? images : undefined };
+}
+
 export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
   const out: LoadedMessage[] = [];
   let turn = 0;
@@ -390,7 +470,7 @@ export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
   for (const rec of records) {
     if (rec.role === "system") continue;
     if (rec.role === "user") {
-      out.push({ kind: "user", text: rec.content ?? "" });
+      out.push(userLoadedMessage(rec.content));
       pendingAssistantIdx = -1;
       continue;
     }
@@ -398,7 +478,8 @@ export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
       turn++;
       const segments: LoadedSegment[] = [];
       if (rec.reasoning_content) segments.push({ kind: "reasoning", text: rec.reasoning_content });
-      if (rec.content) segments.push({ kind: "text", text: rec.content });
+      if (typeof rec.content === "string" && rec.content)
+        segments.push({ kind: "text", text: rec.content });
       if (rec.tool_calls) {
         for (let i = 0; i < rec.tool_calls.length; i++) {
           const tc = rec.tool_calls[i];
@@ -423,7 +504,7 @@ export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
       if (!callId) continue;
       const seg = host.segments.find((s) => s.kind === "tool" && s.callId === callId);
       if (seg && seg.kind === "tool") {
-        seg.result = rec.content ?? "";
+        seg.result = typeof rec.content === "string" ? rec.content : "";
         seg.ok = !/error|failed/i.test(seg.result.slice(0, 200));
       }
     }
@@ -555,10 +636,10 @@ async function emitBalance(tab: Tab): Promise<void> {
   );
 }
 
-/** Last API-reported weekly usage — delta to the next fetch = credits consumed since (each $turn_complete refetches). */
-let lastCodexQuotaUsed: number | null = null;
+/** Last API-reported weekly usage — delta to the next fetch = percent points consumed since (each $turn_complete refetches). */
+let lastCodexQuotaUsedPct: number | null = null;
 
-/** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only; `turnCost` = API-reported credits delta since the previous fetch. */
+/** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only; `turnUsedPct` = weekly usedPercent delta since the previous fetch. */
 async function emitCodexQuota(tab: Tab): Promise<void> {
   if (providerForModel(tab.currentModel) !== "openai") return;
   const { quota, reason } = await fetchCodexQuotaDetailed().catch((err) => ({
@@ -566,14 +647,17 @@ async function emitCodexQuota(tab: Tab): Promise<void> {
     reason: (err as Error).message,
   }));
   if (quota) {
-    let turnCost: number | null = null;
-    if (quota.used !== null) {
-      if (lastCodexQuotaUsed !== null && quota.used >= lastCodexQuotaUsed) {
-        turnCost = quota.used - lastCodexQuotaUsed;
+    let turnUsedPct: number | null = null;
+    const weeklyUsedPct = quota.weekly?.usedPercent ?? null;
+    if (weeklyUsedPct !== null) {
+      // Rollover (weekly reset) makes the delta negative — keep the previous
+      // measurement as the baseline and report no turn cost for this fetch.
+      if (lastCodexQuotaUsedPct !== null && weeklyUsedPct >= lastCodexQuotaUsedPct) {
+        turnUsedPct = weeklyUsedPct - lastCodexQuotaUsedPct;
       }
-      lastCodexQuotaUsed = quota.used;
+      lastCodexQuotaUsedPct = weeklyUsedPct;
     }
-    emit({ type: "$codex_quota", quota: { ...quota, turnCost } }, tab.id);
+    emit({ type: "$codex_quota", quota: { ...quota, turnUsedPct } }, tab.id);
     return;
   }
   emit({ type: "$codex_quota", quota: null, ...(reason ? { reason } : {}) }, tab.id);
@@ -1523,7 +1607,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emit({ type: "$tab_closed" }, tab.id);
   }
 
-  async function runTurn(tab: Tab, text: string, fromQQ = false): Promise<void> {
+  async function runTurn(tab: Tab, text: string, fromQQ = false, images?: string[]): Promise<void> {
     if (!tab.runtime) return;
     if (!tabHasCredential(tab)) {
       const openai = providerForModel(tab.currentModel) === "openai";
@@ -1539,6 +1623,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     const rt = tab.runtime;
+    // Images are a ChatGPT-model-only feature — DeepSeek 400s on image
+    // content parts. The UI hides the affordance for non-OpenAI models;
+    // this is the hard gate so a stale or forged request can't reach the API.
+    if (images && images.length > 0 && providerForModel(tab.currentModel) !== "openai") {
+      emit(
+        {
+          type: "$error",
+          message: "Images require a ChatGPT (gpt-*) model — switch models to attach images.",
+        },
+        tab.id,
+      );
+      return;
+    }
     // First turn of a fresh conversation records the model/effort it runs
     // with; a later resume restores them even after a reinstall wiped the
     // config. Never overwrites an existing stored pair (see stampSessionModelPrefs).
@@ -1583,7 +1680,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // next event arrives, so Send now / Stop during a fold never reached
       // $turn_complete and the queued-sends drain never ran. raceLoopStep
       // resolves `null` the moment the aborter fires instead.
-      const gen = rt.loop.step(text);
+      const gen = rt.loop.step(text, images);
       let aborted = false;
       let lastTurn = -1;
       let sawAssistantFinal = false;
@@ -3120,7 +3217,33 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         );
         return;
       }
-      void runTurn(tab, msg.text);
+      void (async () => {
+        let text = msg.text;
+        let attachments = msg.images ? [...msg.images] : [];
+        // OpenAI models accept image parts — auto-parse `@path` mentions of
+        // local images into vision attachments so typing or picking an image
+        // path just works. DeepSeek never gets image parts (runTurn gates).
+        if (providerForModel(tab.currentModel) === "openai") {
+          const converted = await extractImageMentions(text, tab.rootDir);
+          if (converted.attachments.length > 0) {
+            text = converted.text;
+            attachments = [...attachments, ...converted.attachments];
+          }
+        }
+        let images: string[] | undefined;
+        if (attachments.length > 0) {
+          try {
+            images = await resolveUserImages(attachments);
+          } catch (err) {
+            emit(
+              { type: "$error", message: `Image attach failed: ${(err as Error).message}` },
+              tab.id,
+            );
+            return;
+          }
+        }
+        void runTurn(tab, text, false, images);
+      })();
     }
   });
 

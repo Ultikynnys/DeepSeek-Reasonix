@@ -15,6 +15,7 @@ import type {
 } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
+import { useAutoApproveCountdown } from "./auto-countdown";
 import {
   AssistantText,
   CompactionCard,
@@ -27,7 +28,6 @@ import {
   parseEditResult,
 } from "./cards";
 import { ApprovalCard, TaskCard, type TaskStepView } from "./extra-cards";
-import { useAutoApproveCountdown } from "./auto-countdown";
 
 export function TurnDivider({ label }: { label: string }) {
   return (
@@ -40,6 +40,7 @@ export function TurnDivider({ label }: { label: string }) {
 
 export const UserMsg = memo(function UserMsg({
   text,
+  images,
   time,
   skill,
   userIndex,
@@ -48,6 +49,7 @@ export const UserMsg = memo(function UserMsg({
   onRewind,
 }: {
   text: string;
+  images?: string[];
   time?: string;
   skill?: SkillOrigin;
   /** 0-based position among user messages — what the backend expects for rewind. */
@@ -84,6 +86,14 @@ export const UserMsg = memo(function UserMsg({
           ) : null}
           {time ? <span className="time">{time}</span> : null}
         </div>
+        {images && images.length > 0 ? (
+          <div className="msg-images">
+            {images.map((src, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: per-message image list is immutable
+              <img key={i} className="msg-image" src={src} alt="" loading="lazy" />
+            ))}
+          </div>
+        ) : null}
         <div className="msg-text">{text}</div>
         <div className="msg-actions">
           {onRewind ? (
@@ -160,13 +170,16 @@ export const AssistantMsg = memo(function AssistantMsg({
           if (s.kind === "text") {
             if (!s.text.trim()) return null;
             if (isCompactionSummary(s.text)) {
+              // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
               return <CompactionCard key={i} summary={stripCompactionMarker(s.text)} />;
             }
+            // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
             return <AssistantText key={i} text={s.text} />;
           }
           if (s.kind === "reasoning") {
             return (
               <ReasoningCard
+                // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
                 key={i}
                 text={s.text}
                 streaming={pending && i === segments.length - 1}
@@ -176,6 +189,7 @@ export const AssistantMsg = memo(function AssistantMsg({
           if (s.kind === "compaction") {
             return (
               <CompactionCard
+                // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
                 key={i}
                 state={s.state}
                 reason={s.reason}
@@ -209,6 +223,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                   : "done";
             return (
               <ShellCard
+                // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
                 key={i}
                 command={cmd}
                 output={s.result}
@@ -233,6 +248,7 @@ export const AssistantMsg = memo(function AssistantMsg({
               <>
                 {files.map((f, fi) => (
                   <DiffCard
+                    // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
                     key={`${i}-${fi}`}
                     filename={f.filename}
                     lines={f.lines}
@@ -242,6 +258,7 @@ export const AssistantMsg = memo(function AssistantMsg({
               </>
             ) : (
               <ToolCard
+                // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
                 key={i}
                 name={s.name}
                 args={s.args}
@@ -253,6 +270,7 @@ export const AssistantMsg = memo(function AssistantMsg({
           }
           return (
             <ToolCard
+              // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
               key={i}
               name={s.name}
               args={s.args}

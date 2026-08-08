@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { I } from "../icons";
 import { t, useLang } from "../i18n";
+import { I } from "../icons";
+import { activationHandler } from "./keyboard";
 import { Shortcut } from "./shortcut";
 
 type Anchor = { top?: number; bottom?: number; left: number };
@@ -98,14 +99,16 @@ export function WorkdirPop({
           {items.map((p) => {
             const isCurrent = p === current;
             const name = p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+            const pick = () => {
+              if (!isCurrent) onPick(p);
+              onClose();
+            };
             return (
               <div
                 key={p}
                 className="wd-row"
-                onClick={() => {
-                  if (!isCurrent) onPick(p);
-                  onClose();
-                }}
+                onClick={pick}
+                onKeyDown={activationHandler(pick)}
                 title={p}
               >
                 <span className="ic">

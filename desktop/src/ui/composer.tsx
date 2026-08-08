@@ -1,3 +1,6 @@
+import { SUPPORTED_IMAGE_EXTENSIONS } from "@reasonix/core-utils";
+import { invoke } from "@tauri-apps/api/core";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   type ChangeEvent,
   type KeyboardEvent,
@@ -9,17 +12,14 @@ import {
   useState,
 } from "react";
 import type React from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
-import { t, type TKey } from "../i18n";
+import { type TKey, t } from "../i18n";
 import { I } from "../icons";
-import {
-  DEFAULT_COMPOSER_ROWS,
-  applyComposerTextareaAutosize,
-} from "./composer-sizing";
+import { isImagePath, resolveImagePath } from "../image-attach";
+import type { EditMode, ReasoningEffort } from "../protocol";
+import { DEFAULT_COMPOSER_ROWS, applyComposerTextareaAutosize } from "./composer-sizing";
+import { activationHandler } from "./keyboard";
 import { fmtElapsed } from "./live";
 import { Shortcut } from "./shortcut";
-import type { EditMode, ReasoningEffort } from "../protocol";
 export type { EditMode, ReasoningEffort };
 
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
@@ -28,7 +28,12 @@ const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high", "xhigh", "
 
 const MODE_INFO: ModeEntry[] = [
   { k: "plan", label: "editMode.plan", icon: <I.list size={11} />, hint: "editMode.planHint" },
-  { k: "review", label: "editMode.review", icon: <I.shield size={11} />, hint: "editMode.reviewHint" },
+  {
+    k: "review",
+    label: "editMode.review",
+    icon: <I.shield size={11} />,
+    hint: "editMode.reviewHint",
+  },
   { k: "auto", label: "editMode.auto", icon: <I.zap size={11} />, hint: "editMode.autoHint" },
   { k: "yolo", label: "editMode.yolo", icon: <I.warn size={11} />, hint: "editMode.yoloHint" },
 ];
@@ -73,14 +78,9 @@ export type MentionItem = {
   desc?: string;
 };
 
-export type Chip =
-  | { kind: "at"; label: string }
-  | { kind: "slash"; label: string };
+export type Chip = { kind: "at"; label: string } | { kind: "slash"; label: string };
 
-type Popup =
-  | { kind: "slash"; query: string }
-  | { kind: "at"; query: string; nonce: number }
-  | null;
+type Popup = { kind: "slash"; query: string } | { kind: "at"; query: string; nonce: number } | null;
 
 function slashIcon(cmd: string) {
   const m: Record<string, React.ReactNode> = {
@@ -154,6 +154,11 @@ export function Composer({
   onQueueWhileBusy,
   onDequeueSend,
   onSendNow,
+  pendingImages,
+  onRemoveImage,
+  imageCapable,
+  onPasteImage,
+  onPickImage,
 }: {
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -184,6 +189,15 @@ export function Composer({
   onDequeueSend?: (index: number) => void;
   /** Sends the whole queue immediately — the app aborts the running turn so the drain fires on turn-complete. */
   onSendNow?: () => void;
+  /** Vision attachments queued for the next send (ChatGPT models only). */
+  pendingImages?: { id: string; thumbnail: string }[];
+  onRemoveImage?: (id: string) => void;
+  /** True when the active model accepts image content (gpt-*). */
+  imageCapable?: boolean;
+  /** Vision path for clipboard images — bytes downscaled and attached. */
+  onPasteImage?: (file: File) => Promise<void>;
+  /** Vision path for picked/dropped image paths — daemon reads the bytes. */
+  onPickImage?: (path: string) => void;
 }) {
   const [chips, setChips] = useState<Chip[]>([]);
   const [popup, setPopup] = useState<Popup>(null);
@@ -199,13 +213,17 @@ export function Composer({
   const savedDraftRef = useRef("");
 
   const insertMention = (picked: string) => {
+    // ChatGPT models auto-attach supported image paths (paperclip / drag-drop
+    // / paste) instead of text-mentioning them — the daemon reads the bytes.
+    if (imageCapable && onPickImage && isImagePath(picked)) {
+      onPickImage(resolveImagePath(picked, workspaceDir));
+      return;
+    }
     const rel =
       workspaceDir && picked.startsWith(workspaceDir)
         ? picked.slice(workspaceDir.length).replace(/^[\\/]+/, "")
         : picked;
-    setDraft((current) =>
-      current ? `${current.replace(/\s+$/, "")} @${rel} ` : `@${rel} `,
-    );
+    setDraft((current) => (current ? `${current.replace(/\s+$/, "")} @${rel} ` : `@${rel} `));
     setChips((c) => [...c, { kind: "at", label: rel }]);
     onMentionPicked?.(rel);
     textareaRef.current?.focus();
@@ -230,10 +248,7 @@ export function Composer({
   useEffect(() => {
     if (!modelMenuOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (
-        modelWrapRef.current &&
-        !modelWrapRef.current.contains(e.target as Node)
-      ) {
+      if (modelWrapRef.current && !modelWrapRef.current.contains(e.target as Node)) {
         setModelMenuOpen(false);
       }
     };
@@ -252,12 +267,22 @@ export function Composer({
             ? [
                 {
                   name: t("composer.imageFilterName"),
-                  extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg"],
+                  // Only raster formats the daemon reads (png/jpg/jpeg/webp) go
+                  // down the vision path; keep the wider list for @-mentions.
+                  extensions: imageCapable
+                    ? [...SUPPORTED_IMAGE_EXTENSIONS]
+                    : ["png", "jpg", "jpeg", "gif", "webp", "svg"],
                 },
               ]
             : undefined,
       });
       if (typeof picked !== "string" || !picked) return;
+      // gif/svg fall back to an @-mention (matching drag-drop) so a send can
+      // never abort on a pick the daemon's accept-list doesn't read.
+      if (filter === "image" && imageCapable && onPickImage && isImagePath(picked)) {
+        onPickImage(picked);
+        return;
+      }
       insertMention(picked);
     } catch (err) {
       console.error("attach failed", err);
@@ -271,6 +296,14 @@ export function Composer({
     const file = imageItem.getAsFile();
     if (!file) return;
     e.preventDefault();
+    if (imageCapable && onPasteImage) {
+      try {
+        await onPasteImage(file);
+      } catch (err) {
+        console.error("clipboard image attach failed", err);
+      }
+      return;
+    }
     try {
       const buffer = await file.arrayBuffer();
       const savedPath = await invoke<string>("save_clipboard_image", {
@@ -310,11 +343,11 @@ export function Composer({
     return base;
   }, [popup, mentionResults]);
 
-  const items =
-    popup?.kind === "slash" ? slashItems : popup?.kind === "at" ? atItems : [];
+  const items = popup?.kind === "slash" ? slashItems : popup?.kind === "at" ? atItems : [];
 
   useEffect(() => {
-    setActiveIdx(0);
+    // reset the highlighted row whenever the popup kind changes
+    if (popup?.kind) setActiveIdx(0);
   }, [popup?.kind]);
 
   useEffect(() => {
@@ -373,6 +406,14 @@ export function Composer({
         textareaRef.current?.focus();
         return;
       }
+      // ChatGPT models attach mentioned image files directly — thumbnail
+      // preview + vision content part instead of a text mention.
+      if (imageCapable && onPickImage && isImagePath(mention.name)) {
+        onPickImage(resolveImagePath(mention.name, workspaceDir));
+        setPopup(null);
+        textareaRef.current?.focus();
+        return;
+      }
       const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
       setDraft(next ? `${next} @${mention.name} ` : `@${mention.name} `);
       setChips((c) => [...c, { kind: "at", label: mention.name }]);
@@ -420,9 +461,7 @@ export function Composer({
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        setActiveIdx((i) =>
-          items.length ? (i - 1 + items.length) % items.length : 0,
-        );
+        setActiveIdx((i) => (items.length ? (i - 1 + items.length) % items.length : 0));
         return;
       }
       if (e.key === "Escape") {
@@ -503,10 +542,15 @@ export function Composer({
               {t("composer.queueCount", { n: queuedSends.length })}
             </span>
             {queuedSends.map((text, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: queue is dequeue-by-index; chips are text-only leaves
               <span key={i} className="composer-queue-chip" title={text}>
                 <span className="text">{text}</span>
                 {onDequeueSend ? (
-                  <span className="x" onClick={() => onDequeueSend(i)}>
+                  <span
+                    className="x"
+                    onClick={() => onDequeueSend(i)}
+                    onKeyDown={activationHandler(() => onDequeueSend(i))}
+                  >
                     <I.x size={10} />
                   </span>
                 ) : null}
@@ -527,9 +571,7 @@ export function Composer({
               <span className="composer-busy-status">
                 <span className="composer-busy-pip" />
                 <span className="composer-busy-label">{busyLabel}</span>
-                <span className="composer-busy-time">
-                  {fmtElapsed(busyElapsedMs ?? 0)}
-                </span>
+                <span className="composer-busy-time">{fmtElapsed(busyElapsedMs ?? 0)}</span>
               </span>
               <span className="grow" />
               <ModeSwitch mode={editMode} onChange={onEditModeChange} />
@@ -561,18 +603,16 @@ export function Composer({
           {chips.length > 0 ? (
             <div className="composer-tags">
               {chips.map((c, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: chips are removed by index; label-keyed dupes possible
                 <span key={i} className={`chip ${c.kind}`}>
-                  {c.kind === "slash" ? (
-                    <I.slash size={11} />
-                  ) : (
-                    <I.at size={11} />
-                  )}
+                  {c.kind === "slash" ? <I.slash size={11} /> : <I.at size={11} />}
                   <span>{c.label}</span>
                   <span
                     className="x"
-                    onClick={() =>
-                      setChips((cs) => cs.filter((_, j) => j !== i))
-                    }
+                    onClick={() => setChips((cs) => cs.filter((_, j) => j !== i))}
+                    onKeyDown={activationHandler(() =>
+                      setChips((cs) => cs.filter((_, j) => j !== i)),
+                    )}
                   >
                     <I.x size={10} />
                   </span>
@@ -588,7 +628,9 @@ export function Composer({
             onChange={handleChange}
             onPaste={(e) => void handlePaste(e)}
             onKeyDown={handleKeyDown}
-            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
             onCompositionEnd={() => {
               composingRef.current = false;
               compositionEndedAtRef.current = Date.now();
@@ -596,6 +638,26 @@ export function Composer({
             rows={DEFAULT_COMPOSER_ROWS}
             disabled={disabled}
           />
+
+          {pendingImages && pendingImages.length > 0 ? (
+            <div className="composer-images">
+              {pendingImages.map((im) => (
+                <div key={im.id} className="composer-image">
+                  <img src={im.thumbnail} alt="" />
+                  {onRemoveImage ? (
+                    <button
+                      type="button"
+                      className="composer-image-remove"
+                      title={t("composer.removeImage")}
+                      onClick={() => onRemoveImage(im.id)}
+                    >
+                      <I.x size={11} />
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           <div className="composer-foot">
             <button
@@ -738,6 +800,7 @@ function Popup({
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll-follow must re-run per index change — the DOM query hides the read
   useEffect(() => {
     requestAnimationFrame(() => {
       const el = listRef.current?.querySelector<HTMLElement>(`[data-active="true"]`);
@@ -749,13 +812,13 @@ function Popup({
     <div className="popup" onMouseDown={(e) => e.preventDefault()}>
       <div className="ph">
         <span className="tok">{kind === "slash" ? "/" : "@"}</span>
-        <span>
-          {kind === "slash"
-            ? t("composer.slashHeader")
-            : t("composer.atHeader")}
-        </span>
+        <span>{kind === "slash" ? t("composer.slashHeader") : t("composer.atHeader")}</span>
         <span className="grow" />
-        <span style={{ cursor: "pointer" }} onClick={onClose}>
+        <span
+          style={{ cursor: "pointer" }}
+          onClick={onClose}
+          onKeyDown={activationHandler(onClose)}
+        >
           <I.x size={11} />
         </span>
       </div>
@@ -774,10 +837,12 @@ function Popup({
         ) : null}
         {items.map((it, i) => (
           <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: filtered popup items are a render snapshot
             key={i}
             className="popup-item"
             data-active={i === activeIdx}
             onClick={() => onPick(i)}
+            onKeyDown={activationHandler(() => onPick(i))}
             onMouseEnter={() => onHover(i, it)}
           >
             <span className="ico">
@@ -800,9 +865,7 @@ function Popup({
                 </>
               )}
             </div>
-            <span className="kb">
-              {kind === "slash" ? ((it as SlashCmd).kb ?? "") : ""}
-            </span>
+            <span className="kb">{kind === "slash" ? ((it as SlashCmd).kb ?? "") : ""}</span>
           </div>
         ))}
       </div>
@@ -863,6 +926,7 @@ function ModelEffortMenu({
             className="popup-item"
             data-active={m === modelLabel}
             onClick={() => onPickModel(m)}
+            onKeyDown={activationHandler(() => onPickModel(m))}
           >
             <span className="ico">
               <I.brain size={12} />
@@ -901,6 +965,7 @@ function ModelEffortMenu({
             className="popup-item"
             data-active={e === currentEffort}
             onClick={() => onPickEffort(e)}
+            onKeyDown={activationHandler(() => onPickEffort(e))}
           >
             <span className="ico">
               <I.cpu size={12} />

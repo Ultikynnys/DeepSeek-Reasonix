@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { activationHandler } from "./keyboard";
 
 const SPLASH_FLAG = "reasonix.splash.shown";
 
@@ -52,7 +53,12 @@ export function Splash({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="splash" data-leaving={leaving} onClick={skipClick}>
+    <div
+      className="splash"
+      data-leaving={leaving}
+      onClick={skipClick}
+      onKeyDown={activationHandler(skipClick)}
+    >
       <div className="splash-card">
         <div className="splash-mark" />
         <div className="splash-name">Reasonix</div>

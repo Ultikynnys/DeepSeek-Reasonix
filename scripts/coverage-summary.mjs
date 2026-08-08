@@ -1,4 +1,4 @@
-import { readFileSync, appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,5 +44,5 @@ const rows = [
 ];
 
 const md = `## Coverage\n\n${rows.join("\n")}\n`;
-appendFileSync(GITHUB_STEP_SUMMARY, md + "\n");
+appendFileSync(GITHUB_STEP_SUMMARY, `${md}\n`);
 console.log("Coverage summary written to job summary.");

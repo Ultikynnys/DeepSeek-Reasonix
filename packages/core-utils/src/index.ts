@@ -14,6 +14,16 @@ export {
 } from "./tool-paths.js";
 export type { FilePathTool } from "./tool-paths.js";
 export { derivePrefix } from "./derive-prefix.js";
+export {
+  AT_MENTION_PATTERN,
+  MAX_IMAGE_BYTES,
+  SUPPORTED_IMAGE_EXTENSIONS,
+  imageMimeForExtension,
+  isSupportedImagePath,
+  scanImageMentions,
+  stripMentionTokens,
+} from "./image-attach.js";
+export type { ImageMention } from "./image-attach.js";
 export { formatBytes } from "./format.js";
 export { DAY_MS } from "./time.js";
 export type {
@@ -94,8 +104,10 @@ export type {
   BalanceEvent,
   CodexQuota,
   CodexQuotaEvent,
+  CodexQuotaWindow,
   ModelEndpointInfo,
   SettingsPatch,
   QQConfigPatch,
   OutgoingCommand,
+  UserImageAttachment,
 } from "./desktop-protocol.js";

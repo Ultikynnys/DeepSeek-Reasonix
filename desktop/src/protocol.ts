@@ -26,8 +26,8 @@ import type {
   LoadedMessage,
   LoadedSegment,
   McpSpecInfo,
-  McpSpecsEvent,
   McpSpecStatus,
+  McpSpecsEvent,
   MemoryDetailEvent,
   MemoryEntryDetail,
   MemoryEntryInfo,
@@ -65,12 +65,13 @@ import type {
   SettingsEvent,
   SettingsPatch,
   SkillInfo,
-  SkillsEvent,
   SkillScope,
+  SkillsEvent,
   StepCompletedEvent,
   TabClosedEvent,
   TabOpenedEvent,
   TurnCompleteEvent,
+  UserImageAttachment,
   WebSearchEngineName,
 } from "@reasonix/core-utils";
 import { invoke } from "@tauri-apps/api/core";
@@ -141,6 +142,7 @@ export type {
   TabClosedEvent,
   TabOpenedEvent,
   TurnCompleteEvent,
+  UserImageAttachment,
   WebSearchEngineName,
 };
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { I } from "../icons";
 import { t, useLang } from "../i18n";
+import { I } from "../icons";
 
 export type ApprovalTone = "ok" | "warn" | "danger" | "info" | "brand" | "ghost";
 
@@ -167,10 +167,11 @@ export function TipCard({
         <span className="grow" />
         {command ? <span className="pill">{command}</span> : null}
       </div>
-      {sections.map((sec, i) => (
-        <div className="sec" key={i}>
+      {sections.map((sec) => (
+        <div className="sec" key={sec.title}>
           <div className="stt">{sec.title}</div>
           {sec.rows.map((r, j) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static row snapshot, never reordered
             <div className="row" key={j}>
               {r}
             </div>
@@ -184,7 +185,10 @@ export function TipCard({
 
 export type DoctorRow = { s: "ok" | "warn" | "fail"; nm: string; sub: string; v: string };
 
-export function DoctorCard({ rows, headerSubtitle }: { rows: DoctorRow[]; headerSubtitle?: string }) {
+export function DoctorCard({
+  rows,
+  headerSubtitle,
+}: { rows: DoctorRow[]; headerSubtitle?: string }) {
   useLang();
   const c = { ok: 0, warn: 0, fail: 0 };
   for (const r of rows) c[r.s]++;
@@ -222,8 +226,8 @@ export function DoctorCard({ rows, headerSubtitle }: { rows: DoctorRow[]; header
           </span>
         </div>
       </div>
-      {rows.map((r, i) => (
-        <div className="doctor-row" key={i} data-s={r.s}>
+      {rows.map((r) => (
+        <div className="doctor-row" key={r.nm} data-s={r.s}>
           <span className="ic" data-mark={r.s === "ok" ? "✓" : r.s === "warn" ? "!" : "✕"} />
           <div className="body">
             <div className="nm">{r.nm}</div>
@@ -324,7 +328,12 @@ export function UsageFull({
 
 // ---- Context window breakdown ----
 
-export type CtxPart = { k: "system" | "tools" | "log" | "input"; label: string; value: string; widthPct: number };
+export type CtxPart = {
+  k: "system" | "tools" | "log" | "input";
+  label: string;
+  value: string;
+  widthPct: number;
+};
 export type CtxTopRow = { name: string; widthPct: number; value: string };
 
 export function CtxCard({
@@ -371,8 +380,8 @@ export function CtxCard({
       {topTools.length > 0 ? (
         <div className="ttop">
           <div className="stt">{t("extraCards.topToolsUsage")}</div>
-          {topTools.map((t, i) => (
-            <div className="row" key={i}>
+          {topTools.map((t) => (
+            <div className="row" key={t.name}>
               <span className="n">{t.name}</span>
               <div className="bbar">
                 <span style={{ width: `${t.widthPct}%` }} />
@@ -416,6 +425,7 @@ export function MemoryGroups({ data }: { data: MemGroups }) {
               <span className="cnt">{rows.length}</span>
             </div>
             {rows.map((r, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: memory rows are a static per-group snapshot
               <div className="mrow" key={i}>
                 <span className="b">·</span>
                 <div className="t">{r.text}</div>
@@ -431,7 +441,10 @@ export function MemoryGroups({ data }: { data: MemGroups }) {
 
 // ---- Fallback ----
 
-export function FallbackCard({ kindLabel, payload }: { kindLabel: string; payload: Record<string, string> }) {
+export function FallbackCard({
+  kindLabel,
+  payload,
+}: { kindLabel: string; payload: Record<string, string> }) {
   useLang();
   return (
     <div className="fallback-card">
