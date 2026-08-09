@@ -537,8 +537,11 @@ export class ContextManager {
   ): Promise<{ content: string; reasoningContent: string; error?: string }> {
     // Pick a cheap model valid for the current transport: the Codex backend
     // rejects DeepSeek model names; the DeepSeek endpoint rejects GPT names.
+    // gpt-4o-mini is NOT available through the Codex backend (ChatGPT accounts);
+    // gpt-5.6-luna is the cheapest GPT-5.6 tier that the backend accepts
+    // (Luna < Terra < Sol in cost).
     const summaryModel =
-      providerForModel(activeModel) === "openai" ? "gpt-4o-mini" : "deepseek-v4-flash";
+      providerForModel(activeModel) === "openai" ? "gpt-5.6-luna" : "deepseek-v4-flash";
     const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
     const agentSystem = this.deps.getSystemPrompt();
     const fewShots = this.deps.getFewShots?.() ?? [];
@@ -655,8 +658,11 @@ export class ContextManager {
         reject(new Error("file-triage-timeout"));
       }, FILE_TRIAGE_TIMEOUT_MS);
     });
+    // gpt-4o-mini is NOT available through the Codex backend (ChatGPT accounts);
+    // gpt-5.6-luna is the cheapest GPT-5.6 tier that the backend accepts
+    // (Luna < Terra < Sol in cost).
     const triageModel =
-      providerForModel(activeModel) === "openai" ? "gpt-4o-mini" : FILE_TRIAGE_MODEL;
+      providerForModel(activeModel) === "openai" ? "gpt-5.6-luna" : FILE_TRIAGE_MODEL;
     try {
       const resp = await Promise.race([
         this.deps.client.chat({

@@ -589,7 +589,8 @@ async function emitBalance(tab: Tab): Promise<void> {
   );
 }
 
-/** Last API-reported weekly usage — delta to the next fetch = percent points consumed since (each $turn_complete refetches). */
+/** Last API-reported five-hour usage — delta to the next fetch = percent points consumed since (each $turn_complete refetches).
+ *  The five-hour window has ~33× better resolution than the weekly window, so per-turn usage is visible. */
 let lastCodexQuotaUsedPct: number | null = null;
 
 /** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only.
@@ -606,12 +607,16 @@ async function emitCodexQuota(tab: Tab): Promise<void> {
 
   if (quota) {
     let turnUsedPct: number | null = null;
-    const weeklyUsedPct = quota.weekly?.usedPercent ?? null;
-    if (weeklyUsedPct !== null) {
-      if (lastCodexQuotaUsedPct !== null && weeklyUsedPct >= lastCodexQuotaUsedPct) {
-        turnUsedPct = weeklyUsedPct - lastCodexQuotaUsedPct;
+    // Use the five-hour window for turn-percentage — it has ~33× better
+    // resolution than the weekly window, so per-turn usage is visible.
+    const fiveHourUsedPct = quota.fiveHour?.usedPercent ?? null;
+    if (fiveHourUsedPct !== null) {
+      // Rollover (five-hour window reset) makes the delta go backwards —
+      // keep the previous baseline and report no turn cost for this fetch.
+      if (lastCodexQuotaUsedPct !== null && fiveHourUsedPct >= lastCodexQuotaUsedPct) {
+        turnUsedPct = fiveHourUsedPct - lastCodexQuotaUsedPct;
       }
-      lastCodexQuotaUsedPct = weeklyUsedPct;
+      lastCodexQuotaUsedPct = fiveHourUsedPct;
     }
     emit({ type: "$codex_quota", quota: { ...quota, turnUsedPct } }, tab.id);
     return;
