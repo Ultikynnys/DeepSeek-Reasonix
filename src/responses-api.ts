@@ -8,13 +8,27 @@ export interface ResponsesInputItem {
   [k: string]: unknown;
 }
 
-function contentParts(content: ChatMessage["content"]): ResponsesInputItem[] {
+/** Build the `content` field for a Responses API message item — returns a
+ *  plain string for text-only content (bypasses the content-part type enum
+ *  entirely, working across Codex backend deployments that disagree on
+ *  whether input_text or output_text is valid).  Mixed text + image content
+ *  returns an array with input_text / input_image parts. */
+function contentParts(content: ChatMessage["content"]): string | ResponsesInputItem[] {
   if (content === null || content === undefined) return [];
-  if (typeof content === "string") return content ? [{ type: "output_text", text: content }] : [];
+  if (typeof content === "string") return content; // plain string — safest across backends
+  // If the array has no images, join the text parts into a single string.
+  if (content.every((p) => p.type === "text")) {
+    const textParts: string[] = [];
+    for (const part of content) {
+      if (part.type === "text" && part.text) textParts.push(part.text);
+    }
+    return textParts.join("\n");
+  }
+  // Mixed content — use input_text / input_image parts.
   const parts: ResponsesInputItem[] = [];
   for (const part of content) {
     if (part.type === "text") {
-      if (part.text) parts.push({ type: "output_text", text: part.text });
+      if (part.text) parts.push({ type: "input_text", text: part.text });
     } else {
       // Responses input_image takes the URL as a bare string (chat
       // completions wraps it in { url, detail }).

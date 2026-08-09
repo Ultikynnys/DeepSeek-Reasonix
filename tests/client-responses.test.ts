@@ -98,11 +98,11 @@ describe("Responses payload conversion (codex backend)", () => {
       },
     ]);
     expect(body.input).toEqual([
-      { type: "message", role: "user", content: [{ type: "output_text", text: "hi" }] },
-      { type: "message", role: "assistant", content: [] },
+      { type: "message", role: "user", content: "hi" },
+      { type: "message", role: "assistant", content: "" },
       { type: "function_call", call_id: "call_1", name: "read_file", arguments: '{"path":"a.ts"}' },
       { type: "function_call_output", call_id: "call_1", output: "file contents" },
-      { type: "message", role: "user", content: [{ type: "output_text", text: "thanks" }] },
+      { type: "message", role: "user", content: "thanks" },
     ]);
   });
 
@@ -134,7 +134,7 @@ describe("Responses payload conversion (codex backend)", () => {
         type: "message",
         role: "user",
         content: [
-          { type: "output_text", text: "what is this?" },
+          { type: "input_text", text: "what is this?" },
           { type: "input_image", image_url: "data:image/png;base64,AAAA", detail: "low" },
         ],
       },
