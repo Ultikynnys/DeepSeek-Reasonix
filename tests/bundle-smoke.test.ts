@@ -11,62 +11,60 @@ const LIB_BUNDLE = resolve("dist/index.js");
 const CLI_BUNDLE = resolve("dist/cli/index.js");
 
 describe("bundled dist — tokenizer path resolution", () => {
-  const libExists = existsSync(LIB_BUNDLE);
-  const cliExists = existsSync(CLI_BUNDLE);
+  it("dist/index.js resolves the tokenizer data file at package-root data/", () => {
+    expect(existsSync(LIB_BUNDLE), "dist/index.js is missing — run npm run build first").toBe(true);
+    // truncateForModelByTokens internally calls countTokens when the
+    // input exceeds the fast-path threshold, which forces the
+    // tokenizer's lazy data-file load. If resolveDataPath() lands on
+    // a non-existent path (the 0.5.4 regression) this crashes with
+    // ENOENT and the spawned process exits non-zero.
+    // ESM dynamic imports on Windows require `file://` URLs, not bare
+    // absolute paths (which Node's ESM loader rejects as an unknown
+    // protocol). pathToFileURL handles the cross-platform form.
+    const libUrl = pathToFileURL(LIB_BUNDLE).href;
+    const result = spawnSync(
+      "node",
+      [
+        "--input-type=module",
+        "-e",
+        `import { truncateForModelByTokens } from "${libUrl}";
+         const s = "hello world ".repeat(500);
+         const out = truncateForModelByTokens(s, 100);
+         console.log(JSON.stringify({ ok: true, len: out.length }));`,
+      ],
+      { encoding: "utf8", timeout: 30_000 },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toMatch(/deepseek-tokenizer\.json\.gz/);
+    expect(result.stderr).not.toMatch(/ENOENT/);
+    expect(result.stdout).toMatch(/"ok":true/);
+  });
 
-  (libExists ? it : it.skip)(
-    "dist/index.js resolves the tokenizer data file at package-root data/",
-    () => {
-      // truncateForModelByTokens internally calls countTokens when the
-      // input exceeds the fast-path threshold, which forces the
-      // tokenizer's lazy data-file load. If resolveDataPath() lands on
-      // a non-existent path (the 0.5.4 regression) this crashes with
-      // ENOENT and the spawned process exits non-zero.
-      // ESM dynamic imports on Windows require `file://` URLs, not bare
-      // absolute paths (which Node's ESM loader rejects as an unknown
-      // protocol). pathToFileURL handles the cross-platform form.
-      const libUrl = pathToFileURL(LIB_BUNDLE).href;
-      const result = spawnSync(
-        "node",
-        [
-          "--input-type=module",
-          "-e",
-          `import { truncateForModelByTokens } from "${libUrl}";
-           const s = "hello world ".repeat(500);
-           const out = truncateForModelByTokens(s, 100);
-           console.log(JSON.stringify({ ok: true, len: out.length }));`,
-        ],
-        { encoding: "utf8", timeout: 30_000 },
-      );
-      expect(result.status).toBe(0);
-      expect(result.stderr).not.toMatch(/deepseek-tokenizer\.json\.gz/);
-      expect(result.stderr).not.toMatch(/ENOENT/);
-      expect(result.stdout).toMatch(/"ok":true/);
-    },
-  );
+  it("dist/cli/* inlines runtime deps so the desktop sidecar can run without node_modules", async () => {
+    expect(existsSync(CLI_BUNDLE), "dist/cli/index.js is missing — run npm run build first").toBe(
+      true,
+    );
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const distDir = resolve("dist/cli");
+    const jsFiles = readdirSync(distDir).filter((f) => f.endsWith(".js"));
+    const leakedImports = jsFiles.flatMap((f) => {
+      const body = readFileSync(resolve(distDir, f), "utf8");
+      const hits: string[] = [];
+      for (const pkg of ["commander", "ink", "undici"]) {
+        if (new RegExp(`from\\s*["']${pkg}["']`).test(body)) hits.push(`${f}:${pkg}`);
+      }
+      return hits;
+    });
+    expect(
+      leakedImports,
+      `dist/cli/*.js still imports runtime deps from node_modules: ${leakedImports.join(", ")}`,
+    ).toEqual([]);
+  });
 
-  (cliExists ? it : it.skip)(
-    "dist/cli/* inlines runtime deps so the desktop sidecar can run without node_modules",
-    async () => {
-      const { readdirSync, readFileSync } = await import("node:fs");
-      const distDir = resolve("dist/cli");
-      const jsFiles = readdirSync(distDir).filter((f) => f.endsWith(".js"));
-      const leakedImports = jsFiles.flatMap((f) => {
-        const body = readFileSync(resolve(distDir, f), "utf8");
-        const hits: string[] = [];
-        for (const pkg of ["commander", "ink", "undici"]) {
-          if (new RegExp(`from\\s*["']${pkg}["']`).test(body)) hits.push(`${f}:${pkg}`);
-        }
-        return hits;
-      });
-      expect(
-        leakedImports,
-        `dist/cli/*.js still imports runtime deps from node_modules: ${leakedImports.join(", ")}`,
-      ).toEqual([]);
-    },
-  );
-
-  (cliExists ? it : it.skip)("dist/cli/index.js loads tokenizer before the first API fetch", () => {
+  it("dist/cli/index.js loads tokenizer before the first API fetch", () => {
+    expect(existsSync(CLI_BUNDLE), "dist/cli/index.js is missing — run npm run build first").toBe(
+      true,
+    );
     // Spawn the desktop backend pointed at a bogus local address that fails
     // fetch fast. In runTurn(), preflight's estimateRequestTokens runs BEFORE
     // client.chat — so if the bundled layout can't find the tokenizer data,

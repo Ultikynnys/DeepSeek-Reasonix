@@ -714,9 +714,10 @@ describe("config", () => {
     expect(loadProjectPathAllowed("/proj", path)).toEqual(["/Users/foo"]);
   });
 
-  it.runIf(process.platform === "win32")(
-    "matches project keys case-insensitively on Windows so cross-shell rootDir casing doesn't lose entries (#402)",
-    () => {
+  it("matches project keys case-insensitively on Windows so cross-shell rootDir casing doesn't lose entries (#402)", () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
       addProjectShellAllowed("F:\\Reasonix", "gh", path);
       expect(loadProjectShellAllowed("f:\\reasonix", path)).toContain("gh");
       expect(loadProjectShellAllowed("F:\\REASONIX", path)).toContain("gh");
@@ -728,17 +729,22 @@ describe("config", () => {
       expect(loadProjectShellAllowed("F:\\Reasonix", path)).toEqual(["deploy"]);
       expect(clearProjectShellAllowed("F:\\REASONIX", path)).toBe(1);
       expect(loadProjectShellAllowed("F:\\Reasonix", path)).toEqual([]);
-    },
-  );
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
+  });
 
-  it.runIf(process.platform !== "win32")(
-    "keeps project key matching case-sensitive on non-Windows platforms",
-    () => {
+  it("keeps project key matching case-sensitive on non-Windows platforms", () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+    try {
       addProjectShellAllowed("/home/foo/repo", "gh", path);
       expect(loadProjectShellAllowed("/home/foo/repo", path)).toContain("gh");
       expect(loadProjectShellAllowed("/home/FOO/repo", path)).toEqual([]);
-    },
-  );
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
+  });
 
   it("loadEditMode defaults to 'review' when unset", () => {
     expect(loadEditMode(path)).toBe("review");

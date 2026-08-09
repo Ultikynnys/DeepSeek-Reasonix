@@ -257,61 +257,59 @@ describe("runChain — redirect execution", () => {
     expect(readFileSync(inside, "utf8")).toBe("inside");
   });
 
-  it.skipIf(process.platform === "win32")(
-    "rejects output redirects through a symlink to an outside file",
-    async () => {
-      const outside = `${tmp}-symlink-outside.txt`;
-      const link = join(tmp, "out-link.txt");
-      writeFileSync(outside, "original");
-      symlinkSync(outside, link);
-      try {
-        const c = parseCommandChain("node -e \"process.stdout.write('blocked')\" > out-link.txt")!;
-        await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(/symbolic link/);
-        expect(readFileSync(outside, "utf8")).toBe("original");
-      } finally {
-        rmSync(outside, { force: true });
-      }
-    },
-  );
+  it("rejects output redirects through a symlinked directory to an outside file", async () => {
+    const outsideDir = `${tmp}-output-outside-dir`;
+    const linkDir = join(tmp, "output-link");
+    mkdirSync(outsideDir);
+    symlinkSync(outsideDir, linkDir, "junction");
+    try {
+      const c = parseCommandChain(
+        "node -e \"process.stdout.write('blocked')\" > output-link/out.txt",
+      )!;
+      await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(
+        /outside the workspace sandbox/,
+      );
+      expect(existsSync(join(outsideDir, "out.txt"))).toBe(false);
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
 
-  it.skipIf(process.platform === "win32")(
-    "rejects input redirects through a symlink to an outside file",
-    async () => {
-      const outside = `${tmp}-symlink-secret.txt`;
-      const link = join(tmp, "in-link.txt");
-      writeFileSync(outside, "SECRET");
-      symlinkSync(outside, link);
-      try {
-        const c = parseCommandChain(
-          "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>process.stdout.write(d))\" < in-link.txt",
-        )!;
-        await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(/symbolic link/);
-      } finally {
-        rmSync(outside, { force: true });
-      }
-    },
-  );
+  it("rejects input redirects through a symlinked directory to an outside file", async () => {
+    const outsideDir = `${tmp}-input-outside-dir`;
+    const linkDir = join(tmp, "input-link");
+    mkdirSync(outsideDir);
+    writeFileSync(join(outsideDir, "secret.txt"), "SECRET");
+    symlinkSync(outsideDir, linkDir, "junction");
+    try {
+      const c = parseCommandChain(
+        "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>process.stdout.write(d))\" < input-link/secret.txt",
+      )!;
+      await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(
+        /outside the workspace sandbox/,
+      );
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
 
-  it.skipIf(process.platform === "win32")(
-    "rejects writes under a symlinked directory that points outside the sandbox",
-    async () => {
-      const outsideDir = `${tmp}-outside-dir`;
-      const linkDir = join(tmp, "linked-dir");
-      mkdirSync(outsideDir);
-      symlinkSync(outsideDir, linkDir, "dir");
-      try {
-        const c = parseCommandChain(
-          "node -e \"process.stdout.write('blocked')\" > linked-dir/out.txt",
-        )!;
-        await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(
-          /outside the workspace sandbox/,
-        );
-        expect(existsSync(join(outsideDir, "out.txt"))).toBe(false);
-      } finally {
-        rmSync(outsideDir, { recursive: true, force: true });
-      }
-    },
-  );
+  it("rejects writes under a symlinked directory that points outside the sandbox", async () => {
+    const outsideDir = `${tmp}-outside-dir`;
+    const linkDir = join(tmp, "linked-dir");
+    mkdirSync(outsideDir);
+    symlinkSync(outsideDir, linkDir, "junction");
+    try {
+      const c = parseCommandChain(
+        "node -e \"process.stdout.write('blocked')\" > linked-dir/out.txt",
+      )!;
+      await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(
+        /outside the workspace sandbox/,
+      );
+      expect(existsSync(join(outsideDir, "out.txt"))).toBe(false);
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("runCommand — redirect dispatch", () => {
@@ -371,38 +369,44 @@ describe("runChain — null-device redirects", () => {
     expect(existsSync(join(tmp, "dev"))).toBe(false);
   });
 
-  it.skipIf(process.platform !== "win32")(
-    "`2>nul` (Windows) discards stderr without leaving a `nul` file behind",
-    async () => {
-      const c = parseCommandChain(
-        "node -e \"console.error('boom'); process.stdout.write('ok')\" 2>nul",
-      )!;
-      const r = await runChain(c, { cwd: tmp, ...baseOpts });
-      expect(r.exitCode).toBe(0);
-      expect(r.output).toContain("ok");
-      expect(r.output).not.toContain("boom");
+  it("`2>nul` follows the host null-device semantics", async () => {
+    const c = parseCommandChain(
+      "node -e \"console.error('boom'); process.stdout.write('ok')\" 2>nul",
+    )!;
+    const r = await runChain(c, { cwd: tmp, ...baseOpts });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("ok");
+    expect(r.output).not.toContain("boom");
+    if (process.platform === "win32") {
       expect(existsSync(join(tmp, "nul"))).toBe(false);
-    },
-  );
+    } else {
+      expect(existsSync(join(tmp, "nul"))).toBe(true);
+    }
+  });
 
-  it.skipIf(process.platform !== "win32")(
-    "uppercase `2>NUL` also routes to the null device",
-    async () => {
-      const c = parseCommandChain("node -e \"console.error('x')\" 2>NUL")!;
-      const r = await runChain(c, { cwd: tmp, ...baseOpts });
-      expect(r.exitCode).toBe(0);
+  it("uppercase `2>NUL` follows the host null-device semantics", async () => {
+    const c = parseCommandChain("node -e \"console.error('x')\" 2>NUL")!;
+    const r = await runChain(c, { cwd: tmp, ...baseOpts });
+    expect(r.exitCode).toBe(0);
+    if (process.platform === "win32") {
       expect(existsSync(join(tmp, "NUL"))).toBe(false);
       expect(existsSync(join(tmp, "nul"))).toBe(false);
-    },
-  );
+    } else {
+      expect(existsSync(join(tmp, "NUL"))).toBe(true);
+      expect(readFileSync(join(tmp, "NUL"), "utf8")).toBe("x\n");
+    }
+  });
 
-  it.skipIf(process.platform === "win32")(
-    "`nul` is a regular filename on POSIX (no aliasing)",
-    async () => {
-      const c = parseCommandChain("node -e \"process.stdout.write('p')\" > nul")!;
-      await runChain(c, { cwd: tmp, ...baseOpts });
+  it("`nul` follows the host null-device semantics for stdout", async () => {
+    const c = parseCommandChain("node -e \"process.stdout.write('p')\" > nul")!;
+    const r = await runChain(c, { cwd: tmp, ...baseOpts });
+    expect(r.exitCode).toBe(0);
+    if (process.platform === "win32") {
+      expect(r.output).not.toContain("p");
+      expect(existsSync(join(tmp, "nul"))).toBe(false);
+    } else {
       expect(existsSync(join(tmp, "nul"))).toBe(true);
       expect(readFileSync(join(tmp, "nul"), "utf8")).toBe("p");
-    },
-  );
+    }
+  });
 });
