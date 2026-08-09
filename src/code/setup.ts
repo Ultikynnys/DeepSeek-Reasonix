@@ -3,6 +3,7 @@ import { resolveCodexTransport } from "../codex-backend.js";
 import {
   DEFAULT_MODEL,
   type EditMode,
+  isOpenAIStandardEndpoint,
   loadEditMode,
   loadEndpointForModel,
   loadFilesystemOutlineThresholdBytes,
@@ -117,8 +118,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
       let subagentClient = subagentClients.get(model);
       if (!subagentClient) {
         const ep = loadEndpointForModel(model);
-        const isOpenAI =
-          providerForModel(model) === "openai" && ep.baseUrl === "https://api.openai.com/v1";
+        const isOpenAI = isOpenAIStandardEndpoint(model);
         subagentClient = new DeepSeekClient({
           apiKey: ep.apiKey,
           baseUrl: ep.baseUrl,

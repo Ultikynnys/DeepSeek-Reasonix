@@ -735,6 +735,13 @@ export function loadEndpointForModel(
   return loadEndpoint(path);
 }
 
+// True when an OpenAI model hits the standard api.openai.com (not a proxy),
+// meaning OAuth + Codex backend transport is applicable.
+export function isOpenAIStandardEndpoint(model: string, path?: string): boolean {
+  if (providerForModel(model) !== "openai") return false;
+  return loadEndpointForModel(model, path).baseUrl === "https://api.openai.com/v1";
+}
+
 export function loadApiKey(path: string = defaultConfigPath()): string | undefined {
   return loadEndpoint(path).apiKey;
 }

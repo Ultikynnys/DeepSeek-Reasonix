@@ -69,6 +69,7 @@ import { fetchCodexQuotaViaOAuth, resolveCodexTransport } from "../../codex-back
 import {
   DEFAULT_MODEL,
   bridgeEndpointEnv,
+  isOpenAIStandardEndpoint,
   isPlausibleKey,
   isReasoningEffort,
   loadApiKey,
@@ -965,8 +966,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   const toolset = tab.toolset;
   applyPlanMode(toolset.tools, loadEditMode());
   const ep = loadEndpointForModel(tab.currentModel);
-  const isOpenAI =
-    providerForModel(tab.currentModel) === "openai" && ep.baseUrl === "https://api.openai.com/v1";
+  const isOpenAI = isOpenAIStandardEndpoint(tab.currentModel);
   const log = createLogger("desktop");
   if (isOpenAI) {
     const keyStatus = ep.apiKey ? "static key present, " : "no static key, ";
@@ -2460,7 +2460,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               // rebuild gpt tabs so a fresh sign-in takes effect (and clears
               // the needs-setup screen) without a model flip.
               for (const t of tabs.values()) {
-                if (t.toolset && providerForModel(t.currentModel) === "openai") {
+                if (t.toolset && isOpenAIStandardEndpoint(t.currentModel)) {
                   t.runtime = buildRuntimeFor(t);
                   emit({ type: "$ready" }, t.id);
                 }
@@ -2521,7 +2521,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         // The runtime snapshots the static key at build time — rebuild gpt-model
         // tabs so a freshly pasted key takes effect without a model flip.
         for (const t of tabs.values()) {
-          if (t.toolset && providerForModel(t.currentModel) === "openai") {
+          if (t.toolset && isOpenAIStandardEndpoint(t.currentModel)) {
             t.runtime = buildRuntimeFor(t);
             emit({ type: "$ready" }, t.id);
           }
