@@ -8,11 +8,9 @@ export interface ResponsesInputItem {
   [k: string]: unknown;
 }
 
-/** Build the `content` field for a Responses API message item — returns a
- *  plain string for text-only content (bypasses the content-part type enum
- *  entirely, working across Codex backend deployments that disagree on
- *  whether input_text or output_text is valid).  Mixed text + image content
- *  returns an array with input_text / input_image parts. */
+// Build the `content` field for a Responses API message: plain string for
+// text-only (bypasses the type enum — works across backend deployments that
+// disagree on input_text vs output_text), array for mixed text+image content.
 function contentParts(content: ChatMessage["content"]): string | ResponsesInputItem[] {
   if (content === null || content === undefined) return [];
   if (typeof content === "string") return content; // plain string — safest across backends
