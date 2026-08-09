@@ -2719,6 +2719,59 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("recovered");
   });
 
+  it("retries a terminated stream after reasoning-only deltas", async () => {
+    let calls = 0;
+    const fetch = vi.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        const bytes = new TextEncoder().encode(
+          'data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n\n',
+        );
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(bytes);
+              controller.error(Object.assign(new Error("terminated"), { code: "UND_ERR_ABORTED" }));
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      const bytes = new TextEncoder().encode(
+        [
+          'data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n',
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}\n\n',
+          "data: [DONE]\n\n",
+        ].join(""),
+      );
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      );
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch, retry: { maxAttempts: 1 } });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(events.filter((ev) => ev.role === "warning").map((ev) => ev.content)).toContain(
+      "The streaming connection ended before producing a visible response — retrying once.",
+    );
+    expect(events.some((ev) => ev.role === "error")).toBe(false);
+    expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("recovered");
+  });
+
   it("does not retry a stream body failure after visible output", async () => {
     const fetch = vi.fn(async () => {
       const stream = new ReadableStream<Uint8Array>({

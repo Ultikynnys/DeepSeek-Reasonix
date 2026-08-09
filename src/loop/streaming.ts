@@ -43,7 +43,10 @@ export async function* streamModelResponse(
       reasoningEffort,
     })) {
       if (chunk.reasoningDelta) {
-        emittedOutput = true;
+        // Reasoning is rendered transiently but is not persisted until the
+        // stream completes. It is therefore safe to replay a stream that
+        // terminates after reasoning-only deltas; marking it partial here
+        // incorrectly disables the loop's bounded body-read retry.
         reasoningContent += chunk.reasoningDelta;
         yield {
           turn,
