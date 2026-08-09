@@ -842,10 +842,43 @@ describe("CacheFirstLoop (non-streaming)", () => {
       folded: false,
       foldError: "compaction failed — tokenizer unavailable",
     });
-    expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe(
-      "continued after compaction failure",
+    expect(events.find((ev) => ev.role === "assistant_final")).toBeUndefined();
+    expect(events.find((ev) => ev.role === "error")?.errorDetail?.message).toContain(
+      "forced-summary request exceeds the model context budget",
     );
-    expect(events[events.length - 1]?.role).toBe("done");
+  });
+
+  it("refuses an over-limit request when turn-start compaction fails", async () => {
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 1_000;
+    const client = makeClient([{ content: "provider must not be called" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: FOLD_TEST_MODEL,
+    });
+    for (let i = 0; i < 8; i++) {
+      loop.log.append({
+        role: "user",
+        content: `oversized context ${i}: ${"context padding ".repeat(100)}`,
+      });
+    }
+    const internals = loop as unknown as {
+      context: { fold: (...args: unknown[]) => Promise<never> };
+    };
+    vi.spyOn(internals.context, "fold").mockRejectedValue(new Error("fold unavailable"));
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("continue")) events.push(ev);
+
+    expect(events.find((ev) => ev.role === "compaction_end")).toMatchObject({
+      folded: false,
+      foldError: "compaction failed — fold unavailable",
+    });
+    expect(events.find((ev) => ev.role === "error")?.errorDetail?.message).toContain(
+      "forced-summary request exceeds the model context budget",
+    );
+    expect(events.find((ev) => ev.role === "assistant_final")).toBeUndefined();
   });
 
   it("settles the compaction card when forced-summary recovery fails", async () => {

@@ -254,7 +254,33 @@ export class ContextManager {
     alreadyFoldedThisTurn: boolean,
   ): PostUsageDecision {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
-    if (!usage) return { kind: "none", promptTokens: 0, ctxMax, ratio: 0 };
+    if (!usage) {
+      // Missing provider usage is not evidence that the request was small. Use
+      // the live log as a conservative lower bound so dropped usage chunks
+      // cannot disable post-response compaction indefinitely.
+      const promptTokens = this.getLogTokens();
+      const ratio = promptTokens / ctxMax;
+      const base = { promptTokens, ctxMax, ratio };
+      if (ratio > FORCE_SUMMARY_THRESHOLD) return { kind: "exit-with-summary", ...base };
+      if (alreadyFoldedThisTurn) return { kind: "none", ...base };
+      if (ratio > HISTORY_FOLD_AGGRESSIVE_THRESHOLD) {
+        return {
+          kind: "fold",
+          ...base,
+          tailBudget: Math.floor(ctxMax * HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION),
+          aggressive: true,
+        };
+      }
+      if (ratio > HISTORY_FOLD_THRESHOLD) {
+        return {
+          kind: "fold",
+          ...base,
+          tailBudget: Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION),
+          aggressive: false,
+        };
+      }
+      return { kind: "none", ...base };
+    }
     const ratio = usage.promptTokens / ctxMax;
     const base = { promptTokens: usage.promptTokens, ctxMax, ratio };
     if (ratio > FORCE_SUMMARY_THRESHOLD) {
@@ -290,6 +316,16 @@ export class ContextManager {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
     const estimate = estimateRequestTokens(messages, toolSpecs ?? null, true);
     return { estimateTokens: estimate, ctxMax, ratio: estimate / ctxMax };
+  }
+
+  /** Hard request invariant: callers must not send a payload above the model budget. */
+  requestBudget(
+    messages: ChatMessage[],
+    toolSpecs: ReadonlyArray<unknown> | undefined | null,
+    model: string,
+  ): { fits: boolean; estimateTokens: number; ctxMax: number; ratio: number } {
+    const estimate = this.estimateTurnStart(messages, toolSpecs, model);
+    return { ...estimate, fits: estimate.estimateTokens <= estimate.ctxMax };
   }
 
   async fold(

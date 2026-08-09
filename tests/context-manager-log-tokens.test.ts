@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
-import { ContextManager } from "../src/context-manager.js";
+import { ContextManager, HISTORY_FOLD_THRESHOLD } from "../src/context-manager.js";
 import { AppendOnlyLog } from "../src/memory/runtime.js";
-import { SessionStats } from "../src/telemetry/stats.js";
+import { DEEPSEEK_CONTEXT_TOKENS, SessionStats } from "../src/telemetry/stats.js";
 
 function makeManager(log: AppendOnlyLog): ContextManager {
   const client = new DeepSeekClient({ apiKey: "sk-test" });
@@ -89,6 +89,22 @@ describe("ContextManager.getLogTokens", () => {
     log.compactInPlace(all.slice(all.length - 4));
     const after = mgr.getLogTokens();
     expect(after).toBeLessThan(before);
+  });
+
+  it("uses live log tokens when provider usage is missing", () => {
+    const model = "test-missing-usage";
+    DEEPSEEK_CONTEXT_TOKENS[model] = 100;
+    try {
+      const log = new AppendOnlyLog();
+      log.append({ role: "user", content: "context ".repeat(80) });
+      const mgr = makeManager(log);
+      const decision = mgr.decideAfterUsage(null, model, false);
+      expect(decision.promptTokens).toBeGreaterThan(0);
+      expect(decision.ratio).toBeGreaterThan(HISTORY_FOLD_THRESHOLD);
+      expect(["fold", "exit-with-summary"]).toContain(decision.kind);
+    } finally {
+      delete DEEPSEEK_CONTEXT_TOKENS[model];
+    }
   });
 
   it("reflects appends made after the first read", () => {

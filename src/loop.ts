@@ -854,6 +854,23 @@ export class CacheFirstLoop {
         };
       }
 
+      const requestBudget = this.context.requestBudget(messages, toolSpecs, this.model);
+      if (!requestBudget.fits) {
+        yield {
+          turn: this._turn,
+          role: "warning",
+          severity: "high",
+          content: t("loop.forcingSummary", {
+            before: requestBudget.estimateTokens.toLocaleString(),
+            ctxMax: requestBudget.ctxMax.toLocaleString(),
+            pct: Math.round(requestBudget.ratio * 100),
+          }),
+        };
+        yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "context-guard");
+        this._steerQueue.length = 0;
+        return;
+      }
+
       let assistantContent = "";
       let reasoningContent = "";
       let toolCalls: ToolCall[] = [];
@@ -1347,6 +1364,8 @@ export class CacheFirstLoop {
       recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
       turn: this._turn,
       model: this.model,
+      canSend: (messages) =>
+        this.context.requestBudget(messages, this.prefix.toolSpecs, this.model).fits,
     };
   }
 

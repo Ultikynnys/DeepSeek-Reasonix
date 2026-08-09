@@ -34,6 +34,8 @@ export interface ForceSummaryContext {
   turn: number;
   /** Model to call for the summary itself — must be valid on the user's endpoint. */
   model: string;
+  /** Final guard supplied by the loop; a force-summary request must not exceed the model budget. */
+  canSend?: (messages: ChatMessage[]) => boolean;
 }
 
 export async function* forceSummaryAfterIterLimit(
@@ -54,6 +56,9 @@ export async function* forceSummaryAfterIterLimit(
       content:
         "The turn is being force-summarized (context guard or stuck-state). Summarize in plain prose what you learned from the tool results above. Do NOT emit any tool calls, function-call markup, DSML invocations, or SEARCH/REPLACE edit blocks — they will be silently discarded. Just plain text.",
     });
+    if (ctx.canSend && !ctx.canSend(messages)) {
+      throw new Error("forced-summary request exceeds the model context budget");
+    }
     // Use the active turn model — pinning a specific name (e.g. flash) 400s
     // on third-party endpoints that don't advertise it. `thinking: disabled`
     // still keeps reasoning tokens off the bill for the bounded paraphrase.
