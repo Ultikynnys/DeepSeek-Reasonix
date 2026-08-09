@@ -2,48 +2,8 @@
 
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import * as pathMod from "node:path";
+import { killProcessTree } from "./process-tree.js";
 import { detectShellOperator, prepareSpawn, tokenizeCommand } from "./shell.js";
-
-/** Kills the whole tree — `child.kill` only hits the direct child, leaving npm-spawned dev servers orphaned. */
-function killProcessTree(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
-  if (process.platform === "win32") {
-    // taskkill: /T = tree, /F = force (TerminateProcess, no cleanup).
-    // Graceful path still uses /F on Windows because there's no signal
-    // in the POSIX sense — the closest equivalent is Ctrl+Break, which
-    // is unreliable from another console. /F with /T is what most
-    // process managers ship on Windows.
-    const args = ["/pid", String(pid), "/T"];
-    if (signal === "SIGKILL") args.push("/F");
-    try {
-      const killer = spawn("taskkill", args, {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      // Swallow ENOENT / EACCES — we did our best. Not awaiting is
-      // intentional: taskkill can take a few hundred ms and the caller
-      // already has its own deadline.
-      killer.on("error", () => {
-        /* ignore */
-      });
-    } catch {
-      /* ignore */
-    }
-    return;
-  }
-  // POSIX: negative pid signals the whole process group. Requires the
-  // spawn to have been detached (which `start()` does below).
-  try {
-    process.kill(-pid, signal);
-    return;
-  } catch {
-    /* group-kill failed — fall back to direct */
-  }
-  try {
-    process.kill(pid, signal);
-  } catch {
-    /* ignore — already dead */
-  }
-}
 
 /** Per-job output ring. Capped so a chatty dev server doesn't OOM. */
 const DEFAULT_OUTPUT_CAP_BYTES = 64 * 1024; // 64 KB

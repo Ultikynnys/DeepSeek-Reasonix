@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { messageOf } from "@reasonix/core-utils";
 import {
   type ReasonixConfig,
   loadResolvedSkillPaths,
@@ -222,9 +223,7 @@ export class MemoryStore {
           out.push(this.read(scope, name));
         } catch (err) {
           // malformed file — skip rather than fail the whole list, but LOG
-          process.stderr.write(
-            `reasonix: user memory file corrupt — ${err instanceof Error ? err.message : String(err)}\n`,
-          );
+          process.stderr.write(`reasonix: user memory file corrupt — ${messageOf(err)}\n`);
         }
       }
     }

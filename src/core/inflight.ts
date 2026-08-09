@@ -1,5 +1,7 @@
 /** Authoritative running-id set — cards derive `running` from `has(id)` instead of trusting end-event delivery. Loop adds on dispatch entry, deletes in `finally` so every exit path cleans up. */
 
+import { messageOf } from "@reasonix/core-utils";
+
 export type InflightSubscriber = () => void;
 
 export class InflightSet {
@@ -46,9 +48,7 @@ export class InflightSet {
         fn();
       } catch (err) {
         /* listener errors must not break the gate — but they must be LOUD */
-        process.stderr.write(
-          `reasonix: inflight listener failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
+        process.stderr.write(`reasonix: inflight listener failed — ${messageOf(err)}\n`);
       }
     }
   }

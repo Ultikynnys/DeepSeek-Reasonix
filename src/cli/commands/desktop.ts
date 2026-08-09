@@ -8,6 +8,7 @@ import {
   MAX_IMAGE_BYTES,
   flattenText,
   imageMimeForExtension,
+  messageOf,
   scanImageMentions,
   stripMentionTokens,
   toApprovalPrompt,
@@ -888,9 +889,7 @@ function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
     patchSessionMeta(name, prefs ? { workspace: rootDir, ...prefs } : { workspace: rootDir });
   } catch (err) {
     // session meta is for filtering only — failure shouldn't block chat, but LOG
-    process.stderr.write(
-      `reasonix: session meta patch failed — ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    process.stderr.write(`reasonix: session meta patch failed — ${messageOf(err)}\n`);
   }
   return name;
 }
@@ -907,9 +906,7 @@ function persistSessionModelPrefs(tab: Tab): void {
     });
   } catch (err) {
     /* meta is best-effort — failure shouldn't block the settings change, but LOG */
-    process.stderr.write(
-      `reasonix: session model prefs persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    process.stderr.write(`reasonix: session model prefs persist failed — ${messageOf(err)}\n`);
   }
 }
 
@@ -927,9 +924,7 @@ function stampSessionModelPrefs(tab: Tab): void {
     });
   } catch (err) {
     /* meta is best-effort — but LOG so the failure isn't silent */
-    process.stderr.write(
-      `reasonix: session model prefs stamp failed — ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    process.stderr.write(`reasonix: session model prefs stamp failed — ${messageOf(err)}\n`);
   }
 }
 
@@ -1059,9 +1054,7 @@ async function getSymbolIndexFor(tab: Tab): Promise<SymbolEntry[]> {
             }
           } catch (err) {
             // unreadable / binary — skip, but LOG
-            process.stderr.write(
-              `reasonix: symbol index parse failed — ${err instanceof Error ? err.message : String(err)}\n`,
-            );
+            process.stderr.write(`reasonix: symbol index parse failed — ${messageOf(err)}\n`);
           }
         }),
       );
@@ -1269,9 +1262,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       );
     } catch (err) {
       // best-effort — disk / perms shouldn't break tab management, but LOG
-      process.stderr.write(
-        `reasonix: open tabs persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      process.stderr.write(`reasonix: open tabs persist failed — ${messageOf(err)}\n`);
     }
   }
 
@@ -1281,9 +1272,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       await tab.toolset?.jobs.shutdown();
     } catch (err) {
       // shutdown errors aren't actionable here — but LOG
-      process.stderr.write(
-        `reasonix: tab job shutdown failed — ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      process.stderr.write(`reasonix: tab job shutdown failed — ${messageOf(err)}\n`);
     }
     if (tab.mcpRuntime) {
       try {
@@ -1300,9 +1289,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         ]);
       } catch (err) {
         // MCP shutdown errors aren't actionable here either — but LOG
-        process.stderr.write(
-          `reasonix: tab MCP closeAll failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
+        process.stderr.write(`reasonix: tab MCP closeAll failed — ${messageOf(err)}\n`);
       }
     }
     tabs.delete(tab.id);
@@ -1359,7 +1346,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           } catch (err) {
             // meta is for display only — failure shouldn't block the turn, but LOG
             process.stderr.write(
-              `reasonix: session meta summary patch failed — ${err instanceof Error ? err.message : String(err)}\n`,
+              `reasonix: session meta summary patch failed — ${messageOf(err)}\n`,
             );
           }
         }
@@ -1511,9 +1498,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       await tab.toolset?.jobs.shutdown();
     } catch (err) {
       // shutdown errors aren't actionable here — but LOG
-      process.stderr.write(
-        `reasonix: tab job shutdown failed — ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      process.stderr.write(`reasonix: tab job shutdown failed — ${messageOf(err)}\n`);
     }
     tab.rootDir = target;
     saveWorkspaceDir(target);
@@ -1561,9 +1546,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         if (summary) return summary;
       } catch (err) {
         // session file unreadable — fall through to workspace basename, but LOG
-        process.stderr.write(
-          `reasonix: session meta load failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
+        process.stderr.write(`reasonix: session meta load failed — ${messageOf(err)}\n`);
       }
     }
     return tab.rootDir.split(/[\\/]/).filter(Boolean).pop() ?? tab.rootDir;
@@ -1882,9 +1865,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
       } catch (err) {
         // unreadable jsonl — fall back to the freshly minted session, but LOG
-        process.stderr.write(
-          `reasonix: session load for resync failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
+        process.stderr.write(`reasonix: session load for resync failed — ${messageOf(err)}\n`);
       }
     }
     emit({ type: "$tab_opened", workspaceDir: tab.rootDir, active: restore?.active }, tab.id);
@@ -2107,9 +2088,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             );
           } catch (err) {
             // unreadable jsonl — skip re-emit, but LOG
-            process.stderr.write(
-              `reasonix: session load for resync failed — ${err instanceof Error ? err.message : String(err)}\n`,
-            );
+            process.stderr.write(`reasonix: session load for resync failed — ${messageOf(err)}\n`);
           }
         }
         emitCtxBreakdown(t);
@@ -2169,9 +2148,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "tab_close") {
       closeTab(tab).catch((err) => {
-        process.stderr.write(
-          `reasonix: closeTab rejected — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
+        process.stderr.write(`reasonix: closeTab rejected — ${messageOf(err)}\n`);
       });
       return;
     }

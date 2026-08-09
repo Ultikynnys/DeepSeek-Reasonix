@@ -237,18 +237,24 @@ export class DeepSeekClient {
   private withTimeout(signal?: AbortSignal): {
     signal: AbortSignal;
     timer: ReturnType<typeof setTimeout>;
+    timedOut: () => boolean;
   } {
     const ctrl = new AbortController();
-    const timer = setTimeout(
-      () => ctrl.abort(new Error(`Model request timed out after ${this.timeoutMs}ms`)),
-      this.timeoutMs,
-    );
-    return { signal: signal ? AbortSignal.any([signal, ctrl.signal]) : ctrl.signal, timer };
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ctrl.abort(new Error(`Model request timed out after ${this.timeoutMs}ms`));
+    }, this.timeoutMs);
+    return {
+      signal: signal ? AbortSignal.any([signal, ctrl.signal]) : ctrl.signal,
+      timer,
+      timedOut: () => timedOut,
+    };
   }
 
   /** Shared chat/stream plumbing: rate-limit wait, transport/header
-   *  resolution, POST. Only the initial fetch is retried — a mid-stream
-   *  retry would re-bill and desync the session context. */
+   *  resolution, POST. The client retries only the initial fetch; the loop
+   *  owns one guarded replay for a stream body failure with no visible output. */
   private async prepareRequest(
     opts: ChatRequestOptions,
     stream: boolean,
@@ -469,7 +475,7 @@ export class DeepSeekClient {
   }
 
   async *stream(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
-    const { signal, timer } = this.withTimeout(opts.signal);
+    const { signal, timer, timedOut } = this.withTimeout(opts.signal);
     let transport: ResolvedTransport | null = null;
     let resp: Response;
     try {
@@ -624,6 +630,7 @@ export class DeepSeekClient {
           throw Object.assign(new Error(`SSE body read failed: ${cause.message}`), {
             phase: "stream_body_read" as const,
             code,
+            timedOut: timedOut(),
           });
         }
         if (streamDone) break;

@@ -1,3 +1,4 @@
+import { messageOf } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "./client.js";
 import type { ReasoningEffort } from "./config.js";
 import type { PauseGate } from "./core/pause-gate.js";
@@ -211,6 +212,8 @@ export class CacheFirstLoop {
   private _foldedThisTurn = false;
   /** Latched once per turn — the empty-completion guard retries exactly once. */
   private _emptyResponseRetried = false;
+  /** Latched once per turn — replay a stream body failure only before any output reached the UI. */
+  private _streamErrorRetried = false;
   private context!: ContextManager;
   /** Stable ids for compaction card events — pairs compaction_start with compaction_end. */
   private _compactionSeq = 0;
@@ -348,9 +351,7 @@ export class CacheFirstLoop {
       } catch (err) {
         // Disk full or permission denied shouldn't kill the chat — but the
         // failure must be LOUD, never a silent drop of the on-disk transcript.
-        process.stderr.write(
-          `reasonix: session append failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
+        process.stderr.write(`reasonix: session append failed — ${messageOf(err)}\n`);
       }
     }
   }
@@ -375,9 +376,7 @@ export class CacheFirstLoop {
       return archived;
     } catch (err) {
       /* disk issue shouldn't block the in-memory reset — but LOG */
-      process.stderr.write(
-        `reasonix: session ${action} persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      process.stderr.write(`reasonix: session ${action} persist failed — ${messageOf(err)}\n`);
       return null;
     }
   }
@@ -398,9 +397,7 @@ export class CacheFirstLoop {
       return this.prefix.replaceSystem(this._rebuildSystem());
     } catch (err) {
       /* builder threw — keep prior system rather than crash a reset, but LOG */
-      process.stderr.write(
-        `reasonix: system prompt rebuild failed — ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      process.stderr.write(`reasonix: system prompt rebuild failed — ${messageOf(err)}\n`);
       return false;
     }
   }
@@ -461,9 +458,7 @@ export class CacheFirstLoop {
     } catch (err) {
       // Malformed args → fall through to the static flag below; the
       // dynamic check would've thrown anyway. But LOG the corrupt payload.
-      process.stderr.write(
-        `reasonix: malformed tool call arguments — ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      process.stderr.write(`reasonix: malformed tool call arguments — ${messageOf(err)}\n`);
     }
     return !isReadOnlyTool(def, args);
   }
@@ -610,9 +605,7 @@ export class CacheFirstLoop {
       rewriteSession(this.sessionName, messages);
       return true;
     } catch (err) {
-      process.stderr.write(
-        `reasonix: session persist failed — ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      process.stderr.write(`reasonix: session persist failed — ${messageOf(err)}\n`);
       return false;
     }
   }
@@ -717,6 +710,7 @@ export class CacheFirstLoop {
     this._turnSelfCorrected = false;
     this._foldedThisTurn = false;
     this._emptyResponseRetried = false;
+    this._streamErrorRetried = false;
     // Fresh controller for this turn: the prior step's signal has
     // already fired (or stayed clean); either way we don't want its
     // state to bleed into the new turn.
@@ -937,8 +931,31 @@ export class CacheFirstLoop {
         const probe =
           is5xxError(err) && dsHost ? await probeDeepSeekReachable(this.client) : undefined;
         const cause = err instanceof Error ? err : new Error(String(err));
-        const retryable = !is4xxError(cause) && cause.name !== "AbortError";
-        const { code, phase } = errorMeta(cause);
+        const { code, phase, partialDelivered, timedOut } = errorMeta(cause);
+        const streamBodyRetryable =
+          this.stream &&
+          phase === "stream_body_read" &&
+          !this._streamErrorRetried &&
+          !partialDelivered &&
+          !timedOut &&
+          cause.name !== "AbortError";
+        if (streamBodyRetryable) {
+          this._streamErrorRetried = true;
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "high",
+            content: t("loop.streamBodyRetry"),
+          };
+          continue;
+        }
+        const streamBodyError = this.stream && phase === "stream_body_read";
+        const retryable =
+          !is4xxError(cause) &&
+          cause.name !== "AbortError" &&
+          !timedOut &&
+          (code !== "UND_ERR_ABORTED" || streamBodyError) &&
+          !(streamBodyError && (partialDelivered || this._streamErrorRetried));
         yield {
           turn: this._turn,
           role: "error",
@@ -976,9 +993,7 @@ export class CacheFirstLoop {
         } catch (err) {
           // Best-effort; don't crash the turn loop on a write failure — but
           // never silent: a lost cost/usage update is real data loss.
-          process.stderr.write(
-            `reasonix: session meta patch failed — ${err instanceof Error ? err.message : String(err)}\n`,
-          );
+          process.stderr.write(`reasonix: session meta patch failed — ${messageOf(err)}\n`);
         }
       }
 
@@ -1178,14 +1193,17 @@ export class CacheFirstLoop {
     tailBudget: number,
     aggressive: boolean,
   ): AsyncGenerator<LoopEvent, FoldResult, void> {
-    this._foldedThisTurn = true;
-    return yield* this.compactionEvents(
+    const result = yield* this.compactionEvents(
       compactionId,
       "auto-context-pressure",
       "fold",
       aggressive,
       () => this.foldRun({ keepRecentTokens: tailBudget, protectActiveExchange: true }),
     );
+    // A failed fold must not suppress another fold decision in this turn. The
+    // result latch is set only after the compaction actually replaced history.
+    if (result.folded) this._foldedThisTurn = true;
+    return result;
   }
 
   /** THE one compaction card lifecycle — every compaction form (fold, user
@@ -1198,6 +1216,7 @@ export class CacheFirstLoop {
     aggressive: boolean | undefined,
     run: () => Promise<FoldResult> | AsyncGenerator<LoopEvent, FoldResult, void>,
   ): AsyncGenerator<LoopEvent, FoldResult, void> {
+    const beforeMessages = this.log.length;
     yield {
       turn: this._turn,
       role: "compaction_start",
@@ -1207,10 +1226,27 @@ export class CacheFirstLoop {
       compactionKind: kind,
       ...(aggressive ? { aggressive: true } : {}),
     };
-    const runner = run();
-    // Plain promise (fold paths) or generator (the forced summary forwards its
-    // own status/assistant_final/done events through the card).
-    const result = runner instanceof Promise ? await runner : yield* runner;
+
+    let result: FoldResult;
+    try {
+      const runner = run();
+      // Plain promise (fold paths) or generator (the forced summary forwards
+      // its own status/assistant_final/done events through the card).
+      result = runner instanceof Promise ? await runner : yield* runner;
+    } catch (err) {
+      // Compaction is an auxiliary action: a tokenizer, persistence, or model
+      // failure must settle its card and return control to the turn loop. The
+      // failed run is never reported as folded, so the live log remains the
+      // source of truth and a later turn can retry it.
+      result = {
+        folded: false,
+        beforeMessages,
+        afterMessages: this.log.length,
+        summaryChars: 0,
+        error: `compaction failed — ${messageOf(err)}`,
+      };
+    }
+
     yield {
       turn: this._turn,
       role: "compaction_end",
@@ -1269,19 +1305,36 @@ export class CacheFirstLoop {
     reason: ForceSummaryReason,
   ): AsyncGenerator<LoopEvent, FoldResult, void> {
     const beforeMessages = this.log.length;
-    this.context.trimTrailingToolCalls();
     let summary = "";
+    let failure: string | undefined;
     try {
+      this.context.trimTrailingToolCalls();
       summary = yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason });
-    } catch {
-      summary = "";
+    } catch (err) {
+      // The helper normally converts provider failures into error + done
+      // events. Keep the outer compaction contract safe even if trimming,
+      // stats, or another unexpected boundary throws before that helper can.
+      failure = `forced summary failed — ${messageOf(err)}`;
+      yield {
+        turn: this._turn,
+        role: "error",
+        content: "",
+        error: failure,
+        errorDetail: {
+          name: "ForceSummaryFailed",
+          message: failure,
+          retryable: false,
+          recoverable: false,
+        },
+      };
+      yield { turn: this._turn, role: "done", content: "" };
     }
     return {
       folded: false,
       beforeMessages,
       afterMessages: this.log.length,
       summaryChars: summary.length,
-      ...(summary.length === 0 ? { error: "forced summary failed" } : {}),
+      ...(summary.length === 0 ? { error: failure ?? "forced summary failed" } : {}),
     };
   }
 

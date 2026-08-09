@@ -31,66 +31,80 @@ export async function* streamModelResponse(
   let usage: Usage | null = null;
   const callBuf: Map<number, ToolCall> = new Map();
   const readyIndices = new Set<number>();
+  let emittedOutput = false;
 
-  for await (const chunk of client.stream({
-    model,
-    messages,
-    tools: toolSpecs.length ? toolSpecs : undefined,
-    signal,
-    thinking: thinkingModeForModel(model),
-    reasoningEffort,
-  })) {
-    if (chunk.reasoningDelta) {
-      reasoningContent += chunk.reasoningDelta;
-      yield {
-        turn,
-        role: "assistant_delta",
-        content: "",
-        reasoningDelta: chunk.reasoningDelta,
-      };
-    }
-    if (chunk.contentDelta) {
-      assistantContent += chunk.contentDelta;
-      yield {
-        turn,
-        role: "assistant_delta",
-        content: chunk.contentDelta,
-      };
-    }
-    if (chunk.toolCallDelta) {
-      const d = chunk.toolCallDelta;
-      const cur = callBuf.get(d.index) ?? {
-        id: d.id,
-        type: "function" as const,
-        function: { name: "", arguments: "" },
-      };
-      if (d.id) cur.id = d.id;
-      if (d.name) cur.function.name = (cur.function.name ?? "") + d.name;
-      if (d.argumentsDelta)
-        cur.function.arguments = (cur.function.arguments ?? "") + d.argumentsDelta;
-      callBuf.set(d.index, cur);
-
-      if (
-        !readyIndices.has(d.index) &&
-        cur.function.name &&
-        looksLikeCompleteJson(cur.function.arguments ?? "")
-      ) {
-        readyIndices.add(d.index);
-      }
-
-      if (cur.function.name) {
+  try {
+    for await (const chunk of client.stream({
+      model,
+      messages,
+      tools: toolSpecs.length ? toolSpecs : undefined,
+      signal,
+      thinking: thinkingModeForModel(model),
+      reasoningEffort,
+    })) {
+      if (chunk.reasoningDelta) {
+        emittedOutput = true;
+        reasoningContent += chunk.reasoningDelta;
         yield {
           turn,
-          role: "tool_call_delta",
+          role: "assistant_delta",
           content: "",
-          toolName: cur.function.name,
-          toolCallArgsChars: (cur.function.arguments ?? "").length,
-          toolCallIndex: d.index,
-          toolCallReadyCount: readyIndices.size,
+          reasoningDelta: chunk.reasoningDelta,
         };
       }
+      if (chunk.contentDelta) {
+        emittedOutput = true;
+        assistantContent += chunk.contentDelta;
+        yield {
+          turn,
+          role: "assistant_delta",
+          content: chunk.contentDelta,
+        };
+      }
+      if (chunk.toolCallDelta) {
+        const d = chunk.toolCallDelta;
+        const cur = callBuf.get(d.index) ?? {
+          id: d.id,
+          type: "function" as const,
+          function: { name: "", arguments: "" },
+        };
+        if (d.id) cur.id = d.id;
+        if (d.name) cur.function.name = (cur.function.name ?? "") + d.name;
+        if (d.argumentsDelta)
+          cur.function.arguments = (cur.function.arguments ?? "") + d.argumentsDelta;
+        callBuf.set(d.index, cur);
+
+        if (
+          !readyIndices.has(d.index) &&
+          cur.function.name &&
+          looksLikeCompleteJson(cur.function.arguments ?? "")
+        ) {
+          readyIndices.add(d.index);
+        }
+
+        if (cur.function.name) {
+          emittedOutput = true;
+          yield {
+            turn,
+            role: "tool_call_delta",
+            content: "",
+            toolName: cur.function.name,
+            toolCallArgsChars: (cur.function.arguments ?? "").length,
+            toolCallIndex: d.index,
+            toolCallReadyCount: readyIndices.size,
+          };
+        }
+      }
+      if (chunk.usage) usage = chunk.usage;
     }
-    if (chunk.usage) usage = chunk.usage;
+  } catch (err) {
+    // The loop may safely replay a body-read failure only when no assistant
+    // bytes or tool-call progress reached the UI. Mark partial streams so the
+    // retry path cannot append a second response to a settled card.
+    if (emittedOutput && typeof err === "object" && err !== null) {
+      (err as { partialDelivered?: boolean }).partialDelivered = true;
+    }
+    throw err;
   }
 
   return {

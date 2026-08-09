@@ -1,8 +1,10 @@
+import { messageOf } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "../client.js";
 import { t } from "../i18n/index.js";
 import type { TurnStats } from "../telemetry/stats.js";
 import { countTokensBounded } from "../tokenizer.js";
 import type { ChatMessage } from "../types.js";
+import { COMPACTION_RETRY_DELAY_MS, withCompactionRetry } from "./compaction-retry.js";
 import { errorLabelFor, reasonPrefixFor } from "./errors.js";
 import { buildAssistantMessage } from "./messages.js";
 import { stripHallucinatedToolMarkup } from "./thinking.js";
@@ -60,8 +62,6 @@ export async function* forceSummaryAfterIterLimit(
     // The deadline aborts the request — AbortSignal.any, the same combination
     // the client uses for its own socket cap — and rejects, so the catch below
     // surfaces an error event instead of freezing the turn on "summarizing…".
-    const summaryCtrl = new AbortController();
-    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const deadlineMs = Math.min(
       FORCE_SUMMARY_MAX_TIMEOUT_MS,
       FORCE_SUMMARY_TIMEOUT_MS +
@@ -72,26 +72,42 @@ export async function* forceSummaryAfterIterLimit(
           ) * FORCE_SUMMARY_PER_TOKEN_MS,
         ),
     );
-    const deadlinePromise = new Promise<never>((_, reject) => {
-      deadlineTimer = setTimeout(() => {
-        summaryCtrl.abort();
-        reject(new Error("forced-summary-timeout"));
-      }, deadlineMs);
+    const resp = await withCompactionRetry({
+      signal: ctx.signal,
+      maxElapsedMs: deadlineMs + COMPACTION_RETRY_DELAY_MS,
+      timeoutMessage: "forced-summary-timeout",
+      attempt: async (attemptSignal) => {
+        const deadlineCtrl = new AbortController();
+        const requestSignal = AbortSignal.any([attemptSignal, deadlineCtrl.signal]);
+        let timedOut = false;
+        let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+        const deadlinePromise = new Promise<never>((_, reject) => {
+          deadlineTimer = setTimeout(() => {
+            timedOut = true;
+            deadlineCtrl.abort(new Error("forced-summary-timeout"));
+            reject(new Error("forced-summary-timeout"));
+          }, deadlineMs);
+        });
+        try {
+          return await Promise.race([
+            ctx.client.chat({
+              model: ctx.model,
+              messages,
+              signal: requestSignal,
+              thinking: "disabled",
+            }),
+            deadlinePromise,
+          ]);
+        } catch (err) {
+          // Keep the local deadline terminal; only provider/network failures
+          // are eligible for the shared bounded compaction replay.
+          if (timedOut) throw new Error("forced-summary-timeout");
+          throw err;
+        } finally {
+          if (deadlineTimer) clearTimeout(deadlineTimer);
+        }
+      },
     });
-    let resp: Awaited<ReturnType<typeof ctx.client.chat>>;
-    try {
-      resp = await Promise.race([
-        ctx.client.chat({
-          model: ctx.model,
-          messages,
-          signal: AbortSignal.any([ctx.signal, summaryCtrl.signal]),
-          thinking: "disabled",
-        }),
-        deadlinePromise,
-      ]);
-    } finally {
-      if (deadlineTimer) clearTimeout(deadlineTimer);
-    }
     const rawContent = resp.content?.trim() ?? "";
     const cleaned = stripHallucinatedToolMarkup(rawContent);
     const summary = cleaned || t("summary.hallucinatedFallback");
@@ -112,7 +128,7 @@ export async function* forceSummaryAfterIterLimit(
     return summary;
   } catch (err) {
     const label = errorLabelFor(opts.reason);
-    const raw = err instanceof Error ? err.message : String(err);
+    const raw = messageOf(err);
     const message = t("summary.failedAfterReason", {
       label,
       message: raw === "forced-summary-timeout" ? "summary request timed out" : raw,
@@ -125,7 +141,7 @@ export async function* forceSummaryAfterIterLimit(
       errorDetail: {
         name: "ForceSummaryFailed",
         message,
-        retryable: true,
+        retryable: false,
         recoverable: true,
       },
     };

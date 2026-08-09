@@ -1,12 +1,11 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { DAY_MS } from "@reasonix/core-utils";
 import type { Event } from "../core/events.js";
 import { readJsonlLines } from "../core/jsonl.js";
 import { SESSION_EVENTS_SUFFIX } from "../memory/session.js";
 import type { EventSource } from "../ports/event-sink.js";
 import { eventLogPath } from "./event-sink-jsonl.js";
-
-const DAY_MS = 86_400_000;
 
 /** Most-recently-modified `*.events.jsonl` files, capped + filtered by stale-mtime cutoff. */
 export function recentEventFiles(dir: string, now: number, cap = 8, staleDays = 30): string[] {

@@ -1,3 +1,5 @@
+import { messageOf } from "@reasonix/core-utils";
+
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_EMBED_MODEL = "nomic-embed-text";
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -77,7 +79,7 @@ export async function probeOllama(
       .filter((n): n is string => typeof n === "string");
     return { ok: true, models };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = messageOf(err);
     return { ok: false, error: msg };
   }
 }
@@ -101,7 +103,7 @@ async function embedOllama(
     });
   } catch (err) {
     cleanup();
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = messageOf(err);
     if (/ECONNREFUSED|connect ECONNREFUSED|fetch failed/i.test(msg)) {
       throw new EmbeddingError(
         `Cannot reach Ollama at ${baseUrl}. Install from https://ollama.com, then run \`ollama pull ${model}\` and \`ollama serve\`. Override the URL via OLLAMA_URL.`,
@@ -213,7 +215,7 @@ async function requestOpenAICompatEmbeddings(
     if (isAbortError(err) || opts.signal?.aborted) {
       throw new EmbeddingError("embedding aborted", err);
     }
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = messageOf(err);
     throw new EmbeddingError(`Cannot reach OpenAI-compatible embeddings at ${url}: ${msg}`, err);
   } finally {
     cleanup();

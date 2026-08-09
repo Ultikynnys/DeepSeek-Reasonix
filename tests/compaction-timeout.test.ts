@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 import { ContextManager, FILE_TRIAGE_TIMEOUT_MS } from "../src/context-manager.js";
+import { COMPACTION_RETRY_DELAY_MS } from "../src/loop/compaction-retry.js";
 import { type ForceSummaryContext, forceSummaryAfterIterLimit } from "../src/loop/force-summary.js";
 import type { LoopEvent } from "../src/loop/types.js";
 import { AppendOnlyLog } from "../src/memory/runtime.js";
@@ -75,6 +76,51 @@ describe("compaction model-call deadlines", () => {
     const ret = await gen.next();
     expect(ret.value).toBe("");
     expect(ret.done).toBe(true);
+  });
+
+  it("retries a forced summary after a transient provider body drop", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () => {
+        calls++;
+        if (calls === 1) {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.error(new Error("provider connection reset"));
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return summaryJsonResponse("recovered forced summary");
+      }),
+    });
+    const ctx: ForceSummaryContext = {
+      client,
+      signal: new AbortController().signal,
+      buildMessages: () => [{ role: "user", content: "do the thing" }],
+      appendAndPersist: vi.fn(),
+      recordStats: (() => ({})) as unknown as ForceSummaryContext["recordStats"],
+      turn: 1,
+      model: "deepseek-v4-flash",
+    };
+
+    const gen = forceSummaryAfterIterLimit(ctx, { reason: "context-guard" });
+    expect((await gen.next()).value).toMatchObject({ role: "status" });
+    const pending = gen.next();
+    await vi.advanceTimersByTimeAsync(COMPACTION_RETRY_DELAY_MS);
+    const final = await pending;
+
+    expect(final.value).toMatchObject({
+      role: "assistant_final",
+      content: expect.stringContaining("recovered forced summary"),
+    });
+    expect(calls).toBe(2);
+    expect((await gen.next()).value).toMatchObject({ role: "done" });
   });
 
   it("fold completes fail-open when the file-triage call hangs past its deadline", async () => {

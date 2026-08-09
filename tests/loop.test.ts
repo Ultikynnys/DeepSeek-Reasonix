@@ -809,6 +809,113 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(finals[finals.length - 1]!.forcedSummary).toBe(true);
   });
 
+  it("settles the compaction card and continues when an auto-fold throws", async () => {
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 1_000;
+    const client = makeClient([{ content: "continued after compaction failure" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: FOLD_TEST_MODEL,
+    });
+    for (let i = 0; i < 6; i++) {
+      loop.log.append({
+        role: "user",
+        content: `question ${i}: ${"context padding for compaction failure ".repeat(80)}`,
+      });
+      loop.log.append({
+        role: "assistant",
+        content: `answer ${i}: ${"more context padding for compaction failure ".repeat(8)}`,
+      });
+    }
+    const internals = loop as unknown as {
+      context: { fold: (...args: unknown[]) => Promise<never> };
+    };
+    vi.spyOn(internals.context, "fold").mockRejectedValue(new Error("tokenizer unavailable"));
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("continue")) events.push(ev);
+
+    expect(events.map((ev) => ev.role)).toContain("compaction_start");
+    expect(events.map((ev) => ev.role)).toContain("compaction_end");
+    expect(events.find((ev) => ev.role === "compaction_end")).toMatchObject({
+      folded: false,
+      foldError: "compaction failed — tokenizer unavailable",
+    });
+    expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe(
+      "continued after compaction failure",
+    );
+    expect(events[events.length - 1]?.role).toBe("done");
+  });
+
+  it("settles the compaction card when forced-summary recovery fails", async () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    let calls = 0;
+    const fetch = vi.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "c",
+                      type: "function",
+                      function: { name: "probe", arguments: "{}" },
+                    },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+            usage: {
+              prompt_tokens: 900_000,
+              completion_tokens: 50,
+              total_tokens: 900_050,
+              prompt_cache_hit_tokens: 700_000,
+              prompt_cache_miss_tokens: 200_000,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response("summary provider unavailable", { status: 401 });
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch,
+      retry: { maxAttempts: 1 },
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("analyze the repo")) events.push(ev);
+
+    expect(calls).toBe(2);
+    expect(events.some((ev) => ev.role === "error")).toBe(true);
+    expect(events.find((ev) => ev.role === "compaction_end")).toMatchObject({
+      compactionKind: "force-summary",
+      folded: false,
+      foldError: "forced summary failed",
+    });
+    expect(events[events.length - 1]?.role).toBe("compaction_end");
+  });
+
   it("force-summary calls the active model, not a hard-coded one (third-party endpoint compat)", async () => {
     const seenModels: string[] = [];
     const responses: FakeResponseShape[] = [
@@ -2527,6 +2634,148 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     expect(loop.steerConsumed).toBe(false);
   });
 
+  it("retries a transient stream body failure before any visible output", async () => {
+    let calls = 0;
+    const fetch = vi.fn(async (_url: unknown, init: { body?: string } | undefined) => {
+      calls++;
+      const body = init?.body ? (JSON.parse(init.body) as { stream?: boolean }) : {};
+      if (calls === 1) {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(Object.assign(new Error("terminated"), { code: "UND_ERR_ABORTED" }));
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      expect(body.stream).toBe(true);
+      const bytes = new TextEncoder().encode(
+        [
+          'data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n',
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}\n\n',
+          "data: [DONE]\n\n",
+        ].join(""),
+      );
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      );
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch, retry: { maxAttempts: 1 } });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    expect(calls).toBe(2);
+    expect(events.filter((ev) => ev.role === "warning").map((ev) => ev.content)).toContain(
+      "The streaming connection ended before producing a visible response — retrying once.",
+    );
+    expect(events.some((ev) => ev.role === "error")).toBe(false);
+    expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("recovered");
+  });
+
+  it("does not retry a stream body failure after visible output", async () => {
+    const fetch = vi.fn(async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'),
+          );
+          setTimeout(
+            () =>
+              controller.error(
+                Object.assign(new Error("socket dropped"), { code: "UND_ERR_SOCKET" }),
+              ),
+            10,
+          );
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch, retry: { maxAttempts: 1 } });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(events.some((ev) => ev.role === "error")).toBe(true);
+    expect(events.some((ev) => ev.role === "assistant_final")).toBe(false);
+  });
+
+  it("does not retry a stream body failure caused by the local request timeout", async () => {
+    const fetch = vi.fn(async (_url: unknown, init: RequestInit | undefined) => {
+      const reqSignal = init?.signal;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(": keep-alive\n\n"));
+          if (!reqSignal) return;
+          if (reqSignal.aborted) {
+            controller.error(reqSignal.reason);
+            return;
+          }
+          reqSignal.addEventListener(
+            "abort",
+            () => {
+              try {
+                controller.error(reqSignal.reason);
+              } catch {
+                /* controller already closed */
+              }
+            },
+            { once: true },
+          );
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch,
+      timeoutMs: 20,
+      retry: { maxAttempts: 1 },
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(events.filter((ev) => ev.role === "warning")).toHaveLength(0);
+    expect(events.find((ev) => ev.role === "error")).toMatchObject({
+      errorDetail: {
+        phase: "stream_body_read",
+        retryable: false,
+      },
+    });
+  });
+
   it("surfaces structured errorDetail when the API call fails", async () => {
     const err = Object.assign(new Error("SSE body read failed: terminated"), {
       phase: "stream_body_read",
@@ -2558,7 +2807,7 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
       message: expect.stringContaining("terminated"),
       phase: "stream_body_read",
       code: "UND_ERR_ABORTED",
-      retryable: true,
+      retryable: false,
       recoverable: false,
     });
   });

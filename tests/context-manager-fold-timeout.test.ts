@@ -146,6 +146,45 @@ describe("ContextManager fold timeout", () => {
     expect(calls).toBe(5);
   });
 
+  it("retries a response-body drop after the provider returns headers", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () => {
+        calls++;
+        if (calls === 1) {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.error(new Error("connection reset by peer"));
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return okJsonResponse({
+          choices: [{ message: { content: "SUMMARY after provider recovery" } }],
+        });
+      }),
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    seedTurns(loop, 6);
+
+    const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS);
+    const result = await resultPromise;
+
+    expect(result.folded).toBe(true);
+    expect(result.summary).toBe("SUMMARY after provider recovery");
+    expect(calls).toBe(2);
+  });
+
   it("gives up with the 503 error after the automatic retry when the outage persists", async () => {
     vi.useFakeTimers();
     let calls = 0;

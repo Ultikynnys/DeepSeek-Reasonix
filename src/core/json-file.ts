@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile as readFileAsync } from "node:fs/promises";
 import { dirname } from "node:path";
+import { messageOf } from "@reasonix/core-utils";
 
 /** Read + parse + validate a JSON file, returning null on any failure (missing, malformed, or wrong shape). */
 export function readJsonFileSilently<T>(path: string, validate: (v: unknown) => v is T): T | null {
@@ -41,8 +42,6 @@ export function writeJsonFileSilently(
     writeFileSync(path, JSON.stringify(data, null, opts.pretty ? 2 : undefined), "utf8");
   } catch (err) {
     /* cache is best-effort — a failed write just means we'll re-fetch, but the failure must be LOUD */
-    process.stderr.write(
-      `reasonix: JSON cache write failed — ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    process.stderr.write(`reasonix: JSON cache write failed — ${messageOf(err)}\n`);
   }
 }

@@ -22,9 +22,11 @@ export {
   isSupportedImagePath,
   scanImageMentions,
   stripMentionTokens,
+  stripTrailingMentionDots,
 } from "./image-attach.js";
 export type { ImageMention } from "./image-attach.js";
 export { formatBytes } from "./format.js";
+export { messageOf } from "./error.js";
 export { DAY_MS } from "./time.js";
 export type {
   ConfirmationChoice,

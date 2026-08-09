@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
-import { DAY_MS, sanitizeFilename } from "@reasonix/core-utils";
+import { DAY_MS, messageOf, sanitizeFilename } from "@reasonix/core-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
 import { atomicWriteSync, tmpSiblingPath } from "../core/atomic-write.js";
 import { readJsonFileSilently } from "../core/json-file.js";
@@ -333,9 +333,7 @@ export function renameSession(oldName: string, newName: string): boolean {
         renameSync(oldP, newP);
       } catch (err) {
         /* sidecar rename failed — leave the jsonl rename in place, but LOG */
-        process.stderr.write(
-          `reasonix: session sidecar rename failed — ${err instanceof Error ? err.message : String(err)}\n`,
-        );
+        process.stderr.write(`reasonix: session sidecar rename failed — ${messageOf(err)}\n`);
       }
     }
   }

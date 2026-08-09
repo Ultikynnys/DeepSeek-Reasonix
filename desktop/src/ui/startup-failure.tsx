@@ -1,3 +1,4 @@
+import { messageOf } from "@reasonix/core-utils";
 import { t } from "../i18n";
 
 export type StartupFailureState = {
@@ -5,8 +6,7 @@ export type StartupFailureState = {
 };
 
 function toErrorText(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
+  return messageOf(error);
 }
 
 export function coerceStartupFailure(

@@ -34,6 +34,13 @@ export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
  *  and the frontend's optimistic echo scan identically. */
 export const AT_MENTION_PATTERN = /(?<=^|\s)@([\p{L}\p{N}_./\\:-]+)/gu;
 
+/** Strip sentence-ending dots from an @path capture without a regex backtracking loop. */
+export function stripTrailingMentionDots(path: string): string {
+  let cleaned = path;
+  while (cleaned.endsWith(".")) cleaned = cleaned.slice(0, -1);
+  return cleaned;
+}
+
 /** One `@path` mention that resolved to a supported image. */
 export interface ImageMention {
   /** The raw `@path` token as it appeared in the text. */
@@ -51,9 +58,7 @@ export function scanImageMentions(text: string, resolve: (path: string) => strin
   const out: ImageMention[] = [];
   const seen = new Set<string>();
   for (const m of text.matchAll(AT_MENTION_PATTERN)) {
-    let cleaned = m[1]!;
-    // Strip trailing sentence-terminator dots, matching at-mentions.
-    while (cleaned.endsWith(".")) cleaned = cleaned.slice(0, -1);
+    const cleaned = stripTrailingMentionDots(m[1]!);
     if (!cleaned || !isSupportedImagePath(cleaned)) continue;
     const path = resolve(cleaned);
     if (seen.has(path)) continue;

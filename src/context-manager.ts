@@ -1,4 +1,8 @@
-import { COMPACTION_SUMMARY_MARKER, buildFilesDroppedMarker } from "@reasonix/core-utils";
+import {
+  COMPACTION_SUMMARY_MARKER,
+  buildFilesDroppedMarker,
+  messageOf,
+} from "@reasonix/core-utils";
 import type { DeepSeekClient } from "./client.js";
 import { Usage } from "./client.js";
 import { providerForModel } from "./config.js";
@@ -10,6 +14,11 @@ import {
 } from "./file-triage.js";
 import { healLoadedMessages } from "./loop.js";
 import { stripHallucinatedToolMarkup } from "./loop.js";
+import {
+  COMPACTION_MAX_ATTEMPTS,
+  COMPACTION_RETRY_DELAY_MS,
+  withCompactionRetry,
+} from "./loop/compaction-retry.js";
 import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
 import type { AppendOnlyLog } from "./memory/runtime.js";
@@ -61,12 +70,12 @@ export const HISTORY_FOLD_SUMMARY_PER_TOKEN_MS = 1.0;
 /** Ceiling for the scaled deadline — a hung request still can't stall the turn loop; it just
  *  gets a full prefill-sized window first (~4.3 min at a 240k-token head). */
 export const HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS = 300_000;
-// Automatic fold-summary retries after a fast retryable failure (5xx / 429 / network): the
-// client already retried 4× with short backoff, so this is one slower pause + one more attempt
-// — a partial outage gets time to clear before the fold gives up. Timeouts/aborts never retry.
-export const HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS = 2;
-/** Pause between fold-summary attempts — matches the "wait 30s and retry" user hint. */
-export const HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS = 30_000;
+// Automatic fold-summary retries after a transient provider failure. The client retries the
+// initial HTTP request, while the shared compaction policy also covers response-body/network
+// failures that happen after headers arrive. Timeouts/aborts remain terminal.
+export const HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS = COMPACTION_MAX_ATTEMPTS;
+/** Pause between fold-summary attempts — gives a high-load provider time to recover. */
+export const HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS = COMPACTION_RETRY_DELAY_MS;
 // Compaction step 3 (file relevance triage) — one small flash call per fold,
 // only when the log carries file-path-bearing tool calls. Fixed deadline: the
 // prompt is the fresh summary + path list, NOT the folded head, so a hung
@@ -198,25 +207,6 @@ function collectPinnedSkills(head: ChatMessage[]): { names: string[]; bodies: st
     }
   }
   return { names: [...pinned.keys()], bodies: [...pinned.values()] };
-}
-
-/** Fast retryable fold-summary failures get one automatic retry. The client already retried
- *  4× with short backoff, so what survived that is either permanent (4xx) or a slow hang
- *  (fold-timeout) — only 5xx / 429 / network errors are worth the longer pause. */
-function isRetryableFoldSummaryError(message: string): boolean {
-  if (message === "fold-timeout" || message === "fold-aborted" || message === "aborted") {
-    return false;
-  }
-  if (/^DeepSeek (5\d{2}|429):/.test(message)) return true;
-  if (/^DeepSeek \d{3}:/.test(message)) return false;
-  return true; // network-level failures (fetch failed, ECONNRESET, …)
-}
-
-/** Plain pause between fold attempts. Deliberately NOT abortable: compaction is
- *  non-interruptible by design (Esc/Stop is honored at the next loop boundary
- *  instead), so the retry window must survive user input too. */
-function foldRetryDelay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class ContextManager {
@@ -566,7 +556,6 @@ export class ContextManager {
     // kept climbing to the 80% forced-summary guard. The fold now runs to
     // completion bounded only by the scaled deadline below; the loop honors
     // a deferred Esc at its next iteration boundary instead.
-    const foldCtrl = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     // Deadline scales with the head being summarized: prefill + queue time
     // grows with the prompt, so a fixed short timeout would deterministically
@@ -578,55 +567,62 @@ export class ContextManager {
       HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS,
       HISTORY_FOLD_SUMMARY_TIMEOUT_MS + Math.round(headTokens * HISTORY_FOLD_SUMMARY_PER_TOKEN_MS),
     );
-    for (let attempt = 0; attempt < HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS; attempt++) {
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => {
-          foldCtrl.abort();
-          reject(new Error("fold-timeout"));
-        }, deadlineMs);
+    try {
+      return await withCompactionRetry({
+        maxAttempts: HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS,
+        retryDelayMs: HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS,
+        maxElapsedMs: deadlineMs + HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS,
+        timeoutMessage: "fold-timeout",
+        attempt: async (attemptSignal) => {
+          const deadlineCtrl = new AbortController();
+          const requestSignal = AbortSignal.any([attemptSignal, deadlineCtrl.signal]);
+          let timedOut = false;
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => {
+              timedOut = true;
+              deadlineCtrl.abort(new Error("fold-timeout"));
+              reject(new Error("fold-timeout"));
+            }, deadlineMs);
+          });
+          try {
+            const resp = await Promise.race([
+              this.deps.client.chat({
+                model: summaryModel,
+                messages,
+                tools: tools.length ? (tools as ToolSpec[]) : undefined,
+                signal: requestSignal,
+                thinking: "disabled",
+              }),
+              timeoutPromise,
+            ]);
+            this.deps.stats.record(
+              this.deps.getCurrentTurn(),
+              summaryModel,
+              resp.usage ?? new Usage(),
+            );
+            return {
+              content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
+              reasoningContent: resp.reasoningContent ?? "",
+            };
+          } catch (err) {
+            // Whichever promise wins the race, preserve the local timeout's
+            // non-retryable identity instead of misclassifying its abort as a
+            // transient provider drop.
+            if (timedOut) throw new Error("fold-timeout");
+            throw err;
+          } finally {
+            if (timeout) clearTimeout(timeout);
+          }
+        },
       });
-      try {
-        const resp = await Promise.race([
-          this.deps.client.chat({
-            model: summaryModel,
-            messages,
-            tools: tools.length ? (tools as ToolSpec[]) : undefined,
-            signal: foldCtrl.signal,
-            thinking: "disabled",
-          }),
-          timeoutPromise,
-        ]);
-        this.deps.stats.record(this.deps.getCurrentTurn(), summaryModel, resp.usage ?? new Usage());
-        return {
-          content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
-          reasoningContent: resp.reasoningContent ?? "",
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        // Automatic retry for fast retryable failures (5xx / 429 / network):
-        // the client already retried 4× with short backoff, so this pause is
-        // the longer "wait 30s and retry" window — a partial outage gets
-        // time to clear before the fold gives up. Timeouts are not retried —
-        // they already consumed the full scaled deadline.
-        const retryable =
-          attempt < HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS - 1 && isRetryableFoldSummaryError(message);
-        if (!retryable) {
-          return {
-            content: "",
-            reasoningContent: "",
-            error: message === "fold-timeout" ? "summary request timed out" : message,
-          };
-        }
-      } finally {
-        // Disarm the attempt deadline before the retry pause — leaving it
-        // armed would abort foldCtrl mid-pause and poison the next attempt.
-        if (timeout) clearTimeout(timeout);
-      }
-      // Retryable failure — pause, then loop into the next attempt.
-      await foldRetryDelay(HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS);
+    } catch (err) {
+      const message = messageOf(err);
+      return {
+        content: "",
+        reasoningContent: "",
+        error: message === "fold-timeout" ? "summary request timed out" : message,
+      };
     }
-    // Unreachable — every attempt returns or continues past the last one.
-    return { content: "", reasoningContent: "", error: "summary request failed" };
   }
 
   /** Compaction step 3 — the file relevance triage call: minimal system prompt
@@ -679,7 +675,7 @@ export class ContextManager {
       // Fail-open: relevance is advisory — the fold proceeds with no drops.
       // The failure is surfaced as a fold warning so the UI card explains
       // why "Files in context" was not trimmed.
-      const message = err instanceof Error ? err.message : String(err);
+      const message = messageOf(err);
       return {
         keep: allPaths,
         drop: [],
@@ -698,7 +694,7 @@ export class ContextManager {
       rewriteSession(this.deps.sessionName, messages);
       return null;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = messageOf(err);
       return `compaction committed but failed to save the session — ${message}. The conversation will revert on reload.`;
     }
   }

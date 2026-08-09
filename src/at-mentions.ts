@@ -3,7 +3,7 @@
 import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { AT_MENTION_PATTERN } from "@reasonix/core-utils";
+import { AT_MENTION_PATTERN, stripTrailingMentionDots } from "@reasonix/core-utils";
 import { TtlLruCache } from "./core/lru.js";
 import {
   type GitignoreLayer,
@@ -551,10 +551,8 @@ export function expandAtMentions(
   for (const match of text.matchAll(AT_MENTION_PATTERN)) {
     const rawPath = match[1] ?? "";
     // Strip trailing dot (sentence terminator): `@foo.ts.` → `@foo.ts`.
-    // Keep internal dots intact. Manual loop instead of `/\.+$/` — the
-    // regex is O(n²) on dot-heavy non-matches per CodeQL js/polynomial-redos.
-    let cleaned = rawPath;
-    while (cleaned.endsWith(".")) cleaned = cleaned.slice(0, -1);
+    // Keep internal dots intact; the shared helper avoids regex backtracking.
+    let cleaned = stripTrailingMentionDots(rawPath);
     // Strip a single trailing slash so `@docs/` and `@docs` resolve identically.
     if (cleaned.endsWith("/") || cleaned.endsWith("\\")) cleaned = cleaned.slice(0, -1);
     if (!cleaned) continue;

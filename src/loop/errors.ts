@@ -69,11 +69,23 @@ export function is4xxError(err: unknown): boolean {
 }
 
 /** Read structured metadata off thrown errors without resorting to `as any`. */
-export function errorMeta(err: unknown): { code?: string; phase?: string } {
+export function errorMeta(err: unknown): {
+  code?: string;
+  phase?: string;
+  partialDelivered?: boolean;
+  timedOut?: boolean;
+} {
   if (!(err instanceof Error)) return {};
   const code = "code" in err && typeof err.code === "string" ? err.code : undefined;
   const phase = "phase" in err && typeof err.phase === "string" ? err.phase : undefined;
-  return { code, phase };
+  const partialDelivered = "partialDelivered" in err && err.partialDelivered === true;
+  const timedOut = "timedOut" in err && err.timedOut === true;
+  return {
+    code,
+    phase,
+    ...(partialDelivered ? { partialDelivered } : {}),
+    ...(timedOut ? { timedOut } : {}),
+  };
 }
 
 export async function probeDeepSeekReachable(

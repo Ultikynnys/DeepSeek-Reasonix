@@ -1,4 +1,6 @@
-/** No retry on aborts or mid-stream body errors — re-billing the user for desynced output is worse than failing. */
+/** Client retries initial requests only; loop-level guards handle safe stream/compaction replays. */
+
+import { messageOf } from "@reasonix/core-utils";
 
 export interface RetryOptions {
   /** Maximum total attempts (including the first). Default 4. */
@@ -111,13 +113,4 @@ function isAbortError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const name = (err as { name?: unknown }).name;
   return name === "AbortError";
-}
-
-function messageOf(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  try {
-    return String(err);
-  } catch {
-    return "unknown error";
-  }
 }

@@ -2,6 +2,7 @@
 
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { messageOf } from "@reasonix/core-utils";
 
 function acceptAll<T>(_raw: unknown): _raw is T {
   return true;
@@ -21,9 +22,7 @@ export function parseJsonl<T = unknown>(
       if (validate(value)) out.push(value);
     } catch (err) {
       /* skip malformed line — but the corruption must be LOUD */
-      process.stderr.write(
-        `reasonix: JSONL parse skipped malformed line — ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      process.stderr.write(`reasonix: JSONL parse skipped malformed line — ${messageOf(err)}\n`);
     }
   }
   return out;

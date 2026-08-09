@@ -1,37 +1,26 @@
-import { type ChildProcess, type SpawnOptions, spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import * as pathMod from "node:path";
+import { killProcessTree as killProcessTreeByPid } from "../process-tree.js";
 import { parseCommandChain, runChain } from "../shell-chain.js";
 import { tokenizeCommand } from "./parse.js";
 
 export const DEFAULT_TIMEOUT_SEC = 60;
 export const DEFAULT_MAX_OUTPUT_CHARS = 32_000;
 
-/** Kill child + descendants. Windows: taskkill /T /F. Unix: SIGKILL the process group when detached, else fall back to SIGKILL on the leader. */
+/** Kill child + descendants using the shared cross-platform process-tree helper. */
 export function killProcessTree(child: ChildProcess): void {
   if (!child.pid || child.killed) return;
-  if (process.platform === "win32") {
-    try {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      return;
-    } catch {
-      /* fall through to SIGKILL */
-    }
-  }
-  try {
-    process.kill(-child.pid, "SIGKILL");
-    return;
-  } catch {
-    /* not a process group leader — fall through */
-  }
-  try {
-    child.kill("SIGKILL");
-  } catch {
-    /* already gone */
-  }
+  killProcessTreeByPid(child.pid, "SIGKILL", {
+    syncWindows: true,
+    fallback: () => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    },
+  });
 }
 
 export interface RunCommandResult {

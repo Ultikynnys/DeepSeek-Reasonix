@@ -2,6 +2,7 @@
 // Tools call gate.ask(kind, payload) and await the result; the App subscribes
 // with gate.on() to show the right modal, then calls gate.resolve() on user pick.
 
+import { messageOf } from "@reasonix/core-utils";
 import type {
   CheckpointVerdict,
   ChoiceVerdict,
@@ -109,9 +110,7 @@ export class PauseGate {
           fn(request);
         } catch (err) {
           /* listener error shouldn't break the gate — but must be LOUD */
-          process.stderr.write(
-            `reasonix: pause gate listener failed — ${err instanceof Error ? err.message : String(err)}\n`,
-          );
+          process.stderr.write(`reasonix: pause gate listener failed — ${messageOf(err)}\n`);
         }
       }
     });
@@ -200,9 +199,7 @@ export class PauseGate {
       }
     } catch (err) {
       /* audit path must never break the gate — but the failure must be LOUD */
-      process.stderr.write(
-        `reasonix: pause gate audit event failed — ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      process.stderr.write(`reasonix: pause gate audit event failed — ${messageOf(err)}\n`);
     }
   }
 }

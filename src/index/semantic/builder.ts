@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { messageOf } from "@reasonix/core-utils";
 import { type ResolvedEmbeddingConfig, resolveSemanticEmbeddingConfig } from "../../config.js";
 import { type ResolvedIndexConfig, defaultIndexConfig } from "../config.js";
 import { walkChunks } from "./chunker.js";
@@ -159,7 +160,7 @@ export async function buildIndex(root: string, opts: BuildOptions = {}): Promise
         chunksSkipped++;
         const c = bucket.chunks[idx];
         const where = c ? `${c.path}:${c.startLine}-${c.endLine}` : `chunk #${idx}`;
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = messageOf(err);
         process.stderr.write(`\n  ! skipped ${where}: ${msg}\n`);
       },
     });

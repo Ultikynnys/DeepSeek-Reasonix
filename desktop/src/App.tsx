@@ -4,6 +4,7 @@ import {
   extractPathsFromArgs,
   flattenText,
   isFilePathTool,
+  messageOf,
   parseFilesDroppedMarker,
 } from "@reasonix/core-utils";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -4401,7 +4402,7 @@ export function App() {
 
   const openTab = useCallback(() => {
     rpcSend({ cmd: "tab_open" }).catch((err) => {
-      const msg = `Failed to open new tab: ${err instanceof Error ? err.message : String(err)}`;
+      const msg = `Failed to open new tab: ${messageOf(err)}`;
       pushGlobalToast(msg, "error");
     });
   }, [pushGlobalToast]);
@@ -4410,7 +4411,7 @@ export function App() {
     (id: string) => {
       if (tabs.length <= 1) return;
       rpcSend({ cmd: "tab_close", tabId: id }).catch((err) => {
-        const msg = `Failed to close tab: ${err instanceof Error ? err.message : String(err)}`;
+        const msg = `Failed to close tab: ${messageOf(err)}`;
         pushGlobalToast(msg, "error");
       });
     },
