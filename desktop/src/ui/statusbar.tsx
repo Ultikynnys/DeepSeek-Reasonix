@@ -140,6 +140,29 @@ export function StatusBar({
     !showQuota && codexQuotaReason
       ? `${quotaTitle}\n${t("statusbar.codexReason", { reason: codexQuotaReason })}`
       : quotaTitle;
+  useEffect(() => {
+    const renderState = {
+      openaiTab,
+      showQuota,
+      hasWeeklyWindow: quotaWeekly !== null,
+      hasFiveHourWindow: quotaFiveHour !== null,
+      turnUsedPct: quotaTurnPct,
+      weeklyRemainingPct: quotaWeekly?.remainingPercent ?? null,
+      refreshing: codexQuotaRefreshing,
+      reason: codexQuotaReason,
+    };
+    const level = quotaTurnPct === null && openaiTab ? "warn" : "debug";
+    if (level === "warn") console.warn("[reasonix frontend] statusbar quota render", renderState);
+    else console.debug("[reasonix frontend] statusbar quota render", renderState);
+  }, [
+    openaiTab,
+    showQuota,
+    quotaWeekly,
+    quotaFiveHour,
+    quotaTurnPct,
+    codexQuotaRefreshing,
+    codexQuotaReason,
+  ]);
   const [themeOpen, setThemeOpen] = useState(false);
   const themePopRef = useRef<HTMLDivElement | null>(null);
   const themeButtonRef = useRef<HTMLSpanElement | null>(null);

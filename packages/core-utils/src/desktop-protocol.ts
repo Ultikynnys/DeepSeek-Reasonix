@@ -35,6 +35,20 @@ export type ReadyEvent = { type: "$ready" };
 export type ProtocolErrorEvent = { type: "$error"; message: string };
 export type TurnCompleteEvent = { type: "$turn_complete" };
 
+export type DesktopDiagnosticLevel = "debug" | "info" | "warn" | "error";
+
+/** Structured daemon diagnostics delivered to the Tauri WebView console.
+ *  Details must be redacted and must never contain credentials or message bodies. */
+export interface DesktopDiagnosticEvent {
+  type: "$diagnostic";
+  ts: string;
+  source: "daemon";
+  level: DesktopDiagnosticLevel;
+  event: string;
+  message?: string;
+  details?: Record<string, unknown>;
+}
+
 export interface ConfirmRequiredEvent {
   type: "$confirm_required";
   id: number;

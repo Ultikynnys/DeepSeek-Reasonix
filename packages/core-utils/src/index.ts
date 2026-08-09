@@ -42,7 +42,13 @@ export {
   toApprovalPrompt,
   resolveApprovalPrompt,
 } from "./approval-prompt.js";
-export { clipText, flattenText, sanitizeFilename } from "./text.js";
+export {
+  clipText,
+  flattenText,
+  redactDiagnosticText,
+  redactDiagnosticValue,
+  sanitizeFilename,
+} from "./text.js";
 export type { SanitizeFilenameOptions } from "./text.js";
 export type {
   ApprovalPrompt,
@@ -58,6 +64,8 @@ export type {
   ReadyEvent,
   ProtocolErrorEvent,
   TurnCompleteEvent,
+  DesktopDiagnosticLevel,
+  DesktopDiagnosticEvent,
   ConfirmRequiredEvent,
   PathAccessRequiredEvent,
   ChoiceRequiredEvent,

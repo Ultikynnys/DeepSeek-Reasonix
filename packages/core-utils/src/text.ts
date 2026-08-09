@@ -7,6 +7,37 @@ export function flattenText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/** Remove common credential/data-url forms before text reaches a diagnostic console. */
+export function redactDiagnosticText(raw: string, max = 2000): string {
+  return raw
+    .replace(/data:\S+/gi, "[redacted-data-url]")
+    .replace(/Bearer\s+[^\s,;]+/gi, "Bearer [redacted]")
+    .replace(/\b(?:sk|sk-proj)-[A-Za-z0-9_+\-/=]+/g, "[redacted-key]")
+    .replace(/\b(?:ghp|github_pat|xox[baprs])-[A-Za-z0-9_+\-/=]+/g, "[redacted-token]")
+    .replace(/\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b/g, "[redacted-jwt]")
+    .replace(
+      /([?&](?:token|access_token|refresh_token|api_key|key|signature)=)[^&#\s]+/gi,
+      "$1[redacted]",
+    )
+    .replace(
+      /(access[_-]?token|refresh[_-]?token|api[_-]?key)([\s:=]+)[^\s,;]+/gi,
+      "$1$2[redacted]",
+    )
+    .slice(0, max);
+}
+
+/** Recursively redact string leaves in structured diagnostic payloads. */
+export function redactDiagnosticValue(value: unknown): unknown {
+  if (typeof value === "string") return redactDiagnosticText(value);
+  if (Array.isArray(value)) return value.map(redactDiagnosticValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, redactDiagnosticValue(child)]),
+    );
+  }
+  return value;
+}
+
 /** Clip `text` at `max` chars, appending `ellipsis` (default "…") when it had to clip. */
 export function clipText(text: string, max: number, ellipsis = "…"): string {
   return text.length > max ? `${text.slice(0, max)}${ellipsis}` : text;

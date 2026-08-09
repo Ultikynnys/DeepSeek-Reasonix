@@ -1,7 +1,11 @@
 /** #1074 — the desktop sidecar must survive an unhandled rejection / uncaught exception rather than exit(1) (which Tauri surfaces as "reasonix exited (code 1)" and forces a full reconnect). */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { installDesktopCrashGuards } from "../src/cli/commands/desktop.js";
+import {
+  buildDesktopDiagnostic,
+  installDesktopCrashGuards,
+  redactDesktopDiagnosticMessage,
+} from "../src/cli/commands/desktop.js";
 
 function snapshotListeners() {
   return {
@@ -18,6 +22,35 @@ function restoreListeners(snap: ReturnType<typeof snapshotListeners>) {
     if (!snap.uncaught.includes(l)) process.off("uncaughtException", l);
   }
 }
+
+describe("desktop diagnostics", () => {
+  it("redacts credentials and data URLs while keeping actionable errors", () => {
+    const message = redactDesktopDiagnosticMessage(
+      "Bearer secret access_token=oauth-secret data:image/png;base64,abc sk-proj-key",
+    );
+    expect(message).not.toContain("secret");
+    expect(message).not.toContain("oauth-secret");
+    expect(message).not.toContain("abc");
+    expect(message).toContain("redacted");
+  });
+
+  it("builds a timestamped structured event without message content in details", () => {
+    const event = buildDesktopDiagnostic(
+      "turn.started",
+      { session: "desktop-session", textChars: 12 },
+      { tabId: "t1", level: "info", message: "ready" },
+    );
+    expect(event).toMatchObject({
+      type: "$diagnostic",
+      source: "daemon",
+      event: "turn.started",
+      level: "info",
+      message: "ready",
+      details: { session: "desktop-session", textChars: 12 },
+    });
+    expect(event.ts).toMatch(/T/);
+  });
+});
 
 describe("installDesktopCrashGuards", () => {
   let snap: ReturnType<typeof snapshotListeners>;

@@ -6,6 +6,8 @@ import {
   isFilePathTool,
   messageOf,
   parseFilesDroppedMarker,
+  redactDiagnosticText,
+  redactDiagnosticValue,
 } from "@reasonix/core-utils";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -38,6 +40,7 @@ import {
   type ChoiceVerdict,
   type CodexQuota,
   type ConfirmationChoice,
+  type DesktopDiagnosticEvent,
   type ExternalSessionApp,
   type ExternalSessionSource,
   type IncomingEvent,
@@ -1826,7 +1829,7 @@ function TabRuntime({
         saveSettings({ workspaceDir: picked });
       }
     } catch (err) {
-      console.error("pickWorkspace failed", err);
+      console.error("[reasonix frontend] pickWorkspace failed", err);
     }
   }, [clearAbortDraft, saveSettings, state.settings?.workspaceDir]);
 
@@ -1852,7 +1855,7 @@ function TabRuntime({
           },
         ]);
       } catch (err) {
-        console.error("clipboard image attach failed", err);
+        console.error("[reasonix frontend] clipboard image attach failed", err);
         flashToast(t("composer.imageAttachFailed"));
       }
     },
@@ -1962,7 +1965,7 @@ function TabRuntime({
         if (cancelled) handle();
         else unlisten = handle;
       } catch (err) {
-        console.error("drag-drop listen failed", err);
+        console.error("[reasonix frontend] drag-drop listen failed", err);
       }
     })();
     return () => {
@@ -2151,7 +2154,10 @@ function TabRuntime({
 
     void getCurrentWindow()
       .isFocused()
-      .catch(() => true)
+      .catch((err) => {
+        console.debug("[reasonix frontend] window focus query unavailable", err);
+        return true;
+      })
       .then((focused) => {
         if (
           shouldShowCompletionToast({
@@ -2472,8 +2478,8 @@ function TabRuntime({
       cmd: "/feedback",
       desc: t("app.cmd.feedback"),
       run: () => {
-        void openUrl("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose").catch(
-          () => undefined,
+        void openUrl("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose").catch((err) =>
+          console.error("[reasonix frontend] feedback URL failed", err),
         );
       },
     },
@@ -2571,7 +2577,7 @@ function TabRuntime({
       await invoke("write_text_file", { path, content: md });
       flashToast(t("app.toast.exportedMd"));
     } catch (err) {
-      console.error("export failed", err);
+      console.error("[reasonix frontend] export failed", err);
       flashToast(t("app.toast.exportFailed", { error: String(err) }));
     }
   }, [state.messages, session, flashToast]);
@@ -4125,8 +4131,8 @@ export function App() {
       try {
         const update = await check();
         if (!cancelled && update) setPendingUpdate(update);
-      } catch {
-        // updater not configured
+      } catch (err) {
+        console.debug("[reasonix frontend] updater check unavailable", err);
       }
     })();
     return () => {
@@ -4192,6 +4198,29 @@ export function App() {
           try {
             const ev = JSON.parse(e.payload.data) as IncomingEvent;
             const tabId = ev.tabId;
+
+            if (ev.type === "$diagnostic") {
+              const diagnostic = ev as DesktopDiagnosticEvent & { tabId?: string };
+              const prefix = `[reasonix ${diagnostic.source}] ${diagnostic.event}`;
+              const safeMessage = diagnostic.message ? redactDiagnosticText(diagnostic.message) : undefined;
+              const payload = {
+                ...diagnostic,
+                ...(safeMessage ? { message: safeMessage } : {}),
+                ...(diagnostic.details
+                  ? { details: redactDiagnosticValue(diagnostic.details) as Record<string, unknown> }
+                  : {}),
+                ...(diagnostic.tabId ? { tabId: diagnostic.tabId } : {}),
+              };
+              if (safeMessage) payload.message = safeMessage;
+              if (diagnostic.details) {
+                payload.details = redactDiagnosticValue(diagnostic.details) as Record<string, unknown>;
+              }
+              if (diagnostic.level === "error") console.error(prefix, payload);
+              else if (diagnostic.level === "warn") console.warn(prefix, payload);
+              else if (diagnostic.level === "info") console.info(prefix, payload);
+              else console.debug(prefix, payload);
+              return;
+            }
 
             if (ev.type === "$tab_opened" && tabId) {
               setTabs((prev) =>
@@ -4336,8 +4365,11 @@ export function App() {
               }
               deliverToTab(target, { t: "incoming", event: ev });
             }
-          } catch {
-            console.error("bad rpc:event line", e.payload.data);
+          } catch (err) {
+            console.error("[reasonix frontend] bad rpc:event line", {
+              error: err,
+              payloadChars: e.payload.data.length,
+            });
           }
         }),
         listen<{ data: string }>("rpc:stderr", (e) => {
@@ -4350,16 +4382,21 @@ export function App() {
                 )
               : prev,
           );
-          console.warn("[reasonix stderr]", e.payload.data);
+          console.warn("[reasonix frontend] daemon stderr", {
+            line: e.payload.data,
+            lineChars: e.payload.data.length,
+          });
         }),
         listen<{ code: number | null }>("rpc:exit", (e) => {
           for (const tabId of dispatchersRef.current.keys()) flushTabDeltas(tabId);
           if (dispatchersRef.current.size === 0) {
+            const exitError = new Error(`reasonix exited (code ${e.payload.code ?? "?"})`);
+            console.error("[reasonix frontend] daemon exited", {
+              code: e.payload.code,
+              stderrLines: startupStderrRef.current.length,
+            });
             setStartupFailure(
-              coerceStartupFailure(
-                new Error(`reasonix exited (code ${e.payload.code ?? "?"})`),
-                startupStderrRef.current,
-              ),
+              coerceStartupFailure(exitError, startupStderrRef.current),
             );
           }
           for (const dispatch of dispatchersRef.current.values()) {
@@ -4397,7 +4434,12 @@ export function App() {
   // Tell the backend which tab is focused so a restart can reopen on it (#1244).
   useEffect(() => {
     if (!activeTabId) return;
-    rpcSend({ cmd: "tab_activate", tabId: activeTabId }).catch(() => {});
+    rpcSend({ cmd: "tab_activate", tabId: activeTabId }).catch((err) => {
+      console.error("[reasonix frontend] tab_activate failed", {
+        tabId: activeTabId,
+        error: err,
+      });
+    });
   }, [activeTabId]);
 
   const openTab = useCallback(() => {

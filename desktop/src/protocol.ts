@@ -69,12 +69,16 @@ import type {
   TurnCompleteEvent,
   UserImageAttachment,
   WebSearchEngineName,
+  DesktopDiagnosticEvent,
+  DesktopDiagnosticLevel,
 } from "@reasonix/core-utils";
 import { invoke } from "@tauri-apps/api/core";
 
 export type {
   BalanceEvent,
   BtwResultEvent,
+  DesktopDiagnosticEvent,
+  DesktopDiagnosticLevel,
   CheckpointRequiredEvent,
   CheckpointVerdict,
   ChoiceOption,
@@ -301,6 +305,7 @@ export type IncomingEvent = { tabId?: string } & (
   | ReadyEvent
   | ProtocolErrorEvent
   | TurnCompleteEvent
+  | DesktopDiagnosticEvent
   | ConfirmRequiredEvent
   | PathAccessRequiredEvent
   | ChoiceRequiredEvent

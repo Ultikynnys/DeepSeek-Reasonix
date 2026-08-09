@@ -9,6 +9,8 @@ import {
   flattenText,
   imageMimeForExtension,
   messageOf,
+  redactDiagnosticText,
+  redactDiagnosticValue,
   scanImageMentions,
   stripMentionTokens,
   toApprovalPrompt,
@@ -21,6 +23,7 @@ import type {
   CodexQuotaEvent,
   ConfirmRequiredEvent,
   CtxBreakdownEvent,
+  DesktopDiagnosticEvent,
   JobInfo,
   JobsEvent,
   LoadedMessage,
@@ -217,6 +220,7 @@ type EmittableEvent =
   | { type: "$ready" }
   | { type: "$error"; message: string }
   | { type: "$turn_complete" }
+  | DesktopDiagnosticEvent
   | { type: "oauth_begin_result"; url: string }
   | ConfirmRequiredEvent
   | PathAccessRequiredEvent
@@ -290,9 +294,137 @@ export function writeAllSync(
   }
 }
 
-function emit(ev: EmittableEvent, tabId?: string): void {
+function writeEvent(ev: EmittableEvent, tabId?: string): void {
   const payload = tabId ? { ...ev, tabId } : ev;
   writeAllSync(1, Buffer.from(`${JSON.stringify(payload)}\n`, "utf8"));
+}
+
+export function redactDesktopDiagnosticMessage(raw: string, max = 2000): string {
+  return redactDiagnosticText(raw, max);
+}
+
+function diagnosticErrorMessage(err: unknown): string {
+  return redactDesktopDiagnosticMessage(messageOf(err));
+}
+
+export function buildDesktopDiagnostic(
+  event: string,
+  details?: Record<string, unknown>,
+  opts: { tabId?: string; level?: DesktopDiagnosticEvent["level"]; message?: string } = {},
+): DesktopDiagnosticEvent {
+  return {
+    type: "$diagnostic",
+    ts: new Date().toISOString(),
+    source: "daemon",
+    level: opts.level ?? "debug",
+    event,
+    ...(opts.message ? { message: diagnosticErrorMessage(opts.message) } : {}),
+    ...(details ? { details: redactDiagnosticValue(details) as Record<string, unknown> } : {}),
+  };
+}
+
+function emitDiagnostic(
+  event: string,
+  details?: Record<string, unknown>,
+  opts: { tabId?: string; level?: DesktopDiagnosticEvent["level"]; message?: string } = {},
+): void {
+  writeEvent(buildDesktopDiagnostic(event, details, opts), opts.tabId);
+}
+
+function emitDiagnosticError(
+  event: string,
+  err: unknown,
+  opts: { tabId?: string; details?: Record<string, unknown> } = {},
+): void {
+  emitDiagnostic(event, opts.details, {
+    tabId: opts.tabId,
+    level: "error",
+    message: diagnosticErrorMessage(err),
+  });
+}
+
+function wireEventDetails(ev: EmittableEvent): Record<string, unknown> {
+  switch (ev.type) {
+    case "$error":
+      return { messageLength: ev.message.length };
+    case "error":
+      return { turn: ev.turn, recoverable: ev.recoverable, messageLength: ev.message.length };
+    case "warning":
+      return { turn: ev.turn, severity: ev.severity, textLength: ev.text.length };
+    case "model.turn.started":
+      return { turn: ev.turn, model: ev.model, reasoningEffort: ev.reasoningEffort };
+    case "model.delta":
+      return { turn: ev.turn, channel: ev.channel, chars: ev.text.length };
+    case "model.final":
+      return {
+        turn: ev.turn,
+        contentChars: ev.content.length,
+        reasoningChars: ev.reasoningContent?.length ?? 0,
+        toolCalls: ev.toolCalls.length,
+        usage: ev.usage,
+        costUsd: ev.costUsd,
+      };
+    case "tool.preparing":
+      return { turn: ev.turn, callId: ev.callId, name: ev.name };
+    case "tool.intent":
+      return { turn: ev.turn, callId: ev.callId, name: ev.name, argsChars: ev.args.length };
+    case "tool.result":
+      return { turn: ev.turn, callId: ev.callId, ok: ev.ok, outputChars: ev.output.length };
+    case "$session_loaded":
+      return {
+        name: ev.name,
+        messages: ev.messages.length,
+        carryover: ev.carryover,
+        resync: ev.resync ?? false,
+      };
+    case "$sessions":
+      return { sessions: ev.items.length };
+    case "$ctx_breakdown":
+      return {
+        reservedTokens: ev.reservedTokens,
+        logTokens: ev.logTokens ?? null,
+        ctxMax: ev.ctxMax ?? null,
+      };
+    case "$codex_quota":
+      return {
+        hasQuota: ev.quota !== null,
+        reason: ev.reason ?? null,
+        weekly: ev.quota?.weekly ?? null,
+        fiveHour: ev.quota?.fiveHour ?? null,
+        turnUsedPct: ev.quota?.turnUsedPct ?? null,
+      };
+    case "$balance":
+      return {
+        currency: ev.currency,
+        isAvailable: ev.isAvailable,
+        currencies: ev.balanceInfos.length,
+      };
+    case "$tab_opened":
+      return { workspaceDirChars: ev.workspaceDir.length, active: ev.active ?? false };
+    case "$tabs_snapshot":
+      return { tabs: ev.tabs.length };
+    case "$turn_complete":
+      return {};
+    default:
+      return {};
+  }
+}
+
+function emit(ev: EmittableEvent, tabId?: string): void {
+  writeEvent(ev, tabId);
+  // Model deltas are streamed at token/chunk frequency. They are already
+  // observable in the WebView transcript; duplicating every chunk as a
+  // diagnostic doubles synchronous stdout writes and can starve the loop.
+  if (ev.type === "$diagnostic" || ev.type === "model.delta") return;
+  emitDiagnostic(
+    "wire.emit",
+    { eventType: ev.type, ...wireEventDetails(ev) },
+    {
+      tabId,
+      level: ev.type === "$error" || ev.type === "error" ? "error" : "debug",
+      ...(ev.type === "$error" || ev.type === "error" ? { message: ev.message } : {}),
+    },
+  );
 }
 
 /** Emit a kernel event to a tab; session.compacted's replacement payload is
@@ -563,15 +695,36 @@ function emitSettings(tab: Tab): void {
     },
     tab.id,
   );
+  emitTabDiagnostic(tab, "settings.emitted", {
+    model: tab.currentModel,
+    provider: providerForModel(tab.currentModel),
+    modelEndpoint: modelEndpointFor(tab.currentModel),
+    editMode,
+    budgetConfigured: tab.runtime?.loop.budgetUsd !== undefined,
+    oauthSignedIn: !!oauth?.accessToken,
+  });
   void emitCodexQuota(tab);
 }
 
 async function emitBalance(tab: Tab): Promise<void> {
-  if (!tab.runtime) return;
-  const bal = await tab.runtime.loop.client.getBalance().catch(() => null);
+  if (!tab.runtime) {
+    emitTabDiagnostic(tab, "balance.skipped", { reason: "runtime-not-ready" });
+    return;
+  }
+  emitTabDiagnostic(tab, "balance.fetch.started");
+  const bal = await tab.runtime.loop.client.getBalance().catch((err) => {
+    emitDiagnosticError("balance.fetch.failed", err, {
+      tabId: tab.id,
+      details: tabDiagnosticState(tab),
+    });
+    return null;
+  });
   if (!bal) return;
   const primary = pickPrimaryBalance(bal.balance_infos);
-  if (!primary) return;
+  if (!primary) {
+    emitTabDiagnostic(tab, "balance.fetch.empty", { balances: bal.balance_infos.length }, "warn");
+    return;
+  }
   const balanceInfos = bal.balance_infos.map((info) => ({
     currency: info.currency,
     total: Number(info.total_balance),
@@ -588,6 +741,11 @@ async function emitBalance(tab: Tab): Promise<void> {
     },
     tab.id,
   );
+  emitTabDiagnostic(tab, "balance.fetch.succeeded", {
+    currency: primary.currency,
+    isAvailable: bal.is_available,
+    balances: balanceInfos.length,
+  });
 }
 
 /** Last API-reported five-hour usage — delta to the next fetch = percent points consumed since (each $turn_complete refetches).
@@ -597,8 +755,12 @@ let lastCodexQuotaUsedPct: number | null = null;
 /** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only.
  *  OAuth HTTP fetch only (no codex CLI dependency). */
 async function emitCodexQuota(tab: Tab): Promise<void> {
-  if (providerForModel(tab.currentModel) !== "openai") return;
+  if (providerForModel(tab.currentModel) !== "openai") {
+    emitTabDiagnostic(tab, "quota.skipped", { reason: "non-openai-provider" });
+    return;
+  }
 
+  emitTabDiagnostic(tab, "quota.fetch.started");
   const oauthResult = await fetchCodexQuotaViaOAuth(10_000).catch((err) => ({
     quota: null,
     reason: (err as Error).message,
@@ -608,24 +770,36 @@ async function emitCodexQuota(tab: Tab): Promise<void> {
 
   if (quota) {
     let turnUsedPct: number | null = null;
-    // Use the five-hour window for turn-percentage — it has ~33× better
-    // resolution than the weekly window, so per-turn usage is visible.
     const fiveHourUsedPct = quota.fiveHour?.usedPercent ?? null;
+    const previousBaseline = lastCodexQuotaUsedPct;
+    const rollover =
+      previousBaseline !== null && fiveHourUsedPct !== null && fiveHourUsedPct < previousBaseline;
     if (fiveHourUsedPct !== null) {
       // Rollover (five-hour window reset) makes the delta go backwards —
       // keep the previous baseline and report no turn cost for this fetch.
-      if (lastCodexQuotaUsedPct !== null && fiveHourUsedPct >= lastCodexQuotaUsedPct) {
-        turnUsedPct = fiveHourUsedPct - lastCodexQuotaUsedPct;
+      if (previousBaseline !== null && fiveHourUsedPct >= previousBaseline) {
+        turnUsedPct = fiveHourUsedPct - previousBaseline;
       }
       lastCodexQuotaUsedPct = fiveHourUsedPct;
     }
+    emitTabDiagnostic(tab, "quota.fetch.succeeded", {
+      plan: quota.plan,
+      fiveHour: quota.fiveHour,
+      weekly: quota.weekly,
+      previousFiveHourUsedPct: previousBaseline,
+      currentFiveHourUsedPct: fiveHourUsedPct,
+      rollover,
+      turnUsedPct,
+    });
     emit({ type: "$codex_quota", quota: { ...quota, turnUsedPct } }, tab.id);
     return;
   }
+  emitTabDiagnostic(tab, "quota.fetch.failed", { reason }, "error");
   emit({ type: "$codex_quota", quota: null, ...(reason ? { reason } : {}) }, tab.id);
 }
 
 function emitSessions(tab: Tab): void {
+  emitTabDiagnostic(tab, "sessions.list.started");
   try {
     const items = listSessionsForWorkspace(tab.rootDir).map((s) => ({
       name: s.name,
@@ -635,7 +809,12 @@ function emitSessions(tab: Tab): void {
       workspaceStatus: s.workspaceStatus,
     }));
     emit({ type: "$sessions", items }, tab.id);
+    emitTabDiagnostic(tab, "sessions.list.completed", { count: items.length });
   } catch (err) {
+    emitDiagnosticError("sessions.list.failed", err, {
+      tabId: tab.id,
+      details: tabDiagnosticState(tab),
+    });
     emit({ type: "$error", message: `session_list failed: ${(err as Error).message}` }, tab.id);
   }
 }
@@ -649,6 +828,7 @@ function loadSessionIntoTab(
     persistOpenTabs: () => void;
   },
 ): void {
+  emitTabDiagnostic(tab, "session.load.started", { name });
   const records = loadSessionMessages(name);
   const backfilledWorkspace = patchSessionWorkspaceIfMissing(name, tab.rootDir);
   const meta = loadSessionMeta(name);
@@ -671,6 +851,12 @@ function loadSessionIntoTab(
     } catch {
       void 0; /* file may not exist */
     }
+    emitTabDiagnostic(
+      tab,
+      "session.load.empty",
+      { name, sizeBytes, records: records.length },
+      "warn",
+    );
     process.stderr.write(
       `session_load: "${name}" returned 0 messages (file size=${sizeBytes}B) — empty or unreadable jsonl\n`,
     );
@@ -693,6 +879,18 @@ function loadSessionIntoTab(
   emitCtxBreakdown(tab);
   emitSettings(tab);
   if (backfilledWorkspace) emitSessions(tab);
+  emitTabDiagnostic(tab, "session.load.completed", {
+    name,
+    records: records.length,
+    loadedMessages: loadedMessages.length,
+    backfilledWorkspace,
+    carryover: {
+      totalCostUsd: meta.totalCostUsd ?? 0,
+      cacheHitTokens: meta.cacheHitTokens ?? 0,
+      cacheMissTokens: meta.cacheMissTokens ?? 0,
+      totalCompletionTokens: meta.totalCompletionTokens ?? 0,
+    },
+  });
 }
 
 function summarizeMcpSpec(raw: string): McpSpecInfo {
@@ -738,13 +936,23 @@ function emitMcpSpecs(tab: Tab): void {
   });
   const bridged = specs.length > 0 && specs.every((s) => s.status === "connected");
   emit({ type: "$mcp_specs", specs, bridged }, tab.id);
+  emitTabDiagnostic(tab, "mcp.specs.emitted", {
+    configured: specs.length,
+    connected: specs.filter((spec) => spec.status === "connected").length,
+    bridged,
+  });
 }
 
 function emitMemory(tab: Tab): void {
   try {
     const entries = collectMemoryEntriesForWorkspace(tab.rootDir);
     emit({ type: "$memory", entries }, tab.id);
+    emitTabDiagnostic(tab, "memory.list.completed", { count: entries.length });
   } catch (err) {
+    emitDiagnosticError("memory.list.failed", err, {
+      tabId: tab.id,
+      details: tabDiagnosticState(tab),
+    });
     emit({ type: "$error", message: `memory_get failed: ${(err as Error).message}` }, tab.id);
   }
 }
@@ -797,12 +1005,18 @@ function emitCtxBreakdown(tab: Tab): void {
   }
   // ctxMax drives the panel meter's denominator + compaction-limit ticks —
   // keep it in sync with the loop's context cap (DEEPSEEK_CONTEXT_TOKENS).
+  const ctxMax = DEEPSEEK_CONTEXT_TOKENS[tab.currentModel] ?? DEFAULT_CONTEXT_TOKENS;
+  emitTabDiagnostic(tab, "context.breakdown", {
+    reservedTokens: sys + tools,
+    logTokens,
+    ctxMax,
+  });
   emit(
     {
       type: "$ctx_breakdown",
       reservedTokens: sys + tools,
       logTokens,
-      ctxMax: DEEPSEEK_CONTEXT_TOKENS[tab.currentModel] ?? DEFAULT_CONTEXT_TOKENS,
+      ctxMax,
     },
     tab.id,
   );
@@ -824,7 +1038,12 @@ function emitSkills(tab: Tab): void {
       model: s.model,
     }));
     emit({ type: "$skills", items }, tab.id);
+    emitTabDiagnostic(tab, "skills.list.completed", { count: items.length });
   } catch (err) {
+    emitDiagnosticError("skills.list.failed", err, {
+      tabId: tab.id,
+      details: tabDiagnosticState(tab),
+    });
     emit({ type: "$error", message: `skills_get failed: ${(err as Error).message}` }, tab.id);
   }
 }
@@ -874,6 +1093,70 @@ interface Tab {
   hooks: ResolvedHook[];
 }
 
+function tabDiagnosticState(tab: Tab): Record<string, unknown> {
+  let credentialAvailable: boolean | null = null;
+  try {
+    credentialAvailable = tabHasCredential(tab);
+  } catch {
+    credentialAvailable = null;
+  }
+  const mcpStatusCounts: Record<string, number> = {};
+  for (const status of tab.mcpStatuses.values()) {
+    mcpStatusCounts[status.kind] = (mcpStatusCounts[status.kind] ?? 0) + 1;
+  }
+  const stats = tab.runtime?.loop.stats.summary() ?? null;
+  let logEntries: number | null = null;
+  if (tab.runtime) {
+    try {
+      logEntries = tab.runtime.loop.log.length;
+    } catch {
+      logEntries = null;
+    }
+  }
+  return {
+    tabId: tab.id,
+    workspaceDirChars: tab.rootDir.length,
+    session: tab.currentSession || null,
+    model: tab.currentModel,
+    provider: providerForModel(tab.currentModel),
+    reasoningEffort: tab.currentReasoningEffort,
+    credentialAvailable,
+    toolsetReady: tab.toolset !== null,
+    runtimeReady: tab.runtime !== null,
+    busy: tab.aborter !== null,
+    switching: tab.switching,
+    pendingGateCount: tab.pendingGateIds.size,
+    plan: { totalSteps: tab.planTotalSteps, completedSteps: tab.completedStepIds.size },
+    mcp: { configured: mcpStatusCounts, runtimeReady: tab.mcpRuntime !== null },
+    indexes: {
+      fileReady: tab.fileIndex !== null,
+      fileBuilding: tab.fileIndexBuilding !== null,
+      symbolReady: tab.symbolIndex !== null,
+      symbolBuilding: tab.symbolBuilding !== null,
+    },
+    hooks: tab.hooks.length,
+    logEntries,
+    turn: tab.runtime?.loop.currentTurn ?? null,
+    stats,
+  };
+}
+
+function emitTabDiagnostic(
+  tab: Tab,
+  event: string,
+  details?: Record<string, unknown>,
+  level: DesktopDiagnosticEvent["level"] = "debug",
+): void {
+  emitDiagnostic(
+    event,
+    { ...tabDiagnosticState(tab), ...details },
+    {
+      tabId: tab.id,
+      level,
+    },
+  );
+}
+
 let tabCounter = 0;
 function nextTabId(): string {
   tabCounter++;
@@ -889,6 +1172,9 @@ function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
     patchSessionMeta(name, prefs ? { workspace: rootDir, ...prefs } : { workspace: rootDir });
   } catch (err) {
     // session meta is for filtering only — failure shouldn't block chat, but LOG
+    emitDiagnosticError("session.meta.patch.failed", err, {
+      details: { session: name, workspaceDirChars: rootDir.length },
+    });
     process.stderr.write(`reasonix: session meta patch failed — ${messageOf(err)}\n`);
   }
   return name;
@@ -905,6 +1191,10 @@ function persistSessionModelPrefs(tab: Tab): void {
       reasoningEffort: tab.currentReasoningEffort,
     });
   } catch (err) {
+    emitDiagnosticError("session.model-prefs.persist.failed", err, {
+      tabId: tab.id,
+      details: tabDiagnosticState(tab),
+    });
     /* meta is best-effort — failure shouldn't block the settings change, but LOG */
     process.stderr.write(`reasonix: session model prefs persist failed — ${messageOf(err)}\n`);
   }
@@ -923,6 +1213,10 @@ function stampSessionModelPrefs(tab: Tab): void {
       reasoningEffort: meta.reasoningEffort ?? tab.currentReasoningEffort,
     });
   } catch (err) {
+    emitDiagnosticError("session.model-prefs.stamp.failed", err, {
+      tabId: tab.id,
+      details: tabDiagnosticState(tab),
+    });
     /* meta is best-effort — but LOG so the failure isn't silent */
     process.stderr.write(`reasonix: session model prefs stamp failed — ${messageOf(err)}\n`);
   }
@@ -1053,6 +1347,10 @@ async function getSymbolIndexFor(tab: Tab): Promise<SymbolEntry[]> {
               if (m) out.push({ kind: m[1]!, name: m[2]!, path: entry.path, line: li + 1 });
             }
           } catch (err) {
+            emitDiagnosticError("symbol-index.file.failed", err, {
+              tabId: tab.id,
+              details: { pathChars: entry.path.length, ...tabDiagnosticState(tab) },
+            });
             // unreadable / binary — skip, but LOG
             process.stderr.write(`reasonix: symbol index parse failed — ${messageOf(err)}\n`);
           }
@@ -1099,10 +1397,18 @@ export function installDesktopCrashGuards(
 ): void {
   process.on("unhandledRejection", (reason) => {
     const err = reason instanceof Error ? reason : new Error(String(reason));
-    stderr.write(`[desktop] unhandledRejection: ${err.stack ?? err.message}\n`);
+    const message = redactDesktopDiagnosticMessage(
+      err.stack ?? err.message,
+      Number.POSITIVE_INFINITY,
+    );
+    stderr.write(`[desktop] unhandledRejection: ${message}\n`);
   });
   process.on("uncaughtException", (err) => {
-    stderr.write(`[desktop] uncaughtException: ${err.stack ?? err.message}\n`);
+    const message = redactDesktopDiagnosticMessage(
+      err.stack ?? err.message,
+      Number.POSITIVE_INFINITY,
+    );
+    stderr.write(`[desktop] uncaughtException: ${message}\n`);
   });
 }
 
@@ -1173,11 +1479,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       reasoningEffort: tab.currentReasoningEffort,
     });
     tabs.set(tab.id, tab);
+    emitTabDiagnostic(tab, "tab.created", { active: false }, "info");
     return tab;
   }
 
   /** Builds the toolset / system prompt / runtime / MCP bridge for a freshly-created skeleton. Reads `tab.currentModel` at call time so model changes during the wait are honored. */
   async function initTabToolset(tab: Tab): Promise<void> {
+    emitTabDiagnostic(tab, "tab.bootstrap.started", undefined, "info");
     const toolset = await buildCodeToolset({
       rootDir: tab.rootDir,
       onSkillInstalled: () => emitSkills(tab),
@@ -1191,23 +1499,51 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (tabHasCredential(tab)) {
       bridgeEndpointEnv();
       tab.runtime = buildRuntimeFor(tab);
+      emitTabDiagnostic(tab, "tab.runtime.ready", undefined, "info");
       void bridgeTabMcp(tab);
+    } else {
+      emitTabDiagnostic(tab, "tab.runtime.waiting-for-credential", undefined, "warn");
     }
+    emitTabDiagnostic(
+      tab,
+      "tab.bootstrap.completed",
+      {
+        toolCount: toolset.tools.specs().length,
+        semanticEnabled: toolset.semantic.enabled,
+      },
+      "info",
+    );
   }
 
   function bridgeTabMcp(tab: Tab): Promise<void> {
-    if (!tab.runtime || !tab.toolset) return Promise.resolve();
+    if (!tab.runtime || !tab.toolset) {
+      emitTabDiagnostic(tab, "mcp.bridge.skipped", { reason: "runtime-or-toolset-not-ready" });
+      return Promise.resolve();
+    }
+    emitTabDiagnostic(tab, "mcp.bridge.started", {
+      configured: (readConfig().mcp ?? []).length,
+    });
     if (tab.mcpRuntime) {
       // Already constructed — reload so new/removed specs settle without restart.
       return tab.mcpRuntime
         .reloadFromConfig(tab.runtime.loop)
-        .then(() => emitMcpSpecs(tab))
+        .then(() => {
+          emitTabDiagnostic(tab, "mcp.bridge.completed", { mode: "reload" });
+          emitMcpSpecs(tab);
+        })
         .catch((err) => {
+          emitDiagnosticError("mcp.bridge.failed", err, {
+            tabId: tab.id,
+            details: { mode: "reload", ...tabDiagnosticState(tab) },
+          });
           emit({ type: "$error", message: `mcp reload failed: ${(err as Error).message}` }, tab.id);
         });
     }
     const requested = (readConfig().mcp ?? []).length;
-    if (requested === 0) return Promise.resolve();
+    if (requested === 0) {
+      emitTabDiagnostic(tab, "mcp.bridge.skipped", { reason: "no-configured-servers" });
+      return Promise.resolve();
+    }
     const runtime = createMcpRuntime({
       getTools: () => {
         if (!tab.toolset) throw new Error("toolset gone");
@@ -1220,7 +1556,20 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     });
     tab.mcpRuntime = runtime;
     runtime.setLifecycleSink((notice) => {
-      if (notice.kind === "slow") return; // not surfaced in the desktop panel
+      if (notice.kind === "slow") {
+        emitTabDiagnostic(
+          tab,
+          "mcp.lifecycle",
+          {
+            notice: "slow",
+            name: notice.serverName,
+            p95Ms: notice.p95Ms,
+            sampleSize: notice.sampleSize,
+          },
+          "warn",
+        );
+        return;
+      }
       const cfg = readConfig().mcp ?? [];
       const target = cfg.find((raw) => {
         try {
@@ -1229,7 +1578,36 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           return false;
         }
       });
-      if (!target) return;
+      if (!target) {
+        emitTabDiagnostic(
+          tab,
+          "mcp.lifecycle.unmatched",
+          {
+            notice: notice.kind,
+            name: notice.name,
+          },
+          "warn",
+        );
+        return;
+      }
+      emitTabDiagnostic(
+        tab,
+        "mcp.lifecycle",
+        {
+          notice: notice.kind,
+          name: notice.name,
+          ...(notice.kind === "connected"
+            ? {
+                tools: notice.tools,
+                resources: notice.resources,
+                prompts: notice.prompts,
+                ms: notice.ms,
+              }
+            : {}),
+          ...(notice.kind === "failed" || notice.kind === "warn" ? { reason: notice.reason } : {}),
+        },
+        notice.kind === "failed" ? "error" : "debug",
+      );
       if (notice.kind === "handshake") {
         tab.mcpStatuses.set(target, { kind: "handshake" });
       } else if (notice.kind === "connected") {
@@ -1243,8 +1621,20 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     });
     return runtime
       .reloadFromConfig(tab.runtime.loop)
-      .then(() => undefined)
+      .then((result) => {
+        emitTabDiagnostic(tab, "mcp.bridge.completed", {
+          mode: "initial",
+          added: result.added.length,
+          removed: result.removed.length,
+          failed: result.failed.length,
+          summaries: result.summaries.length,
+        });
+      })
       .catch((err) => {
+        emitDiagnosticError("mcp.bridge.failed", err, {
+          tabId: tab.id,
+          details: { mode: "initial", ...tabDiagnosticState(tab) },
+        });
         emit({ type: "$error", message: `mcp bridge failed: ${(err as Error).message}` }, tab.id);
       });
   }
@@ -1261,16 +1651,24 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         })),
       );
     } catch (err) {
+      emitDiagnosticError("tabs.persist.failed", err, {
+        details: { tabCount: tabs.size, activeTabId: lastActiveTabId },
+      });
       // best-effort — disk / perms shouldn't break tab management, but LOG
       process.stderr.write(`reasonix: open tabs persist failed — ${messageOf(err)}\n`);
     }
   }
 
   async function closeTab(tab: Tab): Promise<void> {
+    emitTabDiagnostic(tab, "tab.close.started", undefined, "info");
     abortTurn(tab);
     try {
       await tab.toolset?.jobs.shutdown();
     } catch (err) {
+      emitDiagnosticError("tab.jobs.shutdown.failed", err, {
+        tabId: tab.id,
+        details: tabDiagnosticState(tab),
+      });
       // shutdown errors aren't actionable here — but LOG
       process.stderr.write(`reasonix: tab job shutdown failed — ${messageOf(err)}\n`);
     }
@@ -1288,6 +1686,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           ),
         ]);
       } catch (err) {
+        emitDiagnosticError("tab.mcp.shutdown.failed", err, {
+          tabId: tab.id,
+          details: tabDiagnosticState(tab),
+        });
         // MCP shutdown errors aren't actionable here either — but LOG
         process.stderr.write(`reasonix: tab MCP closeAll failed — ${messageOf(err)}\n`);
       }
@@ -1298,12 +1700,26 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       if (next) first = next;
     }
     persistOpenTabs();
+    emitTabDiagnostic(tab, "tab.close.completed", undefined, "info");
     emit({ type: "$tab_closed" }, tab.id);
   }
 
   async function runTurn(tab: Tab, text: string, images?: string[]): Promise<void> {
-    if (!tab.runtime) return;
+    emitTabDiagnostic(
+      tab,
+      "turn.start.requested",
+      {
+        textChars: text.length,
+        imageCount: images?.length ?? 0,
+      },
+      "info",
+    );
+    if (!tab.runtime) {
+      emitTabDiagnostic(tab, "turn.start.rejected", { reason: "runtime-not-ready" }, "error");
+      return;
+    }
     if (!tabHasCredential(tab)) {
+      emitTabDiagnostic(tab, "turn.start.rejected", { reason: "credential-unavailable" }, "error");
       const openai = providerForModel(tab.currentModel) === "openai";
       emit(
         {
@@ -1321,6 +1737,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // content parts. The UI hides the affordance for non-OpenAI models;
     // this is the hard gate so a stale or forged request can't reach the API.
     if (images && images.length > 0 && providerForModel(tab.currentModel) !== "openai") {
+      emitTabDiagnostic(
+        tab,
+        "turn.start.rejected",
+        {
+          reason: "images-require-openai",
+          imageCount: images.length,
+        },
+        "error",
+      );
       emit(
         {
           type: "$error",
@@ -1335,6 +1760,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // config. Never overwrites an existing stored pair (see stampSessionModelPrefs).
     stampSessionModelPrefs(tab);
     tab.aborter = new AbortController();
+    emitTabDiagnostic(
+      tab,
+      "turn.started",
+      {
+        textChars: text.length,
+        imageCount: images?.length ?? 0,
+      },
+      "info",
+    );
     let lastAssistantText = "";
     if (tab.currentSession) {
       const existing = loadSessionMeta(tab.currentSession).summary;
@@ -1390,6 +1824,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           if (next.done) break;
           const ev = next.value;
+          emitDiagnostic(
+            "turn.loop.event",
+            {
+              role: ev.role,
+              turn: ev.turn,
+              contentChars: ev.content?.length ?? 0,
+              toolName: ev.toolName ?? null,
+            },
+            { tabId: tab.id },
+          );
           lastTurn = ev.turn;
           if (!emittedTurnContext) {
             emittedTurnContext = true;
@@ -1426,6 +1870,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           void gen.return(undefined).catch(() => undefined);
         }
         tab.aborter = null;
+        emitTabDiagnostic(
+          tab,
+          "turn.finished",
+          {
+            aborted,
+            lastTurn,
+            sawAssistantFinal,
+            lastAssistantChars: lastAssistantText.length,
+          },
+          aborted ? "warn" : "info",
+        );
         // If a session switch happened while this turn was running,
         // suppress stale events to avoid UI state corruption (#1217).
         if (!tab.switching) {
@@ -1453,6 +1908,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             );
           }
           emit({ type: "$turn_complete" }, tab.id);
+          emitTabDiagnostic(
+            tab,
+            "turn.complete.emitted",
+            {
+              planProgress: { completed: tab.completedStepIds.size, total: tab.planTotalSteps },
+            },
+            "info",
+          );
           if (tab.planTotalSteps > 0 && tab.completedStepIds.size >= tab.planTotalSteps) {
             tab.completedStepIds.clear();
             tab.planTotalSteps = 0;
@@ -1484,11 +1947,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
   async function switchWorkspace(tab: Tab, nextDir: string): Promise<void> {
     const target = resolve(nextDir);
+    emitTabDiagnostic(tab, "workspace.switch.started", { targetChars: target.length }, "info");
     if (target === tab.rootDir) {
+      emitTabDiagnostic(tab, "workspace.switch.skipped", { reason: "same-workspace" });
       emitSettings(tab);
       return;
     }
     if (!existsSync(target) || !statSync(target).isDirectory()) {
+      emitTabDiagnostic(
+        tab,
+        "workspace.switch.rejected",
+        { targetChars: target.length, reason: "not-a-directory" },
+        "error",
+      );
       emit({ type: "$error", message: `Workspace not found: ${target}` }, tab.id);
       emitSettings(tab);
       return;
@@ -1497,6 +1968,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     try {
       await tab.toolset?.jobs.shutdown();
     } catch (err) {
+      emitDiagnosticError("workspace.jobs.shutdown.failed", err, {
+        tabId: tab.id,
+        details: { targetChars: target.length, ...tabDiagnosticState(tab) },
+      });
       // shutdown errors aren't actionable here — but LOG
       process.stderr.write(`reasonix: tab job shutdown failed — ${messageOf(err)}\n`);
     }
@@ -1525,6 +2000,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emitSettings(tab);
     emitSkills(tab);
     persistOpenTabs();
+    emitTabDiagnostic(tab, "workspace.switch.completed", { targetChars: target.length }, "info");
   }
 
   function forgetGate(id: number): Tab | undefined {
@@ -1545,6 +2021,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const summary = loadSessionMeta(tab.currentSession).summary?.trim();
         if (summary) return summary;
       } catch (err) {
+        emitDiagnosticError("session.meta.load.failed", err, {
+          tabId: tab.id,
+          details: tabDiagnosticState(tab),
+        });
         // session file unreadable — fall through to workspace basename, but LOG
         process.stderr.write(`reasonix: session meta load failed — ${messageOf(err)}\n`);
       }
@@ -1849,6 +2329,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     restore?: { id?: string; session?: string; active?: boolean },
   ): Tab {
     const tab = createTabSkeleton(initialDir, restore?.id);
+    emitTabDiagnostic(
+      tab,
+      "tab.bootstrap.requested",
+      {
+        restoredId: restore?.id ?? null,
+        restoredSession: restore?.session ?? null,
+        active: restore?.active ?? false,
+      },
+      "info",
+    );
     // Reopen the conversation the tab had, if its jsonl is still readable.
     let restoredMessages: LoadedMessage[] | undefined;
     if (restore?.session) {
@@ -1865,9 +2355,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
       } catch (err) {
         // unreadable jsonl — fall back to the freshly minted session, but LOG
+        emitDiagnosticError("session.restore.failed", err, {
+          tabId: tab.id,
+          details: { requestedSession: restore.session, ...tabDiagnosticState(tab) },
+        });
         process.stderr.write(`reasonix: session load for resync failed — ${messageOf(err)}\n`);
       }
     }
+    emitTabDiagnostic(tab, "tab.bootstrap.session-state", {
+      restored: restoredMessages !== undefined,
+      restoredMessages: restoredMessages?.length ?? 0,
+    });
     emit({ type: "$tab_opened", workspaceDir: tab.rootDir, active: restore?.active }, tab.id);
     emitSessions(tab);
     emitSettings(tab);
@@ -1891,14 +2389,26 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         tab.id,
       );
     }
-    if (!tabHasCredential(tab)) emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
+    if (!tabHasCredential(tab)) {
+      emitTabDiagnostic(tab, "tab.setup.required", { reason: "credential-unavailable" }, "warn");
+      emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
+    }
     void emitBalance(tab);
     void initTabToolset(tab)
       .then(() => {
-        if (tabHasCredential(tab)) emit({ type: "$ready" }, tab.id);
+        if (tabHasCredential(tab)) {
+          emitTabDiagnostic(tab, "tab.ready", undefined, "info");
+          emit({ type: "$ready" }, tab.id);
+        } else {
+          emitTabDiagnostic(tab, "tab.ready.skipped", { reason: "credential-unavailable" }, "warn");
+        }
         emitCtxBreakdown(tab);
       })
       .catch((err) => {
+        emitDiagnosticError("tab.bootstrap.failed", err, {
+          tabId: tab.id,
+          details: tabDiagnosticState(tab),
+        });
         emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, tab.id);
       });
     return tab;
@@ -1935,13 +2445,24 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   codexQuotaTimer = setInterval(() => {
     if (codexQuotaPolling) return;
     for (const t of tabs.values()) {
-      if (t.aborter) return;
+      if (t.aborter) {
+        emitTabDiagnostic(t, "quota.poll.skipped", { reason: "turn-in-progress" });
+        return;
+      }
     }
     const tab = tabs.get(lastActiveTabId);
-    if (!tab) return;
+    if (!tab) {
+      emitDiagnostic("quota.poll.skipped", {
+        reason: "active-tab-not-found",
+        activeTabId: lastActiveTabId,
+      });
+      return;
+    }
+    emitTabDiagnostic(tab, "quota.poll.started", { intervalMs: 60_000 });
     codexQuotaPolling = true;
     void emitCodexQuota(tab).finally(() => {
       codexQuotaPolling = false;
+      emitTabDiagnostic(tab, "quota.poll.completed");
     });
   }, 60_000);
 
@@ -1952,10 +2473,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     let msg: InMessage;
     try {
       msg = JSON.parse(trimmed) as InMessage;
-    } catch {
+    } catch (err) {
+      emitDiagnosticError("rpc.stdin.invalid-json", err, {
+        details: { inputChars: trimmed.length, previewChars: Math.min(trimmed.length, 80) },
+      });
       emit({ type: "$error", message: `bad json on stdin: ${trimmed.slice(0, 80)}` });
       return;
     }
+    emitDiagnostic("rpc.command.received", {
+      command: msg.cmd,
+      tabId: "tabId" in msg ? (msg.tabId ?? null) : null,
+    });
 
     if (msg.cmd === "tab_open") {
       try {
@@ -1964,6 +2492,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         lastActiveTabId = opened.id;
         persistOpenTabs();
       } catch (err) {
+        emitDiagnosticError("tab.open.failed", err);
         emit({ type: "$error", message: `tab_open failed: ${(err as Error).message}` });
       }
       return;
@@ -1971,11 +2500,26 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "tab_activate") {
       const activated = tabs.get(msg.tabId);
       if (activated) {
+        emitTabDiagnostic(
+          activated,
+          "tab.activated",
+          { previousActiveTabId: lastActiveTabId },
+          "info",
+        );
         lastActiveTabId = msg.tabId;
         persistOpenTabs();
         // Refetch immediately — the tab may have sat idle for hours, and
         // the statusbar must show the current quota the moment it's shown.
         void emitCodexQuota(activated);
+      } else {
+        emitDiagnostic(
+          "tab.activate.failed",
+          { tabId: msg.tabId },
+          {
+            level: "error",
+            message: "tab activation requested for an unknown tab",
+          },
+        );
       }
       return;
     }
@@ -2087,6 +2631,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               t.id,
             );
           } catch (err) {
+            emitDiagnosticError("session.resync.failed", err, {
+              tabId: t.id,
+              details: tabDiagnosticState(t),
+            });
             // unreadable jsonl — skip re-emit, but LOG
             process.stderr.write(`reasonix: session load for resync failed — ${messageOf(err)}\n`);
           }
@@ -2121,6 +2669,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
     const tab = msg.tabId ? tabs.get(msg.tabId) : first;
     if (!tab) {
+      emitDiagnostic(
+        "rpc.dispatch.unknown-tab",
+        { tabId: msg.tabId ?? null, command: msg.cmd },
+        { level: "error", message: "command dropped because the tab is unknown" },
+      );
       if (msg.cmd === "tab_close" && msg.tabId) {
         // Ghost tab — id no longer known backend-side (re-minted after a
         // restart, or already closed). Ack the close so the frontend removes
@@ -2138,16 +2691,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
 
     if (msg.cmd === "abort") {
+      emitTabDiagnostic(tab, "rpc.command.abort", undefined, "info");
       abortTurn(tab, desktopUserAbortLoopOptions());
       cancelPendingGates(tab);
       return;
     }
     if (msg.cmd === "cancel_tool") {
+      emitTabDiagnostic(tab, "rpc.command.cancel-tool", undefined, "info");
       tab.runtime?.loop.cancelCurrentTool("User stopped the running command (desktop Stop button)");
       return;
     }
     if (msg.cmd === "tab_close") {
       closeTab(tab).catch((err) => {
+        emitDiagnosticError("tab.close.failed", err, {
+          tabId: tab.id,
+          details: tabDiagnosticState(tab),
+        });
         process.stderr.write(`reasonix: closeTab rejected — ${messageOf(err)}\n`);
       });
       return;
@@ -2178,6 +2737,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emitMcpSpecs(tab);
         void bridgeTabMcp(tab);
       } catch (err) {
+        emitDiagnosticError("mcp.spec.add.failed", err, {
+          tabId: tab.id,
+          details: { specChars: spec.length, ...tabDiagnosticState(tab) },
+        });
         emit({ type: "$error", message: `mcp_specs_add: ${(err as Error).message}` }, tab.id);
       }
       return;
@@ -2194,6 +2757,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emitMcpSpecs(tab);
         void bridgeTabMcp(tab);
       } catch (err) {
+        emitDiagnosticError("mcp.spec.remove.failed", err, {
+          tabId: tab.id,
+          details: { specChars: msg.spec.length, ...tabDiagnosticState(tab) },
+        });
         emit({ type: "$error", message: `mcp_specs_remove: ${(err as Error).message}` }, tab.id);
       }
       return;
@@ -2324,6 +2891,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           persistOpenTabs,
         });
       } catch (err) {
+        emitDiagnosticError("session.load.failed", err, {
+          tabId: tab.id,
+          details: { requestedSession: msg.name, ...tabDiagnosticState(tab) },
+        });
         process.stderr.write(`session_load: "${msg.name}" threw — ${(err as Error).message}\n`);
         emit({ type: "$error", message: `session_load failed: ${(err as Error).message}` }, tab.id);
       }
@@ -2409,6 +2980,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "new_chat") {
+      emitTabDiagnostic(tab, "session.new-chat.started", undefined, "info");
       // Only set switching flag when there's a live turn to abort —
       // otherwise the flag stays true and suppresses the first turn's events (#1217).
       if (tab.aborter) tab.switching = true;
@@ -2421,6 +2993,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       persistOpenTabs();
       if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
       emitSessions(tab);
+      emitTabDiagnostic(tab, "session.new-chat.completed", undefined, "info");
       return;
     }
     if (msg.cmd === "oauth_begin") {
