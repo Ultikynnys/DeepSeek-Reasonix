@@ -561,8 +561,11 @@ export class DeepSeekClient {
                 chunk.finishReason = "incomplete";
                 break;
               case "response.failed":
-                streamError = new Error(
-                  `${this._errorPrefix()} 400: ${json.message ?? json.code ?? "response failed"}`,
+                streamError = Object.assign(
+                  new Error(
+                    `${this._errorPrefix()} 400: ${json.message ?? json.code ?? "response failed"}`,
+                  ),
+                  { phase: "stream_body_read" as const },
                 );
                 break;
             }

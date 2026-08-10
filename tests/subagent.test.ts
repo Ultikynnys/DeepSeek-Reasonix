@@ -314,6 +314,42 @@ describe("registerSubagentTool", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("aborts the child when the per-tool cancelSignal fires", async () => {
+    const parent = new ToolRegistry();
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async (_url: any, init: any) => {
+        const signal: AbortSignal | undefined = init?.signal;
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 200);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        });
+        return new Response(
+          JSON.stringify({
+            choices: [
+              { index: 0, message: { role: "assistant", content: "late" }, finish_reason: "stop" },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as any,
+      retry: { maxAttempts: 1 },
+    });
+    registerSubagentTool(parent, { client });
+    const cancel = new AbortController();
+    setTimeout(() => cancel.abort(), 20);
+
+    const out = await parent.dispatch("spawn_subagent", JSON.stringify({ task: "slow" }), {
+      cancelSignal: cancel.signal,
+    });
+
+    expect(JSON.parse(out).success).toBe(false);
+  });
+
   it("honors a parentSignal that was already aborted at dispatch time", async () => {
     // Race we previously dropped on the floor: parent.abort() fires
     // before spawn_subagent's listener attach runs. addEventListener

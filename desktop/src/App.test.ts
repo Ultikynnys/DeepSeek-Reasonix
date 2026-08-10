@@ -206,6 +206,88 @@ describe("Desktop App reducer — usage", () => {
     expect(error?.message).toBe("SSE body read failed: terminated");
   });
 
+  it("settles every unresolved tool card when the conversation stops", () => {
+    const base = initialState();
+    const state = {
+      ...base,
+      busy: true,
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          segments: [
+            {
+              kind: "tool" as const,
+              callId: "shell-1",
+              name: "run_command",
+              args: JSON.stringify({ command: "long task" }),
+              startedAt: 100,
+            },
+            {
+              kind: "tool" as const,
+              callId: "review-1",
+              name: "review",
+              args: JSON.stringify({ task: "review changes" }),
+              startedAt: 200,
+            },
+            {
+              kind: "tool" as const,
+              callId: "done-1",
+              name: "read_file",
+              args: JSON.stringify({ path: "README.md" }),
+              startedAt: 300,
+              result: "done",
+              ok: true,
+            },
+          ],
+          pending: true,
+        },
+      ],
+    };
+
+    const next = reduce(state, { t: "incoming", event: { type: "$turn_complete" } });
+
+    expect(next.busy).toBe(false);
+    const assistant = next.messages[0];
+    expect(assistant?.kind).toBe("assistant");
+    if (assistant?.kind !== "assistant") throw new Error("expected assistant message");
+    expect(assistant.segments[0]).toMatchObject({
+      callId: "shell-1",
+      result: "Cancelled because the conversation stopped.",
+      ok: false,
+    });
+    expect(assistant.segments[1]).toMatchObject({
+      callId: "review-1",
+      result: "Cancelled because the conversation stopped.",
+      ok: false,
+    });
+    expect(assistant.segments[2]).toMatchObject({
+      callId: "done-1",
+      result: "done",
+      ok: true,
+    });
+
+    const afterLateResult = reduce(next, {
+      t: "incoming",
+      event: {
+        type: "tool.result",
+        id: 99,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        callId: "shell-1",
+        output: "late success",
+        ok: true,
+      },
+    });
+    const afterAssistant = afterLateResult.messages[0];
+    expect(afterAssistant?.kind).toBe("assistant");
+    if (afterAssistant?.kind !== "assistant") throw new Error("expected assistant message");
+    expect(afterAssistant.segments[0]).toMatchObject({
+      result: "Cancelled because the conversation stopped.",
+      ok: false,
+    });
+  });
+
   it("keeps cumulative usage when live context breakdown refreshes", () => {
     const base = initialState();
     const next = reduce(

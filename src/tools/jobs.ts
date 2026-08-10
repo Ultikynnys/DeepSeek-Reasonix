@@ -73,12 +73,7 @@ export function mergeSignals(a?: AbortSignal, b?: AbortSignal): AbortSignal | un
   if (!a && !b) return undefined;
   if (!a) return b;
   if (!b) return a;
-  const ctrl = new AbortController();
-  const handler = () => ctrl.abort();
-  a.addEventListener("abort", handler, { once: true });
-  b.addEventListener("abort", handler, { once: true });
-  if (a.aborted || b.aborted) ctrl.abort();
-  return ctrl.signal;
+  return AbortSignal.any([a, b]);
 }
 
 export class JobRegistry {

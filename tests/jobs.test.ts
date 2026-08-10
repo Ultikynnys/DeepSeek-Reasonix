@@ -263,9 +263,9 @@ describe("JobRegistry", () => {
     await registry.start(`node -e "setTimeout(()=>{}, 10000)"`, { cwd, waitSec: 0.2 });
     await registry.start(`node -e "setTimeout(()=>{}, 10000)"`, { cwd, waitSec: 0.2 });
     expect(registry.runningCount()).toBe(2);
-    // 4s deadline: Windows taskkill /T is async and needs ~500-800ms
-    // per process to propagate through the tree + reap confirmation.
-    await registry.shutdown(4000);
+    // Conversation cancellation and a repeated Stop can race two shutdown calls.
+    // Both must settle while the registry converges to no live processes.
+    await Promise.all([registry.shutdown(4000), registry.shutdown(4000)]);
     await waitFor(() => registry.runningCount() === 0, 2000);
     expect(registry.runningCount()).toBe(0);
   });

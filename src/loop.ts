@@ -212,8 +212,8 @@ export class CacheFirstLoop {
   private _foldedThisTurn = false;
   /** Latched once per turn — the empty-completion guard retries exactly once. */
   private _emptyResponseRetried = false;
-  /** Latched once per turn — replay a stream body failure only before any output reached the UI. */
-  private _streamErrorRetried = false;
+  /** Latched once per turn — replay one provider failure before any output reached the UI. */
+  private _providerErrorRetried = false;
   private context!: ContextManager;
   /** Stable ids for compaction card events — pairs compaction_start with compaction_end. */
   private _compactionSeq = 0;
@@ -710,7 +710,7 @@ export class CacheFirstLoop {
     this._turnSelfCorrected = false;
     this._foldedThisTurn = false;
     this._emptyResponseRetried = false;
-    this._streamErrorRetried = false;
+    this._providerErrorRetried = false;
     // Fresh controller for this turn: the prior step's signal has
     // already fired (or stayed clean); either way we don't want its
     // state to bleed into the new turn.
@@ -949,20 +949,18 @@ export class CacheFirstLoop {
           is5xxError(err) && dsHost ? await probeDeepSeekReachable(this.client) : undefined;
         const cause = err instanceof Error ? err : new Error(String(err));
         const { code, phase, partialDelivered, timedOut } = errorMeta(cause);
-        const streamBodyRetryable =
-          this.stream &&
-          phase === "stream_body_read" &&
-          !this._streamErrorRetried &&
+        const providerErrorRetryable =
+          !this._providerErrorRetried &&
           !partialDelivered &&
-          !timedOut &&
+          !signal.aborted &&
           cause.name !== "AbortError";
-        if (streamBodyRetryable) {
-          this._streamErrorRetried = true;
+        if (providerErrorRetryable) {
+          this._providerErrorRetried = true;
           yield {
             turn: this._turn,
             role: "warning",
             severity: "high",
-            content: t("loop.streamBodyRetry"),
+            content: t("loop.providerErrorRetry"),
           };
           continue;
         }
@@ -972,7 +970,7 @@ export class CacheFirstLoop {
           cause.name !== "AbortError" &&
           !timedOut &&
           (code !== "UND_ERR_ABORTED" || streamBodyError) &&
-          !(streamBodyError && (partialDelivered || this._streamErrorRetried));
+          !(streamBodyError && (partialDelivered || this._providerErrorRetried));
         yield {
           turn: this._turn,
           role: "error",

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DeepSeekClient, Usage } from "../src/client.js";
+import { DeepSeekClient, type ResolvedTransport, Usage } from "../src/client.js";
 import {
   HISTORY_FOLD_AGGRESSIVE_THRESHOLD,
   HISTORY_FOLD_THRESHOLD,
@@ -2713,10 +2713,101 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
 
     expect(calls).toBe(2);
     expect(events.filter((ev) => ev.role === "warning").map((ev) => ev.content)).toContain(
-      "The streaming connection ended before producing a visible response — retrying once.",
+      "The model provider returned an error before producing a visible response — retrying automatically.",
     );
     expect(events.some((ev) => ev.role === "error")).toBe(false);
     expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("recovered");
+  });
+
+  it("automatically retries an OpenAI response.failed event before visible output", async () => {
+    const transport: ResolvedTransport = {
+      endpoint: "https://chatgpt.com/backend-api/codex/responses",
+      headers: { Authorization: "Bearer oauth", "ChatGPT-Account-Id": "acct-1" },
+      api: "responses",
+    };
+    let calls = 0;
+    const fetch = vi.fn(async () => {
+      calls++;
+      const events =
+        calls === 1
+          ? ['data: {"type":"response.failed","message":"response failed"}\n\n']
+          : [
+              'data: {"type":"response.output_text.delta","delta":"recovered"}\n\n',
+              'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}\n\n',
+            ];
+      const bytes = new TextEncoder().encode(events.join(""));
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      );
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "https://api.openai.com/v1",
+      fetch,
+      transportResolver: async () => transport,
+      retry: { maxAttempts: 1 },
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+      model: "gpt-5.6-sol",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    expect(calls).toBe(2);
+    expect(events.some((ev) => ev.role === "error")).toBe(false);
+    expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("recovered");
+  });
+
+  it("does not replay an OpenAI response.failed event after visible output", async () => {
+    const transport: ResolvedTransport = {
+      endpoint: "https://chatgpt.com/backend-api/codex/responses",
+      headers: { Authorization: "Bearer oauth", "ChatGPT-Account-Id": "acct-1" },
+      api: "responses",
+    };
+    const fetch = vi.fn(async () => {
+      const bytes = new TextEncoder().encode(
+        [
+          'data: {"type":"response.output_text.delta","delta":"partial"}\n\n',
+          'data: {"type":"response.failed","message":"response failed"}\n\n',
+        ].join(""),
+      );
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      );
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "https://api.openai.com/v1",
+      fetch,
+      transportResolver: async () => transport,
+      retry: { maxAttempts: 1 },
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+      model: "gpt-5.6-sol",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(events.some((ev) => ev.role === "error")).toBe(true);
   });
 
   it("retries a terminated stream after reasoning-only deltas", async () => {
@@ -2766,7 +2857,7 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
 
     expect(calls).toBeGreaterThanOrEqual(2);
     expect(events.filter((ev) => ev.role === "warning").map((ev) => ev.content)).toContain(
-      "The streaming connection ended before producing a visible response — retrying once.",
+      "The model provider returned an error before producing a visible response — retrying automatically.",
     );
     expect(events.some((ev) => ev.role === "error")).toBe(false);
     expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("recovered");
@@ -2808,7 +2899,7 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     expect(events.some((ev) => ev.role === "assistant_final")).toBe(false);
   });
 
-  it("does not retry a stream body failure caused by the local request timeout", async () => {
+  it("retries a local request timeout once, then surfaces the repeated failure", async () => {
     const fetch = vi.fn(async (_url: unknown, init: RequestInit | undefined) => {
       const reqSignal = init?.signal;
       const stream = new ReadableStream<Uint8Array>({
@@ -2852,8 +2943,8 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     const events: LoopEvent[] = [];
     for await (const ev of loop.step("hello")) events.push(ev);
 
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(events.filter((ev) => ev.role === "warning")).toHaveLength(0);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(events.filter((ev) => ev.role === "warning")).toHaveLength(1);
     expect(events.find((ev) => ev.role === "error")).toMatchObject({
       errorDetail: {
         phase: "stream_body_read",
@@ -2873,6 +2964,7 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     const client = new DeepSeekClient({
       apiKey: "sk-test",
       fetch,
+      retry: { maxAttempts: 1 },
     });
     const loop = new CacheFirstLoop({
       client,

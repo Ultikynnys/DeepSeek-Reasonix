@@ -981,6 +981,22 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return {
         ...state,
         busy: false,
+        messages: state.messages.map((message) =>
+          message.kind === "assistant"
+            ? {
+                ...message,
+                segments: message.segments.map((segment) =>
+                  segment.kind === "tool" && segment.result === undefined
+                    ? {
+                        ...segment,
+                        result: "Cancelled because the conversation stopped.",
+                        ok: false,
+                      }
+                    : segment,
+                ),
+              }
+            : message,
+        ),
         activeSkill: null,
         turnStatus: null,
         turnStatusTool: null,
@@ -1428,7 +1444,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           if (m.kind !== "assistant") return m;
           let mutated = false;
           const segs = m.segments.map((s) => {
-            if (s.kind === "tool" && s.callId === ev.callId) {
+            if (s.kind === "tool" && s.callId === ev.callId && s.result === undefined) {
               mutated = true;
               return {
                 ...s,

@@ -654,7 +654,7 @@ export const zhCN: TranslationSchema = {
     stormSuppressed: "已抑制 {count} 次重复工具调用 — 同一名称 + 参数触发 3 次以上。",
     emptyResponseRetry: "模型返回了空响应（无文本、无推理、无工具调用）— 将重试一次。",
     emptyResponseGiveUp: "模型连续两次返回空响应 — 本轮结束且未产生回答。请重试或使用 /retry。",
-    streamBodyRetry: "流式连接在产生可见回答前中断 — 将重试一次。",
+    providerErrorRetry: "模型服务在产生可见回答前返回错误 — 正在自动重试。",
     forcingSummary:
       "上下文 {before}/{ctxMax}（{pct}%）— 基于已收集到的内容强制总结。请运行 /compact、/clear 或 /new 重置。",
   },

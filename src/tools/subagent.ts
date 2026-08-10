@@ -11,6 +11,7 @@ import {
   escalationContract,
 } from "../prompt-fragments.js";
 import { ToolRegistry } from "../tools.js";
+import { mergeSignals } from "./jobs.js";
 import { SUBAGENT_TYPE_NAMES, getSubagentType } from "./subagent-types.js";
 
 /** Side-channel — subagents run inside a tool-dispatch frame, can't go through parent's `LoopEvent` stream. */
@@ -547,7 +548,7 @@ export function registerSubagentTool(
         model,
         maxResultChars,
         sink,
-        parentSignal: ctx?.signal,
+        parentSignal: mergeSignals(ctx?.signal, ctx?.cancelSignal),
         resumeSession,
       });
       sessionSpawnCount++;

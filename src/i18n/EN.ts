@@ -682,8 +682,8 @@ export const EN: TranslationSchema = {
       "The model returned an empty response (no text, no reasoning, no tool calls) — retrying once.",
     emptyResponseGiveUp:
       "The model returned an empty response twice in a row — ending the turn without an answer. Try again or /retry.",
-    streamBodyRetry:
-      "The streaming connection ended before producing a visible response — retrying once.",
+    providerErrorRetry:
+      "The model provider returned an error before producing a visible response — retrying automatically.",
     forcingSummary:
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
   },

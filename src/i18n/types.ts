@@ -293,7 +293,7 @@ export interface TranslationSchema {
     stormSuppressed: string;
     emptyResponseRetry: string;
     emptyResponseGiveUp: string;
-    streamBodyRetry: string;
+    providerErrorRetry: string;
     forcingSummary: string;
   };
   errors: {

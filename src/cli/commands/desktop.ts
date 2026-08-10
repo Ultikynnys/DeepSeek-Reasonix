@@ -2015,6 +2015,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.runtime?.loop.abort(opts);
   }
 
+  function cancelConversation(tab: Tab, opts: LoopAbortOptions = {}): void {
+    abortTurn(tab, opts);
+    cancelPendingGates(tab);
+    void tab.toolset?.jobs
+      .shutdown(1500)
+      .catch((err) => {
+        emitDiagnosticError("conversation.jobs.shutdown.failed", err, {
+          tabId: tab.id,
+          details: tabDiagnosticState(tab),
+        });
+        process.stderr.write(`reasonix: conversation job shutdown failed — ${messageOf(err)}\n`);
+      })
+      .finally(() => emitJobs());
+  }
+
   function tabSessionLabel(tab: Tab): string {
     if (tab.currentSession) {
       try {
@@ -2700,8 +2715,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
     if (msg.cmd === "abort") {
       emitTabDiagnostic(tab, "rpc.command.abort", undefined, "info");
-      abortTurn(tab, desktopUserAbortLoopOptions());
-      cancelPendingGates(tab);
+      cancelConversation(tab, desktopUserAbortLoopOptions());
       return;
     }
     if (msg.cmd === "cancel_tool") {
