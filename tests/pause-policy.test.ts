@@ -232,26 +232,73 @@ describe("autoResolveVerdict (yolo mode)", () => {
     expect(bridgedReqId).not.toBeNull();
   });
 
-  it("auto-picks the first option for ask_choice with --yolo so the loop never strands on a branch question", async () => {
-    const gate = new PauseGate();
-    let bridged = false;
-    makeListener({ yolo: true }, "review")(gate, () => {
-      bridged = true;
-    });
+  it("waits 10 seconds before auto-picking the first ask_choice option with --yolo", async () => {
+    vi.useFakeTimers();
+    try {
+      const gate = new PauseGate();
+      let bridged = false;
+      makeListener({ yolo: true }, "review")(gate, () => {
+        bridged = true;
+      });
 
-    const promise = gate.ask({
-      kind: "choice",
-      payload: {
-        question: "Which approach?",
-        options: [
-          { id: "option-1", title: "First" },
-          { id: "option-2", title: "Second" },
-        ],
-        allowCustom: true,
-      },
-    });
-    await expect(promise).resolves.toEqual({ type: "pick", optionId: "option-1" });
-    expect(bridged).toBe(false);
+      const promise = gate.ask({
+        kind: "choice",
+        payload: {
+          question: "Which approach?",
+          options: [
+            { id: "option-1", title: "First" },
+            { id: "option-2", title: "Second" },
+          ],
+          allowCustom: true,
+        },
+      });
+
+      let settled = false;
+      void promise.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(YOLO_PLAN_COUNTDOWN_MS - 1);
+      expect(settled).toBe(false);
+      expect(bridged).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(promise).resolves.toEqual({ type: "pick", optionId: "option-1" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a manual choice made during the countdown instead of overwriting it at expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      const gate = new PauseGate();
+      let bridgedReqId: number | null = null;
+      makeListener({ yolo: true }, "review")(gate, (id) => {
+        bridgedReqId = id;
+      });
+
+      const promise = gate.ask({
+        kind: "choice",
+        payload: {
+          question: "Which approach?",
+          options: [
+            { id: "option-1", title: "First" },
+            { id: "option-2", title: "Second" },
+          ],
+          allowCustom: true,
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(YOLO_PLAN_COUNTDOWN_MS - 1_000);
+      expect(bridgedReqId).not.toBeNull();
+      gate.resolve(bridgedReqId!, { type: "pick", optionId: "option-2" });
+      await expect(promise).resolves.toEqual({ type: "pick", optionId: "option-2" });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(promise).resolves.toEqual({ type: "pick", optionId: "option-2" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("cancels a malformed choice (no well-formed options) rather than hanging", async () => {

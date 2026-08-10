@@ -3,7 +3,7 @@
 import type { EditMode } from "../config.js";
 import type { PauseRequest } from "./pause-gate.js";
 
-/** YOLO plan gates wait this long for the user to pick before auto-selecting the first option. */
+/** YOLO interactive gates wait this long before auto-selecting the first option. */
 export const YOLO_PLAN_COUNTDOWN_MS = 10_000;
 
 /** Mirrors shell.ts's allowAll bypass: only review still pauses on checkpoints. */
@@ -53,16 +53,20 @@ export function autoResolveVerdict(
   if (req.kind === "plan_revision" && editMode === "yolo") {
     return { kind: "countdown", verdict: { type: "accepted" }, ms: YOLO_PLAN_COUNTDOWN_MS };
   }
-  // YOLO: an ask_choice branch question would strand the loop on a picker
-  // nobody is watching (headless/ACP runs especially) — auto-pick the first
-  // option so the model carries on with the leading branch. Cancel is just a
-  // hang-proof fallback; choice.ts already sanitizes options before gating.
+  // YOLO: surface ask_choice with the same manual override window as plan gates,
+  // then auto-pick the leading branch so unattended runs cannot strand the loop.
+  // Cancel malformed choices immediately as a hang-proof fallback; choice.ts
+  // already sanitizes options before gating.
   if (req.kind === "choice" && editMode === "yolo") {
     const payload = req.payload as { options?: unknown[] };
     const first = Array.isArray(payload.options) ? payload.options[0] : undefined;
     const id = first && typeof first === "object" ? (first as { id?: unknown }).id : undefined;
     if (typeof id === "string" && id.length > 0) {
-      return { kind: "instant", verdict: { type: "pick", optionId: id } };
+      return {
+        kind: "countdown",
+        verdict: { type: "pick", optionId: id },
+        ms: YOLO_PLAN_COUNTDOWN_MS,
+      };
     }
     return { kind: "instant", verdict: { type: "cancel" } };
   }

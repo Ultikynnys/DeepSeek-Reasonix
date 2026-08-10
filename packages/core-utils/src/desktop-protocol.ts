@@ -74,6 +74,8 @@ export interface ChoiceRequiredEvent {
   question: string;
   options: ChoiceOption[];
   allowCustom: boolean;
+  /** YOLO auto-selection window (ms) — the card picks the first option at expiry. */
+  countdownMs?: number;
 }
 
 export interface PlanRequiredEvent {

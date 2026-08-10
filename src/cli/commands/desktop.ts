@@ -2162,10 +2162,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       pauseGate.resolve(req.id, auto.verdict);
       return;
     }
-    // YOLO plan gates: surface the picker with a countdown — the frontend
-    // auto-selects the first option (approve / accept rewrite) at expiry via
-    // the normal plan_response / revision_response path.
+    // YOLO interactive gates: surface the picker so a watching user can override
+    // the default. Keep a backend timer as the source of eventual resolution;
+    // the frontend mirrors it for visible countdown feedback and resolves first
+    // when the user picks manually.
     const countdownMs = auto?.kind === "countdown" ? auto.ms : undefined;
+    if (auto?.kind === "countdown") {
+      setTimeout(() => {
+        forgetGate(req.id);
+        pauseGate.resolve(req.id, auto.verdict);
+      }, auto.ms);
+    }
     if (req.kind === "run_command" || req.kind === "run_background") {
       const payload = req.payload as {
         command?: string;
@@ -2229,6 +2236,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           question: payload.question,
           options: payload.options,
           allowCustom: payload.allowCustom,
+          ...(countdownMs !== undefined ? { countdownMs } : {}),
         },
         tabId,
       );

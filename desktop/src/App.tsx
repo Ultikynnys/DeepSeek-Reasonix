@@ -224,6 +224,8 @@ export type PendingChoice = {
   question: string;
   options: { id: string; title: string; summary?: string }[];
   allowCustom: boolean;
+  /** YOLO auto-selection window (ms) — the card picks the first option at expiry. */
+  countdownMs?: number;
 };
 
 export type PendingPlan = {
@@ -1023,6 +1025,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
             question: ev.question,
             options: ev.options,
             allowCustom: ev.allowCustom,
+            countdownMs: ev.countdownMs,
           },
         ],
       };

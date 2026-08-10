@@ -366,7 +366,29 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
   });
 });
 
-describe("Desktop App reducer — yolo plan countdown", () => {
+describe("Desktop App reducer — yolo interactive countdown", () => {
+  it("stores countdownMs on pending choices when $choice_required carries it", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$choice_required",
+        id: 8,
+        question: "Which approach?",
+        options: [
+          { id: "option-1", title: "First" },
+          { id: "option-2", title: "Second" },
+        ],
+        allowCustom: true,
+        countdownMs: 10_000,
+      },
+    });
+    expect(next.pendingChoices).toHaveLength(1);
+    expect(next.pendingChoices[0]).toMatchObject({
+      id: 8,
+      countdownMs: 10_000,
+    });
+  });
+
   it("stores countdownMs on pending plans when $plan_required carries it", () => {
     const next = reduce(initialState(), {
       t: "incoming",
@@ -413,8 +435,6 @@ describe("Desktop App reducer — yolo plan countdown", () => {
     });
   });
 });
-
-
 
 describe("desktop thread layout", () => {
   it("recomputes the thread cap from the latest viewport width", () => {

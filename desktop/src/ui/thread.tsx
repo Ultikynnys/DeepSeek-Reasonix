@@ -599,6 +599,10 @@ export function ChoiceApprovalCard({
   onCancel: () => void;
 }) {
   useLang();
+  const firstOptionId = c.options[0]?.id;
+  const remaining = useAutoApproveCountdown(c.countdownMs, () => {
+    if (firstOptionId) onPick(firstOptionId);
+  });
   return (
     <ApprovalCard
       kind={t("thread.userChoiceKind")}
@@ -607,6 +611,11 @@ export function ChoiceApprovalCard({
       sub={t("thread.optionCount", { count: c.options.length })}
       body={
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {remaining !== null ? (
+            <div style={{ marginBottom: 2, fontSize: 11.5, color: "var(--tone-warn)" }}>
+              {t("thread.autoApproveIn", { n: remaining })}
+            </div>
+          ) : null}
           {c.options.map((o) => (
             <button
               key={o.id}
