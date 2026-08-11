@@ -37,6 +37,24 @@ describe("desktop subagent progress projection", () => {
     });
   });
 
+  it("projects configured budgets and exhaustion status", () => {
+    expect(
+      projectSubagentEvent({
+        kind: "end",
+        runId: "sub-1",
+        task: "review changes",
+        maxToolIters: 8,
+        maxElapsedMs: 90_000,
+        budgetExhausted: "tool-iters",
+      }),
+    ).toMatchObject({
+      action: "end",
+      maxToolIters: 8,
+      maxElapsedMs: 90_000,
+      budgetExhausted: "tool-iters",
+    });
+  });
+
   it("exposes redacted tool intent but never child reasoning or result bodies", () => {
     const start = projectSubagentEvent(
       innerEvent({

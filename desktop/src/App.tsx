@@ -161,6 +161,9 @@ export type SubagentRunProgress = {
   toolReadChars?: number;
   turns?: number;
   costUsd?: number;
+  maxToolIters?: number;
+  maxElapsedMs?: number;
+  budgetExhausted?: "tool-iters" | "elapsed";
   error?: string;
   tools: SubagentToolActivity[];
 };
@@ -1531,6 +1534,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
             toolReadChars: ev.toolReadChars ?? previous?.toolReadChars,
             turns: ev.turns ?? previous?.turns,
             costUsd: ev.costUsd ?? previous?.costUsd,
+            maxToolIters: ev.maxToolIters ?? previous?.maxToolIters,
+            maxElapsedMs: ev.maxElapsedMs ?? previous?.maxElapsedMs,
+            budgetExhausted: ev.budgetExhausted ?? previous?.budgetExhausted,
             error: ev.error ?? previous?.error,
             tools,
           };

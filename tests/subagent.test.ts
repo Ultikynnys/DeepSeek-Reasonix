@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DeepSeekClient, Usage } from "../src/client.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
+  NEVER_INHERITED_TOOLS,
   type SubagentEvent,
   type SubagentResult,
   type SubagentSink,
@@ -130,6 +131,67 @@ describe("registerSubagentTool", () => {
     const progress = events.filter((e) => e.kind === "progress");
     expect(progress.length).toBe(1);
     expect(progress[0]?.iter).toBe(1);
+  });
+
+  it("enforces maxToolIters and returns a partial budget result", async () => {
+    const parent = new ToolRegistry();
+    let calls = 0;
+    parent.register({
+      name: "noop",
+      readOnly: true,
+      fn: () => {
+        calls++;
+        return "ok";
+      },
+    });
+    const client = makeClient([
+      ...makeToolCallResponses(3),
+      { content: "Partial review from the evidence already collected." },
+    ]);
+    const { sink, events } = makeSink();
+    const result = await spawnSubagent({
+      client,
+      parentRegistry: parent,
+      system: "review",
+      task: "review",
+      maxToolIters: 2,
+      sink,
+    });
+    expect(calls).toBe(2);
+    expect(result.success).toBe(false);
+    expect(result.budgetExhausted).toBe("tool-iters");
+    expect(result.toolIters).toBe(2);
+    expect(result.output).toContain("Partial review");
+    expect(JSON.parse(formatSubagentResult(result))).toMatchObject({
+      partial: true,
+      budget_exhausted: "tool-iters",
+      max_tool_iters: 2,
+    });
+    expect(events.at(-1)).toMatchObject({
+      kind: "end",
+      budgetExhausted: "tool-iters",
+      maxToolIters: 2,
+    });
+  });
+
+  it("enforces maxElapsedMs for a hanging child request", async () => {
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: (await import("./support/fake-client.js")).neverResolvingFetch(),
+      retry: { maxAttempts: 1 },
+    });
+    const started = Date.now();
+    const result = await spawnSubagent({
+      client,
+      parentRegistry: new ToolRegistry(),
+      system: "review",
+      task: "review",
+      maxElapsedMs: 25,
+    });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(result.success).toBe(false);
+    expect(result.budgetExhausted).toBe("elapsed");
+    expect(result.error).toMatch(/time budget exhausted/);
   });
 
   it("surfaces a child-loop error in the structured result + end event", async () => {
@@ -586,6 +648,20 @@ describe("formatSubagentResult — forcedSummary path", () => {
 });
 
 describe("forkRegistryExcluding", () => {
+  it("the production exclusion set blocks every nested delegation entry point", () => {
+    expect([...NEVER_INHERITED_TOOLS]).toEqual(
+      expect.arrayContaining([
+        "spawn_subagent",
+        "run_skill",
+        "explore",
+        "research",
+        "review",
+        "security_review",
+        "submit_plan",
+      ]),
+    );
+  });
+
   it("copies all tools except the excluded names", () => {
     const parent = new ToolRegistry();
     parent.register({ name: "a", fn: () => "a" });

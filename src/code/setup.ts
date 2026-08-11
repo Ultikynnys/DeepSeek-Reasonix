@@ -141,6 +141,8 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
         skillName: skill.name,
         parentCallId,
         parentTurn,
+        maxToolIters: skill.maxToolIters,
+        maxElapsedMs: skill.maxElapsedMs,
         // Late-bound: the TUI's `useSubagent` writes the live callback into
         // SHARED_SUBAGENT_SINK after mount. Until then `.current` is null
         // and the events are silently dropped — that's fine for non-TUI

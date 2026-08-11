@@ -875,6 +875,10 @@ export function SubagentCard({
                 {run.phase ? ` · ${run.phase}` : ""}
                 {run.elapsedMs !== undefined ? ` · ${(run.elapsedMs / 1000).toFixed(1)}s` : ""}
                 {run.iter !== undefined ? ` · ${run.iter} tools` : ""}
+                {run.maxToolIters !== undefined ? ` / ${run.maxToolIters}` : ""}
+                {run.maxElapsedMs !== undefined
+                  ? ` · ${(run.maxElapsedMs / 1000).toFixed(0)}s limit`
+                  : ""}
               </div>
               {run.tools.map((tool) => (
                 <div className="role" key={tool.callId} title={tool.args}>
@@ -891,6 +895,11 @@ export function SubagentCard({
                 {run.turns !== undefined ? ` · ${run.turns} turns` : ""}
                 {run.costUsd !== undefined ? ` · $${run.costUsd.toFixed(4)}` : ""}
               </div>
+              {run.budgetExhausted ? (
+                <div className="role">
+                  Stopped at {run.budgetExhausted === "elapsed" ? "time" : "tool-call"} budget
+                </div>
+              ) : null}
               {run.error ? <div className="role">{run.error}</div> : null}
             </div>
             <span className="prog">

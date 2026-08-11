@@ -258,6 +258,9 @@ export type SubagentProgressEvent = {
   error?: string;
   turns?: number;
   costUsd?: number;
+  maxToolIters?: number;
+  maxElapsedMs?: number;
+  budgetExhausted?: "tool-iters" | "elapsed";
 };
 
 export type StatusEvent = {

@@ -149,6 +149,9 @@ export interface SubagentProgressEvent extends EventBase {
   error?: string;
   turns?: number;
   costUsd?: number;
+  maxToolIters?: number;
+  maxElapsedMs?: number;
+  budgetExhausted?: "tool-iters" | "elapsed";
 }
 
 export interface ToolConfirmAllowEvent extends EventBase {

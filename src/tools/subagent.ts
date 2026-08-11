@@ -40,6 +40,9 @@ export interface SubagentEvent {
   outputChars?: number;
   reasoningChars?: number;
   toolReadChars?: number;
+  maxToolIters?: number;
+  maxElapsedMs?: number;
+  budgetExhausted?: "tool-iters" | "elapsed";
 }
 
 let runIdCounter = 0;
@@ -70,6 +73,10 @@ export interface SpawnSubagentOptions {
   parentTurn?: number;
   /** Scopes the child registry to these literal tool names; NEVER_INHERITED still wins. Driven by skill `allowed-tools` frontmatter. */
   allowedTools?: readonly string[];
+  /** Enforced count of real child tool dispatches. */
+  maxToolIters?: number;
+  /** Enforced wall-clock deadline for the whole child run. */
+  maxElapsedMs?: number;
   /** Continue an earlier session instead of starting fresh — loads the prior messages from disk; `task` is treated as a continuation nudge. */
   resumeSession?: string;
 }
@@ -88,6 +95,9 @@ export interface SubagentResult {
   usage: Usage;
   /** True when the child terminated via forceSummaryAfterIterLimit (storm-breaker / context-guard) — `output` carries the partial synthesis the model managed to produce; not a full answer. User-abort forced summaries do NOT set this (their content is a UX placeholder, routed to `error`). */
   forcedSummary?: boolean;
+  budgetExhausted?: "tool-iters" | "elapsed";
+  maxToolIters?: number;
+  maxElapsedMs?: number;
 }
 
 export interface SubagentToolOptions {
@@ -123,8 +133,16 @@ const DEFAULT_SUBAGENT_MODEL = "deepseek-v4-flash";
 const DEFAULT_SUBAGENT_EFFORT: import("../config.js").ReasoningEffort = "high";
 
 const SUBAGENT_TOOL_NAME = "spawn_subagent";
-/** spawn_subagent excluded → depth=1 hard cap; submit_plan excluded → no picker mid-parent-turn. */
-const NEVER_INHERITED_TOOLS = new Set<string>([SUBAGENT_TOOL_NAME, "submit_plan"]);
+/** All delegation entry points are excluded → depth=1 hard cap; submit_plan excluded → no picker mid-parent-turn. */
+export const NEVER_INHERITED_TOOLS = new Set<string>([
+  SUBAGENT_TOOL_NAME,
+  "submit_plan",
+  "run_skill",
+  "explore",
+  "research",
+  "review",
+  "security_review",
+]);
 
 /** Per-session spawn count past which the soft hint fires on every subsequent return. */
 const SOFT_HINT_AFTER_SPAWNS = 1;
@@ -153,6 +171,8 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   const parentCallId = opts.parentCallId;
   const parentTurn = opts.parentTurn;
   const runId = nextRunId();
+  const maxToolIters = opts.maxToolIters;
+  const maxElapsedMs = opts.maxElapsedMs;
   const sessionName = opts.resumeSession ?? `subagent-${runId}-${timestampSuffix()}`;
 
   const startedAt = Date.now();
@@ -172,6 +192,8 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     model,
     iter: 0,
     elapsedMs: 0,
+    maxToolIters,
+    maxElapsedMs,
   });
 
   if (opts.allowedTools) {
@@ -213,6 +235,22 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         NEVER_INHERITED_TOOLS,
       )
     : forkRegistryExcluding(opts.parentRegistry, NEVER_INHERITED_TOOLS);
+  let budgetExhausted: "tool-iters" | "elapsed" | undefined;
+  let dispatchedTools = 0;
+  if (maxToolIters !== undefined) {
+    childTools.addToolInterceptor("subagent-tool-budget", () => {
+      if (dispatchedTools >= maxToolIters) {
+        budgetExhausted = "tool-iters";
+        return JSON.stringify({
+          error: `subagent tool budget exhausted after ${maxToolIters} calls — stop using tools and return your verified findings now`,
+          __reasonixSubagentBudgetRefusal: true,
+          budgetExhausted,
+        });
+      }
+      dispatchedTools++;
+      return undefined;
+    });
+  }
   const childPrefix = new ImmutablePrefix({
     system: opts.system,
     toolSpecs: childTools.specs(),
@@ -245,6 +283,14 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   //      the fresh controller, so abort() called BEFORE step() runs
   //      still kills the new step at iter 0.
   const onParentAbort = () => childLoop.abort();
+  const deadlineTimer =
+    maxElapsedMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          budgetExhausted = "elapsed";
+          childLoop.abort();
+        }, maxElapsedMs);
+  deadlineTimer?.unref?.();
   if (opts.parentSignal?.aborted) {
     childLoop.abort();
   } else {
@@ -257,6 +303,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   let summarisingEmitted = false;
   let forcedSummaryFired = false;
   let outputChars = 0;
+  let streamedContent = "";
   let reasoningChars = 0;
   let toolReadChars = 0;
   let lastStreamEmitAt = 0;
@@ -295,10 +342,16 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       emit({ kind: "inner", runId, task: taskPreview, skillName, model, inner: ev });
 
       if (ev.role === "tool") {
-        toolIter++;
+        let budgetRefusal = false;
+        try {
+          budgetRefusal = JSON.parse(ev.content ?? "{}").__reasonixSubagentBudgetRefusal === true;
+        } catch {
+          // Normal non-JSON tool results are real work and count toward the budget.
+        }
+        if (!budgetRefusal) toolIter++;
         // New tool dispatched — the model went back to deciding, summarising flag resets so the next final-answer delta re-emits.
         summarisingEmitted = false;
-        toolReadChars += ev.content?.length ?? 0;
+        if (!budgetRefusal) toolReadChars += ev.content?.length ?? 0;
         emit({
           kind: "progress",
           runId,
@@ -317,6 +370,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         const dContent = ev.content?.length ?? 0;
         const dReason = ev.reasoningDelta?.length ?? 0;
         if (dContent > 0 || dReason > 0) {
+          streamedContent += ev.content ?? "";
           outputChars += dContent;
           reasoningChars += dReason;
           charsSinceLastEmit += dContent + dReason;
@@ -363,6 +417,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   } catch (err) {
     errorMessage = (err as Error).message;
   } finally {
+    if (deadlineTimer) clearTimeout(deadlineTimer);
     opts.parentSignal?.removeEventListener("abort", onParentAbort);
   }
   // The loop yields `done` without an `error` event when its API call
@@ -371,10 +426,18 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   // still counts as a failure: no answer came back, the parent has
   // nothing to render. Synthesize an error so `success: false` and the
   // UI surfaces the abort instead of returning empty output.
+  if (!final && budgetExhausted && streamedContent.trim()) {
+    final = streamedContent.trim();
+    // Deadline abort errors describe transport cancellation, not the usefulness
+    // of content already streamed. Preserve that content as the partial result.
+    errorMessage = undefined;
+  }
   if (!errorMessage && !final) {
-    errorMessage = opts.parentSignal?.aborted
-      ? "subagent aborted before producing an answer"
-      : "subagent ended without producing an answer";
+    errorMessage = budgetExhausted
+      ? `subagent ${budgetExhausted === "elapsed" ? "time" : "tool-call"} budget exhausted before a final answer`
+      : opts.parentSignal?.aborted
+        ? "subagent aborted before producing an answer"
+        : "subagent ended without producing an answer";
   }
 
   const elapsedMs = Date.now() - startedAt;
@@ -400,10 +463,13 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     turns,
     costUsd,
     usage,
+    maxToolIters,
+    maxElapsedMs,
+    budgetExhausted,
   });
 
   return {
-    success: !errorMessage && !forcedSummaryFired,
+    success: !errorMessage && !forcedSummaryFired && !budgetExhausted,
     output: errorMessage ? "" : truncated,
     error: errorMessage,
     turns,
@@ -414,6 +480,9 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     skillName,
     usage,
     forcedSummary: forcedSummaryFired || undefined,
+    budgetExhausted,
+    maxToolIters,
+    maxElapsedMs,
   };
 }
 
@@ -431,6 +500,22 @@ function aggregateChildUsage(loop: CacheFirstLoop): Usage {
 }
 
 export function formatSubagentResult(r: SubagentResult): string {
+  if (r.budgetExhausted) {
+    return JSON.stringify({
+      success: false,
+      partial: true,
+      output: r.output || undefined,
+      error: r.error,
+      budget_exhausted: r.budgetExhausted,
+      max_tool_iters: r.maxToolIters,
+      max_elapsed_ms: r.maxElapsedMs,
+      turns: r.turns,
+      tool_iters: r.toolIters,
+      elapsed_ms: r.elapsedMs,
+      cost_usd: r.costUsd,
+      note: "Subagent stopped at its enforced work budget. Treat any output as partial findings; follow up directly only on a specific unresolved risk.",
+    });
+  }
   if (r.forcedSummary) {
     return JSON.stringify({
       success: false,

@@ -565,6 +565,58 @@ describe("Skill frontmatter — runAs", () => {
     expect(store.read("scoped")?.allowedTools).toEqual(["read", "search_content", "write"]);
   });
 
+  it("parses positive subagent work budgets", () => {
+    writeSkillDir(
+      home,
+      "global",
+      "bounded",
+      {
+        description: "...",
+        runAs: "subagent",
+        "max-tool-iters": "8",
+        "max-seconds": "90",
+      },
+      "body",
+      home,
+    );
+    const skill = new SkillStore({ homeDir: home, disableBuiltins: true }).read("bounded");
+    expect(skill?.maxToolIters).toBe(8);
+    expect(skill?.maxElapsedMs).toBe(90_000);
+  });
+
+  it("ignores invalid subagent work budgets", () => {
+    writeSkillDir(
+      home,
+      "global",
+      "unbounded",
+      {
+        description: "...",
+        runAs: "subagent",
+        "max-tool-iters": "0",
+        "max-seconds": "later",
+      },
+      "body",
+      home,
+    );
+    const skill = new SkillStore({ homeDir: home, disableBuiltins: true }).read("unbounded");
+    expect(skill?.maxToolIters).toBeUndefined();
+    expect(skill?.maxElapsedMs).toBeUndefined();
+  });
+
+  it("gives builtin reviews structural read-only scopes and tight budgets", () => {
+    const store = new SkillStore({ homeDir: home });
+    for (const name of ["review", "security-review"]) {
+      const skill = store.read(name);
+      expect(skill?.maxToolIters).toBe(8);
+      expect(skill?.maxElapsedMs).toBe(90_000);
+      expect(skill?.allowedTools).toContain("read_file");
+      expect(skill?.allowedTools).toContain("run_command");
+      expect(skill?.allowedTools).not.toContain("write_file");
+      expect(skill?.allowedTools).not.toContain("web_search");
+      expect(skill?.allowedTools).not.toContain("review");
+    }
+  });
+
   it("treats missing allowed-tools as undefined (full inheritance)", () => {
     writeSkillDir(home, "global", "open", { description: "...", runAs: "subagent" }, "body", home);
     const store = new SkillStore({ homeDir: home, disableBuiltins: true });

@@ -317,6 +317,9 @@ export function projectSubagentEvent(ev: SubagentEvent): SubagentProgressPayload
     ...(ev.model ? { model: redactDesktopDiagnosticMessage(ev.model, 80) } : {}),
     ...(ev.iter !== undefined ? { iter: ev.iter } : {}),
     ...(ev.elapsedMs !== undefined ? { elapsedMs: ev.elapsedMs } : {}),
+    ...(ev.maxToolIters !== undefined ? { maxToolIters: ev.maxToolIters } : {}),
+    ...(ev.maxElapsedMs !== undefined ? { maxElapsedMs: ev.maxElapsedMs } : {}),
+    ...(ev.budgetExhausted ? { budgetExhausted: ev.budgetExhausted } : {}),
   };
   switch (ev.kind) {
     case "start":

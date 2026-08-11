@@ -47,6 +47,10 @@ export interface Skill {
   runAs: SkillRunAs;
   /** Subagent model override; only meaningful when `runAs === "subagent"`. */
   model?: string;
+  /** Enforced child-tool dispatch cap; omitted means no per-skill cap. */
+  maxToolIters?: number;
+  /** Enforced wall-clock cap in milliseconds; omitted means no per-skill cap. */
+  maxElapsedMs?: number;
 }
 
 export interface SkillRoot {
@@ -92,6 +96,12 @@ function parseAllowedTools(raw: string | undefined): readonly string[] | undefin
     .map((s) => s.trim())
     .filter(Boolean);
   return names.length > 0 ? Object.freeze(names) : undefined;
+}
+
+function parsePositiveInteger(raw: string | undefined): number | undefined {
+  if (raw === undefined || !/^\d+$/.test(raw.trim())) return undefined;
+  const value = Number.parseInt(raw, 10);
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 /** flash/pro preset → concrete deepseek model id. Kept local so this file doesn't import the CLI preset bundle. */
@@ -290,6 +300,11 @@ export class SkillStore {
       allowedTools: parseAllowedTools(data["allowed-tools"]),
       runAs: parseRunAs(data.runAs, data.context, data.agent),
       model: data.model?.startsWith("deepseek-") ? data.model : undefined,
+      maxToolIters: parsePositiveInteger(data["max-tool-iters"]),
+      maxElapsedMs: (() => {
+        const seconds = parsePositiveInteger(data["max-seconds"]);
+        return seconds === undefined ? undefined : seconds * 1000;
+      })(),
     };
   }
 }
@@ -451,7 +466,7 @@ How to operate:
 - Read the touched files (\`read_file\`) when the diff alone doesn't carry enough context — function signatures, surrounding invariants, callers.
 - For "any callers depending on this?" questions: \`search_content\` against the symbol BEFORE asserting impact.
 - Stay read-only. Never \`run_command git commit\`, never write files, never propose SEARCH/REPLACE blocks. The parent decides whether to act on your findings.
-- Cap yourself at ~12 tool calls. If the diff is too big to review in one pass, pick the riskiest 2-3 files and say so explicitly.
+- You have a hard budget of 8 tool calls and 90 seconds. Prioritize the riskiest 2-3 files; when the budget warning appears, stop and return the findings you already verified.
 
 What to look for, in priority order:
 1. **Correctness bugs** — off-by-one, null/undefined handling, race conditions, wrong sign / wrong operator, edge cases the code doesn't handle.
@@ -479,7 +494,7 @@ How to operate:
 - Discover scope first: \`git status\`, \`git diff --stat\`, \`git diff <base>...HEAD\`. Read touched files (\`read_file\`) when the diff alone doesn't carry security context — auth checks, input validation, the actual handler that calls into the changed function.
 - Use \`search_content\` to verify "is this user-controlled input ever sanitized later?" / "are there other call sites that depend on this validation?" before asserting impact.
 - Stay read-only. Never write, never run destructive commands, never propose SEARCH/REPLACE blocks. The parent decides what to act on.
-- Cap yourself at ~12 tool calls. If the diff is too big, focus on the riskiest 2-3 files and say so explicitly.
+- You have a hard budget of 8 tool calls and 90 seconds. Focus on the riskiest 2-3 files; when the budget warning appears, stop and return the findings you already verified.
 
 Threat model — flag with severity:
 
@@ -577,6 +592,20 @@ const BUILTIN_SKILLS: readonly Skill[] = Object.freeze([
     body: BUILTIN_REVIEW_BODY,
     scope: "builtin",
     path: "(builtin)",
+    allowedTools: Object.freeze([
+      "run_command",
+      "read_file",
+      "search_files",
+      "search_content",
+      "directory_tree",
+      "list_directory",
+      "get_file_info",
+      "glob",
+      "get_symbols",
+      "find_in_code",
+    ]),
+    maxToolIters: 8,
+    maxElapsedMs: 90_000,
     runAs: "subagent",
   }),
   Object.freeze<Skill>({
@@ -586,6 +615,20 @@ const BUILTIN_SKILLS: readonly Skill[] = Object.freeze([
     body: BUILTIN_SECURITY_REVIEW_BODY,
     scope: "builtin",
     path: "(builtin)",
+    allowedTools: Object.freeze([
+      "run_command",
+      "read_file",
+      "search_files",
+      "search_content",
+      "directory_tree",
+      "list_directory",
+      "get_file_info",
+      "glob",
+      "get_symbols",
+      "find_in_code",
+    ]),
+    maxToolIters: 8,
+    maxElapsedMs: 90_000,
     runAs: "subagent",
   }),
   Object.freeze<Skill>({
