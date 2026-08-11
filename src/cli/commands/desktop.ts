@@ -113,9 +113,10 @@ import {
   saveWorkspaceDir,
   writeConfig,
 } from "../../config.js";
+import { redactEventValue } from "../../core/event-redaction.js";
 import { Eventizer } from "../../core/eventize.js";
 import { EventType } from "../../core/events.js";
-import type { Event as KernelEvent } from "../../core/events.js";
+import type { Event as KernelEvent, SubagentProgressEvent } from "../../core/events.js";
 import { pauseGate } from "../../core/pause-gate.js";
 import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { augmentProcessPath } from "../../desktop/login-shell-path.js";
@@ -159,6 +160,7 @@ import {
   resolveOpenAIToken,
   signOutOpenAI,
 } from "../../oauth.js";
+import type { SubagentEvent } from "../../tools/subagent.js";
 
 import {
   discoverExternalSessionApps,
@@ -303,6 +305,72 @@ export function redactDesktopDiagnosticMessage(raw: string, max = 2000): string 
   return redactDiagnosticText(raw, max);
 }
 
+type SubagentProgressPayload = Omit<SubagentProgressEvent, "id" | "ts" | "turn" | "type">;
+
+/** Allowlisted projection for the desktop wire. Assistant text, reasoning deltas, and tool results are omitted. */
+export function projectSubagentEvent(ev: SubagentEvent): SubagentProgressPayload | null {
+  const base = {
+    runId: ev.runId,
+    ...(ev.parentCallId ? { parentCallId: ev.parentCallId } : {}),
+    task: redactDesktopDiagnosticMessage(ev.task, 120),
+    ...(ev.skillName ? { skillName: redactDesktopDiagnosticMessage(ev.skillName, 80) } : {}),
+    ...(ev.model ? { model: redactDesktopDiagnosticMessage(ev.model, 80) } : {}),
+    ...(ev.iter !== undefined ? { iter: ev.iter } : {}),
+    ...(ev.elapsedMs !== undefined ? { elapsedMs: ev.elapsedMs } : {}),
+  };
+  switch (ev.kind) {
+    case "start":
+      return { ...base, action: "start", phase: "exploring" };
+    case "progress":
+      return { ...base, action: "phase", phase: "exploring" };
+    case "phase":
+      return { ...base, action: "phase", ...(ev.phase ? { phase: ev.phase } : {}) };
+    case "stream-progress":
+      return {
+        ...base,
+        action: "stream",
+        outputChars: ev.outputChars ?? 0,
+        reasoningChars: ev.reasoningChars ?? 0,
+        toolReadChars: ev.toolReadChars ?? 0,
+      };
+    case "end":
+      return {
+        ...base,
+        action: "end",
+        ...(ev.error ? { error: redactDesktopDiagnosticMessage(ev.error, 500) } : {}),
+        ...(ev.turns !== undefined ? { turns: ev.turns } : {}),
+        ...(ev.costUsd !== undefined ? { costUsd: ev.costUsd } : {}),
+      };
+    case "inner": {
+      const inner = ev.inner;
+      if (!inner || (inner.role !== "tool_start" && inner.role !== "tool")) return null;
+      return {
+        ...base,
+        action: inner.role === "tool_start" ? "tool-start" : "tool-end",
+        ...(inner.callId ? { childCallId: inner.callId } : {}),
+        ...(inner.toolName
+          ? { toolName: redactDesktopDiagnosticMessage(inner.toolName, 100) }
+          : {}),
+        ...(inner.role === "tool_start" && inner.toolArgs
+          ? { toolArgs: sanitizeSubagentToolArgs(inner.toolArgs) }
+          : {}),
+        ...(inner.role === "tool"
+          ? { toolOk: !/^\s*(?:error\b|\{\s*"error")/i.test(inner.content) }
+          : {}),
+      };
+    }
+  }
+}
+
+function sanitizeSubagentToolArgs(raw: string): string {
+  const clipped = redactDesktopDiagnosticMessage(raw, 2000);
+  try {
+    return JSON.stringify(redactEventValue(JSON.parse(clipped)));
+  } catch {
+    return clipped;
+  }
+}
+
 function diagnosticErrorMessage(err: unknown): string {
   return redactDesktopDiagnosticMessage(messageOf(err));
 }
@@ -370,6 +438,14 @@ function wireEventDetails(ev: EmittableEvent): Record<string, unknown> {
       return { turn: ev.turn, callId: ev.callId, name: ev.name, argsChars: ev.args.length };
     case "tool.result":
       return { turn: ev.turn, callId: ev.callId, ok: ev.ok, outputChars: ev.output.length };
+    case "subagent.progress":
+      return {
+        turn: ev.turn,
+        runId: ev.runId,
+        action: ev.action,
+        toolName: ev.toolName ?? null,
+        iter: ev.iter ?? null,
+      };
     case "$session_loaded":
       return {
         name: ev.name,
@@ -1484,12 +1560,30 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   /** Builds the toolset / system prompt / runtime / MCP bridge for a freshly-created skeleton. Reads `tab.currentModel` at call time so model changes during the wait are honored. */
+  function subagentSinkFor(tab: Tab) {
+    return {
+      current: (ev: SubagentEvent): void => {
+        const progress = projectSubagentEvent(ev);
+        const runtime = tab.runtime;
+        if (!progress || !runtime) return;
+        emitKernelEvent(
+          runtime.eventizer.emitSubagentProgress(
+            ev.parentTurn ?? runtime.loop.currentTurn,
+            progress,
+          ),
+          tab.id,
+        );
+      },
+    };
+  }
+
   async function initTabToolset(tab: Tab): Promise<void> {
     emitTabDiagnostic(tab, "tab.bootstrap.started", undefined, "info");
     const toolset = await buildCodeToolset({
       rootDir: tab.rootDir,
       onSkillInstalled: () => emitSkills(tab),
       onJobsChanged: () => emitJobs(),
+      subagentSink: subagentSinkFor(tab),
     });
     tab.toolset = toolset;
     tab.system = codeSystemPrompt(tab.rootDir, {
@@ -1990,6 +2084,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       rootDir: target,
       onSkillInstalled: () => emitSkills(tab),
       onJobsChanged: () => emitJobs(),
+      subagentSink: subagentSinkFor(tab),
     });
     tab.system = codeSystemPrompt(target, {
       hasSemanticSearch: tab.toolset.semantic.enabled,

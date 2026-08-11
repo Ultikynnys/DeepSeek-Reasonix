@@ -19,6 +19,9 @@ export interface SubagentEvent {
   kind: "start" | "progress" | "end" | "inner" | "phase" | "stream-progress";
   /** Stable per-spawn id; lets the UI key parallel runs apart instead of overwriting one shared row. */
   runId: string;
+  /** Parent loop tool-call identity that owns this spawn. */
+  parentCallId?: string;
+  parentTurn?: number;
   task: string;
   skillName?: string;
   model?: string;
@@ -63,6 +66,8 @@ export interface SpawnSubagentOptions {
   /** Forwarded into the child loop so parent Esc cancels nested work. */
   parentSignal?: AbortSignal;
   skillName?: string;
+  parentCallId?: string;
+  parentTurn?: number;
   /** Scopes the child registry to these literal tool names; NEVER_INHERITED still wins. Driven by skill `allowed-tools` frontmatter. */
   allowedTools?: readonly string[];
   /** Continue an earlier session instead of starting fresh — loads the prior messages from disk; `task` is treated as a continuation nudge. */
@@ -145,12 +150,21 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   const maxResultChars = opts.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
   const sink = opts.sink;
   const skillName = opts.skillName;
+  const parentCallId = opts.parentCallId;
+  const parentTurn = opts.parentTurn;
   const runId = nextRunId();
   const sessionName = opts.resumeSession ?? `subagent-${runId}-${timestampSuffix()}`;
 
   const startedAt = Date.now();
   const taskPreview = opts.task.length > 30 ? `${opts.task.slice(0, 30)}…` : opts.task;
-  sink?.current?.({
+  const emit = (event: Omit<SubagentEvent, "parentCallId" | "parentTurn">): void => {
+    sink?.current?.({
+      ...event,
+      ...(parentCallId ? { parentCallId } : {}),
+      ...(parentTurn !== undefined ? { parentTurn } : {}),
+    });
+  };
+  emit({
     kind: "start",
     runId,
     task: taskPreview,
@@ -164,7 +178,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     const missing = opts.allowedTools.filter((n) => !opts.parentRegistry.has(n));
     if (missing.length > 0) {
       const errorMessage = `subagent allow-list names tool(s) not registered in the parent: ${missing.join(", ")}. Fix the skill's \`allowed-tools\` frontmatter or check spelling.`;
-      sink?.current?.({
+      emit({
         kind: "end",
         runId,
         task: taskPreview,
@@ -263,7 +277,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     }
     lastStreamEmitAt = now;
     charsSinceLastEmit = 0;
-    sink.current({
+    emit({
       kind: "stream-progress",
       runId,
       task: taskPreview,
@@ -278,14 +292,14 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   };
   try {
     for await (const ev of childLoop.step(opts.task)) {
-      sink?.current?.({ kind: "inner", runId, task: taskPreview, skillName, model, inner: ev });
+      emit({ kind: "inner", runId, task: taskPreview, skillName, model, inner: ev });
 
       if (ev.role === "tool") {
         toolIter++;
         // New tool dispatched — the model went back to deciding, summarising flag resets so the next final-answer delta re-emits.
         summarisingEmitted = false;
         toolReadChars += ev.content?.length ?? 0;
-        sink?.current?.({
+        emit({
           kind: "progress",
           runId,
           task: taskPreview,
@@ -313,7 +327,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       // model is now writing its final answer, not deciding the next tool.
       if (ev.role === "assistant_delta" && !summarisingEmitted && (ev.content ?? "").length > 0) {
         summarisingEmitted = true;
-        sink?.current?.({
+        emit({
           kind: "phase",
           runId,
           task: taskPreview,
@@ -373,7 +387,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       ? `${final.slice(0, maxResultChars)}\n\n[…truncated ${final.length - maxResultChars} chars; ask the subagent for a tighter summary if you need more.]`
       : final;
 
-  sink?.current?.({
+  emit({
     kind: "end",
     runId,
     task: taskPreview,

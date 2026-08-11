@@ -4,7 +4,13 @@ import { type Skill, SkillStore } from "../skills.js";
 import type { ToolRegistry } from "../tools.js";
 
 /** Returns serialized tool-result string — dispatch path is pure pass-through. */
-export type SubagentRunner = (skill: Skill, task: string, signal?: AbortSignal) => Promise<string>;
+export type SubagentRunner = (
+  skill: Skill,
+  task: string,
+  signal?: AbortSignal,
+  parentCallId?: string,
+  parentTurn?: number,
+) => Promise<string>;
 
 /** Fired after a successful `install_skill` write — host wires this to push a fresh `$skills` event so the desktop sidebar updates without a tab reload. */
 export type SkillInstalledHook = (info: {
@@ -82,7 +88,7 @@ function registerBuiltinSubagentTool(
           error: `${spec.toolName}: skill ${JSON.stringify(spec.skillName)} is overridden as inline; invoke it via run_skill instead.`,
         });
       }
-      return subagentRunner(skill, task, ctx?.signal);
+      return subagentRunner(skill, task, ctx?.signal, ctx?.callId, ctx?.turn);
     },
   });
 }
@@ -171,7 +177,7 @@ export function registerSkillTools(
             error: `run_skill: skill ${JSON.stringify(name)} is a subagent and requires 'arguments' — the subagent has no other context, so describe the concrete task in the arguments field.`,
           });
         }
-        return subagentRunner(skill, rawArgs, ctx?.signal);
+        return subagentRunner(skill, rawArgs, ctx?.signal, ctx?.callId, ctx?.turn);
       }
 
       const header = [

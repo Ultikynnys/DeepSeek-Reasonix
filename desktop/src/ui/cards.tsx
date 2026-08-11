@@ -828,24 +828,20 @@ export function WebSearchCard({ query, results }: { query: string; results: Sear
 
 // ---- Subagent ----
 
-export type SubAgentChild = {
-  avatar: string;
-  what: string;
-  role: string;
-  status: "done" | "running" | "queued";
-};
-
 export function SubagentCard({
   name,
-  children,
-  status,
+  runs,
 }: {
   name: string;
-  children: SubAgentChild[];
-  status: "running" | "done" | "failed";
+  runs: import("../App").SubagentRunProgress[];
 }) {
   useLang();
-  const done = children.filter((c) => c.status === "done").length;
+  const done = runs.filter((run) => run.status === "done").length;
+  const status = runs.some((run) => run.status === "running")
+    ? "running"
+    : runs.some((run) => run.status === "failed")
+      ? "failed"
+      : "done";
   return (
     <Card
       tone="violet"
@@ -855,7 +851,7 @@ export function SubagentCard({
       meta={
         <>
           <span>
-            {done} / {children.length} {t("cards.subagentDoneProgress")}
+            {done} / {runs.length} {t("cards.subagentDoneProgress")}
           </span>
           {status === "done" ? (
             <StatusIcon state="done" label={t("cards.subagentDone")} />
@@ -868,19 +864,43 @@ export function SubagentCard({
       }
     >
       <div className="sub-card">
-        {children.map((c) => (
-          <div className="sub-row" key={`${c.avatar}-${c.what}-${c.role}`}>
-            <span className="av">{c.avatar}</span>
+        {runs.map((run) => (
+          <div className="sub-row" key={run.runId}>
+            <span className="av">AI</span>
             <div className="what">
-              <div>{c.what}</div>
-              <div className="role">{c.role}</div>
+              <div>{run.task}</div>
+              <div className="role">
+                {run.skillName ?? "subagent"}
+                {run.model ? ` · ${run.model}` : ""}
+                {run.phase ? ` · ${run.phase}` : ""}
+                {run.elapsedMs !== undefined ? ` · ${(run.elapsedMs / 1000).toFixed(1)}s` : ""}
+                {run.iter !== undefined ? ` · ${run.iter} tools` : ""}
+              </div>
+              {run.tools.map((tool) => (
+                <div className="role" key={tool.callId} title={tool.args}>
+                  {tool.status === "running" ? "↳ …" : tool.status === "failed" ? "↳ ✕" : "↳ ✓"} {tool.name}
+                  {tool.args ? ` ${tool.args}` : ""}
+                </div>
+              ))}
+              <div className="role">
+                {run.toolReadChars !== undefined ? `${run.toolReadChars.toLocaleString()} read chars` : ""}
+                {run.outputChars !== undefined ? ` · ${run.outputChars.toLocaleString()} output chars` : ""}
+                {run.reasoningChars !== undefined
+                  ? ` · ${run.reasoningChars.toLocaleString()} reasoning chars`
+                  : ""}
+                {run.turns !== undefined ? ` · ${run.turns} turns` : ""}
+                {run.costUsd !== undefined ? ` · $${run.costUsd.toFixed(4)}` : ""}
+              </div>
+              {run.error ? <div className="role">{run.error}</div> : null}
             </div>
             <span className="prog">
-              {c.status === "done" ? (
+              {run.status === "done" ? (
                 <I.check size={12} style={{ color: "var(--success)" }} />
-              ) : c.status === "running" ? (
+              ) : run.status === "failed" ? (
+                <I.x size={12} style={{ color: "var(--danger)" }} />
+              ) : (
                 <span className="spin" />
-              ) : null}
+              )}
             </span>
           </div>
         ))}

@@ -24,6 +24,7 @@ import {
   type PlanItem,
   ReasoningCard,
   ShellCard,
+  SubagentCard,
   ToolCard,
   parseEditResult,
 } from "./cards";
@@ -190,6 +191,22 @@ export const AssistantMsg = memo(function AssistantMsg({
             (s.name === "run_command" || s.name === "run_background") && s.result === undefined
               ? pendingConfirms.find((c) => c.command === extractCommand(s.args))
               : undefined;
+          if (s.subagentRuns && s.subagentRuns.length > 0) {
+            return (
+              <div key={i}>
+                <SubagentCard name={s.name} runs={s.subagentRuns} />
+                {s.result ? (
+                  <ToolCard
+                    name={s.name}
+                    args=""
+                    result={s.result}
+                    ok={s.ok}
+                    durationMs={s.durationMs}
+                  />
+                ) : null}
+              </div>
+            );
+          }
           if (s.name === "run_command" || s.name === "run_background") {
             const cmd = extractCommand(s.args) ?? s.args;
             const state: "await" | "running" | "done" | "failed" =

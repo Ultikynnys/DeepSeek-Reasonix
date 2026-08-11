@@ -234,6 +234,32 @@ export type ToolResultEvent = {
   output: string;
 };
 
+export type SubagentProgressEvent = {
+  type: "subagent.progress";
+  id: number;
+  ts: string;
+  turn: number;
+  runId: string;
+  parentCallId?: string;
+  action: "start" | "phase" | "stream" | "tool-start" | "tool-end" | "end";
+  task: string;
+  skillName?: string;
+  model?: string;
+  phase?: "exploring" | "summarising";
+  iter?: number;
+  elapsedMs?: number;
+  outputChars?: number;
+  reasoningChars?: number;
+  toolReadChars?: number;
+  childCallId?: string;
+  toolName?: string;
+  toolArgs?: string;
+  toolOk?: boolean;
+  error?: string;
+  turns?: number;
+  costUsd?: number;
+};
+
 export type StatusEvent = {
   type: "status";
   id: number;
@@ -344,6 +370,7 @@ export type IncomingEvent = { tabId?: string } & (
   | ToolPreparingEvent
   | ToolIntentEvent
   | ToolResultEvent
+  | SubagentProgressEvent
   | StatusEvent
   | CompactionStartedEvent
   | CompactionFinishedEvent

@@ -15,6 +15,7 @@ import type {
   SessionRetractedEvent,
   SlashInvokedEvent,
   StatusEvent,
+  SubagentProgressEvent,
   ToolCallEvent,
   ToolConfirmAllowEvent,
   ToolConfirmAlwaysAllowEvent,
@@ -282,6 +283,19 @@ export class Eventizer {
       type: EventType.toolCall,
       name,
       args: redactEventValue(args),
+    };
+  }
+
+  emitSubagentProgress(
+    turn: number,
+    progress: Omit<SubagentProgressEvent, "id" | "ts" | "turn" | "type">,
+  ): SubagentProgressEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: EventType.subagentProgress,
+      ...progress,
     };
   }
 

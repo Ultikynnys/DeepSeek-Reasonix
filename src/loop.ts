@@ -509,6 +509,8 @@ export class CacheFirstLoop {
       this._lastToolCancelController = cancelController;
       const result = await this.tools.dispatch(name, args, {
         signal,
+        turn: this._turn,
+        callId: inflightId,
         cancelSignal: cancelController.signal,
         maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
         confirmationGate: this.confirmationGate,

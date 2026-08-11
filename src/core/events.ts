@@ -24,6 +24,8 @@ export const EventType = {
   toolDenied: "tool.denied",
   toolResult: "tool.result",
   toolCall: "tool.call",
+  subagentProgress: "subagent.progress",
+
   toolConfirmAllow: "tool.confirm.allow",
   toolConfirmDeny: "tool.confirm.deny",
   toolConfirmAlwaysAllow: "tool.confirm.always_allow",
@@ -122,6 +124,31 @@ export interface ToolCallEvent extends EventBase {
   type: typeof EventType.toolCall;
   name: string;
   args: Record<string, unknown>;
+}
+
+/** Sanitized, transient child-agent activity. Raw child output and reasoning never enter this event. */
+export interface SubagentProgressEvent extends EventBase {
+  type: typeof EventType.subagentProgress;
+  runId: string;
+  parentCallId?: string;
+  action: "start" | "phase" | "stream" | "tool-start" | "tool-end" | "end";
+  task: string;
+  skillName?: string;
+  model?: string;
+  phase?: "exploring" | "summarising";
+  iter?: number;
+  elapsedMs?: number;
+  outputChars?: number;
+  reasoningChars?: number;
+  toolReadChars?: number;
+  childCallId?: string;
+  toolName?: string;
+  /** Redacted and bounded JSON arguments; never includes a tool result body. */
+  toolArgs?: string;
+  toolOk?: boolean;
+  error?: string;
+  turns?: number;
+  costUsd?: number;
 }
 
 export interface ToolConfirmAllowEvent extends EventBase {
@@ -310,6 +337,7 @@ export type Event =
   | ToolDeniedEvent
   | ToolResultEvent
   | ToolCallEvent
+  | SubagentProgressEvent
   | ToolConfirmAllowEvent
   | ToolConfirmDenyEvent
   | ToolConfirmAlwaysAllowEvent

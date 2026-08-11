@@ -13,6 +13,9 @@ import type { JSONSchema, ToolSpec } from "./types.js";
 export interface ToolCallContext {
   /** Turn abort signal — Esc/Stop fires this, ending the entire turn. */
   signal?: AbortSignal;
+  /** Parent loop turn and stable call id, used by nested activity UIs for exact association. */
+  turn?: number;
+  callId?: string;
   /** Per-tool-call cancel signal — Ctrl+K or the desktop Stop button fires this to kill just the current running tool without aborting the turn. */
   cancelSignal?: AbortSignal;
   /** Inject a mock PauseGate for tests. When absent, tools use the singleton. */
@@ -190,6 +193,8 @@ export class ToolRegistry {
     argumentsRaw: string | Record<string, unknown>,
     opts: {
       signal?: AbortSignal;
+      turn?: number;
+      callId?: string;
       cancelSignal?: AbortSignal;
       maxResultChars?: number;
       maxResultTokens?: number;
@@ -301,6 +306,8 @@ export class ToolRegistry {
       }
       const result = await tool.fn(args, {
         signal: opts.signal,
+        turn: opts.turn,
+        callId: opts.callId,
         // Per-tool-call cancel (Ctrl+K / desktop Stop) must reach the tool's
         // ctx or the handler never learns the user force-stopped it — it would
         // keep running and no cancelledByUser result would ever be appended.

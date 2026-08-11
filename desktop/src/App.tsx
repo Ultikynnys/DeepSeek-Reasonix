@@ -140,6 +140,31 @@ function responsiveStage(width: number): ResponsiveStage {
   return RESPONSIVE_STAGE.WIDE;
 }
 
+export type SubagentToolActivity = {
+  callId: string;
+  name: string;
+  args?: string;
+  status: "running" | "done" | "failed";
+};
+
+export type SubagentRunProgress = {
+  runId: string;
+  task: string;
+  skillName?: string;
+  model?: string;
+  phase?: "exploring" | "summarising";
+  status: "running" | "done" | "failed";
+  iter?: number;
+  elapsedMs?: number;
+  outputChars?: number;
+  reasoningChars?: number;
+  toolReadChars?: number;
+  turns?: number;
+  costUsd?: number;
+  error?: string;
+  tools: SubagentToolActivity[];
+};
+
 export type AssistantSegment =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
@@ -152,6 +177,7 @@ export type AssistantSegment =
       result?: string;
       ok?: boolean;
       durationMs?: number;
+      subagentRuns?: SubagentRunProgress[];
     }
   | {
       kind: "compaction";
@@ -1435,6 +1461,85 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         }),
       };
     }
+    case "subagent.progress":
+      return {
+        ...state,
+        turnLastEventMs: Date.now(),
+        messages: state.messages.map((m) => {
+          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
+          let host = ev.parentCallId
+            ? m.segments.findIndex(
+                (segment) => segment.kind === "tool" && segment.callId === ev.parentCallId,
+              )
+            : -1;
+          if (host < 0 && !ev.parentCallId) {
+            const candidates = m.segments
+              .map((segment, index) => ({ segment, index }))
+              .filter(
+                ({ segment }) =>
+                  segment.kind === "tool" &&
+                  (segment.name === "explore" ||
+                    segment.name === "research" ||
+                    segment.name === "review" ||
+                    segment.name === "security_review" ||
+                    segment.name === "run_skill"),
+              );
+            if (candidates.length === 1) host = candidates[0]?.index ?? -1;
+          }
+          if (host < 0) return m;
+          const segments = [...m.segments];
+          const segment = segments[host];
+          if (!segment || segment.kind !== "tool") return m;
+          const runs = [...(segment.subagentRuns ?? [])];
+          const runIndex = runs.findIndex((run) => run.runId === ev.runId);
+          const previous = runIndex >= 0 ? runs[runIndex] : undefined;
+          const tools = [...(previous?.tools ?? [])];
+          if (ev.action === "tool-start") {
+            const callId = ev.childCallId ?? `${ev.runId}-tool-${tools.length}`;
+            const existing = tools.findIndex((tool) => tool.callId === callId);
+            const activity: SubagentToolActivity = {
+              callId,
+              name: ev.toolName ?? "tool",
+              ...(ev.toolArgs ? { args: ev.toolArgs } : {}),
+              status: "running",
+            };
+            if (existing >= 0) tools[existing] = activity;
+            else tools.push(activity);
+          } else if (ev.action === "tool-end") {
+            const existing = ev.childCallId
+              ? tools.findIndex((tool) => tool.callId === ev.childCallId)
+              : tools.findIndex((tool) => tool.status === "running");
+            if (existing >= 0 && tools[existing]) {
+              tools[existing] = {
+                ...tools[existing],
+                status: ev.toolOk === false ? "failed" : "done",
+              };
+            }
+          }
+          const next: SubagentRunProgress = {
+            runId: ev.runId,
+            task: ev.task,
+            skillName: ev.skillName ?? previous?.skillName,
+            model: ev.model ?? previous?.model,
+            phase: ev.phase ?? previous?.phase,
+            status:
+              ev.action === "end" ? (ev.error ? "failed" : "done") : (previous?.status ?? "running"),
+            iter: ev.iter ?? previous?.iter,
+            elapsedMs: ev.elapsedMs ?? previous?.elapsedMs,
+            outputChars: ev.outputChars ?? previous?.outputChars,
+            reasoningChars: ev.reasoningChars ?? previous?.reasoningChars,
+            toolReadChars: ev.toolReadChars ?? previous?.toolReadChars,
+            turns: ev.turns ?? previous?.turns,
+            costUsd: ev.costUsd ?? previous?.costUsd,
+            error: ev.error ?? previous?.error,
+            tools,
+          };
+          if (runIndex >= 0) runs[runIndex] = next;
+          else runs.push(next);
+          segments[host] = { ...segment, subagentRuns: runs };
+          return { ...m, segments };
+        }),
+      };
     case "tool.result":
       return {
         ...state,

@@ -1216,3 +1216,122 @@ describe("Desktop App reducer — image attachments", () => {
     });
   });
 });
+
+describe("Desktop App reducer — subagent progress", () => {
+  it("associates parallel runs with their parent tool call ids", () => {
+    const state = {
+      ...initialState(),
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          pending: true,
+          segments: [
+            {
+              kind: "tool" as const,
+              callId: "parent-a",
+              name: "review",
+              args: "{}",
+              startedAt: 1,
+            },
+            {
+              kind: "tool" as const,
+              callId: "parent-b",
+              name: "review",
+              args: "{}",
+              startedAt: 1,
+            },
+          ],
+        },
+      ],
+    };
+    const eventBase = {
+      type: "subagent.progress" as const,
+      id: 1,
+      ts: "2026-06-01T00:00:00.000Z",
+      turn: 1,
+      action: "start" as const,
+      task: "review",
+    };
+    const afterA = reduce(state, {
+      t: "incoming",
+      event: { ...eventBase, runId: "run-a", parentCallId: "parent-a" },
+    });
+    const afterB = reduce(afterA, {
+      t: "incoming",
+      event: { ...eventBase, id: 2, runId: "run-b", parentCallId: "parent-b" },
+    });
+    const assistant = afterB.messages[0];
+    if (assistant?.kind !== "assistant") throw new Error("expected assistant");
+    expect(assistant.segments[0]).toMatchObject({
+      callId: "parent-a",
+      subagentRuns: [{ runId: "run-a" }],
+    });
+    expect(assistant.segments[1]).toMatchObject({
+      callId: "parent-b",
+      subagentRuns: [{ runId: "run-b" }],
+    });
+  });
+
+  it("pairs child tool activity and settles a failed run", () => {
+    const base = {
+      ...initialState(),
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn: 2,
+          pending: true,
+          segments: [
+            {
+              kind: "tool" as const,
+              callId: "parent",
+              name: "explore",
+              args: "{}",
+              startedAt: 1,
+            },
+          ],
+        },
+      ],
+    };
+    const send = (
+      state: Parameters<typeof reduce>[0],
+      event: import("./protocol").SubagentProgressEvent,
+    ) => reduce(state, { t: "incoming", event });
+    const common = {
+      type: "subagent.progress" as const,
+      ts: "2026-06-01T00:00:00.000Z",
+      turn: 2,
+      runId: "run",
+      parentCallId: "parent",
+      task: "explore",
+    };
+    let state = send(base, { ...common, id: 1, action: "start" });
+    state = send(state, {
+      ...common,
+      id: 2,
+      action: "tool-start",
+      childCallId: "child",
+      toolName: "read_file",
+    });
+    state = send(state, {
+      ...common,
+      id: 3,
+      action: "tool-end",
+      childCallId: "child",
+      toolOk: true,
+    });
+    state = send(state, { ...common, id: 4, action: "end", error: "failed" });
+    const assistant = state.messages[0];
+    if (assistant?.kind !== "assistant") throw new Error("expected assistant");
+    expect(assistant.segments[0]).toMatchObject({
+      subagentRuns: [
+        {
+          runId: "run",
+          status: "failed",
+          error: "failed",
+          tools: [{ callId: "child", name: "read_file", status: "done" }],
+        },
+      ],
+    });
+  });
+});
