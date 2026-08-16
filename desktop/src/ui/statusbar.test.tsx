@@ -50,6 +50,13 @@ describe("StatusBar quota display", () => {
     expect(screen.queryByText(/left/)).toBeNull();
   });
 
+  it("shows the current rate period (off-peak or peak) with its price multiplier", () => {
+    renderBar();
+    // Wall-clock dependent — either label and multiplier may be current.
+    expect(screen.getByText(/off-peak|peak/)).toBeTruthy();
+    expect(screen.getByText(/½×|×2/)).toBeTruthy();
+  });
+
   it("shows weekly quota % left + plan and this-turn % for gpt-5.6 tabs", () => {
     renderBar({
       settings: { model: "gpt-5.6-sol" } as Settings,

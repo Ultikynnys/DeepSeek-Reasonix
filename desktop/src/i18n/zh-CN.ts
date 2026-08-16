@@ -379,6 +379,12 @@ export const zhCN: typeof en = {
       "Codex 配额 · 暂无数据 — 请在设置（设置 → OpenAI）中登录 ChatGPT 以查看套餐用量 · 点击重试",
     codexLeft: "剩余",
     thisTurnQuotaTitle: "本轮已消耗周配额 {pct}%",
+    offPeak: "非高峰",
+    peak: "高峰",
+    offPeakTitle:
+      "非高峰 — 价格为高峰时段的半价 · 高峰时段 01:00–04:00 与 06:00–10:00 UTC · {mins} 分钟后切换",
+    peakTitle:
+      "高峰 — 价格为非高峰时段的两倍 · 高峰时段 01:00–04:00 与 06:00–10:00 UTC · {mins} 分钟后切换",
     authOauth: "OAuth",
     authKey: "密钥",
     authNone: "未登录",

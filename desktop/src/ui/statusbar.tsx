@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Balance, Settings, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
+import { isOffPeak, minutesUntilRateChange } from "../peak-hours";
 import type { CodexQuota, JobInfo } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { activationHandler } from "./keyboard";
@@ -163,6 +164,18 @@ export function StatusBar({
     codexQuotaRefreshing,
     codexQuotaReason,
   ]);
+  // Rate period (peak / off-peak) — this turn's pricing depends on the UTC
+  // hour, so the chip re-evaluates on a short tick instead of only on parent
+  // re-renders (the parent has no per-minute state of its own).
+  const [rateNow, setRateNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setRateNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const offPeak = isOffPeak(rateNow);
+  const rateTitle = offPeak
+    ? t("statusbar.offPeakTitle", { mins: minutesUntilRateChange(rateNow) })
+    : t("statusbar.peakTitle", { mins: minutesUntilRateChange(rateNow) });
   const [themeOpen, setThemeOpen] = useState(false);
   const themePopRef = useRef<HTMLDivElement | null>(null);
   const themeButtonRef = useRef<HTMLSpanElement | null>(null);
@@ -229,6 +242,14 @@ export function StatusBar({
             <span className="conv">{`(${spentOther})`}</span>
           </span>
         )}
+      </span>
+
+      <span className="seg" title={rateTitle}>
+        <I.clock size={11} style={{ color: offPeak ? "var(--success)" : "var(--warning)" }} />
+        <span className={`v ${offPeak ? "ok" : "warn"}`}>
+          {offPeak ? t("statusbar.offPeak") : t("statusbar.peak")}
+          <span className="conv">{offPeak ? "½×" : "×2"}</span>
+        </span>
       </span>
 
       <span className="grow" />

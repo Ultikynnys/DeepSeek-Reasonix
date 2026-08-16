@@ -624,6 +624,12 @@ export const de: typeof en = {
       "Codex-Kontingent · keine Daten — bei ChatGPT anmelden (Einstellungen → OpenAI), um den Kontingentverbrauch zu sehen · zum Wiederholen klicken",
     codexLeft: "übrig",
     thisTurnQuotaTitle: "Dieser Turn hat {pct}% des wöchentlichen Codex-Kontingents verbraucht",
+    offPeak: "Off-Peak",
+    peak: "Peak",
+    offPeakTitle:
+      "Off-Peak — halber Peak-Preis · Peak-Zeiten 01:00–04:00 & 06:00–10:00 UTC · Wechsel in {mins} Min",
+    peakTitle:
+      "Peak — doppelter Off-Peak-Preis · Peak-Zeiten 01:00–04:00 & 06:00–10:00 UTC · Wechsel in {mins} Min",
     authOauth: "OAuth",
     authKey: "Schlüssel",
     authNone: "kein Schlüssel",

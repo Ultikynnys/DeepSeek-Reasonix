@@ -598,6 +598,12 @@ export const en = {
       "Codex quota · no data — sign in with ChatGPT (Settings → OpenAI) to see plan usage · click to retry",
     codexLeft: "left",
     thisTurnQuotaTitle: "This turn used {pct}% of the weekly Codex quota",
+    offPeak: "off-peak",
+    peak: "peak",
+    offPeakTitle:
+      "Off-peak — half of peak rates · Peak hours 01:00–04:00 & 06:00–10:00 UTC · changes in {mins} min",
+    peakTitle:
+      "Peak — double the off-peak rate · Peak hours 01:00–04:00 & 06:00–10:00 UTC · changes in {mins} min",
     authOauth: "oauth",
     authKey: "key",
     authNone: "no key",
