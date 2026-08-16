@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { type Plugin, defineConfig } from "vite";
+import { browserBridge } from "./plugins/browser-bridge";
 
 const pkg = JSON.parse(
   readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"),
@@ -32,7 +33,7 @@ function patchGfmAutolinkLookbehind(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), patchGfmAutolinkLookbehind()],
+  plugins: [react(), patchGfmAutolinkLookbehind(), browserBridge()],
   clearScreen: false,
   server: {
     host: "127.0.0.1",

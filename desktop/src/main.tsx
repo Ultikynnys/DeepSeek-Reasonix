@@ -1,3 +1,6 @@
+// Browser-only Tauri shim — no-op under the real host. Must run before any
+// @tauri-apps/api import touches window.__TAURI_INTERNALS__.
+import "./browser-tauri";
 import "@fontsource/geist/400.css";
 import "@fontsource/geist/500.css";
 import "@fontsource/geist/600.css";
