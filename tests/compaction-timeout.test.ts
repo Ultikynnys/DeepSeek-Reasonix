@@ -8,6 +8,7 @@ import { type ForceSummaryContext, forceSummaryAfterIterLimit } from "../src/loo
 import type { LoopEvent } from "../src/loop/types.js";
 import { AppendOnlyLog } from "../src/memory/runtime.js";
 import { SessionStats } from "../src/telemetry/stats.js";
+import type { ChatMessage } from "../src/types.js";
 
 /** Fetch that NEVER settles and ignores abort — the worst-case hung connection. */
 function hangForeverFetch(): typeof fetch {
@@ -46,13 +47,13 @@ describe("compaction model-call deadlines", () => {
     const client = new DeepSeekClient({ apiKey: "sk-test", fetch: hangForeverFetch() });
     const ctx: ForceSummaryContext = {
       client,
-      signal: new AbortController().signal,
       buildMessages: () => [{ role: "user", content: "do the thing" }],
-      appendAndPersist: vi.fn(),
+      replaceLog: vi.fn(),
       // Never reached on the timeout path — only needed to satisfy the type.
       recordStats: (() => ({})) as unknown as ForceSummaryContext["recordStats"],
       turn: 1,
       model: "deepseek-v4-flash",
+      getSystemPrompt: () => "system",
     };
 
     const gen = forceSummaryAfterIterLimit(ctx, { reason: "context-guard" });
@@ -101,12 +102,12 @@ describe("compaction model-call deadlines", () => {
     });
     const ctx: ForceSummaryContext = {
       client,
-      signal: new AbortController().signal,
       buildMessages: () => [{ role: "user", content: "do the thing" }],
-      appendAndPersist: vi.fn(),
+      replaceLog: vi.fn(),
       recordStats: (() => ({})) as unknown as ForceSummaryContext["recordStats"],
       turn: 1,
       model: "deepseek-v4-flash",
+      getSystemPrompt: () => "system",
     };
 
     const gen = forceSummaryAfterIterLimit(ctx, { reason: "context-guard" });
@@ -121,6 +122,42 @@ describe("compaction model-call deadlines", () => {
     });
     expect(calls).toBe(2);
     expect((await gen.next()).value).toMatchObject({ role: "done" });
+  });
+
+  it("forceSummaryAfterIterLimit full-folds: replaceLog carries the marker, summary, and pinned constraints", async () => {
+    const replaceLog = vi.fn();
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () =>
+        summaryJsonResponse("Earlier turns explored auth; objective: ship the refactor."),
+      ) as unknown as typeof fetch,
+    });
+    const ctx: ForceSummaryContext = {
+      client,
+      buildMessages: () => [{ role: "user", content: "ship the refactor" }],
+      replaceLog,
+      recordStats: (() => ({})) as unknown as ForceSummaryContext["recordStats"],
+      turn: 1,
+      model: "deepseek-v4-flash",
+      getSystemPrompt: () =>
+        "# HIGH PRIORITY constraints (must observe)\n\nNever launch Blender.\n\n# User memory\n\nDo not publish without review.\n",
+    };
+
+    const events: LoopEvent[] = [];
+    for await (const ev of forceSummaryAfterIterLimit(ctx, { reason: "context-guard" })) {
+      events.push(ev);
+    }
+
+    expect(events.some((e) => e.role === "assistant_final")).toBe(true);
+    expect(replaceLog).toHaveBeenCalledTimes(1);
+    const committed = replaceLog.mock.calls[0]![0] as ChatMessage;
+    const text = typeof committed.content === "string" ? committed.content : "";
+    // Marker → the summary renders as a compaction recap, not a fresh answer.
+    expect(text).toContain("CONVERSATION HISTORY SUMMARY");
+    expect(text).toContain("ship the refactor");
+    // Pinned constraints survive the full fold verbatim.
+    expect(text).toContain("Never launch Blender");
+    expect(text).toContain("[PINNED CONSTRAINTS — preserved verbatim]");
   });
 
   it("fold completes fail-open when the file-triage call hangs past its deadline", async () => {

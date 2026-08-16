@@ -796,14 +796,16 @@ describe("CacheFirstLoop (non-streaming)", () => {
     });
     expect(end).toMatchObject({
       compactionKind: "force-summary",
-      folded: false, // the log isn't folded — it's trimmed + summarized in place
+      folded: true, // the force summary FULL-folds the log into the summary
       summaryChars: "based on what I saw, X.".length,
     });
     // The trim removed the trailing in-flight assistant-with-tool_calls, then
-    // the summary message was appended — before == after in this shape.
-    expect(end!.beforeMessages).toBe(end!.afterMessages);
-    // No replacement snapshot for a force-summary — nothing was folded.
-    expect((end as { replacementMessages?: unknown }).replacementMessages).toBeUndefined();
+    // the whole history was replaced by the synthesized summary.
+    expect(end!.beforeMessages).toBe(2);
+    expect(end!.afterMessages).toBe(1);
+    // A force-summary now swaps the log like a fold — the replacement snapshot
+    // rides the end event for the kernel view.
+    expect((end as { replacementMessages?: unknown }).replacementMessages).toBeDefined();
     // The forced summary message still lands as the annotated assistant final.
     const finals = events.filter((e) => e.role === "assistant_final");
     expect(finals[finals.length - 1]!.forcedSummary).toBe(true);
@@ -1072,6 +1074,39 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const result = await loop.compactHistory({ keepRecentTokens: 10_000 });
     expect(result.folded).toBe(false);
     expect(loop.log.length).toBe(4);
+  });
+
+  it("fold proceeds (does not noop) when the log is over the threshold even with a small head", async () => {
+    // Regression: the min-savings noop fired whenever the head was < 30% of
+    // the log — including when the ACTIVE exchange dominated and the total was
+    // already past the 75% fold line. That let context climb to the 80% guard.
+    // Above the threshold the fold must run even if the head is small.
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 1_000;
+    const client = makeClient([{ content: "Earlier turns summarized." }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: FOLD_TEST_MODEL,
+    });
+    // Tiny head, huge active exchange (last user message near the top) → the
+    // head alone would trip the min-savings noop, but the log is over 750/1000.
+    const big =
+      "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ".repeat(
+        60,
+      );
+    loop.log.append({ role: "user", content: "q0" });
+    loop.log.append({ role: "assistant", content: "a0" });
+    loop.log.append({ role: "user", content: "q1" });
+    loop.log.append({ role: "assistant", content: big });
+
+    const result = await loop.compactHistory({
+      keepRecentTokens: 100,
+      protectActiveExchange: true,
+    });
+    expect(result.folded).toBe(true);
+    expect(result.beforeMessages).toBe(4);
+    expect(loop.log.length).toBeLessThan(4);
   });
 
   it("compactHistoryWithEvents yields the same card lifecycle as auto folds (user /compact path)", async () => {

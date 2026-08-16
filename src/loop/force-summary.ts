@@ -1,9 +1,10 @@
-import { messageOf } from "@reasonix/core-utils";
+import { COMPACTION_SUMMARY_MARKER, messageOf } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "../client.js";
 import { t } from "../i18n/index.js";
 import type { TurnStats } from "../telemetry/stats.js";
 import { countTokensBounded } from "../tokenizer.js";
 import type { ChatMessage } from "../types.js";
+import { buildFoldSummaryInstruction, extractPinnedConstraints } from "./compaction-prompt.js";
 import { COMPACTION_RETRY_DELAY_MS, withCompactionRetry } from "./compaction-retry.js";
 import { errorLabelFor, reasonPrefixFor } from "./errors.js";
 import { buildAssistantMessage } from "./messages.js";
@@ -27,13 +28,17 @@ export type ForceSummaryReason = "aborted" | "context-guard" | "stuck";
 
 export interface ForceSummaryContext {
   client: DeepSeekClient;
-  signal: AbortSignal;
   buildMessages: () => ChatMessage[];
-  appendAndPersist: (msg: ChatMessage) => void;
+  /** Replaces the entire log with the synthesized summary — the force summary
+   *  is a FULL fold, not an append, so the context actually drops below the
+   *  guard threshold instead of re-tripping it next turn. */
+  replaceLog: (msg: ChatMessage) => void;
   recordStats: (model: string, usage: Usage) => TurnStats;
   turn: number;
   /** Model to call for the summary itself — must be valid on the user's endpoint. */
   model: string;
+  /** System prompt — used to lift pinned constraints verbatim into the summary. */
+  getSystemPrompt: () => string;
   /** Final guard supplied by the loop; a force-summary request must not exceed the model budget. */
   canSend?: (messages: ChatMessage[]) => boolean;
 }
@@ -46,15 +51,15 @@ export async function* forceSummaryAfterIterLimit(
     // Status bridges the silence — summary call is non-streaming, 30-60s typical.
     yield { turn: ctx.turn, role: "status", content: t("summary.status") };
     const messages = ctx.buildMessages();
-    // Passing `tools: undefined` was supposed to force a text response,
-    // but R1 can still hallucinate tool-call markup (e.g. DSML
-    // `<｜DSML｜function_calls>…`) when primed by prior tool use. An
-    // explicit user-role instruction plus post-hoc stripping of known
-    // hallucination shapes keeps the user from seeing raw markup.
+    // The force summary now REPLACES the whole log, so it must be a
+    // conversation recap that preserves the original objective, negative
+    // constraints, decisions, and open todos — not just a turn-scoped
+    // "what did I learn" blurb. Reuse the fold's instruction for parity.
+    // `stripHallucinatedToolMarkup` below still catches any tool-call/DSML
+    // markup the model hallucinates despite the plain-prose directive.
     messages.push({
       role: "user",
-      content:
-        "The turn is being force-summarized (context guard or stuck-state). Summarize in plain prose what you learned from the tool results above. Do NOT emit any tool calls, function-call markup, DSML invocations, or SEARCH/REPLACE edit blocks — they will be silently discarded. Just plain text.",
+      content: buildFoldSummaryInstruction([]),
     });
     if (ctx.canSend && !ctx.canSend(messages)) {
       throw new Error("forced-summary request exceeds the model context budget");
@@ -77,8 +82,11 @@ export async function* forceSummaryAfterIterLimit(
           ) * FORCE_SUMMARY_PER_TOKEN_MS,
         ),
     );
+    // Deliberately NOT wired to the turn's abort signal — compaction is
+    // non-interruptible by design (same rationale as the fold summarizer in
+    // context-manager.ts). Esc/Stop during the summary is deferred to the next
+    // iteration boundary; the request is bounded only by the scaled deadline.
     const resp = await withCompactionRetry({
-      signal: ctx.signal,
       maxElapsedMs: deadlineMs + COMPACTION_RETRY_DELAY_MS,
       timeoutMessage: "forced-summary-timeout",
       attempt: async (attemptSignal) => {
@@ -119,7 +127,20 @@ export async function* forceSummaryAfterIterLimit(
     const reasonPrefix = reasonPrefixFor(opts.reason);
     const annotated = `${reasonPrefix}\n\n${summary}`;
     const summaryStats = ctx.recordStats(ctx.model, resp.usage ?? new Usage());
-    ctx.appendAndPersist(buildAssistantMessage(summary, [], ctx.model, resp.reasoningContent));
+    // Full fold: stamp the recap + pinned constraints and REPLACE the log, so
+    // the context drops below the guard instead of growing on top of it.
+    const constraints = extractPinnedConstraints(ctx.getSystemPrompt());
+    const constraintTail = constraints
+      ? `\n\n[PINNED CONSTRAINTS — preserved verbatim]\n\n${constraints}`
+      : "";
+    ctx.replaceLog(
+      buildAssistantMessage(
+        COMPACTION_SUMMARY_MARKER + summary + constraintTail,
+        [],
+        ctx.model,
+        resp.reasoningContent,
+      ),
+    );
     yield {
       turn: ctx.turn,
       role: "assistant_final",

@@ -1289,9 +1289,8 @@ export class CacheFirstLoop {
     return result;
   }
 
-  /** Force-summary card lifecycle — the context guard (or stuck state) trims the
-   *  trailing in-flight tool call and summarizes in place; same card shape as a
-   *  fold, but the log isn't folded (trim + summary append, folded: false). */
+  /** Force-summary card lifecycle — trims the trailing in-flight tool call and
+   *  FULL-folds the log (history replaced by the synthesized summary). */
   private async *forcedSummaryEvents(
     compactionId: string,
     reason: ForceSummaryReason,
@@ -1316,8 +1315,7 @@ export class CacheFirstLoop {
   }
 
   /** Runs the forced summary — trims the trailing in-flight assistant-with-
-   *  tool_calls, forwards the summary call's events through the compaction card,
-   *  and returns the FoldResult-shaped outcome (summary text stays in the message). */
+   *  tool_calls, forwards events through the card, returns the FoldResult. */
   private async *forceSummaryRun(
     reason: ForceSummaryReason,
   ): AsyncGenerator<LoopEvent, FoldResult, void> {
@@ -1347,10 +1345,11 @@ export class CacheFirstLoop {
       yield { turn: this._turn, role: "done", content: "" };
     }
     return {
-      folded: false,
+      folded: summary.length > 0,
       beforeMessages,
       afterMessages: this.log.length,
       summaryChars: summary.length,
+      ...(summary.length > 0 ? { summary } : {}),
       ...(summary.length === 0 ? { error: failure ?? "forced summary failed" } : {}),
     };
   }
@@ -1358,12 +1357,15 @@ export class CacheFirstLoop {
   private summaryContext(): ForceSummaryContext {
     return {
       client: this.client,
-      signal: this._turnAbort.signal,
       buildMessages: () => this.buildMessages(),
-      appendAndPersist: (m) => this.appendAndPersist(m),
+      replaceLog: (m) => {
+        this.log.compactInPlace([m]);
+        this.persistLog([m]);
+      },
       recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
       turn: this._turn,
       model: this.model,
+      getSystemPrompt: () => this.prefix.system,
       canSend: (messages) =>
         this.context.requestBudget(messages, this.prefix.toolSpecs, this.model).fits,
     };
