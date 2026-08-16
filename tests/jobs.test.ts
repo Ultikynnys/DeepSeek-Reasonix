@@ -269,4 +269,16 @@ describe("JobRegistry", () => {
     await waitFor(() => registry.runningCount() === 0, 2000);
     expect(registry.runningCount()).toBe(0);
   });
+
+  it("cancelAll() force-kills every running job immediately", { timeout: 15000 }, async () => {
+    await registry.start(`node -e "setTimeout(()=>{}, 10000)"`, { cwd, waitSec: 0.2 });
+    await registry.start(`node -e "setTimeout(()=>{}, 10000)"`, { cwd, waitSec: 0.2 });
+    expect(registry.runningCount()).toBe(2);
+    // Synchronous force-cancel — no SIGTERM grace, so the count drops to 0
+    // before the fold's summary call that follows it in the loop.
+    registry.cancelAll();
+    expect(registry.runningCount()).toBe(0);
+    // list() must no longer report the jobs as running, either.
+    expect(registry.list().every((j) => !j.running)).toBe(true);
+  });
 });

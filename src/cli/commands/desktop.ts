@@ -1372,6 +1372,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     reasoningEffort,
     hooks: tab.hooks,
     hookCwd: tab.rootDir,
+    onPreCompaction: () => toolset.jobs.cancelAll(),
   });
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };

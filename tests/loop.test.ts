@@ -811,6 +811,90 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(finals[finals.length - 1]!.forcedSummary).toBe(true);
   });
 
+  it("force-cancels live tasks (onPreCompaction) BEFORE the compaction card opens", async () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    const responses: FakeResponseShape[] = [
+      {
+        content: "",
+        tool_calls: [{ id: "c", type: "function", function: { name: "probe", arguments: "{}" } }],
+        usage: {
+          prompt_tokens: 900_000,
+          completion_tokens: 50,
+          total_tokens: 900_050,
+          prompt_cache_hit_tokens: 700_000,
+          prompt_cache_miss_tokens: 200_000,
+        },
+      },
+      { content: "based on what I saw, X." },
+    ];
+    const client = makeClient(responses);
+    const order: string[] = [];
+    const onPreCompaction = vi.fn(() => {
+      order.push("cancel");
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 64,
+      onPreCompaction,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("analyze the repo")) {
+      events.push(ev);
+      if (ev.role === "compaction_start") order.push("compaction_start");
+    }
+
+    // The cancel hook fires exactly once, and strictly before the compaction
+    // card opens (i.e. before the summary call runs).
+    expect(onPreCompaction).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["cancel", "compaction_start"]);
+    // The force-summary still committed after the cancel.
+    expect(events.find((e) => e.role === "compaction_end")).toMatchObject({ folded: true });
+  });
+
+  it("refuses new tool dispatch while a compaction is in flight", async () => {
+    const reg = new ToolRegistry();
+    let dispatched = 0;
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => {
+        dispatched++;
+        return "ok";
+      },
+    });
+    const loop = new CacheFirstLoop({
+      client: makeClient([{ content: "hi" }]),
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+    });
+    const internals = loop as unknown as {
+      _compacting: boolean;
+      runOneToolCall: (
+        call: { function?: { name?: string; arguments?: string } },
+        signal: AbortSignal,
+      ) => Promise<{ result: string }>;
+    };
+    internals._compacting = true;
+    const res = await internals.runOneToolCall(
+      { function: { name: "probe", arguments: "{}" } },
+      new AbortController().signal,
+    );
+    expect(res.result).toContain("compaction in progress");
+    expect(dispatched).toBe(0);
+  });
+
   it("settles the compaction card and continues when an auto-fold throws", async () => {
     DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 1_000;
     const client = makeClient([{ content: "continued after compaction failure" }]);

@@ -397,6 +397,31 @@ export class JobRegistry {
     return snapshot(job);
   }
 
+  /** Force-cancel every running job immediately (SIGKILL tree kill, no grace).
+   *  Wired to the loop's pre-compaction hook so no background shell (dev
+   *  server, long build) outlives a fold that summarizes its history away. */
+  cancelAll(): void {
+    for (const job of this.jobs.values()) {
+      if (!job.running || !job.child) continue;
+      if (job.pid !== null) killProcessTree(job.pid, "SIGKILL");
+      else {
+        try {
+          job.child.kill("SIGKILL");
+        } catch {
+          /* already dead — fall through */
+        }
+      }
+      // Settle the record synchronously — the SIGKILL is issued; the OS reap
+      // (Windows taskkill /T) completes asynchronously but must not keep the
+      // job looking "running" once compaction commits. The close handler still
+      // fires and backfills exitCode via settleClosed.
+      job.running = false;
+      job.signalReady();
+      job.signalClosed();
+    }
+    this.maybeCleanup();
+  }
+
   list(): JobRecord[] {
     return [...this.jobs.values()].map(snapshot);
   }

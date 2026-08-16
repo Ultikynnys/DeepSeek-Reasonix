@@ -117,6 +117,9 @@ export interface CacheFirstLoopOptions {
   confirmationGate?: PauseGate;
   /** Re-runs the prompt builder (applyMemoryStack / codeSystemPrompt) on /new so REASONIX.md edits take effect without a restart. Accepting a cache miss is the price. */
   rebuildSystem?: () => string;
+  /** Host hook fired at the start of every compaction so live background
+   *  shells can be force-cancelled before history is replaced. */
+  onPreCompaction?: () => void | Promise<void>;
 }
 
 export interface ReconfigurableOptions {
@@ -217,6 +220,10 @@ export class CacheFirstLoop {
   private context!: ContextManager;
   /** Stable ids for compaction card events — pairs compaction_start with compaction_end. */
   private _compactionSeq = 0;
+  /** True while a compaction is in flight — blocks new tool dispatch. */
+  private _compacting = false;
+  /** Host hook that force-cancels background jobs before compaction. */
+  private readonly _onPreCompaction: (() => void | Promise<void>) | null;
 
   /** Subscribe API so UI hooks can derive `running` from finally-guaranteed insertions. */
   get inflight(): InflightSet {
@@ -240,6 +247,7 @@ export class CacheFirstLoop {
     this.hookCwd = opts.hookCwd ?? process.cwd();
     this.confirmationGate = opts.confirmationGate ?? defaultPauseGate;
     this._rebuildSystem = opts.rebuildSystem ?? null;
+    this._onPreCompaction = opts.onPreCompaction ?? null;
 
     this._streamPreference = opts.stream ?? true;
     this.stream = this._streamPreference;
@@ -470,6 +478,18 @@ export class CacheFirstLoop {
     const name = call.function?.name ?? "";
     const args = call.function?.arguments ?? "{}";
     const parsedArgs = safeParseToolArgs(args);
+    // Compaction dispatch lock: while a fold / force-summary / /compact is
+    // running, refuse to start any new tool so nothing begins mid-compaction
+    // and gets orphaned by the log replacement.
+    if (this._compacting) {
+      return {
+        preWarnings: [],
+        postWarnings: [],
+        result: JSON.stringify({
+          error: "compaction in progress — tool call deferred until it completes",
+        }),
+      };
+    }
     const inflightId = this.inflightIdFor(call);
     this._inflight.add(inflightId);
     let cancelController: AbortController | null = null;
@@ -592,6 +612,19 @@ export class CacheFirstLoop {
   /** Cancel exactly one running tool call (the TUI Stop button on a shell card). */
   cancelToolCall(callId: string, _reason: string): void {
     this._toolCancelControllers.get(callId)?.abort();
+  }
+
+  /** Force-cancel in-flight tools + subagents and background shells so a
+   *  fold never orphans live work. */
+  private async cancelActiveTasks(): Promise<void> {
+    for (const ctrl of this._toolCancelControllers.values()) ctrl.abort();
+    this._lastToolCancelController?.abort();
+    try {
+      await this._onPreCompaction?.();
+    } catch (err) {
+      // Background cancellation must never block compaction, but must be LOUD.
+      process.stderr.write(`reasonix: pre-compaction cancel failed — ${messageOf(err)}\n`);
+    }
   }
 
   private resetAbortState(): void {
@@ -1234,59 +1267,68 @@ export class CacheFirstLoop {
     run: () => Promise<FoldResult> | AsyncGenerator<LoopEvent, FoldResult, void>,
   ): AsyncGenerator<LoopEvent, FoldResult, void> {
     const beforeMessages = this.log.length;
-    yield {
-      turn: this._turn,
-      role: "compaction_start",
-      content: "",
-      compactionId,
-      compactionReason: reason,
-      compactionKind: kind,
-      ...(aggressive ? { aggressive: true } : {}),
-    };
-
-    let result: FoldResult;
+    // Cancel live work FIRST and hold the dispatch lock for the whole summary:
+    // no background shell, subagent, or tool may be running — or started — while
+    // history is being summarized and replaced. The lock clears on early break.
+    this._compacting = true;
     try {
-      const runner = run();
-      // Plain promise (fold paths) or generator (the forced summary forwards
-      // its own status/assistant_final/done events through the card).
-      result = runner instanceof Promise ? await runner : yield* runner;
-    } catch (err) {
-      // Compaction is an auxiliary action: a tokenizer, persistence, or model
-      // failure must settle its card and return control to the turn loop. The
-      // failed run is never reported as folded, so the live log remains the
-      // source of truth and a later turn can retry it.
-      result = {
-        folded: false,
-        beforeMessages,
-        afterMessages: this.log.length,
-        summaryChars: 0,
-        error: `compaction failed — ${messageOf(err)}`,
+      await this.cancelActiveTasks();
+      yield {
+        turn: this._turn,
+        role: "compaction_start",
+        content: "",
+        compactionId,
+        compactionReason: reason,
+        compactionKind: kind,
+        ...(aggressive ? { aggressive: true } : {}),
       };
-    }
 
-    yield {
-      turn: this._turn,
-      role: "compaction_end",
-      content: "",
-      compactionId,
-      compactionReason: reason,
-      compactionKind: kind,
-      folded: result.folded,
-      beforeMessages: result.beforeMessages,
-      afterMessages: result.afterMessages,
-      summaryChars: result.summaryChars,
-      ...(result.summary ? { summary: result.summary } : {}),
-      ...(result.error ? { foldError: result.error } : {}),
-      ...(result.warn ? { foldWarn: result.warn } : {}),
-      ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
-      ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
-      ...(result.droppedFiles?.length ? { droppedFiles: result.droppedFiles } : {}),
-      // Post-fold log snapshot — the fold swapped the array in place, so the
-      // live entries ARE the replacement (merge-at-commit preserved any
-      // mid-summary appends).
-      ...(result.folded ? { replacementMessages: this.log.entries } : {}),
-    };
-    return result;
+      let result: FoldResult;
+      try {
+        const runner = run();
+        // Plain promise (fold paths) or generator (the forced summary forwards
+        // its own status/assistant_final/done events through the card).
+        result = runner instanceof Promise ? await runner : yield* runner;
+      } catch (err) {
+        // Compaction is an auxiliary action: a tokenizer, persistence, or model
+        // failure must settle its card and return control to the turn loop. The
+        // failed run is never reported as folded, so the live log remains the
+        // source of truth and a later turn can retry it.
+        result = {
+          folded: false,
+          beforeMessages,
+          afterMessages: this.log.length,
+          summaryChars: 0,
+          error: `compaction failed — ${messageOf(err)}`,
+        };
+      }
+
+      yield {
+        turn: this._turn,
+        role: "compaction_end",
+        content: "",
+        compactionId,
+        compactionReason: reason,
+        compactionKind: kind,
+        folded: result.folded,
+        beforeMessages: result.beforeMessages,
+        afterMessages: result.afterMessages,
+        summaryChars: result.summaryChars,
+        ...(result.summary ? { summary: result.summary } : {}),
+        ...(result.error ? { foldError: result.error } : {}),
+        ...(result.warn ? { foldWarn: result.warn } : {}),
+        ...(result.prunedFiles ? { prunedFiles: result.prunedFiles } : {}),
+        ...(result.prunedTokens ? { prunedTokens: result.prunedTokens } : {}),
+        ...(result.droppedFiles?.length ? { droppedFiles: result.droppedFiles } : {}),
+        // Post-fold log snapshot — the fold swapped the array in place, so the
+        // live entries ARE the replacement (merge-at-commit preserved any
+        // mid-summary appends).
+        ...(result.folded ? { replacementMessages: this.log.entries } : {}),
+      };
+      return result;
+    } finally {
+      this._compacting = false;
+    }
   }
 
   /** Force-summary card lifecycle — trims the trailing in-flight tool call and
