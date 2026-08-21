@@ -321,6 +321,8 @@ export type Settings = {
   reasoningEffort: ReasoningEffort;
   editMode: "review" | "auto" | "yolo" | "plan";
   budgetUsd: number | null;
+  /** User-configured context-window cap (tokens); null = per-model default. */
+  contextTokens?: number | null;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -1233,6 +1235,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           reasoningEffort: ev.reasoningEffort,
           editMode: ev.editMode,
           budgetUsd: ev.budgetUsd,
+          contextTokens: ev.contextTokens ?? null,
           baseUrl: ev.baseUrl,
           apiKeyPrefix: ev.apiKeyPrefix,
           workspaceDir: ev.workspaceDir,

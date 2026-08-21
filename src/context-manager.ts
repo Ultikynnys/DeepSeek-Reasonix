@@ -24,11 +24,7 @@ import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
 import type { AppendOnlyLog } from "./memory/runtime.js";
 import { rewriteSession } from "./memory/session.js";
-import {
-  DEEPSEEK_CONTEXT_TOKENS,
-  DEFAULT_CONTEXT_TOKENS,
-  type SessionStats,
-} from "./telemetry/stats.js";
+import { type SessionStats, resolveContextTokens } from "./telemetry/stats.js";
 import { IMAGE_DETAIL_LOW_TOKENS, countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ToolSpec, UserContentPart } from "./types.js";
 
@@ -95,6 +91,8 @@ export interface ContextManagerDeps {
   getFewShots?: () => readonly ChatMessage[];
   /** Fired when the message log was rewritten by fold; lets the loop drop session-scoped caches whose validity rested on the elided history (e.g. read-before-edit tracker). */
   onLogRewrite?: () => void;
+  /** User-configured context-window cap override (tokens). Undefined = per-model default (see resolveContextTokens). */
+  ctxMaxOverride?: number;
 }
 
 export type PostUsageDecisionKind = "none" | "fold" | "exit-with-summary";
@@ -198,7 +196,12 @@ export class ContextManager {
    *  survive recomputes after compaction for kept messages. */
   private logTokenCache = new WeakMap<ChatMessage, number>();
 
+  /** Effective cap override — hot-applied by the loop's configure() so a settings
+   *  change re-scales every fold threshold without rebuilding the runtime. */
+  ctxMaxOverride: number | undefined;
+
   constructor(private deps: ContextManagerDeps) {
+    this.ctxMaxOverride = deps.ctxMaxOverride;
     deps.log.onAppend((msg) => {
       if (this.logTokenTotal !== null) this.logTokenTotal += this.countMessageTokensCached(msg);
     });
@@ -233,7 +236,7 @@ export class ContextManager {
     model: string,
     alreadyFoldedThisTurn: boolean,
   ): PostUsageDecision {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+    const ctxMax = resolveContextTokens(model, this.ctxMaxOverride);
     if (!usage) {
       // Missing provider usage is not evidence that the request was small. Use
       // the live log as a conservative lower bound so dropped usage chunks
@@ -293,7 +296,7 @@ export class ContextManager {
     toolSpecs: ReadonlyArray<unknown> | undefined | null,
     model: string,
   ): { estimateTokens: number; ctxMax: number; ratio: number } {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+    const ctxMax = resolveContextTokens(model, this.ctxMaxOverride);
     const estimate = estimateRequestTokens(messages, toolSpecs ?? null, true);
     return { estimateTokens: estimate, ctxMax, ratio: estimate / ctxMax };
   }
@@ -321,7 +324,7 @@ export class ContextManager {
       protectActiveExchange?: boolean;
     },
   ): Promise<FoldResult> {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+    const ctxMax = resolveContextTokens(model, this.ctxMaxOverride);
     const tailBudget = opts?.keepRecentTokens ?? Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
     // Keep the live array reference — append() pushes in place, compactInPlace()
     // swaps the array. Identity lets the commit step detect messages appended

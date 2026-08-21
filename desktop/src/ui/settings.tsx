@@ -558,6 +558,35 @@ function PageGeneral({
         </div>
         <div className="setting-row">
           <div className="l">
+            <div className="n">{t("settings.contextWindow")}</div>
+            <div className="h">{t("settings.contextWindowHint")}</div>
+          </div>
+          <input
+            key={`ctx-${settings.contextTokens ?? "default"}`}
+            className="field"
+            type="number"
+            min={300000}
+            max={1000000}
+            step={50000}
+            defaultValue={settings.contextTokens ?? ""}
+            placeholder={t("settings.contextWindowPlaceholder")}
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (v === "") {
+                onSave({ contextTokens: null });
+                return;
+              }
+              const n = Number(v);
+              // Guard NaN (partial entries like "1e") and clamp here so the
+              // daemon never sees an out-of-range or invalid value.
+              if (Number.isFinite(n)) {
+                onSave({ contextTokens: Math.min(1000000, Math.max(300000, Math.floor(n))) });
+              }
+            }}
+          />
+        </div>
+        <div className="setting-row">
+          <div className="l">
             <div className="n">{t("settings.webSearchEngine")}</div>
             <div className="h">{t("settings.webSearchEngineNote")}</div>
           </div>

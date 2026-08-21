@@ -40,8 +40,8 @@ export function pricingFor(model: string, path?: string): ModelPricing | undefin
 export const CLAUDE_SONNET_PRICING = { input: 3.0, output: 15.0 };
 
 /** Prompt-side window only; completion caps live server-side. Deliberately below the API's
- *  1M-token ceiling: quality degrades past ~300K, and compaction thresholds in
- *  context-manager.ts are fractions of this cap (fold at 0.75 × 300K = 225K). */
+ *  1M-token ceiling: quality degrades past ~300K, and compaction thresholds in context-manager.ts
+ *  are fractions of this cap (fold at 0.75 × 300K = 225K). Users may raise it via the `contextTokens` setting (see resolveContextTokens) — the API ceiling is 1M tokens. */
 export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
   "deepseek-v4-flash": 300_000,
   "deepseek-v4-pro": 300_000,
@@ -55,8 +55,23 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
   "gpt-5.6-luna": 300_000,
 };
 
+/** Lower bound of the user-configurable `contextTokens` setting. */
+export const MIN_CONTEXT_TOKENS = 300_000;
+/** Upper bound of the user-configurable `contextTokens` setting — the API's 1M-token ceiling. */
+export const MAX_CONTEXT_TOKENS = 1_000_000;
+
 /** Fallback when the caller's model id isn't in the table — safe lower bound. */
 export const DEFAULT_CONTEXT_TOKENS = 131_072;
+
+/** The effective context cap for a model: the configured `contextTokens` override when set
+ *  (clamped to [300K, 1M]), else the model table, else the safe fallback — every ctxMax consumer
+ *  resolves through here so the meter, the budget checks and the compaction thresholds agree. */
+export function resolveContextTokens(model: string, configured?: number): number {
+  if (typeof configured === "number" && Number.isFinite(configured)) {
+    return Math.min(MAX_CONTEXT_TOKENS, Math.max(MIN_CONTEXT_TOKENS, Math.floor(configured)));
+  }
+  return DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+}
 
 /** Maximum turns retained in memory before old entries are rolled into carryover.
  *  Each TurnStats holds usage + cost + model — at N=200 this caps memory at ~50KB. */

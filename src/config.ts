@@ -13,6 +13,7 @@ import {
 } from "./index/config.js";
 import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
 import { reasonixHome } from "./reasonix-home.js";
+import { MAX_CONTEXT_TOKENS, MIN_CONTEXT_TOKENS } from "./telemetry/stats.js";
 import { type ThemeName, isThemeName, resolveThemeName } from "./theme/tokens.js";
 import {
   type NormalizedToolRateLimitConfig,
@@ -191,6 +192,9 @@ export interface ReasonixConfig {
   /** When false, skip the boot splash animation and show the main UI immediately. Default true. */
   banner?: boolean;
   reasoningEffort?: ReasoningEffort;
+  /** Context-window cap in tokens, overriding the per-model default (300K).
+   *  Clamped to [300000, 1000000] at load; unset = model default. */
+  contextTokens?: number;
   /** Default workspace root for the desktop client. CLI uses cwd. */
   workspaceDir?: string;
   /** Last N workspace paths the desktop client has opened, most recent first. */
@@ -1233,6 +1237,34 @@ export function loadFilesystemOutlineThresholdBytes(
   const v = readConfig(path).filesystem?.outlineThresholdBytes;
   if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return undefined;
   return Math.floor(v);
+}
+
+/** User-configured context-window cap in tokens, clamped to [300K, 1M] (the
+ *  API ceiling). Unset / non-numeric → undefined, and callers fall back to
+ *  the per-model default (see resolveContextTokens). */
+export function loadContextTokens(path: string = defaultConfigPath()): number | undefined {
+  const v = readConfig(path).contextTokens;
+  if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+  return Math.min(MAX_CONTEXT_TOKENS, Math.max(MIN_CONTEXT_TOKENS, Math.floor(v)));
+}
+
+/** Persist the context-window cap. `null` / undefined clears it back to the
+ *  per-model default; out-of-range values clamp to [300K, 1M]. */
+export function saveContextTokens(
+  value: number | null | undefined,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  const clamped =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.min(MAX_CONTEXT_TOKENS, Math.max(MIN_CONTEXT_TOKENS, Math.floor(value)))
+      : undefined;
+  if (clamped === undefined) {
+    const { contextTokens: _drop, ...rest } = cfg;
+    writeConfig(rest, path);
+  } else {
+    writeConfig({ ...cfg, contextTokens: clamped }, path);
+  }
 }
 
 /** True when the onboarding tip for the review/AUTO gate has been shown. */

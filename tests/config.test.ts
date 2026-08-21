@@ -16,6 +16,7 @@ import {
   loadApiKey,
   loadBaseUrl,
   loadBraveApiKey,
+  loadContextTokens,
   loadDesktopOpenTabs,
   loadEditMode,
   loadEndpoint,
@@ -47,6 +48,7 @@ import {
   resolveThemePreference,
   saveApiKey,
   saveBaseUrl,
+  saveContextTokens,
   saveDesktopOpenTabs,
   saveEditMode,
   saveIndexConfig,
@@ -800,6 +802,38 @@ describe("config", () => {
     expect(loadFilesystemOutlineThresholdBytes(path)).toBeUndefined();
     writeConfig({ filesystem: { outlineThresholdBytes: "big" as any } }, path);
     expect(loadFilesystemOutlineThresholdBytes(path)).toBeUndefined();
+  });
+
+  it("loadContextTokens returns undefined when unset (caller applies the model default)", () => {
+    expect(loadContextTokens(path)).toBeUndefined();
+  });
+
+  it("loadContextTokens accepts a value in [300000, 1000000]", () => {
+    writeConfig({ contextTokens: 500000 }, path);
+    expect(loadContextTokens(path)).toBe(500000);
+  });
+
+  it("loadContextTokens clamps out-of-range values to [300000, 1000000]", () => {
+    writeConfig({ contextTokens: 100 } as any, path);
+    expect(loadContextTokens(path)).toBe(300000);
+    writeConfig({ contextTokens: 2_000_000 }, path);
+    expect(loadContextTokens(path)).toBe(1_000_000);
+  });
+
+  it("loadContextTokens drops non-numeric values", () => {
+    writeConfig({ contextTokens: "big" as any }, path);
+    expect(loadContextTokens(path)).toBeUndefined();
+  });
+
+  it("saveContextTokens persists a clamped value and clears on null", () => {
+    saveContextTokens(750_000, path);
+    expect(readConfig(path).contextTokens).toBe(750_000);
+
+    saveContextTokens(50, path);
+    expect(readConfig(path).contextTokens).toBe(300_000);
+
+    saveContextTokens(null, path);
+    expect(readConfig(path).contextTokens).toBeUndefined();
   });
 
   it("loadReasoningEffort defaults to 'high' when unset (safe for vLLM / Azure)", () => {

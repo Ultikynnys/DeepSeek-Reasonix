@@ -109,6 +109,9 @@ export interface CacheFirstLoopOptions {
   reasoningEffort?: ReasoningEffort;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
+  /** User-configured context-window cap (tokens), forwarded to the ContextManager.
+   *  Undefined = per-model default. Hot-applied via configure(). */
+  ctxMaxOverride?: number;
   session?: string;
   /** PreToolUse + PostToolUse only — UserPromptSubmit / Stop live at the App boundary. */
   hooks?: ResolvedHook[];
@@ -128,6 +131,8 @@ export interface ReconfigurableOptions {
   stream?: boolean;
   /** V4 thinking mode only; deepseek-chat ignores. */
   reasoningEffort?: ReasoningEffort;
+  /** Context-window cap override (tokens); undefined = per-model default. `null` = clear a set override. */
+  ctxMaxOverride?: number | null;
 }
 
 export interface LoopAbortOptions {
@@ -161,6 +166,8 @@ export class CacheFirstLoop {
   budgetUsd: number | null;
   /** One-shot 80% warning latch — cleared by setBudget so a bump re-arms at the new boundary. */
   private _budgetWarned = false;
+  /** Context-window cap override (tokens) — mutable via configure(); undefined = per-model default. */
+  ctxMaxOverride: number | undefined;
   sessionName: string | null;
 
   hooks: ResolvedHook[];
@@ -247,6 +254,7 @@ export class CacheFirstLoop {
     this.reasoningEffort = opts.reasoningEffort ?? "high";
     this.budgetUsd =
       typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
+    this.ctxMaxOverride = opts.ctxMaxOverride;
 
     this.hooks = opts.hooks ?? [];
     this.hookCwd = opts.hookCwd ?? process.cwd();
@@ -319,6 +327,7 @@ export class CacheFirstLoop {
       log: this.log,
       stats: this.stats,
       sessionName: this.sessionName,
+      ctxMaxOverride: this.ctxMaxOverride,
       getCurrentTurn: () => this._turn,
       getSystemPrompt: () => this.prefix.system,
       getToolSpecs: () => this.prefix.toolSpecs,
@@ -447,6 +456,11 @@ export class CacheFirstLoop {
       this.stream = opts.stream;
     }
     if (opts.reasoningEffort !== undefined) this.reasoningEffort = opts.reasoningEffort;
+    if (opts.ctxMaxOverride !== undefined) {
+      const v = opts.ctxMaxOverride ?? undefined;
+      this.ctxMaxOverride = v;
+      this.context.ctxMaxOverride = v;
+    }
   }
 
   /** `null` disables the cap; any change re-arms the 80% warning. */

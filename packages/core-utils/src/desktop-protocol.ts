@@ -342,6 +342,8 @@ export interface SettingsEvent {
   reasoningEffort: ReasoningEffort;
   editMode: EditMode;
   budgetUsd: number | null;
+  /** User-configured context-window cap (tokens); null = per-model default (300K). */
+  contextTokens?: number | null;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -444,6 +446,8 @@ export interface SettingsPatch {
   reasoningEffort?: ReasoningEffort;
   editMode?: EditMode;
   budgetUsd?: number | null;
+  /** Context-window cap in tokens, clamped to [300000, 1000000]; null/undefined = per-model default. */
+  contextTokens?: number | null;
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;

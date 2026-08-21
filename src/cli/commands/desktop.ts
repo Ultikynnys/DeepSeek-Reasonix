@@ -78,6 +78,7 @@ import {
   isReasoningEffort,
   loadApiKey,
   loadBraveApiKey,
+  loadContextTokens,
   loadDesktopOpenTabs,
   loadEditMode,
   loadEditor,
@@ -101,6 +102,7 @@ import {
   webSearchEngine as readWebSearchEngine,
   saveApiKey,
   saveBaseUrl,
+  saveContextTokens,
   saveDesktopOpenTabs,
   saveEditMode,
   saveEditor,
@@ -168,7 +170,7 @@ import {
   importExternalSessions,
 } from "../../session-import.js";
 import { SkillStore } from "../../skills.js";
-import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS } from "../../telemetry/stats.js";
+import { resolveContextTokens } from "../../telemetry/stats.js";
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage } from "../../types.js";
@@ -753,6 +755,7 @@ function emitSettings(tab: Tab): void {
       reasoningEffort: tab.currentReasoningEffort,
       editMode,
       budgetUsd: tab.runtime?.loop.budgetUsd ?? null,
+      contextTokens: tab.ctxMaxOverride ?? null,
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
       workspaceDir: tab.rootDir,
@@ -1083,8 +1086,8 @@ function emitCtxBreakdown(tab: Tab): void {
     }
   }
   // ctxMax drives the panel meter's denominator + compaction-limit ticks —
-  // keep it in sync with the loop's context cap (DEEPSEEK_CONTEXT_TOKENS).
-  const ctxMax = DEEPSEEK_CONTEXT_TOKENS[tab.currentModel] ?? DEFAULT_CONTEXT_TOKENS;
+  // keep it in sync with the loop's context cap (resolveContextTokens).
+  const ctxMax = resolveContextTokens(tab.currentModel, tab.ctxMaxOverride);
   emitTabDiagnostic(tab, "context.breakdown", {
     reservedTokens: sys + tools,
     logTokens,
@@ -1147,6 +1150,8 @@ interface Tab {
   /** Per-tab reasoning effort — restored from the session's meta on load so a config reset doesn't flip it back to the global default. */
   currentReasoningEffort: import("../../config.js").ReasoningEffort;
   budgetUsd: number | undefined;
+  /** User-configured context-window cap (tokens); undefined = per-model default (300K). */
+  ctxMaxOverride: number | undefined;
   /** null while the tab is bootstrapping — see `initTabToolset`. UI gates input on `$ready`, which only fires once this is set. */
   toolset: Awaited<ReturnType<typeof buildCodeToolset>> | null;
   /** Empty while bootstrapping; populated together with `toolset`. */
@@ -1368,6 +1373,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     tools: toolset.tools,
     model: tab.currentModel,
     budgetUsd: tab.budgetUsd,
+    ctxMaxOverride: tab.ctxMaxOverride,
     session: tab.currentSession,
     reasoningEffort,
     hooks: tab.hooks,
@@ -1536,6 +1542,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       currentModel: model,
       currentReasoningEffort: loadReasoningEffort(),
       budgetUsd: opts.budgetUsd,
+      ctxMaxOverride: loadContextTokens(),
       toolset: null,
       system: "",
       runtime: null,
@@ -3234,6 +3241,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         if (msg.budgetUsd !== undefined) {
           tab.budgetUsd = msg.budgetUsd ?? undefined;
           tab.runtime?.loop.setBudget(msg.budgetUsd);
+        }
+        if (msg.contextTokens !== undefined) {
+          saveContextTokens(msg.contextTokens);
+          const next = loadContextTokens();
+          tab.ctxMaxOverride = next;
+          tab.runtime?.loop.configure({ ctxMaxOverride: next ?? null });
+          emitCtxBreakdown(tab);
+          emitSettings(tab);
         }
         if (msg.baseUrl !== undefined) saveBaseUrl(msg.baseUrl);
         if (msg.workspaceDir !== undefined) {
