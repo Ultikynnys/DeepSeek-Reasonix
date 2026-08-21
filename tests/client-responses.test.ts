@@ -95,6 +95,9 @@ describe("Responses payload conversion (codex backend)", () => {
         name: "read_file",
         description: "Read a file",
         parameters: { type: "object", properties: {} },
+        // gpt-* models must not burst parallel tool calls — one call per
+        // response so the loop feeds each result back before the next round.
+        parallel_tool_calls: false,
       },
     ]);
     expect(body.input).toEqual([

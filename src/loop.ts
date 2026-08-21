@@ -1209,6 +1209,7 @@ export class CacheFirstLoop {
       yield* dispatchToolCallsChunked(repairedCalls, {
         turn: this._turn,
         signal,
+        model: this.model,
         isParallelSafe: (name) => this.tools.isParallelSafe(name),
         inflightIdFor: (call) => this.inflightIdFor(call),
         inflightAdd: (id) => this._inflight.add(id),

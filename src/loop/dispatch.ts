@@ -11,6 +11,9 @@ export interface RunOneToolCallResult {
 export interface DispatchContext {
   turn: number;
   signal: AbortSignal;
+  /** Model id of the current turn — gpt-* models default to serial dispatch
+   *  so their tool calls never run ahead of each other's results. */
+  model: string;
   isParallelSafe: (name: string) => boolean;
   inflightIdFor: (call: ToolCall) => string;
   inflightAdd: (id: string) => void;
@@ -25,15 +28,21 @@ function readParallelMax(): number {
   return Number.isFinite(raw) && raw >= 1 ? Math.min(raw, 16) : 3;
 }
 
-function readDispatchSerial(): boolean {
-  return (process.env.REASONIX_TOOL_DISPATCH ?? "auto").toLowerCase() === "serial";
+/** Env override wins; gpt-* default to SERIAL so their parallel bursts
+ *  run one-at-a-time (each settles before the next starts). DeepSeek
+ *  keeps parallel chunks; `REASONIX_TOOL_DISPATCH=parallel` restores. */
+function readDispatchSerial(model: string): boolean {
+  const raw = (process.env.REASONIX_TOOL_DISPATCH ?? "").toLowerCase();
+  if (raw === "serial") return true;
+  if (raw === "parallel" || raw === "auto") return false;
+  return model.startsWith("gpt-");
 }
 
 export async function* dispatchToolCallsChunked(
   repairedCalls: ToolCall[],
   ctx: DispatchContext,
 ): AsyncGenerator<LoopEvent, void, void> {
-  const dispatchSerial = readDispatchSerial();
+  const dispatchSerial = readDispatchSerial(ctx.model);
   const parallelMax = readParallelMax();
 
   let callIdx = 0;

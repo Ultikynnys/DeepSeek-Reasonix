@@ -322,7 +322,14 @@ export class DeepSeekClient {
     if (stream) payload.stream_options = { include_usage: true };
     // OpenAI now requires explicit `store: false` — omitting it returns
     // 400 {"detail":"Store must be set to false"}.  DeepSeek ignores it.
-    if (providerForModel(opts.model) === "openai") payload.store = false;
+    if (providerForModel(opts.model) === "openai") {
+      payload.store = false;
+      // ChatGPT models default to parallel tool-call bursts in one response.
+      // Pin them to one call per response: the loop feeds each result back
+      // before the next model round, so a burst is both unsafe (calls run on
+      // stale assumptions) and wasted (serial dispatch would just queue them).
+      payload.parallel_tool_calls = false;
+    }
     if (opts.tools?.length) payload.tools = opts.tools;
     if (opts.temperature !== undefined) payload.temperature = opts.temperature;
     if (opts.maxTokens !== undefined) payload.max_tokens = opts.maxTokens;

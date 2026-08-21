@@ -5,6 +5,11 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed — gpt-* models no longer burst parallel tool calls.**
+
+- Chat-completions payloads to OpenAI now send `parallel_tool_calls: false`, and the Codex / Responses payload marks every tool `parallel_tool_calls: false` — ChatGPT models emit ONE tool call per response instead of a burst, so each result is fed back before the model can act on stale assumptions.
+- The tool dispatcher now defaults to serial (one-at-a-time) dispatch for `gpt-*` models as a hard guarantee: every dispatched call settles before the next starts, and the next thinking round only begins after all previous tool calls have returned. DeepSeek models keep the cache-first parallel chunks (`REASONIX_PARALLEL_MAX`); `REASONIX_TOOL_DISPATCH=parallel` restores the old behavior for everyone.
+
 **Fixed — ChatGPT-plan routing for gpt-* models.**
 
 - GPT models signed in with a ChatGPT account now speak the OpenAI Responses API to the Codex backend (`chatgpt.com/backend-api/codex/responses`): payloads are converted from chat-completions shape (`messages` → `input` items, top-level `instructions`, flat `tools`, `reasoning.effort`, no `stream_options`) and both streaming SSE (output_text / reasoning_summary_text deltas, function_call items, `response.completed` usage) and non-streaming envelopes are parsed. This fixes the hard failure `Bad request (OpenAI 400): {"detail":"Unsupported parameter: messages"}` that made every gpt-* turn fail for ChatGPT-plan users.

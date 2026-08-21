@@ -114,6 +114,10 @@ export function buildResponsesPayload(
       name: t.function.name,
       description: t.function.description,
       parameters: t.function.parameters,
+      // ChatGPT models default to parallel tool-call bursts; disable so the
+      // model emits ONE call per response and the loop can feed its result
+      // back before the next round ("thinking") starts.
+      parallel_tool_calls: false,
     }));
   }
   if (opts.reasoningEffort) {

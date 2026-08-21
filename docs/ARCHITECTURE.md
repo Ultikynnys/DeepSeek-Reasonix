@@ -51,12 +51,20 @@ them via `Promise.allSettled`; the first non-parallel-safe call ends the
 chunk and runs alone (serial barrier — read-after-write order
 preserved). Tool-result yields and history append still land in declared
 order regardless of which call settles first, so the model sees the
-same shape it would under a fully serial dispatch.
+same shape it would under a fully serial dispatch. The next model round
+("thinking") only begins after every dispatched chunk has settled —
+never while a tool call is still in flight.
+
+ChatGPT models (`gpt-*`) default to serial dispatch instead: they burst
+parallel tool calls in a single response, so the dispatcher runs their
+calls one at a time (each awaited before the next starts) and the client
+also sends `parallel_tool_calls: false` so the model emits one call per
+response and only "thinks" again after seeing that call's result.
 
 | Env var | Default | Effect |
 |---|---|---|
-| `REASONIX_PARALLEL_MAX` | `3` (hard cap `16`) | Max chunk size. |
-| `REASONIX_TOOL_DISPATCH=serial` | unset | Forces serial dispatch — escape hatch. |
+| `REASONIX_PARALLEL_MAX` | `3` (hard cap `16`) | Max chunk size (DeepSeek parallel path). |
+| `REASONIX_TOOL_DISPATCH=serial` | gpt-*: serial, else parallel | Explicit override: `serial` forces one-at-a-time for all models, `parallel`/`auto` re-enables chunked parallel for all. |
 
 Built-in opt-ins: read-only filesystem (`read_file`, `list_directory`,
 `directory_tree`, `search_files`, `search_content`, `get_file_info`),

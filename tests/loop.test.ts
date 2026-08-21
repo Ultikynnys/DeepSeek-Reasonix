@@ -2488,6 +2488,128 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
         } else process.env.REASONIX_PARALLEL_MAX = prev;
       }
     });
+
+    it("gpt-* models dispatch tool calls serially by default — each call finishes before the next starts", async () => {
+      const client = makeClient([
+        makeMultiToolResponse([
+          { name: "slow_read", args: '{"k":1}' },
+          { name: "slow_read", args: '{"k":2}' },
+          { name: "slow_read", args: '{"k":3}' },
+        ]),
+        { content: "ok" },
+      ]);
+      const tools = new ToolRegistry();
+      tools.register({
+        name: "slow_read",
+        parallelSafe: true,
+        fn: async () => {
+          await new Promise((r) => setTimeout(r, 80));
+          return "x";
+        },
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+        tools,
+        model: "gpt-4o",
+        stream: false,
+      });
+
+      const t0 = Date.now();
+      for await (const _ of loop.step("go")) {
+        // drain
+      }
+      const elapsed = Date.now() - t0;
+
+      // Serial: 3 × 80ms back-to-back (≈240ms). The parallel path (<220ms)
+      // would let all three run concurrently — gpt-* must not do that.
+      expect(elapsed).toBeGreaterThan(220);
+    });
+
+    it("REASONIX_TOOL_DISPATCH=parallel restores parallel dispatch for gpt models", async () => {
+      const prev = process.env.REASONIX_TOOL_DISPATCH;
+      process.env.REASONIX_TOOL_DISPATCH = "parallel";
+      try {
+        const client = makeClient([
+          makeMultiToolResponse([
+            { name: "slow_read", args: '{"k":1}' },
+            { name: "slow_read", args: '{"k":2}' },
+            { name: "slow_read", args: '{"k":3}' },
+          ]),
+          { content: "ok" },
+        ]);
+        const tools = new ToolRegistry();
+        tools.register({
+          name: "slow_read",
+          parallelSafe: true,
+          fn: async () => {
+            await new Promise((r) => setTimeout(r, 80));
+            return "x";
+          },
+        });
+        const loop = new CacheFirstLoop({
+          client,
+          prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+          tools,
+          model: "gpt-4o",
+          stream: false,
+        });
+
+        const t0 = Date.now();
+        for await (const _ of loop.step("go")) {
+          // drain
+        }
+        const elapsed = Date.now() - t0;
+
+        expect(elapsed).toBeLessThan(220);
+      } finally {
+        if (prev === undefined) {
+          // biome-ignore lint/performance/noDelete: env restore must remove the key, not stringify "undefined"
+          delete process.env.REASONIX_TOOL_DISPATCH;
+        } else process.env.REASONIX_TOOL_DISPATCH = prev;
+      }
+    });
+
+    it("never starts the next thinking round until every dispatched tool call has settled", async () => {
+      const client = makeClient([
+        makeMultiToolResponse([
+          { name: "slow_read", args: '{"k":1}' },
+          { name: "slow_read", args: '{"k":2}' },
+        ]),
+        { content: "ok" },
+      ]);
+      const tools = new ToolRegistry();
+      tools.register({
+        name: "slow_read",
+        parallelSafe: true,
+        fn: async () => {
+          await new Promise((r) => setTimeout(r, 60));
+          return "x";
+        },
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+        tools,
+        model: "gpt-4o",
+        stream: false,
+      });
+
+      const events: LoopEvent[] = [];
+      for await (const ev of loop.step("go")) events.push(ev);
+
+      // Second call only starts after the first one completed (serial order),
+      // and the answer ("thinking round") only arrives after ALL tool results.
+      const starts = events
+        .map((e, i) => [i, e] as const)
+        .filter(([, e]) => e.role === "tool_start");
+      const results = events.map((e, i) => [i, e] as const).filter(([, e]) => e.role === "tool");
+      expect(starts.length).toBe(2);
+      expect(results.length).toBe(2);
+      expect(starts[1]![0]).toBeGreaterThan(results[0]![0]);
+      const answerIdx = events.findIndex((e) => e.role === "assistant_final" && e.content === "ok");
+      expect(answerIdx).toBeGreaterThan(results[1]![0]);
+    });
   });
 });
 
