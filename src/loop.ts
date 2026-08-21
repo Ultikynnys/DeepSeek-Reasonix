@@ -58,6 +58,7 @@ import { ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
 import { ToolRegistry, isReadOnlyTool } from "./tools.js";
 import { ReadTracker } from "./tools/read-tracker.js";
+import { USER_CANCEL_NOTE } from "./tools/shell.js";
 import type { ChatMessage, ToolCall, UserContentPart } from "./types.js";
 
 export const MID_TURN_STEER_WRAPPER =
@@ -188,6 +189,10 @@ export class CacheFirstLoop {
   private _lastToolCancelController: AbortController | null = null;
   /** Authoritative running-id set — UI cards consult this instead of trusting end-event delivery. Insert at dispatch entry, delete in finally. */
   private readonly _inflight = new InflightSet();
+  /** Dispatched call ids whose results have not been appended. A force-closed
+   *  turn (desktop Send now / queue force) abandons these mid-dispatch; they
+   *  stay behind so the next step can stub them as cancellations. */
+  private readonly _abandonedCalls = new Set<string>();
 
   /** Typeahead steer messages set by the UI; step() consumes one at each iter boundary. */
   private readonly _steerQueue: string[] = [];
@@ -392,6 +397,7 @@ export class CacheFirstLoop {
   private resetTransientState(): void {
     this.scratch.reset();
     this._inflight.clear();
+    this._abandonedCalls.clear();
     // Drain leftover steer text — otherwise the first step() after /new
     // injects it as a user message and the next turn leaks prior intent.
     this._steerQueue.length = 0;
@@ -645,6 +651,53 @@ export class CacheFirstLoop {
     }
   }
 
+  /** Stub tool results for calls a force-closed turn abandoned mid-dispatch,
+   *  so healing doesn't silently drop them and the model reads "cancelled"
+   *  instead of guessing the tool failed. Idempotent; returns stub count. */
+  private settleAbandonedToolCalls(): number {
+    if (this._abandonedCalls.size === 0) return 0;
+    const entries = this.log.entries;
+    let target = -1;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const m = entries[i]!;
+      if (
+        m.role === "assistant" &&
+        Array.isArray(m.tool_calls) &&
+        m.tool_calls.some((c) => c.id !== undefined && this._abandonedCalls.has(c.id))
+      ) {
+        target = i;
+        break;
+      }
+    }
+    if (target < 0) {
+      this._abandonedCalls.clear();
+      return 0;
+    }
+    const settled = new Set<string>();
+    for (let j = target + 1; j < entries.length; j++) {
+      const m = entries[j]!;
+      if (m.role === "tool" && m.tool_call_id) settled.add(m.tool_call_id);
+    }
+    const missing = entries[target]!.tool_calls!.filter(
+      (c) => c.id !== undefined && this._abandonedCalls.has(c.id) && !settled.has(c.id),
+    );
+    this._abandonedCalls.clear();
+    if (missing.length === 0) return 0;
+    const content = JSON.stringify({
+      cancelledByUser: true,
+      error: `Tool call cancelled because the conversation stopped. ${USER_CANCEL_NOTE}`,
+    });
+    for (const call of missing) {
+      this.appendAndPersist({
+        role: "tool",
+        tool_call_id: call.id ?? "",
+        name: call.function?.name ?? "",
+        content,
+      });
+    }
+    return missing.length;
+  }
+
   private discardLogFrom(index: number): void {
     const preserved = this.log.entries.slice(0, index).map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
@@ -686,6 +739,10 @@ export class CacheFirstLoop {
       yield* this.stepTurn(userInput, images);
     } finally {
       if (this._turnAbort.signal.aborted) this.resetAbortState();
+      // A turn force-closed mid-dispatch (desktop Send now / queue force)
+      // abandons in-flight tool calls: their results never reach the log.
+      // Stub them so the pairing holds and the next prompt tells the truth.
+      this.settleAbandonedToolCalls();
     }
   }
 
@@ -772,6 +829,12 @@ export class CacheFirstLoop {
     this._turnAbort = new AbortController();
     if (carryAbort) this._turnAbort.abort();
     const signal = this._turnAbort.signal;
+    // If the PREVIOUS turn was force-closed (queue force / Send now) while a
+    // tool call was in flight, its result never reached the log. Stub it now,
+    // before buildMessages(), so this turn's first request tells the model
+    // the call was cancelled instead of healing silently dropping the
+    // dangling tool_calls and leaving the model to guess the tool failed.
+    this.settleAbandonedToolCalls();
     // Persist the user message before the first API round-trip so a
     // mid-stream abort or a session switch doesn't drop the prompt and
     // leave a new session orphaned without a .jsonl on disk (issue #943
@@ -1215,6 +1278,7 @@ export class CacheFirstLoop {
         inflightAdd: (id) => this._inflight.add(id),
         runOne: (call, sig) => this.runOneToolCall(call, sig),
         appendAndPersist: (m) => this.appendAndPersist(m),
+        abandonedCalls: this._abandonedCalls,
         rateLimitState,
       });
       // The current iter's tool calls have settled — fold now, so the compaction

@@ -5,6 +5,11 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed — force-cancelled tool calls now tell the model they were cancelled, not that they failed.**
+
+- A turn aborted via "Send now" / queue force used to record an in-flight tool call as `{"error": "AbortError: ..."}` (model blames the tool) or abandon it entirely (healing then silently dropped the unpaired `tool_calls`, so the model never learned what happened). Both paths now write a truthful `cancelledByUser` result — same voice as the shell tools' `USER_CANCEL_NOTE` — so the next prompt reads "cancelled because the conversation stopped" instead of a tool failure.
+- Abandoned (never-settled) calls are stubbed at the next turn's start, before the prompt is built, so the pairing survives healing and the model sees the cancellation note in its very next request.
+
 **Fixed — gpt-* models no longer burst parallel tool calls.**
 
 - Chat-completions payloads to OpenAI now send `parallel_tool_calls: false`, and the Codex / Responses payload marks every tool `parallel_tool_calls: false` — ChatGPT models emit ONE tool call per response instead of a burst, so each result is fed back before the model can act on stale assumptions.

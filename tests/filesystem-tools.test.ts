@@ -414,7 +414,11 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
         const out = await tools.dispatch("search_files", JSON.stringify({ pattern: "marker" }), {
           signal: ctrl.signal,
         });
-        expect(out).toMatch(/aborted/i);
+        // The abort is a user cancellation, not a search failure — the model
+        // must read "cancelled", not a tool error, so it knows the result is
+        // absent because the conversation was stopped.
+        expect(out).toMatch(/cancelled because the conversation stopped/i);
+        expect(JSON.parse(out)).toMatchObject({ cancelledByUser: true });
       } finally {
         spy.mockRestore();
       }
@@ -601,7 +605,11 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
           JSON.stringify({ pattern: "export const" }),
           { signal: ctrl.signal },
         );
-        expect(out).toMatch(/aborted/i);
+        // The abort is a user cancellation, not a search failure — the model
+        // must read "cancelled", not a tool error, so it knows the result is
+        // absent because the conversation was stopped.
+        expect(out).toMatch(/cancelled because the conversation stopped/i);
+        expect(JSON.parse(out)).toMatchObject({ cancelledByUser: true });
       } finally {
         spy.mockRestore();
       }

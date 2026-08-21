@@ -2610,6 +2610,108 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
       const answerIdx = events.findIndex((e) => e.role === "assistant_final" && e.content === "ok");
       expect(answerIdx).toBeGreaterThan(results[1]![0]);
     });
+
+    it("records a turn-aborted tool rejection as a cancellation, not a tool error", async () => {
+      const client = makeClient([makeMultiToolResponse([{ name: "abortable", args: "{}" }])]);
+      const tools = new ToolRegistry();
+      let started = false;
+      tools.register({
+        name: "abortable",
+        fn: async (_args, ctx) => {
+          started = true;
+          await new Promise<void>((_resolve, reject) => {
+            ctx?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          });
+          return "unreachable";
+        },
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+        tools,
+        stream: false,
+      });
+      const drain = (async () => {
+        for await (const _ of loop.step("go")) {
+          // drain
+        }
+      })();
+      await vi.waitFor(() => expect(started).toBe(true));
+      loop.abort();
+      await drain;
+
+      // The tool's AbortError must NOT reach the model as a tool failure —
+      // the log records a user cancellation with the right reasoning.
+      const toolMsg = loop.log.entries.find((m) => m.role === "tool");
+      expect(toolMsg).toBeDefined();
+      expect(String(toolMsg!.content)).not.toContain("AbortError");
+      expect(JSON.parse(String(toolMsg!.content))).toMatchObject({ cancelledByUser: true });
+    });
+
+    it("stubs abandoned tool calls with a cancellation note on the next turn (queue-force abort)", async () => {
+      const { client, captured } = makeFakeClient(
+        [
+          makeMultiToolResponse([{ name: "stuck", args: "{}" }]),
+          { content: "turn two ran cleanly" },
+        ],
+        { echoMessages: true },
+      );
+      const tools = new ToolRegistry();
+      let started = false;
+      tools.register({
+        name: "stuck",
+        fn: async (_args) => {
+          started = true;
+          // Ignores the turn signal: a genuinely stuck call, exactly what a
+          // user force-cancels mid-flight. It never settles on its own.
+          await new Promise(() => {});
+          return "never";
+        },
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+        tools,
+        stream: false,
+      });
+      const gen = loop.step("turn one");
+      const drainOne = (async () => {
+        for await (const _ of gen) {
+          // drain
+        }
+      })();
+      await vi.waitFor(() => expect(started).toBe(true));
+      // desktop runTurn: abort, then close the generator fire-and-forget
+      // (never awaited — the stuck call would hold it), then drain the queue.
+      loop.abort();
+      void gen.return(undefined).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 20));
+
+      for await (const ev of loop.step("turn two")) {
+        // drain
+      }
+
+      // The abandoned call got a truthful stub — not silently dropped.
+      const stub = loop.log.entries.find((m) => m.role === "tool");
+      expect(stub).toBeDefined();
+      expect(JSON.parse(String(stub!.content))).toMatchObject({ cancelledByUser: true });
+      // And the stub reached the model on turn two's request: the pairing
+      // held (assistant tool_calls survived healing) alongside the stub.
+      const second = captured[1];
+      expect(second).toBeDefined();
+      expect(
+        second.messages.some(
+          (m) => m.role === "assistant" && m.tool_calls !== undefined && m.tool_calls.length === 1,
+        ),
+      ).toBe(true);
+      const toolMsgs = second.messages.filter((m) => m.role === "tool");
+      expect(toolMsgs).toHaveLength(1);
+      expect(JSON.parse(String(toolMsgs[0]!.content))).toMatchObject({ cancelledByUser: true });
+    });
   });
 });
 

@@ -7,6 +7,7 @@ import {
   ToolRateLimiter,
 } from "./tools/rate-limit.js";
 import type { ReadTracker } from "./tools/read-tracker.js";
+import { USER_CANCEL_NOTE } from "./tools/shell.js";
 import { saveTruncatedResult, shouldSkipSave } from "./tools/truncated-result-saver.js";
 import type { JSONSchema, ToolSpec } from "./types.js";
 
@@ -286,7 +287,8 @@ export class ToolRegistry {
     // pending calls from running to completion after the user gave up.
     if (opts.signal?.aborted) {
       return JSON.stringify({
-        error: `${name}: aborted before dispatch (user interrupt)`,
+        cancelledByUser: true,
+        error: `${name}: aborted before dispatch (user interrupt). ${USER_CANCEL_NOTE}`,
         rejectedReason: "aborted",
       });
     }
@@ -350,12 +352,21 @@ export class ToolRegistry {
       }
     } catch (err) {
       const e = err as Error & { toToolResult?: () => unknown };
-      // Errors may opt into a richer tool-result shape by implementing
-      // `toToolResult()`. Used by `PlanProposedError` to smuggle the
-      // submitted plan text out to the UI without stuffing it into the
-      // error message (which the dispatcher truncates at no fixed limit,
-      // but keeping payloads structured is cleaner for UI parsing).
-      if (typeof e.toToolResult === "function") {
+      // A throw caused by a user cancellation (turn aborted via Send now /
+      // queue force / Esc, or this call's Stop button) is NOT a tool
+      // failure — the raw AbortError would make the model blame the tool
+      // for an interruption it never caused.
+      if (opts.signal?.aborted || opts.cancelSignal?.aborted) {
+        finalResult = JSON.stringify({
+          cancelledByUser: true,
+          error: `Tool call cancelled because the conversation stopped. ${USER_CANCEL_NOTE}`,
+        });
+      } else if (typeof e.toToolResult === "function") {
+        // Errors may opt into a richer tool-result shape by implementing
+        // `toToolResult()`. Used by `PlanProposedError` to smuggle the
+        // submitted plan text out to the UI without stuffing it into the
+        // error message (which the dispatcher truncates at no fixed limit,
+        // but keeping payloads structured is cleaner for UI parsing).
         try {
           finalResult = JSON.stringify(e.toToolResult());
         } catch {

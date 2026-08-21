@@ -1018,7 +1018,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
                   segment.kind === "tool" && segment.result === undefined
                     ? {
                         ...segment,
-                        result: "Cancelled because the conversation stopped.",
+                        result:
+                          "Tool call cancelled because the conversation stopped. No result was produced.",
                         ok: false,
                       }
                     : segment,

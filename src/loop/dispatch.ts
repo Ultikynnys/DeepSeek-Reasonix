@@ -1,4 +1,5 @@
 import { parseRateLimitedToolResult } from "../tools/rate-limit.js";
+import { USER_CANCEL_NOTE } from "../tools/shell.js";
 import type { ChatMessage, ToolCall } from "../types.js";
 import type { LoopEvent } from "./types.js";
 
@@ -19,6 +20,10 @@ export interface DispatchContext {
   inflightAdd: (id: string) => void;
   runOne: (call: ToolCall, signal: AbortSignal) => Promise<RunOneToolCallResult>;
   appendAndPersist: (msg: ChatMessage) => void;
+  /** Loop-owned set of dispatched call ids whose results have NOT been
+   *  appended yet. If the turn generator is force-closed mid-dispatch, the
+   *  ids stay behind so the loop can stub them as cancellations. */
+  abandonedCalls: Set<string>;
   /** Mutable across iter cycles — single rate-limit warning per step(). */
   rateLimitState: { shown: boolean };
 }
@@ -64,6 +69,9 @@ export async function* dispatchToolCallsChunked(
     for (const call of chunk) {
       const callId = ctx.inflightIdFor(call);
       ctx.inflightAdd(callId);
+      // Track the dispatched call id so a force-closed turn can later stub
+      // it as a cancellation if the result never gets appended.
+      ctx.abandonedCalls.add(call.id ?? "");
       yield {
         turn: ctx.turn,
         role: "tool_start",
@@ -90,8 +98,17 @@ export async function* dispatchToolCallsChunked(
         postWarnings = s.value.postWarnings;
         result = s.value.result;
       } else {
+        // A rejection that lands because the TURN was cancelled (Send now /
+        // queue force / Esc) is a user cancellation, not a tool failure —
+        // record it as such, or the model blames the tool for an
+        // interruption it never caused.
         const err = s.reason instanceof Error ? s.reason : new Error(String(s.reason));
-        result = JSON.stringify({ error: `${err.name}: ${err.message}` });
+        result = ctx.signal.aborted
+          ? JSON.stringify({
+              cancelledByUser: true,
+              error: `Tool call cancelled because the conversation stopped. ${USER_CANCEL_NOTE}`,
+            })
+          : JSON.stringify({ error: `${err.name}: ${err.message}` });
       }
 
       for (const w of preWarnings) yield w;
@@ -113,6 +130,8 @@ export async function* dispatchToolCallsChunked(
         name,
         content: result,
       });
+      // The result is in the log — the call is no longer abandoned.
+      ctx.abandonedCalls.delete(call.id ?? "");
 
       yield {
         turn: ctx.turn,

@@ -253,12 +253,12 @@ describe("Desktop App reducer — usage", () => {
     if (assistant?.kind !== "assistant") throw new Error("expected assistant message");
     expect(assistant.segments[0]).toMatchObject({
       callId: "shell-1",
-      result: "Cancelled because the conversation stopped.",
+      result: "Tool call cancelled because the conversation stopped. No result was produced.",
       ok: false,
     });
     expect(assistant.segments[1]).toMatchObject({
       callId: "review-1",
-      result: "Cancelled because the conversation stopped.",
+      result: "Tool call cancelled because the conversation stopped. No result was produced.",
       ok: false,
     });
     expect(assistant.segments[2]).toMatchObject({
@@ -283,7 +283,7 @@ describe("Desktop App reducer — usage", () => {
     expect(afterAssistant?.kind).toBe("assistant");
     if (afterAssistant?.kind !== "assistant") throw new Error("expected assistant message");
     expect(afterAssistant.segments[0]).toMatchObject({
-      result: "Cancelled because the conversation stopped.",
+      result: "Tool call cancelled because the conversation stopped. No result was produced.",
       ok: false,
     });
   });
