@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchOllamaPlan,
+  fetchOllamaUsage,
   isSubscriptionGatedResponse,
   probeOllamaModel,
 } from "../src/cli/commands/desktop.js";
@@ -168,5 +169,69 @@ describe("isSubscriptionGatedResponse", () => {
     ).toBe(true);
     expect(isSubscriptionGatedResponse(403, "forbidden")).toBe(false);
     expect(isSubscriptionGatedResponse(429, "this model requires a subscription")).toBe(false);
+  });
+});
+
+describe("fetchOllamaUsage", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("GETs {origin}/api/usage with the Bearer key and parses both windows", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        activity: { cost: "0.00000", period: { type: "last_4_weeks" }, models: [] },
+        limits: {
+          session: { usage: 0.003, models: [{ name: "gpt-oss:20b", request_count: 14 }] },
+          weekly: { usage: 0.001, models: [] },
+        },
+      }),
+    );
+    await expect(fetchOllamaUsage("https://ollama.com/v1", "key-1")).resolves.toEqual({
+      session: 0.003,
+      weekly: 0.001,
+    });
+    const [, init] = fetchMock.mock.calls[0]!;
+    const url = new URL(String(fetchMock.mock.calls[0]![0]));
+    expect(url.origin).toBe("https://ollama.com");
+    expect(url.pathname).toBe("/api/usage");
+    expect(init).toMatchObject({
+      method: "GET",
+      headers: { Authorization: "Bearer key-1" },
+    });
+  });
+
+  it("returns only the windows the payload carries", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ limits: { session: { usage: 0.5 } } }));
+    await expect(fetchOllamaUsage("https://ollama.com/v1", "key-1")).resolves.toEqual({
+      session: 0.5,
+    });
+  });
+
+  it("ignores non-numeric usage values", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ limits: { session: { usage: "0.5" }, weekly: { usage: null } } }),
+    );
+    await expect(fetchOllamaUsage("https://ollama.com/v1", "key-1")).resolves.toBeUndefined();
+  });
+
+  it("returns undefined when neither window parses", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ activity: { cost: "0" } }));
+    await expect(fetchOllamaUsage("https://ollama.com/v1", "key-1")).resolves.toBeUndefined();
+  });
+
+  it("returns undefined on non-ok status", async () => {
+    fetchMock.mockResolvedValueOnce(textResponse("not found", 404));
+    await expect(fetchOllamaUsage("https://gateway.example/v1", "key-1")).resolves.toBeUndefined();
+  });
+
+  it("returns undefined on network errors", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    await expect(fetchOllamaUsage("https://ollama.com/v1", "key-1")).resolves.toBeUndefined();
   });
 });

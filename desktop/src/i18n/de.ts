@@ -642,6 +642,12 @@ export const de: typeof en = {
       "Codex-Kontingent · keine Daten — bei ChatGPT anmelden (Einstellungen → OpenAI), um den Kontingentverbrauch zu sehen · zum Wiederholen klicken",
     codexLeft: "übrig",
     thisTurnQuotaTitle: "Dieser Turn hat {pct}% des wöchentlichen Codex-Kontingents verbraucht",
+    ollamaQuota: "Kontingentnutzung",
+    ollamaQuotaTitle:
+      "Wöchentliche Kontingentnutzung {left}% übrig · Sitzung {session}% übrig · zum Aktualisieren klicken",
+    ollamaTurnQuotaTitle: "Dieser Turn hat {pct}% der Sitzungsnutzung verbraucht",
+    ollamaNoData:
+      "Ollama-Nutzung · keine Daten — API-Schlüssel in Einstellungen → Modelle festlegen, um die Nutzung zu sehen · zum Wiederholen klicken",
     offPeak: "Off-Peak",
     peak: "Peak",
     offPeakTitle:

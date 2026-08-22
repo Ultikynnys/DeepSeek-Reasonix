@@ -397,6 +397,10 @@ export const zhCN: typeof en = {
       "Codex 配额 · 暂无数据 — 请在设置（设置 → OpenAI）中登录 ChatGPT 以查看套餐用量 · 点击重试",
     codexLeft: "剩余",
     thisTurnQuotaTitle: "本轮已消耗周配额 {pct}%",
+    ollamaQuota: "套餐用量",
+    ollamaQuotaTitle: "每周套餐用量剩余 {left}% · 会话剩余 {session}% · 点击刷新",
+    ollamaTurnQuotaTitle: "本轮已消耗会话用量 {pct}%",
+    ollamaNoData: "Ollama 用量 · 暂无数据 — 请在设置（模型）中配置 API 密钥以查看用量 · 点击重试",
     offPeak: "非高峰",
     peak: "高峰",
     offPeakTitle:

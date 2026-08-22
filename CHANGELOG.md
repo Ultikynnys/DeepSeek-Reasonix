@@ -13,6 +13,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On Ollama cloud, the picker only shows models the account can run: the daemon reads the plan via `POST {origin}/api/me` and, for free accounts, probes each model with a 1-token chat (batched, 10-min cached) to hide subscription-gated ids. Local daemons, proxies, and unknown plans always show the full list. Settings shows the plan and how many models were hidden.
 - Learned model-tier verdicts persist per plan in `~/.reasonix/ollama-model-map.json` (keyed by endpoint + API-key hash, never the raw key), so each model is probed once: refreshes re-check only unmapped or 24 h stale models and the whole catalog gets mapped progressively instead of re-probed on every fetch.
 - The status bar shows the Ollama endpoint; cost and context accounting degrade safely (zero cost, 131K context fallback) for local models.
+- On Ollama cloud tabs the status bar's balance chip shows the account's plan usage as a percentage — weekly + session windows from `GET {origin}/api/usage`, scaled from the API's fraction-of-limit numbers (the absolute cap is not exposed) — and the "this turn" chip shows the session-window percentage consumed since the previous measurement, mirroring the Codex quota chips.
 
 **Added — configurable context window (300K default, up to 1M tokens).**
 
@@ -39,6 +40,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 **Fixed — Codex quota no longer requires the codex CLI.**
 
 - The quota chip now fetches purely via OAuth HTTP (`chatgpt.com/backend-api/codex/rate_limits`). The fallback that spawned the `codex` app-server and auto-ran `npm install -g @openai/codex` is removed, together with the "install the Codex CLI" tooltip; a no-data quota now points at the in-app ChatGPT sign-in (Settings → OpenAI) in EN / DE / 简体中文.
+
+**Fixed — the this-turn quota percentage for weekly-only plans.**
+
+- The status bar's "this turn" cost for gpt-* tabs now falls back to the weekly quota window when the plan reports no five-hour window: previously the delta was computed only from the five-hour window, so those plans showed an em dash forever. The baseline tracks each window separately and rollover (window reset) still reports no delta for that fetch.
 
 **Internal — DRY cleanup.**
 

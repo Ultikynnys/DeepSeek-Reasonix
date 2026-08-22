@@ -18,6 +18,8 @@ import type {
   ConfirmRequiredEvent,
   ConfirmationChoice,
   CtxBreakdownEvent,
+  DesktopDiagnosticEvent,
+  DesktopDiagnosticLevel,
   EditMode,
   ExternalSessionApp,
   ExternalSessionSource,
@@ -40,6 +42,9 @@ import type {
   ModelEndpointInfo,
   NeedsSetupEvent,
   OllamaModelsEvent,
+  OllamaQuota,
+  OllamaQuotaEvent,
+  OllamaQuotaWindow,
   OutgoingCommand,
   PathAccessRequiredEvent,
   PlanClearedEvent,
@@ -70,8 +75,6 @@ import type {
   TurnCompleteEvent,
   UserImageAttachment,
   WebSearchEngineName,
-  DesktopDiagnosticEvent,
-  DesktopDiagnosticLevel,
 } from "@reasonix/core-utils";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -81,6 +84,9 @@ export type {
   DesktopDiagnosticEvent,
   DesktopDiagnosticLevel,
   OllamaModelsEvent,
+  OllamaQuota,
+  OllamaQuotaEvent,
+  OllamaQuotaWindow,
   CheckpointRequiredEvent,
   CheckpointVerdict,
   ChoiceOption,
@@ -351,6 +357,7 @@ export type IncomingEvent = { tabId?: string } & (
   | SettingsEvent
   | BalanceEvent
   | CodexQuotaEvent
+  | OllamaQuotaEvent
   | OllamaModelsEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent

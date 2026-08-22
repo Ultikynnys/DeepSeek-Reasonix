@@ -40,6 +40,7 @@ import type {
   ModelEndpointInfo,
   NeedsSetupEvent,
   OllamaModelsEvent,
+  OllamaQuotaEvent,
   PathAccessRequiredEvent,
   PlanClearedEvent,
   PlanRequiredEvent,
@@ -254,6 +255,7 @@ type EmittableEvent =
   | SettingsEvent
   | BalanceEvent
   | CodexQuotaEvent
+  | OllamaQuotaEvent
   | OllamaModelsEvent
   | MentionResultsEvent
   | MentionPreviewEvent
@@ -484,6 +486,14 @@ function wireEventDetails(ev: EmittableEvent): Record<string, unknown> {
         reason: ev.reason ?? null,
         weekly: ev.quota?.weekly ?? null,
         fiveHour: ev.quota?.fiveHour ?? null,
+        turnUsedPct: ev.quota?.turnUsedPct ?? null,
+      };
+    case "$ollama_quota":
+      return {
+        hasQuota: ev.quota !== null,
+        reason: ev.reason ?? null,
+        session: ev.quota?.session ?? null,
+        weekly: ev.quota?.weekly ?? null,
         turnUsedPct: ev.quota?.turnUsedPct ?? null,
       };
     case "$balance":
@@ -806,6 +816,7 @@ function emitSettings(tab: Tab): void {
     oauthSignedIn: !!oauth?.accessToken,
   });
   void emitCodexQuota(tab);
+  void emitOllamaQuota(tab);
 }
 
 /** Account plan for a cloud Ollama endpoint — `POST {origin}/api/me` with the
@@ -1021,9 +1032,11 @@ async function emitBalance(tab: Tab): Promise<void> {
   });
 }
 
-/** Last API-reported five-hour usage — delta to the next fetch = percent points consumed since (each $turn_complete refetches).
- *  The five-hour window has ~33× better resolution than the weekly window, so per-turn usage is visible. */
-let lastCodexQuotaUsedPct: number | null = null;
+/** Last API-reported five-hour / weekly usage — the delta to the next fetch is
+ *  percent points consumed since (each $turn_complete refetches). The five-hour
+ *  window has ~33× better resolution; weekly covers plans that report only weekly. */
+let lastCodexFiveHourUsedPct: number | null = null;
+let lastCodexWeeklyUsedPct: number | null = null;
 
 /** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only.
  *  OAuth HTTP fetch only (no codex CLI dependency). */
@@ -1044,23 +1057,27 @@ async function emitCodexQuota(tab: Tab): Promise<void> {
   if (quota) {
     let turnUsedPct: number | null = null;
     const fiveHourUsedPct = quota.fiveHour?.usedPercent ?? null;
-    const previousBaseline = lastCodexQuotaUsedPct;
-    const rollover =
-      previousBaseline !== null && fiveHourUsedPct !== null && fiveHourUsedPct < previousBaseline;
-    if (fiveHourUsedPct !== null) {
-      // Rollover (five-hour window reset) makes the delta go backwards —
-      // keep the previous baseline and report no turn cost for this fetch.
-      if (previousBaseline !== null && fiveHourUsedPct >= previousBaseline) {
-        turnUsedPct = fiveHourUsedPct - previousBaseline;
+    const weeklyUsedPct = quota.weekly?.usedPercent ?? null;
+    // Prefer the five-hour window; weekly covers plans that report only weekly.
+    const usedPct = fiveHourUsedPct !== null ? fiveHourUsedPct : weeklyUsedPct;
+    const previousBaseline =
+      fiveHourUsedPct !== null ? lastCodexFiveHourUsedPct : lastCodexWeeklyUsedPct;
+    const rollover = previousBaseline !== null && usedPct !== null && usedPct < previousBaseline;
+    if (usedPct !== null) {
+      // Rollover (window reset) makes the delta go backwards — report no
+      // turn cost for this fetch and adopt the new baseline.
+      if (previousBaseline !== null && usedPct >= previousBaseline) {
+        turnUsedPct = usedPct - previousBaseline;
       }
-      lastCodexQuotaUsedPct = fiveHourUsedPct;
+      if (fiveHourUsedPct !== null) lastCodexFiveHourUsedPct = fiveHourUsedPct;
+      else lastCodexWeeklyUsedPct = weeklyUsedPct;
     }
     emitTabDiagnostic(tab, "quota.fetch.succeeded", {
       plan: quota.plan,
       fiveHour: quota.fiveHour,
       weekly: quota.weekly,
-      previousFiveHourUsedPct: previousBaseline,
-      currentFiveHourUsedPct: fiveHourUsedPct,
+      previousUsedPct: previousBaseline,
+      currentUsedPct: usedPct,
       rollover,
       turnUsedPct,
     });
@@ -1069,6 +1086,93 @@ async function emitCodexQuota(tab: Tab): Promise<void> {
   }
   emitTabDiagnostic(tab, "quota.fetch.failed", { reason }, "error");
   emit({ type: "$codex_quota", quota: null, ...(reason ? { reason } : {}) }, tab.id);
+}
+
+/** Ollama cloud usage — `GET {origin}/api/usage` with the chat key. The API
+ *  reports `limits.session` (5 h) and `limits.weekly` (7 d) usage as fractions
+ *  of the plan's limit (the absolute cap is not exposed). Undefined on failure. */
+export async function fetchOllamaUsage(
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs = 10_000,
+): Promise<{ session?: number; weekly?: number } | undefined> {
+  try {
+    const resp = await fetch(`${new URL(baseUrl).origin}/api/usage`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!resp.ok) return undefined;
+    const data = (await resp.json()) as {
+      limits?: { session?: { usage?: unknown }; weekly?: { usage?: unknown } };
+    };
+    const session = data.limits?.session?.usage;
+    const weekly = data.limits?.weekly?.usage;
+    if (typeof session !== "number" && typeof weekly !== "number") return undefined;
+    return {
+      ...(typeof session === "number" ? { session } : {}),
+      ...(typeof weekly === "number" ? { weekly } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Last API-reported Ollama session usage % — the delta to the next fetch is
+ *  the percent points of the session window consumed since (each
+ *  $turn_complete refetches; the window resets every 5 h). */
+let lastOllamaSessionUsagePct: number | null = null;
+
+/** Cloud Ollama usage for the signed-in account — Ollama-provider tabs with a
+ *  key only. Local daemons have no usage endpoint; the fetch mirrors the
+ *  Codex quota fetch and scales the API's fraction to percent. */
+async function emitOllamaQuota(tab: Tab): Promise<void> {
+  const ep = loadOllamaEndpoint();
+  const apiKey = ep.apiKey;
+  if (providerForModel(tab.currentModel) !== "ollama" || !apiKey) {
+    emitTabDiagnostic(tab, "quota.skipped", {
+      reason: !apiKey ? "ollama-no-api-key" : "non-ollama-provider",
+    });
+    return;
+  }
+  emitTabDiagnostic(tab, "quota.fetch.started");
+  const usage = await fetchOllamaUsage(ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL, apiKey);
+  if (!usage) {
+    emitTabDiagnostic(tab, "quota.fetch.failed", { reason: "usage-unavailable" }, "error");
+    emit({ type: "$ollama_quota", quota: null, reason: "usage-unavailable" }, tab.id);
+    return;
+  }
+  const sessionWindow =
+    usage.session !== undefined
+      ? { usagePct: usage.session * 100, remainingPct: Math.max(0, 100 - usage.session * 100) }
+      : null;
+  const weeklyWindow =
+    usage.weekly !== undefined
+      ? { usagePct: usage.weekly * 100, remainingPct: Math.max(0, 100 - usage.weekly * 100) }
+      : null;
+  let turnUsedPct: number | null = null;
+  const sessionPct = sessionWindow?.usagePct ?? null;
+  const previous = lastOllamaSessionUsagePct;
+  if (sessionPct !== null) {
+    // Rollover (session window reset) makes the delta go backwards — report
+    // no turn cost for this fetch and adopt the new baseline.
+    if (previous !== null && sessionPct >= previous) turnUsedPct = sessionPct - previous;
+    lastOllamaSessionUsagePct = sessionPct;
+  }
+  emitTabDiagnostic(tab, "quota.fetch.succeeded", {
+    session: usage.session,
+    weekly: usage.weekly,
+    previousSessionPct: previous,
+    currentSessionPct: sessionPct,
+    turnUsedPct,
+  });
+  emit(
+    {
+      type: "$ollama_quota",
+      quota: { session: sessionWindow, weekly: weeklyWindow, turnUsedPct, fetchedAt: Date.now() },
+    },
+    tab.id,
+  );
 }
 
 function emitSessions(tab: Tab): void {
@@ -2230,6 +2334,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           emitSessions(tab);
           void emitBalance(tab);
           void emitCodexQuota(tab);
+          void emitOllamaQuota(tab);
           if (tab.hooks.some((h) => h.event === "Stop")) {
             const stopReport = await runHooks({
               hooks: tab.hooks,
@@ -2424,11 +2529,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // surviving tab when its source closes.
   let shuttingDown = false;
   /** 60s quota poll — assigned below after tab restore, cleared on shutdown. */
-  let codexQuotaTimer: ReturnType<typeof setInterval> | undefined = undefined;
+  let quotaTimer: ReturnType<typeof setInterval> | undefined = undefined;
   async function gracefulShutdown(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
-    if (codexQuotaTimer) clearInterval(codexQuotaTimer);
+    if (quotaTimer) clearInterval(quotaTimer);
     await Promise.allSettled(
       [...tabs.values()].map((t) => t.toolset?.jobs.shutdown(1500) ?? Promise.resolve()),
     );
@@ -2767,13 +2872,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   const activeIdx = savedTabs.findIndex((t) => t.active);
   lastActiveTabId = ((activeIdx >= 0 ? restored[activeIdx] : first) ?? first).id;
   persistOpenTabs();
-  // The account-wide weekly Codex quota changes underneath us (other
-  // devices, weekly reset) — poll so the statusbar chip is never stale.
-  // Skipped mid-turn so the $turn_complete fetch stays the authoritative
-  // turn-cost measurement. Only OpenAI tabs actually fetch.
-  let codexQuotaPolling = false;
-  codexQuotaTimer = setInterval(() => {
-    if (codexQuotaPolling) return;
+  // Account-wide quotas change underneath us (other devices, window resets) —
+  // poll so the statusbar chips are never stale. Skipped mid-turn so the
+  // $turn_complete fetch stays the authoritative turn-cost measurement.
+  let quotaPolling = false;
+  quotaTimer = setInterval(() => {
+    if (quotaPolling) return;
     for (const t of tabs.values()) {
       if (t.aborter) {
         emitTabDiagnostic(t, "quota.poll.skipped", { reason: "turn-in-progress" });
@@ -2789,9 +2893,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     emitTabDiagnostic(tab, "quota.poll.started", { intervalMs: 60_000 });
-    codexQuotaPolling = true;
-    void emitCodexQuota(tab).finally(() => {
-      codexQuotaPolling = false;
+    quotaPolling = true;
+    void Promise.allSettled([emitCodexQuota(tab), emitOllamaQuota(tab)]).finally(() => {
+      quotaPolling = false;
       emitTabDiagnostic(tab, "quota.poll.completed");
     });
   }, 60_000);
@@ -2841,6 +2945,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         // Refetch immediately — the tab may have sat idle for hours, and
         // the statusbar must show the current quota the moment it's shown.
         void emitCodexQuota(activated);
+        void emitOllamaQuota(activated);
       } else {
         emitDiagnostic(
           "tab.activate.failed",
@@ -3425,6 +3530,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "codex_quota_get") {
       void emitCodexQuota(tab);
+      return;
+    }
+    if (msg.cmd === "ollama_quota_get") {
+      void emitOllamaQuota(tab);
       return;
     }
     if (msg.cmd === "ollama_models_list") {

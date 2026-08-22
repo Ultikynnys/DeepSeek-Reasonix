@@ -75,6 +75,9 @@ function initialState(): Parameters<typeof reduce>[0] {
     codexQuota: null,
     codexQuotaRefreshing: false,
     codexQuotaReason: null,
+    ollamaQuota: null,
+    ollamaQuotaRefreshing: false,
+    ollamaQuotaReason: null,
     ollamaModels: [],
     ollamaModelsError: null,
     ollamaPlan: null,
@@ -1376,5 +1379,40 @@ describe("Desktop App reducer — Ollama model catalog", () => {
     });
     expect(next.ollamaModels).toEqual([]);
     expect(next.ollamaModelsError).toBe("Ollama unreachable: ECONNREFUSED");
+  });
+});
+
+describe("Desktop App reducer — Ollama usage quota", () => {
+  it("$ollama_quota stores the windows and clears the refresh flag", () => {
+    const state = { ...initialState(), ollamaQuotaRefreshing: true };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$ollama_quota",
+        quota: {
+          session: { usagePct: 0.3, remainingPct: 99.7 },
+          weekly: { usagePct: 0.1, remainingPct: 99.9 },
+          turnUsedPct: 0.1,
+          fetchedAt: 1234,
+        },
+      },
+    });
+    expect(next.ollamaQuota).toMatchObject({
+      session: { usagePct: 0.3, remainingPct: 99.7 },
+      weekly: { usagePct: 0.1, remainingPct: 99.9 },
+      turnUsedPct: 0.1,
+    });
+    expect(next.ollamaQuotaRefreshing).toBe(false);
+    expect(next.ollamaQuotaReason).toBeNull();
+  });
+
+  it("$ollama_quota with null quota carries the reason", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: { type: "$ollama_quota", quota: null, reason: "usage-unavailable" },
+    });
+    expect(next.ollamaQuota).toBeNull();
+    expect(next.ollamaQuotaReason).toBe("usage-unavailable");
+    expect(next.ollamaQuotaRefreshing).toBe(false);
   });
 });

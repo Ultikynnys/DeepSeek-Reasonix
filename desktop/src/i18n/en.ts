@@ -616,6 +616,12 @@ export const en = {
       "Codex quota · no data — sign in with ChatGPT (Settings → OpenAI) to see plan usage · click to retry",
     codexLeft: "left",
     thisTurnQuotaTitle: "This turn used {pct}% of the weekly Codex quota",
+    ollamaQuota: "plan usage",
+    ollamaQuotaTitle:
+      "Weekly plan usage {left}% left · session {session}% left · click to refresh",
+    ollamaTurnQuotaTitle: "This turn used {pct}% of the session usage",
+    ollamaNoData:
+      "Ollama usage · no data — set an API key in Settings → Models to see plan usage · click to retry",
     offPeak: "off-peak",
     peak: "peak",
     offPeakTitle:

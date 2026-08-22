@@ -442,6 +442,40 @@ export interface CodexQuotaEvent {
   reason?: string;
 }
 
+/** One Ollama cloud usage window (`GET {origin}/api/usage`). The API reports
+ *  usage as a fraction of the plan's limit (session window resets every 5 h,
+ *  weekly every 7 d) but never the absolute cap — the daemon scales the
+ *  fraction to percent, mirroring how the Codex quota reports usedPercent. */
+export interface OllamaQuotaWindow {
+  /** API-reported usage in this window as a percentage of the plan's limit (usage × 100). */
+  usagePct: number;
+  /** 100 - usagePct — the statusbar's "% left". */
+  remainingPct: number;
+}
+
+/** Cloud Ollama usage for the signed-in account (daemon source: `GET
+ *  {origin}/api/usage` with the same Bearer key as chat). `null` payload means
+ *  "no data" — no key, local daemon, or fetch failure — the UI degrades to a
+ *  dash instead of a wrong number. */
+export interface OllamaQuota {
+  /** 5-hour session window (resets every 5 h). */
+  session: OllamaQuotaWindow | null;
+  /** 7-day weekly window (resets every 7 d). */
+  weekly: OllamaQuotaWindow | null;
+  /** Percentage points of the session window consumed since the previous
+   *  fetch (fetches fire on every $turn_complete). Null until a second
+   *  measurement exists. */
+  turnUsedPct?: number | null;
+  fetchedAt: number;
+}
+
+export interface OllamaQuotaEvent {
+  type: "$ollama_quota";
+  quota: OllamaQuota | null;
+  /** Why quota is null — surfaced in the statusbar tooltip. */
+  reason?: string;
+}
+
 /** Dynamically fetched model list for the Ollama provider — driven by the
  *  picker's "Ollama" section so the hundreds of available models don't need
  *  hardcoding. `error` replaces the list when the endpoint is unreachable,
@@ -543,6 +577,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "settings_get" }
   | ({ cmd: "settings_save" } & SettingsPatch)
   | { cmd: "codex_quota_get" }
+  | { cmd: "ollama_quota_get" }
   | { cmd: "ollama_models_list" }
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }

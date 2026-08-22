@@ -3,7 +3,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Settings, UsageStats } from "../App";
-import type { CodexQuota } from "../protocol";
+import type { CodexQuota, OllamaQuota } from "../protocol";
 import { THEME, THEME_STYLES } from "../theme";
 import { StatusBar } from "./statusbar";
 
@@ -12,6 +12,7 @@ function renderBar(overrides: Partial<Parameters<typeof StatusBar>[0]> = {}) {
     settings: { model: "deepseek-v4-flash" } as Settings,
     balance: null,
     codexQuota: null,
+    ollamaQuota: null,
     usage: { totalCostUsd: 0 } as unknown as UsageStats,
     busy: false,
     ready: true,
@@ -33,6 +34,13 @@ const GPT_QUOTA: CodexQuota = {
   fiveHour: { windowMinutes: 300, usedPercent: 50, remainingPercent: 50, resetsAt: null },
   weekly: { windowMinutes: 10080, usedPercent: 42, remainingPercent: 58, resetsAt: null },
   turnUsedPct: 2.5,
+  fetchedAt: 0,
+};
+
+const OLLAMA_QUOTA: OllamaQuota = {
+  session: { usagePct: 25, remainingPct: 75 },
+  weekly: { usagePct: 12.5, remainingPct: 87.5 },
+  turnUsedPct: 0.1,
   fetchedAt: 0,
 };
 
@@ -159,5 +167,49 @@ describe("StatusBar quota display", () => {
     });
     expect(screen.getByTitle(/sign in with ChatGPT/)).toBeTruthy();
     expect(screen.getByTitle(/no OAuth token/)).toBeTruthy();
+  });
+
+  it("shows weekly % left + plan + this-turn % for ollama tabs", () => {
+    renderBar({
+      settings: { model: "ollama/gpt-oss:20b" } as Settings,
+      ollamaQuota: OLLAMA_QUOTA,
+      ollamaPlan: "free",
+    });
+    expect(screen.getByText(/88%\s*left/)).toBeTruthy();
+    expect(screen.getByText("free")).toBeTruthy();
+    expect(screen.getByText(/0\.1%/)).toBeTruthy();
+    // Balance and $ amounts are replaced by the pure usage numbers.
+    expect(screen.queryByText("balance")).toBeNull();
+    expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
+  });
+
+  it("shows an em dash for this turn until a second Ollama measurement exists", () => {
+    renderBar({
+      settings: { model: "ollama/gpt-oss:20b" } as Settings,
+      ollamaQuota: { ...OLLAMA_QUOTA, turnUsedPct: null },
+    });
+    expect(screen.getByText(/88%\s*left/)).toBeTruthy();
+    expect(screen.getByText("—")).toBeTruthy();
+  });
+
+  it("keeps the quota chips for ollama tabs when usage data is missing — never the DeepSeek balance", () => {
+    renderBar({
+      settings: { model: "ollama/gpt-oss:20b" } as Settings,
+      ollamaQuota: null,
+    });
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("plan usage")).toBeTruthy();
+    expect(screen.queryByText("balance")).toBeNull();
+    expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
+    expect(screen.getByTitle(/set an API key/)).toBeTruthy();
+  });
+
+  it("surfaces the Ollama usage fetch failure reason in the chip tooltip", () => {
+    renderBar({
+      settings: { model: "ollama/gpt-oss:20b" } as Settings,
+      ollamaQuota: null,
+      ollamaQuotaReason: "usage-unavailable",
+    });
+    expect(screen.getByTitle(/usage-unavailable/)).toBeTruthy();
   });
 });

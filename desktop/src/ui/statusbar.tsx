@@ -3,7 +3,7 @@ import type { Balance, Settings, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
 import { isOffPeak, minutesUntilRateChange } from "../peak-hours";
-import type { CodexQuota, JobInfo } from "../protocol";
+import type { CodexQuota, JobInfo, OllamaQuota } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { activationHandler } from "./keyboard";
 import { localizeShortcutText } from "./shortcut";
@@ -28,6 +28,11 @@ export function StatusBar({
   onRefreshCodexQuota,
   codexQuotaRefreshing,
   codexQuotaReason,
+  ollamaQuota,
+  onRefreshOllamaQuota,
+  ollamaQuotaRefreshing,
+  ollamaQuotaReason,
+  ollamaPlan,
   usage,
   busy,
   ready,
@@ -50,6 +55,13 @@ export function StatusBar({
   codexQuotaRefreshing?: boolean;
   /** Why the last quota fetch produced no data — appended to the chip tooltip. */
   codexQuotaReason?: string | null;
+  /** Cloud Ollama usage — mirrors codexQuota for the Ollama provider. */
+  ollamaQuota: OllamaQuota | null;
+  onRefreshOllamaQuota?: () => void;
+  ollamaQuotaRefreshing?: boolean;
+  ollamaQuotaReason?: string | null;
+  /** The account's Ollama plan (e.g. `free`) — labels the usage chip. */
+  ollamaPlan?: string | null;
   usage: UsageStats;
   busy: boolean;
   ready: boolean;
@@ -128,6 +140,23 @@ export function StatusBar({
   // and an ISO resetsAt — the chip shows "% left" + plan, no credit amounts.
   const quotaLeftPct = quotaWeekly ? Math.round(quotaWeekly.remainingPercent) : 0;
   const quotaTurnPct = quota?.turnUsedPct ?? null;
+  const ollamaTab = !!settings?.model?.startsWith("ollama/");
+  const ollamaQuotaData = ollamaQuota && ollamaTab ? ollamaQuota : null;
+  const ollamaWeekly = ollamaQuotaData?.weekly ?? null;
+  const ollamaSession = ollamaQuotaData?.session ?? null;
+  const ollamaTurnPct = ollamaQuotaData?.turnUsedPct ?? null;
+  const ollamaQuotaTitle =
+    ollamaQuotaData && ollamaWeekly
+      ? t("statusbar.ollamaQuotaTitle", {
+          left: Math.round(ollamaWeekly.remainingPct),
+          session: ollamaSession ? Math.round(ollamaSession.remainingPct) : "—",
+        })
+      : t("statusbar.ollamaNoData");
+  // A failed fetch stays diagnosable: append the reason to the tooltip.
+  const ollamaQuotaTitleWithReason =
+    !ollamaQuotaData && ollamaQuotaReason
+      ? `${ollamaQuotaTitle}\n${t("statusbar.codexReason", { reason: ollamaQuotaReason })}`
+      : ollamaQuotaTitle;
   const quotaTitle = quotaWeekly
     ? t("statusbar.codexQuotaTitle", {
         left: quotaLeftPct,
@@ -146,23 +175,30 @@ export function StatusBar({
   useEffect(() => {
     const renderState = {
       openaiTab,
+      ollamaTab,
       showQuota,
       hasWeeklyWindow: quotaWeekly !== null,
       hasFiveHourWindow: quotaFiveHour !== null,
       turnUsedPct: quotaTurnPct,
+      ollamaTurnPct,
       weeklyRemainingPct: quotaWeekly?.remainingPercent ?? null,
       refreshing: codexQuotaRefreshing,
       reason: codexQuotaReason,
     };
-    const level = quotaTurnPct === null && openaiTab ? "warn" : "debug";
+    const level =
+      (quotaTurnPct === null && openaiTab) || (ollamaTurnPct === null && ollamaTab)
+        ? "warn"
+        : "debug";
     if (level === "warn") console.warn("[reasonix frontend] statusbar quota render", renderState);
     else console.debug("[reasonix frontend] statusbar quota render", renderState);
   }, [
     openaiTab,
+    ollamaTab,
     showQuota,
     quotaWeekly,
     quotaFiveHour,
     quotaTurnPct,
+    ollamaTurnPct,
     codexQuotaRefreshing,
     codexQuotaReason,
   ]);
@@ -227,7 +263,9 @@ export function StatusBar({
         title={
           quotaTurnPct != null
             ? t("statusbar.thisTurnQuotaTitle", { pct: quotaTurnPct.toFixed(1) })
-            : undefined
+            : ollamaTurnPct != null
+              ? t("statusbar.ollamaTurnQuotaTitle", { pct: ollamaTurnPct.toFixed(1) })
+              : undefined
         }
       >
         <I.coin size={11} />
@@ -235,6 +273,12 @@ export function StatusBar({
         {openaiTab ? (
           quotaTurnPct != null ? (
             <span className="v ok">{quotaTurnPct.toFixed(1)}%</span>
+          ) : (
+            <span className="v ok">—</span>
+          )
+        ) : ollamaTab ? (
+          ollamaTurnPct != null ? (
+            <span className="v ok">{ollamaTurnPct.toFixed(1)}%</span>
           ) : (
             <span className="v ok">—</span>
           )
@@ -315,6 +359,29 @@ export function StatusBar({
               <span className="conv">{quota?.plan ?? "ChatGPT"}</span>
             </>
           ) : codexQuotaRefreshing ? (
+            <span className="v acc">{t("statusbar.codexRefreshing")}</span>
+          ) : (
+            <span className="v acc">—</span>
+          )}
+        </span>
+      ) : ollamaTab ? (
+        <span
+          className="seg"
+          title={ollamaQuotaTitleWithReason}
+          style={onRefreshOllamaQuota ? { cursor: "pointer" } : undefined}
+          onClick={onRefreshOllamaQuota}
+          onKeyDown={onRefreshOllamaQuota ? activationHandler(onRefreshOllamaQuota) : undefined}
+        >
+          <I.coin size={11} style={{ color: "var(--accent)" }} />
+          <span>{t("statusbar.ollamaQuota")}</span>
+          {ollamaQuotaData && ollamaWeekly ? (
+            <>
+              <span className="v acc">
+                {Math.round(ollamaWeekly.remainingPct)}% {t("statusbar.codexLeft")}
+              </span>
+              <span className="conv">{ollamaPlan ?? "free"}</span>
+            </>
+          ) : ollamaQuotaRefreshing ? (
             <span className="v acc">{t("statusbar.codexRefreshing")}</span>
           ) : (
             <span className="v acc">—</span>

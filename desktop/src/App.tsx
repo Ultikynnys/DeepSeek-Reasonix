@@ -50,6 +50,7 @@ import {
   type MemoryDetail,
   type MemoryEntryInfo,
   type ModelEndpointInfo,
+  type OllamaQuota,
   type OutgoingCommand,
   type PlanStep,
   type PlanVerdict,
@@ -408,6 +409,12 @@ type State = {
   codexQuotaRefreshing: boolean;
   /** Why the last quota fetch produced no data — shown in the chip tooltip. */
   codexQuotaReason: string | null;
+  /** Cloud Ollama usage (session + weekly windows) for Ollama-provider tabs. */
+  ollamaQuota: OllamaQuota | null;
+  /** True between a statusbar chip click and the $ollama_quota reply. */
+  ollamaQuotaRefreshing: boolean;
+  /** Why the last Ollama usage fetch produced no data — shown in the chip tooltip. */
+  ollamaQuotaReason: string | null;
   /** Dynamically fetched Ollama model catalog (raw ids, e.g. `llama3.1:latest`). */
   ollamaModels: string[];
   /** Why the last Ollama model fetch failed — replaces the picker list. */
@@ -486,6 +493,7 @@ type Action =
   | { t: "settings_patch"; patch: SettingsPatch }
   | { t: "oauth_waiting"; waiting: boolean }
   | { t: "codex_quota_refreshing" }
+  | { t: "ollama_quota_refreshing" }
   | { t: "push_status"; text: string };
 
 function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
@@ -597,6 +605,8 @@ export function reduce(state: State, action: Action): State {
       return { ...state, oauthWaiting: action.waiting };
     case "codex_quota_refreshing":
       return { ...state, codexQuotaRefreshing: true };
+    case "ollama_quota_refreshing":
+      return { ...state, ollamaQuotaRefreshing: true };
     case "batch_delta": {
       const collapsed: DeltaBatchItem[] = [];
       for (const item of action.items) {
@@ -1228,6 +1238,13 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         codexQuotaReason: ev.reason ?? null,
         codexQuotaRefreshing: false,
       };
+    case "$ollama_quota":
+      return {
+        ...state,
+        ollamaQuota: ev.quota,
+        ollamaQuotaReason: ev.reason ?? null,
+        ollamaQuotaRefreshing: false,
+      };
     case "$settings": {
       const prevWs = state.settings?.workspaceDir;
       const wsChanged = prevWs !== undefined && prevWs !== ev.workspaceDir;
@@ -1269,6 +1286,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         // Quota is only meaningful while a ChatGPT (gpt-*) model is active —
         // drop stale numbers the moment the model leaves the OpenAI family.
         codexQuota: ev.model.startsWith("gpt-") ? state.codexQuota : null,
+        // Same for Ollama usage — only meaningful while an ollama/ model is active.
+        ollamaQuota: ev.model.startsWith("ollama/") ? state.ollamaQuota : null,
       };
     }
     case "$ollama_models": {
@@ -1842,6 +1861,9 @@ function TabRuntime({
     codexQuota: null,
     codexQuotaRefreshing: false,
     codexQuotaReason: null,
+    ollamaQuota: null,
+    ollamaQuotaRefreshing: false,
+    ollamaQuotaReason: null,
     ollamaModels: [],
     ollamaModelsError: null,
     ollamaPlan: null,
@@ -1951,6 +1973,10 @@ function TabRuntime({
   const refreshCodexQuota = useCallback(() => {
     dispatch({ t: "codex_quota_refreshing" });
     sendRpc({ cmd: "codex_quota_get" });
+  }, [sendRpc]);
+  const refreshOllamaQuota = useCallback(() => {
+    dispatch({ t: "ollama_quota_refreshing" });
+    sendRpc({ cmd: "ollama_quota_get" });
   }, [sendRpc]);
   const requestOllamaModels = useCallback(() => {
     sendRpc({ cmd: "ollama_models_list" });
@@ -3171,6 +3197,10 @@ function TabRuntime({
           codexQuotaRefreshing={state.codexQuotaRefreshing}
           codexQuotaReason={state.codexQuotaReason}
           onRefreshCodexQuota={refreshCodexQuota}
+          ollamaQuota={state.ollamaQuota}
+          ollamaQuotaRefreshing={state.ollamaQuotaRefreshing}
+          ollamaQuotaReason={state.ollamaQuotaReason}
+          onRefreshOllamaQuota={refreshOllamaQuota}
           usage={state.usage}
           busy={state.busy}
           ready={state.ready}
