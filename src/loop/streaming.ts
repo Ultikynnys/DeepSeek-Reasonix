@@ -9,9 +9,11 @@ export interface StreamModelOptions {
   client: DeepSeekClient;
   model: string;
   messages: ChatMessage[];
-  toolSpecs: ToolSpec[];
+  toolSpecs: readonly ToolSpec[];
   signal: AbortSignal;
   reasoningEffort: ReasoningEffort;
+  /** Per-turn output token cap forwarded to the stream as `max_tokens`. Undefined = no cap. */
+  maxTokens?: number;
   turn: number;
 }
 
@@ -25,7 +27,7 @@ export interface StreamModelResult {
 export async function* streamModelResponse(
   opts: StreamModelOptions,
 ): AsyncGenerator<LoopEvent, StreamModelResult, void> {
-  const { client, model, messages, toolSpecs, signal, reasoningEffort, turn } = opts;
+  const { client, model, messages, toolSpecs, signal, reasoningEffort, maxTokens, turn } = opts;
   let assistantContent = "";
   let reasoningContent = "";
   let usage: Usage | null = null;
@@ -41,6 +43,7 @@ export async function* streamModelResponse(
       signal,
       thinking: thinkingModeForModel(model),
       reasoningEffort,
+      maxTokens,
     })) {
       if (chunk.reasoningDelta) {
         // Reasoning is rendered transiently but is not persisted until the

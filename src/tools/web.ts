@@ -4,6 +4,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { parse as parseHtml } from "node-html-parser";
 import {
+  loadBaiduApiKey,
   loadBraveApiKey,
   loadExaApiKey,
   loadMetasoApiKey,
@@ -47,8 +48,18 @@ export interface WebSearchOptions {
   signal?: AbortSignal;
   /** Config path for provider-specific keys. Defaults to ~/.reasonix/config.json. */
   configPath?: string;
-  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
-  engine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "baidu" (Baidu AI Search API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
+  engine?:
+    | "bing"
+    | "bing-intl"
+    | "searxng"
+    | "metaso"
+    | "baidu"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -56,6 +67,8 @@ export interface WebSearchOptions {
 const DEFAULT_FETCH_MAX_CHARS = 32_000;
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 const DEFAULT_TOPK = 5;
+/** Timeout applied to every outbound search request — a blocked/slow engine must not hang the research step forever. */
+const SEARCH_TIMEOUT_MS = 15_000;
 /** Bytes cap applied before `resp.text()` — char cap can't fire until the body is fully buffered. */
 const FETCH_MAX_BYTES = 10 * 1024 * 1024;
 // Real-browser UA. Most search backends gate obvious scraper UAs; a stock
@@ -66,7 +79,9 @@ const USER_AGENT =
 // HTML; the international endpoint wraps them in `bing.com/ck/a?u=a1<base64>`
 // click-tracking redirects we'd have to decode per result.
 const BING_ENDPOINT = "https://cn.bing.com/search";
+const BING_INTL_ENDPOINT = "https://www.bing.com/search";
 const METASO_ENDPOINT = "https://metaso.cn/api/v1";
+const BAIDU_AI_SEARCH_ENDPOINT = "https://qianfan.baidubce.com/v2/ai_search/web_search";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions";
 const EXA_ENDPOINT = "https://api.exa.ai/answer";
@@ -98,6 +113,14 @@ interface SearchApiErrorMap {
   serverError: (status: number) => string;
 }
 
+/** Combine caller's abort signal with the per-request search timeout — an
+ *  engine that neither responds nor respects the caller's abort (firewalled
+ *  connections, dead hosts) gets cut off after SEARCH_TIMEOUT_MS. */
+function searchSignal(callerSignal?: AbortSignal): AbortSignal {
+  const t = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+  return callerSignal ? AbortSignal.any([callerSignal, t]) : t;
+}
+
 /** fetch → TypeError→cannotReach → status→error map.  Returns the raw Response
  *  so callers can choose text()/json()/whatever. */
 async function fetchSearchApi(
@@ -108,7 +131,7 @@ async function fetchSearchApi(
 ): Promise<Response> {
   let resp: Response;
   try {
-    resp = await fetch(endpoint, { ...init, signal });
+    resp = await fetch(endpoint, { ...init, signal: searchSignal(signal) });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
       throw new Error(t("webErrors.cannotReach", { endpoint }));
@@ -307,6 +330,9 @@ export async function webSearch(
   if (opts.engine === "metaso") {
     return searchMetaso(query, opts);
   }
+  if (opts.engine === "baidu") {
+    return searchBaidu(query, opts);
+  }
   if (opts.engine === "searxng") {
     return searchSearxng(query, opts);
   }
@@ -325,18 +351,25 @@ export async function webSearch(
   if (opts.engine === "brave") {
     return searchBrave(query, opts);
   }
+  if (opts.engine === "bing-intl") {
+    return searchBing(query, opts, BING_INTL_ENDPOINT);
+  }
   return searchBing(query, opts);
 }
 
-async function searchBing(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+async function searchBing(
+  query: string,
+  opts: WebSearchOptions = {},
+  endpoint = BING_ENDPOINT,
+): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
-  const resp = await fetch(`${BING_ENDPOINT}?q=${encodeURIComponent(query)}`, {
+  const resp = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9",
       "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     },
-    signal: opts.signal,
+    signal: searchSignal(opts.signal),
     redirect: "follow",
   });
   if (!resp.ok) throw new Error(searchStatusError(resp.status));
@@ -384,7 +417,7 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
         "User-Agent": USER_AGENT,
         Accept: "text/html",
       },
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -424,7 +457,7 @@ interface MetasoSearchResponse {
 
 async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(100, opts.topK ?? DEFAULT_TOPK));
-  const apiKey = loadMetasoApiKey();
+  const apiKey = loadMetasoApiKey(opts.configPath);
   if (!apiKey) throw new Error(t("webErrors.metasoMissingKey"));
 
   const resp = await fetchSearchApi(
@@ -474,6 +507,61 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
     url: wp.link,
     snippet: wp.snippet ?? wp.summary ?? "",
   }));
+}
+
+interface BaiduReference {
+  title?: string;
+  url?: string;
+  content?: string;
+  snippet?: string;
+}
+
+interface BaiduSearchResponse {
+  references?: BaiduReference[];
+}
+
+async function searchBaidu(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadBaiduApiKey(opts.configPath);
+  if (!apiKey) throw new Error(t("webErrors.baiduMissingKey"));
+
+  // fetchSearchApi classifies HTTP errors (401/403/429/5xx) BEFORE the JSON
+  // parse below — error bodies are not JSON, so ordering matters.
+  const resp = await fetchSearchApi(
+    BAIDU_AI_SEARCH_ENDPOINT,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: query }],
+      }),
+    },
+    opts.signal,
+    {
+      authError: t("webErrors.baiduUnauthorized"),
+      rateLimitError: t("webErrors.baiduRateLimit"),
+      serverError: (s) => t("webErrors.baiduServerError", { status: s }),
+    },
+  );
+
+  const raw = await resp.text();
+  const data = parseSearchJson<BaiduSearchResponse>(
+    raw,
+    t("webErrors.baiduParseError", { status: resp.status }),
+  );
+
+  return (data.references ?? [])
+    .filter((r) => typeof r.title === "string" && typeof r.url === "string")
+    .slice(0, topK)
+    .map((r) => ({
+      title: r.title!,
+      url: r.url!,
+      snippet: r.content ?? r.snippet ?? "",
+    }));
 }
 
 interface TavilyResultItem {
@@ -858,6 +946,23 @@ export function parseSearxngHtmlResults(html: string): SearchResult[] {
   return results;
 }
 
+/** Decode Bing /ck/a click-tracking redirects to the real target. www.bing.com (bing-intl) emits
+ *  these as root-relative `/ck/a?…` hrefs, so resolve against a base before parsing (a bare
+ *  `new URL("/ck/a?…")` throws); the `u=a1…` value is base64url, often unpadded. */
+function unwrapBingUrl(href: string): string {
+  if (!/\/ck\/a\b/.test(href)) return href;
+  try {
+    const u = new URL(href, BING_INTL_ENDPOINT).searchParams.get("u");
+    if (!u) return href;
+    const b64 = u.startsWith("a1") ? u.slice(2) : u;
+    const decoded = Buffer.from(b64, "base64url").toString("utf-8");
+    if (/^https?:\/\//i.test(decoded)) return decoded;
+  } catch {
+    // ignore decode errors and fall back to raw href
+  }
+  return href;
+}
+
 /** Title-anchor + snippet-paragraph passes paired positionally — robust to attribute reorder. */
 export function parseBingResults(html: string): SearchResult[] {
   // DOM walk rather than regex — `<li[^>]*\bclass\b[^>]*>` triggers
@@ -867,7 +972,7 @@ export function parseBingResults(html: string): SearchResult[] {
   for (const li of root.querySelectorAll("li.b_algo")) {
     const anchor = li.querySelector("h2 a[href]");
     if (!anchor) continue;
-    const href = anchor.getAttribute("href");
+    const href = unwrapBingUrl(anchor.getAttribute("href") || "");
     if (!href) continue;
     const title = anchor.textContent.trim();
     if (!title) continue;

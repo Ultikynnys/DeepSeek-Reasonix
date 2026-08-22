@@ -181,8 +181,10 @@ export const en = {
     contextWindowPlaceholder: "default (300000)",
     webSearchEngine: "search engine",
     webSearchEngineBing: "bing — default, works from CN without proxy",
+    webSearchEngineBingIntl: "bing-intl — www.bing.com, indexes international sites",
     webSearchEngineSearxng: "searxng — self-hosted (set endpoint via /se searxng <url>)",
     webSearchEngineMetaso: "metaso — 100/day free (CN-friendly, free key at metaso.cn)",
+    webSearchEngineBaidu: "baidu — Baidu AI Search, free 1500/mo per docs (set BAIDU_API_KEY)",
     webSearchEngineTavily: "tavily — 1000/mo free (set TAVILY_API_KEY)",
     webSearchEnginePerplexity: "perplexity — AI-native (set PERPLEXITY_API_KEY)",
     webSearchEngineExa: "exa — AI-native 1000/mo free (set EXA_API_KEY)",
@@ -195,6 +197,7 @@ export const en = {
     webSearchApiKeyClear: "Clear",
     webSearchApiKey: {
       metaso: "Metaso API key",
+      baidu: "Baidu AI Search API key",
       tavily: "Tavily API key",
       perplexity: "Perplexity API key",
       exa: "Exa API key",

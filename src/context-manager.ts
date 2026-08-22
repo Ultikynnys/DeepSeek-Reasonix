@@ -24,7 +24,12 @@ import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
 import type { AppendOnlyLog } from "./memory/runtime.js";
 import { rewriteSession } from "./memory/session.js";
-import { type SessionStats, resolveContextTokens } from "./telemetry/stats.js";
+import {
+  type SessionStats,
+  inputCostUsd,
+  pricingFor,
+  resolveContextTokens,
+} from "./telemetry/stats.js";
 import { IMAGE_DETAIL_LOW_TOKENS, countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ToolSpec, UserContentPart } from "./types.js";
 
@@ -51,6 +56,12 @@ export const HISTORY_FOLD_SUMMARY_MIN_CHARS = 16;
 // kills legitimate folds at large contexts (prefill + queue time grows with the prompt) — exactly
 // when compaction matters most.
 export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
+/** Normal-band folds should pay for themselves over a short horizon; aggressive folds still prioritize headroom. */
+export const HISTORY_FOLD_ECONOMIC_HORIZON_TURNS = 3;
+export const HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_FRACTION = 0.15;
+export const HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_USD = 0.002;
+/** Summary + next-turn cold segment reserve used by fold economics. */
+export const HISTORY_FOLD_SUMMARY_RESERVE_TOKENS = 4096;
 /** Extra budget per head token — prefill roughly scales with input size. Bumped from 0.5ms after
  *  real sessions at ~240k-token heads measured 1-2+ min per fold — 0.5ms budgeted only ~2 min
  *  where prefill + queue jitter is worst, so legitimate folds timed out mid-compaction. */
@@ -106,6 +117,62 @@ export interface PostUsageDecision {
   tailBudget?: number;
   /** True when this fold is in the 70-85% band — used in user-facing messaging. */
   aggressive?: boolean;
+  /** Cost model for the fold decision — lets UIs explain why a fold ran (or was skipped). */
+  economics?: FoldEconomics;
+}
+
+export interface FoldEconomics {
+  horizonTurns: number;
+  carryInputUsd: number;
+  foldInputUsd: number;
+  savingsUsd: number;
+  savingsFraction: number;
+  worthwhile: boolean;
+}
+
+/** Dollar math behind the normal-band fold: one summary call + cold post-fold segment vs
+ *  carrying the warm prefix over a short horizon. Skip when it wouldn't pay for itself;
+ *  missing pricing is not evidence against folding (assume worthwhile). */
+export function estimateFoldEconomics(
+  usage: Usage,
+  model: string,
+  tailBudgetTokens: number,
+): FoldEconomics {
+  const pricing = pricingFor(model);
+  if (!pricing) {
+    return {
+      horizonTurns: HISTORY_FOLD_ECONOMIC_HORIZON_TURNS,
+      carryInputUsd: 0,
+      foldInputUsd: 0,
+      savingsUsd: 0,
+      savingsFraction: 0,
+      worthwhile: true,
+    };
+  }
+
+  const horizonTurns = HISTORY_FOLD_ECONOMIC_HORIZON_TURNS;
+  const carryInputUsd = inputCostUsd(model, usage) * horizonTurns;
+  const summaryCallUsd = inputCostUsd(model, usage);
+  const postFoldPromptTokens = Math.min(
+    usage.promptTokens,
+    tailBudgetTokens + HISTORY_FOLD_SUMMARY_RESERVE_TOKENS,
+  );
+  const postFoldColdUsd = (postFoldPromptTokens * pricing.inputCacheMiss) / 1_000_000;
+  const postFoldWarmUsd =
+    ((horizonTurns - 1) * postFoldPromptTokens * pricing.inputCacheHit) / 1_000_000;
+  const foldInputUsd = summaryCallUsd + postFoldColdUsd + postFoldWarmUsd;
+  const savingsUsd = carryInputUsd - foldInputUsd;
+  const savingsFraction = carryInputUsd > 0 ? savingsUsd / carryInputUsd : 0;
+  return {
+    horizonTurns,
+    carryInputUsd,
+    foldInputUsd,
+    savingsUsd,
+    savingsFraction,
+    worthwhile:
+      savingsUsd >= HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_USD &&
+      savingsFraction >= HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_FRACTION,
+  };
 }
 
 export interface FoldResult {
@@ -279,11 +346,17 @@ export class ContextManager {
       };
     }
     if (ratio > HISTORY_FOLD_THRESHOLD) {
+      const tailBudget = Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
+      const economics = estimateFoldEconomics(usage, model, tailBudget);
+      if (!economics.worthwhile) {
+        return { kind: "none", ...base, economics };
+      }
       return {
         kind: "fold",
         ...base,
-        tailBudget: Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION),
+        tailBudget,
         aggressive: false,
+        economics,
       };
     }
     return { kind: "none", ...base };

@@ -294,7 +294,7 @@ export function StatusBar({
         <I.clock size={11} style={{ color: offPeak ? "var(--success)" : "var(--warning)" }} />
         <span className={`v ${offPeak ? "ok" : "warn"}`}>
           {offPeak ? t("statusbar.offPeak") : t("statusbar.peak")}
-          <span className="conv">{offPeak ? "½×" : "×2"}</span>
+          <span className="conv">{offPeak ? "1x" : "2x"}</span>
         </span>
       </span>
 

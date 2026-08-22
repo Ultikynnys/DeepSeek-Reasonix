@@ -193,9 +193,12 @@ export const de: typeof en = {
     contextWindowPlaceholder: "Standard (300000)",
     webSearchEngine: "Suchmaschine",
     webSearchEngineBing: "bing — Standard, funktioniert von CN ohne Proxy",
+    webSearchEngineBingIntl: "bing-intl — www.bing.com, indexiert internationale Seiten",
     webSearchEngineSearxng: "searxng — selbst gehostet (Endpunkt via /se searxng <url>)",
     webSearchEngineMetaso:
       "metaso — 100/Tag kostenlos (CN-freundlich, kostenloser Schlüssel auf metaso.cn)",
+    webSearchEngineBaidu:
+      "baidu — Baidu AI Search, 1500/Monat kostenlos laut Doku (BAIDU_API_KEY setzen)",
     webSearchEngineTavily: "tavily — 1000/Monat kostenlos (TAVILY_API_KEY setzen)",
     webSearchEnginePerplexity: "perplexity — AI-native (PERPLEXITY_API_KEY setzen)",
     webSearchEngineExa: "exa — AI-native 1000/Monat kostenlos (EXA_API_KEY setzen)",
@@ -209,6 +212,7 @@ export const de: typeof en = {
     webSearchApiKeyClear: "Löschen",
     webSearchApiKey: {
       metaso: "Metaso API-Key",
+      baidu: "Baidu-AI-Search-API-Key",
       tavily: "Tavily API-Key",
       perplexity: "Perplexity API-Key",
       exa: "Exa API-Key",

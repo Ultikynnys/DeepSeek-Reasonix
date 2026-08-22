@@ -695,6 +695,8 @@ export const de: TranslationSchema = {
       "{count} wiederholte Tool-Aufrufe unterdrückt — gleicher Name + Argumente 3+ Mal gesendet.",
     forcingSummary:
       "Kontext {before}/{ctxMax} ({pct}%) — erzwinge Zusammenfassung aus dem Gesammelten. Führe /compact, /clear oder /new aus, um zurückzusetzen.",
+    iterLimitReached:
+      "Iterationslimit ({max}) dieser Runde erreicht — erzwinge Zusammenfassung des Gesammelten. Erhöhe mit `maxIterPerTurn`-Konfiguration oder REASONIX_MAX_ITER, oder frag erneut in einer neuen Runde.",
   },
   errors: {
     ...EN.errors,
@@ -1533,17 +1535,17 @@ export const de: TranslationSchema = {
   webErrors: {
     ...EN.webErrors,
     status:
-      "web_search {status} — versuche: Das Such-Backend hat einen Fehler zurückgegeben; formuliere die Abfrage um oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search {status} — versuche: Das Such-Backend hat einen Fehler zurückgegeben; formuliere die Abfrage um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     rateLimit429:
       "web_search 429 — versuche: 10s warten vor erneuter Abfrage oder Abfrage umformulieren; das Such-Backend hat das Rate-Limit für diesen Client erreicht",
     forbidden403:
-      "web_search 403 — versuche: Das Such-Backend blockiert diesen Client; wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama oder warte und versuche es später erneut",
+      "web_search 403 — versuche: Das Such-Backend blockiert diesen Client; wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama oder warte und versuche es später erneut",
     serverError5xx:
       "web_search {status} — versuche: Öffne die Such-URL in einem Browser; falls sie lädt, ist dies vorübergehend und ein erneuter Versuch in 30s kann helfen",
     bingBlocked:
-      "web_search: Bing-Anti-Bot-Seite — Rate-Limit erreicht oder blockiert — versuche: 30s warten und erneut versuchen, oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Bing-Anti-Bot-Seite — Rate-Limit erreicht oder blockiert — versuche: 30s warten und erneut versuchen, oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     bingNoResults:
-      "web_search: 0 Ergebnisse, aber die Antwort sieht nicht wie eine echte leere Seite aus ({chars} Zeichen, erste 120: {preview}) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: 0 Ergebnisse, aber die Antwort sieht nicht wie eine echte leere Seite aus ({chars} Zeichen, erste 120: {preview}) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     invalidEndpoint:
       'web_search: ungültiger SearXNG-Endpunkt "{endpoint}" — versuche: setze eine gültige URL mit /search-endpoint http://host:port',
     endpointMustBeHttp:
@@ -1566,6 +1568,16 @@ export const de: TranslationSchema = {
       "web_search: Metaso hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     metasoApiError:
       "web_search: Metaso-API-Fehler (Code {code}: {message}) — versuche es später erneut",
+    baiduMissingKey:
+      "web_search: Baidu AI Search benötigt einen API-Schlüssel — setze BAIDU_API_KEY oder QIANFAN_API_KEY, konfiguriere `baiduApiKey` in ~/.reasonix/config.json oder verwende /search-engine baidu <schlüssel>. Erhalte einen bei Baidu Cloud Qianfan.",
+    baiduUnauthorized:
+      "web_search: Baidu-AI-Search-API-Schlüssel abgelehnt — überprüfe BAIDU_API_KEY, QIANFAN_API_KEY oder `baiduApiKey`.",
+    baiduRateLimit:
+      "web_search: Baidu-AI-Search-Rate-Limit erreicht oder Kontingent überschritten — warte und versuche es erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
+    baiduServerError:
+      "web_search: Baidu-AI-Search-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
+    baiduParseError:
+      "web_search: Baidu AI Search hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     tavilyMissingKey:
       "web_search: Tavily-Backend benötigt einen API-Schlüssel — setze TAVILY_API_KEY-Umgebungsvariable oder `tavilyApiKey` in ~/.reasonix/config.json; kostenlose 1000/Monat-Registrierung unter https://tavily.com",
     tavilyUnauthorized:

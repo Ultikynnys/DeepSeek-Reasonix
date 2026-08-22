@@ -686,6 +686,8 @@ export const EN: TranslationSchema = {
       "The model provider returned an error before producing a visible response — retrying automatically.",
     forcingSummary:
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
+    iterLimitReached:
+      "Reached the {max}-iteration cap for this turn — forcing a summary of what was gathered. Raise with `maxIterPerTurn` config or REASONIX_MAX_ITER, or ask again in a fresh turn.",
   },
   errors: {
     contextOverflow:
@@ -1469,17 +1471,17 @@ export const EN: TranslationSchema = {
   },
   webErrors: {
     status:
-      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
+      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave",
     rateLimit429:
       "web_search 429 \u2014 try: wait 10s before retrying, or rephrase the query; the search backend is rate-limiting this client",
     forbidden403:
-      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave, or wait and retry later",
+      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave, or wait and retry later",
     serverError5xx:
       "web_search {status} \u2014 try: open the search URL in a browser; if it loads this is transient and a retry in 30s may help",
     bingBlocked:
-      "web_search: Bing anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
+      "web_search: Bing anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave",
     bingNoResults:
-      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
+      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave",
     invalidEndpoint:
       'web_search: invalid SearXNG endpoint "{endpoint}" \u2014 try: set a valid URL with /search-endpoint http://host:port',
     endpointMustBeHttp:
@@ -1501,6 +1503,16 @@ export const EN: TranslationSchema = {
     metasoParseError:
       "web_search: Metaso returned unparseable response (HTTP {status}) \u2014 try again later",
     metasoApiError: "web_search: Metaso API error (code {code}: {message}) \u2014 try again later",
+    baiduMissingKey:
+      "web_search: Baidu AI Search requires an API key \u2014 set BAIDU_API_KEY or QIANFAN_API_KEY env var, configure `baiduApiKey` in ~/.reasonix/config.json, or use /search-engine baidu <key>. Get one from Baidu Cloud Qianfan.",
+    baiduUnauthorized:
+      "web_search: Baidu AI Search API key rejected \u2014 check BAIDU_API_KEY, QIANFAN_API_KEY, or `baiduApiKey`.",
+    baiduRateLimit:
+      "web_search: Baidu AI Search rate-limited or quota exceeded \u2014 wait and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave",
+    baiduServerError:
+      "web_search: Baidu AI Search server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave",
+    baiduParseError:
+      "web_search: Baidu AI Search returned unparseable response (HTTP {status}) \u2014 try again later",
     tavilyMissingKey:
       "web_search: Tavily backend requires an API key \u2014 set TAVILY_API_KEY env var or `tavilyApiKey` in ~/.reasonix/config.json; free 1000/mo signup at https://tavily.com",
     tavilyUnauthorized:

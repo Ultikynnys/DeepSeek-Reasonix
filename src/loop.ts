@@ -55,17 +55,28 @@ import {
   rewriteSession,
 } from "./memory/session.js";
 import { ToolCallRepair } from "./repair/index.js";
-import { SessionStats, type TurnStats } from "./telemetry/stats.js";
+import {
+  type PrefixDiagnosticHashes,
+  appendCacheDiagnostic,
+  buildCacheDiagnostic,
+  latestCacheDiagnostic,
+} from "./telemetry/cache-diagnostics.js";
+import { type CacheDiagnostics, SessionStats, type TurnStats } from "./telemetry/stats.js";
+import { countTokensBounded } from "./tokenizer.js";
 import { ToolRegistry, isReadOnlyTool } from "./tools.js";
 import { ReadTracker } from "./tools/read-tracker.js";
 import { USER_CANCEL_NOTE } from "./tools/shell.js";
-import type { ChatMessage, ToolCall, UserContentPart } from "./types.js";
+import type { ChatMessage, ToolCall, ToolSpec, UserContentPart } from "./types.js";
 
 export const MID_TURN_STEER_WRAPPER =
   "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]";
 
 function formatSteerUserMessage(content: string): string {
   return [MID_TURN_STEER_WRAPPER, content].join("\n");
+}
+
+function parseNeedsProEscalation(content: string): boolean {
+  return /^\s*<<<NEEDS_PRO(?::\s*[^>\n]{1,150})?>>>/.test(content);
 }
 
 /** User content for the log/request: plain text when no images are attached
@@ -107,6 +118,10 @@ export interface CacheFirstLoopOptions {
   model?: string;
   stream?: boolean;
   reasoningEffort?: ReasoningEffort;
+  /** Per-turn output token cap passed as `max_tokens`. Undefined = no cap (server default). */
+  maxOutputTokens?: number;
+  /** Maximum tool-call iterations per turn. Overrides config/env. Default 50. */
+  maxIterPerTurn?: number;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
   /** User-configured context-window cap (tokens), forwarded to the ContextManager.
@@ -131,6 +146,8 @@ export interface ReconfigurableOptions {
   stream?: boolean;
   /** V4 thinking mode only; deepseek-chat ignores. */
   reasoningEffort?: ReasoningEffort;
+  /** Per-turn output token cap. Pass null to clear. */
+  maxOutputTokens?: number | null;
   /** Context-window cap override (tokens); undefined = per-model default. `null` = clear a set override. */
   ctxMaxOverride?: number | null;
 }
@@ -138,6 +155,15 @@ export interface ReconfigurableOptions {
 export interface LoopAbortOptions {
   /** Explicit user interrupts can discard the unfinished turn so the next prompt starts clean. */
   discardCurrentTurn?: boolean;
+}
+
+interface CacheShapeSnapshot {
+  systemHash: string;
+  toolsHash: string;
+  fewShotsHash: string;
+  prefixHash: string;
+  logRewriteVersion: number;
+  toolSchemaTokens: number;
 }
 
 function shrinkMessageForRetention(message: ChatMessage): ChatMessage {
@@ -155,6 +181,10 @@ export class CacheFirstLoop {
   readonly scratch = new VolatileScratch();
   readonly stats = new SessionStats();
   readonly repair: ToolCallRepair;
+  /** Hard iteration cap per turn — prevents runaway tool-call loops from
+   *  burning unlimited API budget. The model gets one final force-summary
+   *  call when the cap fires. Override via REASONIX_MAX_ITER env var. */
+  static readonly DEFAULT_MAX_ITER_PER_TURN = 50;
   /** Files the model has read this session; gates edit_file / multi_edit so SEARCH text matches on-disk bytes. Cleared on fold / mechanical truncate (the model's byte-level view of the elided history is gone). In-memory only — naturally empty on resume. */
   readonly readTracker = new ReadTracker();
 
@@ -163,6 +193,10 @@ export class CacheFirstLoop {
   model: string;
   stream: boolean;
   reasoningEffort: ReasoningEffort;
+  /** Per-turn output token cap (max_tokens). Undefined = no cap. */
+  maxOutputTokens: number | undefined;
+  /** Maximum tool-call iterations per turn. Config > env > default (50). */
+  maxIterPerTurn: number;
   budgetUsd: number | null;
   /** One-shot 80% warning latch — cleared by setBudget so a bump re-arms at the new boundary. */
   private _budgetWarned = false;
@@ -230,6 +264,8 @@ export class CacheFirstLoop {
   /** Latched once per turn — replay one provider failure before any output reached the UI. */
   private _providerErrorRetried = false;
   private context!: ContextManager;
+  /** Prefix-shape snapshot of the last sent request — next turn's churn is attributed against it. */
+  private _lastCacheShape: CacheShapeSnapshot | null = null;
   /** Stable ids for compaction card events — pairs compaction_start with compaction_end. */
   private _compactionSeq = 0;
   /** True while a compaction is in flight — blocks new tool dispatch. */
@@ -252,6 +288,8 @@ export class CacheFirstLoop {
     this.tools = opts.tools ?? new ToolRegistry();
     this.model = opts.model ?? "deepseek-v4-flash";
     this.reasoningEffort = opts.reasoningEffort ?? "high";
+    this.maxOutputTokens = opts.maxOutputTokens;
+    this.maxIterPerTurn = opts.maxIterPerTurn ?? CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN;
     this.budgetUsd =
       typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
     this.ctxMaxOverride = opts.ctxMaxOverride;
@@ -434,6 +472,7 @@ export class CacheFirstLoop {
     this.stats.reset();
     this._turn = 0;
     this._budgetWarned = false;
+    this._lastCacheShape = null;
     const systemRebuilt = this.rebuildSystemPrompt();
     return { dropped, archived, systemRebuilt };
   }
@@ -445,6 +484,7 @@ export class CacheFirstLoop {
     this.log.compactInPlace([]);
     this.resetTransientState();
     this.sessionName = opts.sessionName;
+    this._lastCacheShape = null;
     this.rebuildSystemPrompt();
     return { dropped, archived };
   }
@@ -456,6 +496,9 @@ export class CacheFirstLoop {
       this.stream = opts.stream;
     }
     if (opts.reasoningEffort !== undefined) this.reasoningEffort = opts.reasoningEffort;
+    if (opts.maxOutputTokens !== undefined) {
+      this.maxOutputTokens = opts.maxOutputTokens ?? undefined;
+    }
     if (opts.ctxMaxOverride !== undefined) {
       const v = opts.ctxMaxOverride ?? undefined;
       this.ctxMaxOverride = v;
@@ -593,6 +636,11 @@ export class CacheFirstLoop {
   }
   private _inflightCounter = 0;
 
+  // Cached result from the last healActiveLogBeforeSend() pass.
+  // Invalidated when the log version changes (append/compactInPlace).
+  private _healedCache: ChatMessage[] | null = null;
+  private _healedVersion = -1;
+
   /** Running count of user turns processed so far. */
   private _userTurnCount = 0;
 
@@ -601,7 +649,55 @@ export class CacheFirstLoop {
     return [...this.prefix.toMessages(), ...healedMessages];
   }
 
+  private cacheShapeForRequest(
+    prefixEvidence: PrefixDiagnosticHashes,
+    toolSpecs: readonly ToolSpec[],
+  ): CacheShapeSnapshot {
+    return {
+      systemHash: prefixEvidence.systemHash,
+      toolsHash: prefixEvidence.toolSpecsHash,
+      fewShotsHash: prefixEvidence.fewShotsHash,
+      prefixHash: prefixEvidence.prefixHash,
+      logRewriteVersion: this.log.rewriteVersion,
+      toolSchemaTokens: countTokensBounded(JSON.stringify(toolSpecs)),
+    };
+  }
+
+  private cacheDiagnosticsForUsage(
+    shape: CacheShapeSnapshot,
+    usage: TurnStats["usage"] | null,
+  ): CacheDiagnostics {
+    const prev = this._lastCacheShape;
+    const prefixChangeReasons: CacheDiagnostics["prefixChangeReasons"] = [];
+    if (prev) {
+      if (prev.systemHash !== shape.systemHash) prefixChangeReasons.push("system");
+      if (prev.toolsHash !== shape.toolsHash) prefixChangeReasons.push("tools");
+      if (prev.fewShotsHash !== shape.fewShotsHash) prefixChangeReasons.push("few_shots");
+      if (prev.logRewriteVersion !== shape.logRewriteVersion) {
+        prefixChangeReasons.push("log_rewrite");
+      }
+    }
+    return {
+      prefixHash: shape.prefixHash,
+      prefixChanged: prefixChangeReasons.length > 0,
+      prefixChangeReasons,
+      systemHash: shape.systemHash,
+      toolsHash: shape.toolsHash,
+      fewShotsHash: shape.fewShotsHash,
+      logRewriteVersion: shape.logRewriteVersion,
+      toolSchemaTokens: shape.toolSchemaTokens,
+      promptCacheMissTokens: usage?.promptCacheMissTokens ?? 0,
+      promptCacheHitTokens: usage?.promptCacheHitTokens ?? 0,
+    };
+  }
+
   private healActiveLogBeforeSend(): ChatMessage[] {
+    // Skip the expensive 3-pass healing pipeline when the log hasn't
+    // changed since the last call — the common case between iterations
+    // where no new messages were appended.
+    if (this._healedCache && this._healedVersion === this.log.version) {
+      return this._healedCache;
+    }
     const current = this.log.toMessages();
     const healed = healLoadedMessages(current, DEFAULT_MAX_RESULT_CHARS);
     const argsShrunk = shrinkOversizedToolCallArgsByTokens(
@@ -610,9 +706,13 @@ export class CacheFirstLoop {
     );
     const pruned = stripDroppableReasoningContent(argsShrunk.messages);
     if (healed.healedCount === 0 && argsShrunk.healedCount === 0 && pruned.prunedCount === 0) {
+      this._healedCache = current;
+      this._healedVersion = this.log.version;
       return current;
     }
     this.log.compactInPlace(pruned.messages);
+    this._healedCache = pruned.messages;
+    this._healedVersion = this.log.version;
     this.persistLog(pruned.messages);
     return pruned.messages;
   }
@@ -806,6 +906,14 @@ export class CacheFirstLoop {
       }
     }
     this._turn++;
+    const baseModelForTurn = this.model;
+    let restoreModelAfterTurn = false;
+    const restoreModelIfNeeded = () => {
+      if (restoreModelAfterTurn && this.model === "deepseek-v4-pro") {
+        this.model = baseModelForTurn;
+      }
+    };
+
     this._userTurnCount++;
     this.scratch.reset();
     // A fresh user turn is a new intent — don't let StormBreaker's
@@ -923,10 +1031,26 @@ export class CacheFirstLoop {
             content: stoppedMsg,
             forcedSummary: true,
           };
+          restoreModelIfNeeded();
           yield { turn: this._turn, role: "done", content: stoppedMsg };
         } finally {
           this.resetAbortState();
         }
+        this._steerQueue.length = 0;
+        return;
+      }
+      // Hard iteration cap — prevents runaway tool-call loops from
+      // consuming unlimited API budget. The model gets one final
+      // force-summary call when the cap fires. (#2037)
+      if (iter >= this.maxIterPerTurn) {
+        yield {
+          turn: this._turn,
+          role: "warning",
+          severity: "high",
+          content: t("loop.iterLimitReached", { max: this.maxIterPerTurn }),
+        };
+        yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
+        restoreModelIfNeeded();
         this._steerQueue.length = 0;
         return;
       }
@@ -979,6 +1103,7 @@ export class CacheFirstLoop {
           }),
         };
         yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "context-guard");
+        restoreModelIfNeeded();
         this._steerQueue.length = 0;
         return;
       }
@@ -987,16 +1112,22 @@ export class CacheFirstLoop {
       let reasoningContent = "";
       let toolCalls: ToolCall[] = [];
       let usage: TurnStats["usage"] | null = null;
+      const callModel = this.model;
+
+      // Snapshot prefix evidence from the same turn-start tool list sent to the
+      // API so MCP hot-adds during the turn don't rewrite history.
+      const prefixEvidence = this.prefix.diagnosticHashes(toolSpecs);
 
       try {
         if (this.stream) {
           const result = yield* streamModelResponse({
             client: this.client,
-            model: this.model,
+            model: callModel,
             messages,
             toolSpecs,
             signal,
             reasoningEffort: this.reasoningEffort,
+            maxTokens: this.maxOutputTokens,
             turn: this._turn,
           });
           assistantContent = result.assistantContent;
@@ -1004,7 +1135,6 @@ export class CacheFirstLoop {
           toolCalls = result.toolCalls;
           usage = result.usage;
         } else {
-          const callModel = this.model;
           const resp = await this.client.chat({
             model: callModel,
             messages,
@@ -1012,6 +1142,7 @@ export class CacheFirstLoop {
             signal,
             thinking: thinkingModeForModel(callModel),
             reasoningEffort: this.reasoningEffort,
+            maxTokens: this.maxOutputTokens,
           });
           assistantContent = resp.content;
           reasoningContent = resp.reasoningContent ?? "";
@@ -1048,6 +1179,7 @@ export class CacheFirstLoop {
             };
           }
           try {
+            restoreModelIfNeeded();
             yield { turn: this._turn, role: "done", content: "" };
           } finally {
             this.resetAbortState();
@@ -1098,16 +1230,50 @@ export class CacheFirstLoop {
           },
         };
         this._steerQueue.length = 0;
+        restoreModelIfNeeded();
         return;
       }
 
+      if (parseNeedsProEscalation(assistantContent) && callModel !== "deepseek-v4-pro") {
+        restoreModelAfterTurn = true;
+        this.model = "deepseek-v4-pro";
+        continue;
+      }
+
       // Attribute under the actual model used (escalated → pro, else
-      // this.model) so cost/usage logs reflect reality.
-      const turnStats = this.stats.record(this._turn, this.model, usage ?? new Usage());
+      // callModel) so cost/usage logs reflect reality.
+      const cacheShape = this.cacheShapeForRequest(prefixEvidence, toolSpecs);
+      const cacheDiagnostics = this.cacheDiagnosticsForUsage(cacheShape, usage);
+      this._lastCacheShape = cacheShape;
+      const turnStats = this.stats.record(
+        this._turn,
+        callModel,
+        usage ?? new Usage(),
+        cacheDiagnostics,
+      );
 
       // Carry cumulative stats across app restarts.
+      let cacheDiagnostic = buildCacheDiagnostic({
+        turn: this._turn,
+        model: callModel,
+        usage: turnStats.usage,
+        estimatedCostUsd: turnStats.cost,
+        prefix: prefixEvidence,
+        previous: latestCacheDiagnostic(this.stats.cacheDiagnostics),
+      });
       if (this.sessionName) {
         try {
+          // Rebuild against the persisted chain so a resumed session's first
+          // turn infers misses from the pre-restart evidence, not just this boot.
+          const meta = loadSessionMeta(this.sessionName);
+          cacheDiagnostic = buildCacheDiagnostic({
+            turn: this._turn,
+            model: callModel,
+            usage: turnStats.usage,
+            estimatedCostUsd: turnStats.cost,
+            prefix: prefixEvidence,
+            previous: latestCacheDiagnostic(meta.cacheDiagnostics),
+          });
           const last =
             this.stats.turns.length > 0 ? this.stats.turns[this.stats.turns.length - 1] : null;
           patchSessionMeta(this.sessionName, {
@@ -1116,6 +1282,7 @@ export class CacheFirstLoop {
             cacheMissTokens: this.stats.cumulativeCacheMissTokens,
             totalCompletionTokens: this.stats.cumulativeCompletionTokens,
             lastPromptTokens: last?.usage.promptTokens,
+            cacheDiagnostics: appendCacheDiagnostic(meta.cacheDiagnostics, cacheDiagnostic),
           });
         } catch (err) {
           // Best-effort; don't crash the turn loop on a write failure — but
@@ -1123,6 +1290,10 @@ export class CacheFirstLoop {
           process.stderr.write(`reasonix: session meta patch failed — ${messageOf(err)}\n`);
         }
       }
+
+      // Store the per-turn cache diagnostic so the live cache-miss report
+      // replays the prefix hashes that were actually in effect at turn time.
+      this.stats.addCacheDiagnostic(cacheDiagnostic);
 
       this.scratch.reasoning = reasoningContent || null;
 
@@ -1155,6 +1326,7 @@ export class CacheFirstLoop {
           content: t("loop.emptyResponseGiveUp"),
         };
         this._steerQueue.length = 0;
+        restoreModelIfNeeded();
         return;
       }
 
@@ -1165,7 +1337,7 @@ export class CacheFirstLoop {
       );
 
       this.appendAndPersist(
-        buildAssistantMessage(assistantContent, repairedCalls, this.model, reasoningContent),
+        buildAssistantMessage(assistantContent, repairedCalls, callModel, reasoningContent),
       );
 
       yield {
@@ -1173,6 +1345,7 @@ export class CacheFirstLoop {
         role: "assistant_final",
         content: assistantContent,
         stats: turnStats,
+        cacheDiagnostic,
         repair: report,
       };
 
@@ -1186,7 +1359,7 @@ export class CacheFirstLoop {
       if (allSuppressed && !this._turnSelfCorrected) {
         this._turnSelfCorrected = true;
         this.replaceTailAssistantMessage(
-          buildAssistantMessage(assistantContent, toolCalls, this.model, reasoningContent),
+          buildAssistantMessage(assistantContent, toolCalls, callModel, reasoningContent),
         );
         for (const call of toolCalls) {
           this.appendAndPersist({
@@ -1223,7 +1396,7 @@ export class CacheFirstLoop {
       // ContextManager owns the policy; loop renders the events.
       // Must run BEFORE the repairedCalls.length === 0 early-return so
       // text-only responses also benefit from auto-fold / force-summary.
-      const decision = this.context.decideAfterUsage(usage, this.model, this._foldedThisTurn);
+      const decision = this.context.decideAfterUsage(usage, callModel, this._foldedThisTurn);
       // Compaction runs in the same queue as the tool calls: the fold emits a
       // compaction card (compaction_start → compaction_end) like a tool card,
       // and pending tool calls dispatch BEFORE the fold so an in-flight read
@@ -1250,6 +1423,7 @@ export class CacheFirstLoop {
         // lifecycle as a fold, so the UI renders one compaction shape and the
         // event log records the trim + summary as one action.
         yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "context-guard");
+        restoreModelIfNeeded();
         this._steerQueue.length = 0;
         return;
       }
@@ -1275,9 +1449,11 @@ export class CacheFirstLoop {
           // Same compaction card lifecycle as the context-guard path — the
           // stuck-state force-summary is also a compaction action.
           yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
+          restoreModelIfNeeded();
           this._steerQueue.length = 0;
           return;
         }
+        restoreModelIfNeeded();
         yield { turn: this._turn, role: "done", content: assistantContent };
         this._steerQueue.length = 0;
         return;
@@ -1486,6 +1662,7 @@ export class CacheFirstLoop {
       recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
       turn: this._turn,
       model: this.model,
+      maxOutputTokens: this.maxOutputTokens,
       getSystemPrompt: () => this.prefix.system,
       canSend: (messages) =>
         this.context.requestBudget(messages, this.prefix.toolSpecs, this.model).fits,

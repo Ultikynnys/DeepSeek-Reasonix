@@ -62,7 +62,7 @@ describe("StatusBar quota display", () => {
     renderBar();
     // Wall-clock dependent — either label and multiplier may be current.
     expect(screen.getByText(/off-peak|peak/)).toBeTruthy();
-    expect(screen.getByText(/½×|×2/)).toBeTruthy();
+    expect(screen.getByText(/1x|2x/)).toBeTruthy();
   });
 
   it("shows weekly quota % left + plan and this-turn % for gpt-5.6 tabs", () => {

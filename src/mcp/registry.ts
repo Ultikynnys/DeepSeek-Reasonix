@@ -3,7 +3,7 @@ import { ToolRegistry } from "../tools.js";
 import type { JSONSchema } from "../types.js";
 import type { McpClient } from "./client.js";
 import { LatencyTracker, type SlowEvent } from "./latency.js";
-import type { CallToolResult, McpContentBlock } from "./types.js";
+import type { CallToolResult, McpContentBlock, McpTool } from "./types.js";
 
 export interface BridgeOptions {
   /** Prefix for tool names — disambiguates collisions when bridging multiple servers. */
@@ -73,16 +73,17 @@ export interface BridgeEnv {
 }
 
 /** Register one MCP tool's bridged closure into the registry. Returns the registered name (or "" if skipped). */
-export function registerSingleMcpTool(
-  mcpTool: import("./types.js").McpTool,
-  env: BridgeEnv,
-): string {
-  if (!mcpTool.name) return "";
-  const registeredName = `${env.prefix}${mcpTool.name}`;
+export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string {
+  // Canonicalize BEFORE registration so the registry's tool-list hash matches
+  // what the API actually receives — key-order/array-order drift from the MCP
+  // server would otherwise churn the prefix and cost a cache miss every turn.
+  const stableTool = canonicalizeMcpToolForCache(mcpTool);
+  if (!stableTool.name) return "";
+  const registeredName = `${env.prefix}${stableTool.name}`;
   env.registry.register({
     name: registeredName,
-    description: mcpTool.description ?? "",
-    parameters: mcpTool.inputSchema as JSONSchema,
+    description: stableTool.description ?? "",
+    parameters: stableTool.inputSchema as JSONSchema,
     fn: async (args: Record<string, unknown>, ctx) => {
       if (env.ready) {
         await waitForReady(
@@ -96,7 +97,7 @@ export function registerSingleMcpTool(
       // Resolve client at call time via the host indirection so `/mcp reconnect`
       // can swap a fresh client in without re-bridging tools.
       const live = env.host.client;
-      const toolResult = await live.callTool(mcpTool.name, args, {
+      const toolResult = await live.callTool(stableTool.name, args, {
         onProgress: env.onProgress
           ? (info) => env.onProgress!({ toolName: registeredName, ...info })
           : undefined,
@@ -194,7 +195,13 @@ export async function bridgeMcpTools(
     serverName,
   };
   const listed = await client.listTools();
-  for (const mcpTool of listed.tools) {
+  // Canonicalize + sort so the bridged tool list is byte-stable across
+  // reconnects — the tool list is part of the immutable prefix, and any
+  // nondeterminism here forces a full prompt-cache miss.
+  const stableTools = listed.tools
+    .map((tool) => canonicalizeMcpToolForCache(tool))
+    .sort((a, b) => `${prefix}${a.name}`.localeCompare(`${prefix}${b.name}`));
+  for (const mcpTool of stableTools) {
     if (!mcpTool.name) {
       result.skipped.push({ name: "?", reason: "empty tool name" });
       continue;
@@ -203,6 +210,49 @@ export async function bridgeMcpTools(
     if (registeredName) result.registeredNames.push(registeredName);
   }
   return { ...result, env };
+}
+
+/** Deterministic copy of a bridged MCP tool: sorted schema keys + sorted set-like
+ *  arrays (`required`, `dependentRequired`) so the registry's tool-list hash is
+ *  stable across server responses, reconnects, and sessions. Prefix-cache safety. */
+export function canonicalizeMcpToolForCache(tool: McpTool): McpTool {
+  return {
+    ...tool,
+    inputSchema: canonicalizeSchemaForCache(tool.inputSchema) as McpTool["inputSchema"],
+  };
+}
+
+const SET_LIKE_SCHEMA_ARRAY_KEYS = new Set(["required", "dependentRequired"]);
+
+export function canonicalizeSchemaForCache(value: unknown, parentKey?: string): unknown {
+  if (Array.isArray(value)) {
+    const mapped = value.map((item) => canonicalizeSchemaForCache(item));
+    if (parentKey && SET_LIKE_SCHEMA_ARRAY_KEYS.has(parentKey) && mapped.every(isScalar)) {
+      return [...mapped].sort((a, b) => String(a).localeCompare(String(b)));
+    }
+    return mapped;
+  }
+  if (!value || typeof value !== "object") return value;
+  if (parentKey === "dependentRequired") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      const arr = (value as Record<string, unknown>)[key];
+      out[key] =
+        Array.isArray(arr) && arr.every(isScalar)
+          ? [...(arr as unknown[])].sort((a, b) => String(a).localeCompare(String(b)))
+          : canonicalizeSchemaForCache(arr, key);
+    }
+    return out;
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    out[key] = canonicalizeSchemaForCache((value as Record<string, unknown>)[key], key);
+  }
+  return out;
+}
+
+function isScalar(value: unknown): boolean {
+  return value === null || ["string", "number", "boolean"].includes(typeof value);
 }
 
 export interface FlattenOptions {

@@ -1,10 +1,10 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
-import { atomicWriteSync } from "./core/atomic-write.js";
+import { atomicWriteSync, tmpSiblingPath } from "./core/atomic-write.js";
 import type { LanguageCode } from "./i18n/types.js";
 import {
   type IndexUserConfig,
@@ -211,6 +211,11 @@ export interface ReasonixConfig {
   /** When false, skip the boot splash animation and show the main UI immediately. Default true. */
   banner?: boolean;
   reasoningEffort?: ReasoningEffort;
+  /** Per-turn output token cap sent as `max_tokens` in the API request. Undefined/null = no cap. */
+  maxOutputTokens?: number | null;
+  /** Maximum tool-call iterations per turn. Prevents runaway loops from consuming
+   *  unlimited API budget. Default 50. Env `REASONIX_MAX_ITER` overrides. */
+  maxIterPerTurn?: number;
   /** Context-window cap in tokens, overriding the per-model default (300K).
    *  Clamped to [300000, 1000000] at load; unset = model default. */
   contextTokens?: number;
@@ -234,11 +239,13 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
+  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "baidu" (Baidu AI Search API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
   webSearchEngine?:
     | "bing"
+    | "bing-intl"
     | "searxng"
     | "metaso"
+    | "baidu"
     | "tavily"
     | "perplexity"
     | "exa"
@@ -248,6 +255,8 @@ export interface ReasonixConfig {
   webSearchEndpoint?: string;
   /** Metaso API key. Falls back to METASO_API_KEY env var. */
   metasoApiKey?: string;
+  /** Baidu AI Search API key. Falls back to BAIDU_API_KEY or QIANFAN_API_KEY env var. */
+  baiduApiKey?: string;
   /** Tavily API key. Falls back to TAVILY_API_KEY env var. No baked-in default — free tier is 1000/mo per account, sharing would burn out. */
   tavilyApiKey?: string;
   /** Perplexity API key. Falls back to PERPLEXITY_API_KEY env var. Get one at https://perplexity.ai/settings/api */
@@ -407,6 +416,14 @@ export function loadMetasoApiKey(path: string = defaultConfigPath()): string | u
   return undefined;
 }
 
+export function loadBaiduApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.BAIDU_API_KEY) return process.env.BAIDU_API_KEY.trim();
+  if (process.env.QIANFAN_API_KEY) return process.env.QIANFAN_API_KEY.trim();
+  const cfg = readConfig(path).baiduApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
 /** Tavily API key — env > config > undefined. Returning undefined means the caller must error out with a clear "go get one at tavily.com" message; we deliberately ship no default because the free 1000/mo quota wouldn't survive being shared. */
 export function loadTavilyApiKey(path: string = defaultConfigPath()): string | undefined {
   if (process.env.TAVILY_API_KEY) return process.env.TAVILY_API_KEY.trim();
@@ -467,6 +484,10 @@ const STRING_ARRAY_FIELDS: Array<readonly string[]> = [
 
 const stringArraySchema = z.array(z.string());
 
+/** Mtime-keyed cache for readConfig (shared, read-only — callers must not mutate).
+ *  Caveat: mtime resolution ~1 s; external edits may be missed within that window. */
+const _configCache = new Map<string, { mtimeMs: number; cfg: ReasonixConfig }>();
+
 function sanitizeStringArrayField(
   cfg: Record<string, unknown>,
   segments: readonly string[],
@@ -499,24 +520,47 @@ function sanitizeStringArrayField(
 }
 
 export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
+  let fd: number | undefined;
   try {
+    // Open the file descriptor first, then fstat + read from the same fd.
+    // This eliminates the TOCTOU race where statSync sees one mtime but
+    // readFileSync reads a different version of the file (CodeQL flagged).
+    fd = openSync(path, "r");
+    const st = fstatSync(fd);
+    const cached = _configCache.get(path);
+    if (cached && cached.mtimeMs === st.mtimeMs) {
+      closeSync(fd);
+      return cached.cfg;
+    }
     // Strip the UTF-8 BOM if a foreign writer left one in — Windows
     // PowerShell 5's `Set-Content -Encoding UTF8` and several text
     // editors emit `EF BB BF` at the head of the file. `JSON.parse`
     // refuses BOM-prefixed input and throws, which used to fall
     // through to `return {}` and silently nuke every saved field on
     // the next read-modify-write.
-    const raw = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
+    const raw = readFileSync(fd, "utf8").replace(/^\uFEFF/, "");
+    closeSync(fd);
+    fd = undefined;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const cfg = parsed as Record<string, unknown>;
       for (const segments of STRING_ARRAY_FIELDS) {
         sanitizeStringArrayField(cfg, segments, path);
       }
-      return cfg as ReasonixConfig;
+      const result = cfg as ReasonixConfig;
+      _configCache.set(path, { mtimeMs: st.mtimeMs, cfg: result });
+      return result;
     }
   } catch {
     /* missing or malformed → empty config */
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* already closed */
+      }
+    }
   }
   return {};
 }
@@ -568,8 +612,9 @@ export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPat
   // config.json, which readConfig would then parse as `{}` and the next
   // saveX would silently overwrite every other field with that empty
   // baseline (issue #1535).
-  const tmp = `${path}.${process.pid}.tmp`;
+  const tmp = tmpSiblingPath(path);
   atomicWriteSync(path, JSON.stringify(cfg, null, 2), tmp);
+  _configCache.delete(path);
 }
 
 /** Resolve the language from config file. */
@@ -1025,10 +1070,22 @@ export function loadJavaSourceEnabled(path: string = defaultConfigPath()): boole
 
 export function webSearchEngine(
   path: string = defaultConfigPath(),
-): "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama" {
+):
+  | "bing"
+  | "bing-intl"
+  | "searxng"
+  | "metaso"
+  | "baidu"
+  | "tavily"
+  | "perplexity"
+  | "exa"
+  | "brave"
+  | "ollama" {
   const cfg = readConfig(path).webSearchEngine;
+  if (cfg === "bing-intl") return "bing-intl";
   if (cfg === "searxng") return "searxng";
   if (cfg === "metaso") return "metaso";
+  if (cfg === "baidu") return "baidu";
   if (cfg === "tavily") return "tavily";
   if (cfg === "perplexity") return "perplexity";
   if (cfg === "exa") return "exa";
@@ -1335,6 +1392,34 @@ export function saveReasoningEffort(
 ): void {
   const cfg = readConfig(path);
   cfg.reasoningEffort = effort;
+  writeConfig(cfg, path);
+}
+
+/** Load the per-turn iteration cap. Config > env > default (50). */
+export function loadMaxIterPerTurn(path: string = defaultConfigPath()): number {
+  const fromConfig = readConfig(path).maxIterPerTurn;
+  if (typeof fromConfig === "number" && fromConfig > 0) return fromConfig;
+  const fromEnv = process.env.REASONIX_MAX_ITER;
+  if (fromEnv) {
+    const n = Number(fromEnv);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 50;
+}
+
+/** Returns undefined when no cap is set (caller passes nothing to the API, server default applies). */
+export function loadMaxOutputTokens(path: string = defaultConfigPath()): number | undefined {
+  const v = readConfig(path).maxOutputTokens;
+  if (typeof v === "number" && Number.isInteger(v) && v > 0) return v;
+  return undefined;
+}
+
+export function saveMaxOutputTokens(
+  tokens: number | null,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.maxOutputTokens = tokens ?? undefined;
   writeConfig(cfg, path);
 }
 

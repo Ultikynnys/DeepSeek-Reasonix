@@ -334,8 +334,10 @@ export type Settings = {
   editor?: string;
   webSearchEngine?:
     | "bing"
+    | "bing-intl"
     | "searxng"
     | "metaso"
+    | "baidu"
     | "tavily"
     | "perplexity"
     | "exa"
@@ -344,6 +346,7 @@ export type Settings = {
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
+    baidu?: string;
     tavily?: string;
     perplexity?: string;
     exa?: string;
@@ -499,6 +502,7 @@ type Action =
 function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
   const {
     metasoApiKey: _metaso,
+    baiduApiKey: _baidu,
     tavilyApiKey: _tavily,
     perplexityApiKey: _perplexity,
     exaApiKey: _exa,

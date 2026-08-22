@@ -295,6 +295,7 @@ export interface TranslationSchema {
     emptyResponseGiveUp: string;
     providerErrorRetry: string;
     forcingSummary: string;
+    iterLimitReached: string;
   };
   errors: {
     contextOverflow: string;
@@ -713,6 +714,11 @@ export interface TranslationSchema {
     metasoServerError: string;
     metasoParseError: string;
     metasoApiError: string;
+    baiduMissingKey: string;
+    baiduUnauthorized: string;
+    baiduRateLimit: string;
+    baiduServerError: string;
+    baiduParseError: string;
     tavilyMissingKey: string;
     tavilyUnauthorized: string;
     tavilyRateLimit: string;

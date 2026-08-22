@@ -88,6 +88,8 @@ import {
   loadEndpoint,
   loadEndpointForModel,
   loadExaApiKey,
+  loadMaxIterPerTurn,
+  loadMaxOutputTokens,
   loadMetasoApiKey,
   loadModel,
   loadOllamaApiKey,
@@ -1681,6 +1683,8 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     ctxMaxOverride: tab.ctxMaxOverride,
     session: tab.currentSession,
     reasoningEffort,
+    maxIterPerTurn: loadMaxIterPerTurn(),
+    maxOutputTokens: loadMaxOutputTokens(),
     hooks: tab.hooks,
     hookCwd: tab.rootDir,
     onPreCompaction: () => toolset.jobs.cancelAll(),
@@ -3580,6 +3584,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           msg.webSearchEngine !== undefined ||
           msg.webSearchEndpoint !== undefined ||
           msg.metasoApiKey !== undefined ||
+          msg.baiduApiKey !== undefined ||
           msg.tavilyApiKey !== undefined ||
           msg.perplexityApiKey !== undefined ||
           msg.exaApiKey !== undefined ||
@@ -3593,6 +3598,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           if (msg.metasoApiKey !== undefined) {
             cfg.metasoApiKey = msg.metasoApiKey?.trim() || undefined;
+          }
+          if (msg.baiduApiKey !== undefined) {
+            cfg.baiduApiKey = msg.baiduApiKey?.trim() || undefined;
           }
           if (msg.tavilyApiKey !== undefined) {
             cfg.tavilyApiKey = msg.tavilyApiKey?.trim() || undefined;

@@ -1,4 +1,5 @@
 import type { RepairReport } from "../repair/index.js";
+import type { CacheDiagnosticEntry } from "../telemetry/cache-diagnostics.js";
 import type { TurnStats } from "../telemetry/stats.js";
 import type { ChatMessage } from "../types.js";
 
@@ -50,6 +51,9 @@ export interface LoopEvent {
   /** Stable id for tool_start / tool pairs — also the inflight-set key. UI uses this as the card id so it can derive `running` from `loop.inflight.has(callId)` instead of trusting end-event delivery. */
   callId?: string;
   stats?: TurnStats;
+  /** Per-turn local cache evidence — prefix hashes + inferred miss reason. Surfaced
+   *  on assistant_final; DeepSeek reports token counts, Reasonix infers reasons. */
+  cacheDiagnostic?: CacheDiagnosticEntry;
   repair?: RepairReport;
   error?: string;
   errorDetail?: {

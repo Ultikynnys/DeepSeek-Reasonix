@@ -10,8 +10,10 @@ export type EditMode = "review" | "auto" | "yolo" | "plan";
 
 export type WebSearchEngineName =
   | "bing"
+  | "bing-intl"
   | "searxng"
   | "metaso"
+  | "baidu"
   | "tavily"
   | "perplexity"
   | "exa"
@@ -510,6 +512,7 @@ export interface SettingsPatch {
   webSearchEngine?: WebSearchEngineName;
   webSearchEndpoint?: string | null;
   metasoApiKey?: string | null;
+  baiduApiKey?: string | null;
   tavilyApiKey?: string | null;
   perplexityApiKey?: string | null;
   exaApiKey?: string | null;

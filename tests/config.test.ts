@@ -14,6 +14,7 @@ import {
   editModeHintShown,
   isPlausibleKey,
   loadApiKey,
+  loadBaiduApiKey,
   loadBaseUrl,
   loadBraveApiKey,
   loadContextTokens,
@@ -1073,8 +1074,10 @@ describe("config", () => {
     it("preserves each known engine end-to-end (no silent tavily→default fall-through, #1309)", () => {
       for (const engine of [
         "bing",
+        "bing-intl",
         "searxng",
         "metaso",
+        "baidu",
         "tavily",
         "perplexity",
         "exa",
@@ -1098,6 +1101,68 @@ describe("config", () => {
       // so an explicit `/search-engine mojeek` later still rejects loudly.
       writeConfig({ webSearchEngine: "mojeek" as unknown as "bing" }, path);
       expect(webSearchEngine(path)).toBe("bing");
+    });
+  });
+
+  describe("loadBaiduApiKey", () => {
+    it("returns BAIDU_API_KEY env var when set", () => {
+      const orig = process.env.BAIDU_API_KEY;
+      process.env.BAIDU_API_KEY = "bai-123";
+      try {
+        expect(loadBaiduApiKey(path)).toBe("bai-123");
+      } finally {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        if (orig === undefined) delete process.env.BAIDU_API_KEY;
+        else process.env.BAIDU_API_KEY = orig;
+      }
+    });
+
+    it("falls back to QIANFAN_API_KEY when BAIDU_API_KEY is unset", () => {
+      const origLong = process.env.BAIDU_API_KEY;
+      const origShort = process.env.QIANFAN_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BAIDU_API_KEY;
+      process.env.QIANFAN_API_KEY = "qf-456";
+      try {
+        expect(loadBaiduApiKey(path)).toBe("qf-456");
+      } finally {
+        if (origLong !== undefined) process.env.BAIDU_API_KEY = origLong;
+        // biome-ignore lint/performance/noDelete: same reason
+        if (origShort === undefined) delete process.env.QIANFAN_API_KEY;
+        else process.env.QIANFAN_API_KEY = origShort;
+      }
+    });
+
+    it("falls back to config.baiduApiKey when no env vars are set", () => {
+      const origLong = process.env.BAIDU_API_KEY;
+      const origShort = process.env.QIANFAN_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BAIDU_API_KEY;
+      // biome-ignore lint/performance/noDelete: same reason
+      delete process.env.QIANFAN_API_KEY;
+      try {
+        writeConfig({ baiduApiKey: "cfg-baidu" }, path);
+        expect(loadBaiduApiKey(path)).toBe("cfg-baidu");
+      } finally {
+        if (origLong !== undefined) process.env.BAIDU_API_KEY = origLong;
+        if (origShort !== undefined) process.env.QIANFAN_API_KEY = origShort;
+      }
+    });
+
+    it("returns undefined when nothing is set", () => {
+      const origLong = process.env.BAIDU_API_KEY;
+      const origShort = process.env.QIANFAN_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BAIDU_API_KEY;
+      // biome-ignore lint/performance/noDelete: same reason
+      delete process.env.QIANFAN_API_KEY;
+      try {
+        writeConfig({ baiduApiKey: undefined }, path);
+        expect(loadBaiduApiKey(path)).toBeUndefined();
+      } finally {
+        if (origLong !== undefined) process.env.BAIDU_API_KEY = origLong;
+        if (origShort !== undefined) process.env.QIANFAN_API_KEY = origShort;
+      }
     });
   });
 

@@ -13,19 +13,10 @@ function fakeFetch(captured: CapturedRequest[], stubContent: string): typeof fet
 const SYSTEM_PROMPT =
   "You are a coding agent for project X.\nFollow the user's instructions.\nUse tools as needed.";
 
+// Deliberately NOT alphabetical in the original fixture — order drift used to
+// be possible. ImmutablePrefix now normalizes to name-sorted order (sortToolSpecs)
+// so the tool list is byte-stable for the cache prefix; these are pre-sorted.
 const TOOLS: ToolSpec[] = [
-  {
-    type: "function",
-    function: {
-      name: "Read",
-      description: "Read a file",
-      parameters: {
-        type: "object",
-        properties: { path: { type: "string" } },
-        required: ["path"],
-      },
-    },
-  },
   {
     type: "function",
     function: {
@@ -35,6 +26,18 @@ const TOOLS: ToolSpec[] = [
         type: "object",
         properties: { command: { type: "string" } },
         required: ["command"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "Read",
+      description: "Read a file",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
       },
     },
   },

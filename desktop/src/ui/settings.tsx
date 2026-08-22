@@ -621,8 +621,10 @@ function PageGeneral({
               onSave({
                 webSearchEngine: e.target.value as
                   | "bing"
+                  | "bing-intl"
                   | "searxng"
                   | "metaso"
+                  | "baidu"
                   | "tavily"
                   | "perplexity"
                   | "exa"
@@ -632,8 +634,10 @@ function PageGeneral({
             }
           >
             <option value="bing">{t("settings.webSearchEngineBing")}</option>
+            <option value="bing-intl">{t("settings.webSearchEngineBingIntl")}</option>
             <option value="searxng">{t("settings.webSearchEngineSearxng")}</option>
             <option value="metaso">{t("settings.webSearchEngineMetaso")}</option>
+            <option value="baidu">{t("settings.webSearchEngineBaidu")}</option>
             <option value="tavily">{t("settings.webSearchEngineTavily")}</option>
             <option value="perplexity">{t("settings.webSearchEnginePerplexity")}</option>
             <option value="exa">{t("settings.webSearchEngineExa")}</option>
@@ -648,9 +652,10 @@ function PageGeneral({
 }
 
 const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
-  engine: "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
   patchKey:
     | "metasoApiKey"
+    | "baiduApiKey"
     | "tavilyApiKey"
     | "perplexityApiKey"
     | "exaApiKey"
@@ -659,6 +664,11 @@ const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
   signupUrl: string;
 }> = [
   { engine: "metaso", patchKey: "metasoApiKey", signupUrl: "https://metaso.cn/settings/api" },
+  {
+    engine: "baidu",
+    patchKey: "baiduApiKey",
+    signupUrl: "https://console.bce.baidu.com/qianfan/ais/console/onlineService",
+  },
   { engine: "tavily", patchKey: "tavilyApiKey", signupUrl: "https://app.tavily.com" },
   {
     engine: "perplexity",
@@ -684,10 +694,10 @@ function WebSearchEngineCredentials({
   }
   const field = SEARCH_ENGINE_API_KEY_FIELDS.find((f) => f.engine === engine);
   if (!field) return null;
-  const prefix = settings.webSearchApiKeys?.[engine];
+  const prefix = settings.webSearchApiKeys?.[field.engine];
   return (
     <WebSearchApiKeyRow
-      engine={engine}
+      engine={field.engine}
       patchKey={field.patchKey}
       signupUrl={field.signupUrl}
       prefix={prefix}
@@ -735,9 +745,10 @@ function WebSearchApiKeyRow({
   prefix,
   onSave,
 }: {
-  engine: "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
   patchKey:
     | "metasoApiKey"
+    | "baiduApiKey"
     | "tavilyApiKey"
     | "perplexityApiKey"
     | "exaApiKey"

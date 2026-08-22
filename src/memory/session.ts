@@ -20,6 +20,7 @@ import { atomicWriteSync, tmpSiblingPath } from "../core/atomic-write.js";
 import { readJsonFileSilently } from "../core/json-file.js";
 import { appendJsonlLine, parseJsonl } from "../core/jsonl.js";
 import { reasonixHome } from "../reasonix-home.js";
+import type { CacheDiagnosticEntry } from "../telemetry/cache-diagnostics.js";
 import type { ChatMessage } from "../types.js";
 
 /** Sidecar file suffix holding the per-session event log. */
@@ -75,6 +76,8 @@ export interface SessionMeta {
   totalCompletionTokens?: number;
   /** Last turn's promptTokens — lets /status render the context bar before the next turn fires. */
   lastPromptTokens?: number;
+  /** Recent per-turn cache evidence. Backward-compatible: absent on sessions created before cache diagnostics. */
+  cacheDiagnostics?: CacheDiagnosticEntry[];
   /** True when the session filename/summary was generated from conversation content. */
   autoTitleGenerated?: boolean;
   /** Model the conversation last ran with — restored on resume so a reinstall / config reset doesn't silently switch an ongoing conversation's model. Only the desktop UI's model enum writes this. */

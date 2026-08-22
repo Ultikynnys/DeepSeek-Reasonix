@@ -791,9 +791,23 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
         "write_file",
         JSON.stringify({ path: "new.md", content: "hi" }),
       );
-      expect(out).toMatch(/wrote 2 chars/);
+      expect(out).toMatch(/created new\.md \(2 chars\)/);
       const disk = await fs.readFile(join(root, "new.md"), "utf8");
       expect(disk).toBe("hi");
+    });
+
+    it("returns a unified diff when overwriting an existing file", async () => {
+      await fs.writeFile(join(root, "old.txt"), "one\ntwo\n");
+      const out = await tools.dispatch(
+        "write_file",
+        JSON.stringify({ path: "old.txt", content: "one\nTWO\n" }),
+      );
+      expect(out).toContain("edited old.txt (8→8 chars)");
+      expect(out).toContain("@@ -1,3 +1,3 @@");
+      expect(out).toContain("- two");
+      expect(out).toContain("+ TWO");
+      const disk = await fs.readFile(join(root, "old.txt"), "utf8");
+      expect(disk).toBe("one\nTWO\n");
     });
 
     it("creates parent directories as needed", async () => {

@@ -294,7 +294,7 @@ export class SkillStore {
     return {
       name,
       description,
-      body: body.trim(),
+      body: loadBodyWithReferences(path, body.trim()),
       scope,
       path,
       allowedTools: parseAllowedTools(data["allowed-tools"]),
@@ -307,6 +307,33 @@ export class SkillStore {
       })(),
     };
   }
+}
+
+function loadBodyWithReferences(skillFilePath: string, body: string): string {
+  if (!skillFilePath.endsWith(SKILL_FILE)) return body;
+  const refsDir = join(dirname(skillFilePath), "references");
+  if (!existsSync(refsDir)) return body;
+  let entries: string[];
+  try {
+    entries = readdirSync(refsDir)
+      .filter((f) => f.endsWith(".md"))
+      .sort();
+  } catch {
+    return body;
+  }
+  if (entries.length === 0) return body;
+  const parts: string[] = [body];
+  for (const entry of entries) {
+    const slug = entry.slice(0, -3); // strip .md
+    let content: string;
+    try {
+      content = readFileSync(join(refsDir, entry), "utf8").trim();
+    } catch {
+      continue;
+    }
+    if (content) parts.push(`\n\n## Reference: ${slug}\n\n${content}`);
+  }
+  return parts.join("");
 }
 
 function dedupePaths(paths: readonly string[]): string[] {

@@ -657,6 +657,8 @@ export const zhCN: TranslationSchema = {
     providerErrorRetry: "模型服务在产生可见回答前返回错误 — 正在自动重试。",
     forcingSummary:
       "上下文 {before}/{ctxMax}（{pct}%）— 基于已收集到的内容强制总结。请运行 /compact、/clear 或 /new 重置。",
+    iterLimitReached:
+      "本轮已达到 {max} 次迭代上限 — 正在基于已收集到的内容强制总结。可通过 `maxIterPerTurn` 配置或 REASONIX_MAX_ITER 提高上限，或在新的轮次中重新提问。",
   },
   errors: {
     contextOverflow:
@@ -1378,17 +1380,17 @@ export const zhCN: TranslationSchema = {
   },
   webErrors: {
     status:
-      "web_search {status} — try: 搜索后端返回错误；请改写查询，或使用 /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave 切换引擎",
+      "web_search {status} — try: 搜索后端返回错误；请改写查询，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave 切换引擎",
     rateLimit429:
       "web_search 429 — try: 等待 10 秒后重试，或改写查询；搜索后端正在对该客户端进行限流",
     forbidden403:
-      "web_search 403 — try: 搜索后端拒绝该客户端访问；使用 /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave 切换引擎，或稍后重试",
+      "web_search 403 — try: 搜索后端拒绝该客户端访问；使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave 切换引擎，或稍后重试",
     serverError5xx:
       "web_search {status} — try: 在浏览器中打开搜索 URL；若能加载则属临时故障，等 30 秒重试即可",
     bingBlocked:
-      "web_search: Bing 反爬页面 — 频率限制或被屏蔽 — try: 等待 30 秒后重试，或使用 /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave 切换引擎",
+      "web_search: Bing 反爬页面 — 频率限制或被屏蔽 — try: 等待 30 秒后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave 切换引擎",
     bingNoResults:
-      "web_search: 返回 0 条结果但响应看起来不是正常空结果页（{chars} 字符，前 120 字符：{preview}）— try: 使用更简单的关键词改写查询，或使用 /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave 切换引擎",
+      "web_search: 返回 0 条结果但响应看起来不是正常空结果页（{chars} 字符，前 120 字符：{preview}）— try: 使用更简单的关键词改写查询，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave 切换引擎",
     invalidEndpoint:
       'web_search: 无效的 SearXNG 端点 "{endpoint}" — try: 使用 /search-endpoint http://host:port 设置有效的 URL',
     endpointMustBeHttp:
@@ -1409,6 +1411,15 @@ export const zhCN: TranslationSchema = {
       "web_search: Metaso 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave 切换引擎",
     metasoParseError: "web_search: Metaso 返回无法解析的响应（HTTP {status}）— 稍后重试",
     metasoApiError: "web_search: Metaso API 错误（code {code}: {message}）— 稍后重试",
+    baiduMissingKey:
+      "web_search: Baidu AI Search 需要 API 密钥 — 设置 BAIDU_API_KEY 或 QIANFAN_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `baiduApiKey`，或使用 /search-engine baidu <key>；可在百度智能云千帆获取密钥",
+    baiduUnauthorized:
+      "web_search: Baidu AI Search API 密钥被拒绝 — 检查 BAIDU_API_KEY、QIANFAN_API_KEY 或 `baiduApiKey`",
+    baiduRateLimit:
+      "web_search: Baidu AI Search 请求频率限制或配额用尽 — 等待后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave 切换引擎",
+    baiduServerError:
+      "web_search: Baidu AI Search 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave 切换引擎",
+    baiduParseError: "web_search: Baidu AI Search 返回无法解析的响应（HTTP {status}）— 稍后重试",
     tavilyMissingKey:
       "web_search: Tavily 后端需要 API 密钥 — 设置 TAVILY_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `tavilyApiKey`；https://tavily.com 每月 1000 次免费",
     tavilyUnauthorized:

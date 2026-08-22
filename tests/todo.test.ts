@@ -35,7 +35,8 @@ describe("todo_write — lightweight in-session task tracker", () => {
     expect(out).toContain("1 done");
     expect(out).toContain("1 in progress");
     expect(out).toContain("1 pending");
-    expect(out).toContain("[x] Read the spec");
+    // Completed items are hidden from rendered output (header still counts them) — #2049.
+    expect(out).not.toContain("[x] Read the spec");
     expect(out).toContain("[>] Sketching the parser");
     expect(out).toContain("[ ] Write tests");
     expect(updates).toHaveLength(1);

@@ -109,6 +109,10 @@ export interface SubagentToolOptions {
   sink?: SubagentSink;
   /** Fires once per spawn, after `spawnSubagent` returns and before its result is formatted for the parent. Bind a `SubagentTelemetry.record` here for automatic distillation capture. */
   onSpawnComplete?: (result: SubagentResult) => void;
+  /** Folds the child loop's usage (cost, cache hit/miss, completion tokens) into the
+   *  parent session's SessionStats via `recordExternal` — the parent stats panel then
+   *  shows the full spend, not just parent-loop API calls. (#2008) */
+  recordExternal?: (model: string, usage: Usage) => void;
 }
 
 /** Memory-stable prefix — shared across spawns, cached. The model-dependent escalation contract is appended per spawn so a pro spawn doesn't get told it's running on flash (#582). */
@@ -652,6 +656,13 @@ export function registerSubagentTool(
       });
       sessionSpawnCount++;
       sessionSpawnTokens += result.usage.totalTokens;
+      if (opts.recordExternal && result.usage) {
+        try {
+          opts.recordExternal(result.model, result.usage);
+        } catch {
+          // Stats folding must never break the spawn-tool dispatch.
+        }
+      }
       if (opts.onSpawnComplete) {
         try {
           opts.onSpawnComplete(result);

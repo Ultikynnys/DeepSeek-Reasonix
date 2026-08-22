@@ -181,8 +181,10 @@ export const zhCN: typeof en = {
     contextWindowPlaceholder: "默认（300000）",
     webSearchEngine: "搜索引擎",
     webSearchEngineBing: "bing — 默认，国内裸 IP 直连，无需代理",
+    webSearchEngineBingIntl: "bing-intl — www.bing.com，国际站点索引",
     webSearchEngineSearxng: "searxng — 自托管（端点用 /se searxng <url> 配置）",
     webSearchEngineMetaso: "metaso — 每日 100 次免费（国内友好，metaso.cn 可领免费 key）",
+    webSearchEngineBaidu: "baidu — 百度 AI 搜索，文档称每月 1500 次免费（设置 BAIDU_API_KEY）",
     webSearchEngineTavily: "tavily — 每月 1000 次免费（设置 TAVILY_API_KEY）",
     webSearchEnginePerplexity: "perplexity — AI 直接回答（设置 PERPLEXITY_API_KEY）",
     webSearchEngineExa: "exa — AI 直接回答，每月 1000 次免费（设置 EXA_API_KEY）",
@@ -195,6 +197,7 @@ export const zhCN: typeof en = {
     webSearchApiKeyClear: "清除",
     webSearchApiKey: {
       metaso: "Metaso API key",
+      baidu: "Baidu AI Search API key",
       tavily: "Tavily API key",
       perplexity: "Perplexity API key",
       exa: "Exa API key",
