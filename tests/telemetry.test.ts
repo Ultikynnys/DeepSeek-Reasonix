@@ -55,15 +55,19 @@ describe("Usage.cacheHitRatio", () => {
 describe("costUsd", () => {
   it("matches DeepSeek's published V4 USD pricing sheet", () => {
     expect(DEEPSEEK_PRICING["deepseek-v4-flash"]).toEqual({
-      inputCacheHit: 0.0028,
-      inputCacheMiss: 0.14,
-      output: 0.28,
+      inputCacheHit: 0.007,
+      inputCacheMiss: 0.22,
+      output: 0.66,
     });
     expect(DEEPSEEK_PRICING["deepseek-v4-pro"]).toEqual({
-      inputCacheHit: 0.003625,
-      inputCacheMiss: 0.435,
-      output: 0.87,
+      inputCacheHit: 0.022,
+      inputCacheMiss: 0.66,
+      output: 1.98,
     });
+    // The vision-preview line bills at the same rate as v4-flash.
+    expect(DEEPSEEK_PRICING["deepseek-v4-flash-vision-exp"]).toEqual(
+      DEEPSEEK_PRICING["deepseek-v4-flash"],
+    );
   });
 
   it("applies DeepSeek pricing tiers", () => {
@@ -232,7 +236,10 @@ describe("inputCostUsd / outputCostUsd", () => {
     const u = new Usage(0, 100, 0, 0, 1000);
     const flashCost = costUsd("deepseek-v4-flash", u);
     const proCost = costUsd("deepseek-v4-pro", u);
-    expect(proCost).toBeGreaterThan(flashCost * 3); // current pro promo is ~3.1x flash
+    // Official off-peak rates: pro is exactly 3x flash on cache-miss and
+    // output ($0.66/$1.98), and 3.14x on cache hits ($0.007/$0.022).
+    expect(proCost / flashCost).toBeCloseTo(3, 10);
+    expect(proCost).toBeGreaterThan(flashCost); // own tier, not a flash fallback
   });
 
   it("both return 0 for an unknown model", () => {

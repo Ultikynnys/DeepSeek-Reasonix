@@ -2,16 +2,20 @@ import type { Usage } from "../client.js";
 import { loadPricingOverride } from "../config.js";
 import type { CacheDiagnosticEntry } from "./cache-diagnostics.js";
 
-/** USD per 1M tokens; display currency conversion happens at the UI boundary. */
+/** USD per 1M tokens, off-peak base rate (peak hours bill at 2x — see
+ *  desktop/src/peak-hours.ts). Display currency conversion happens at the UI boundary. */
 export const DEEPSEEK_PRICING: Record<
   string,
   { inputCacheHit: number; inputCacheMiss: number; output: number }
 > = {
-  "deepseek-v4-flash": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
-  "deepseek-v4-pro": { inputCacheHit: 0.003625, inputCacheMiss: 0.435, output: 0.87 },
+  // Official DeepSeek API pricing (api-docs.deepseek.com/quick_start/pricing).
+  "deepseek-v4-flash": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
+  "deepseek-v4-pro": { inputCacheHit: 0.022, inputCacheMiss: 0.66, output: 1.98 },
+  // The vision-preview line bills at the same rate as v4-flash.
+  "deepseek-v4-flash-vision-exp": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
   // Compat aliases — priced as v4-flash per the deprecation notice.
-  "deepseek-chat": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
-  "deepseek-reasoner": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
+  "deepseek-chat": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
+  "deepseek-reasoner": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
   // GPT-5.6 family (Sol/Terra/Luna) — official pricing (2026-07 GA). Cache
   // reads bill at 10% of input (90% discount). Override via `pricingOverride`.
   "gpt-5.6": { inputCacheHit: 0.5, inputCacheMiss: 5, output: 30 },
