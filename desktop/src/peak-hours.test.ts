@@ -4,10 +4,9 @@ import {
   isOffPeak,
   isPeak,
   minutesUntilRateChange,
-  weekendOffPeakActive,
 } from "./peak-hours";
 
-/** Weekday fixture — 2026-01-01 (Thursday), before the weekend-rule effective date. */
+/** Weekday fixture — 2026-01-01 (Thursday). */
 function weekday(hour: number, minute = 0): Date {
   return new Date(Date.UTC(2026, 0, 1, hour, minute));
 }
@@ -58,15 +57,6 @@ describe("peak-hours rate periods", () => {
     expect(isOffPeak(monday(1))).toBe(false);
   });
 
-  it("keeps the legacy weekday schedule until the effective instant (2026-08-22 16:00 UTC)", () => {
-    // Saturday 2026-08-22 07:00 UTC (15:00 Beijing) — before the gate: still peak.
-    expect(weekendOffPeakActive(new Date(Date.UTC(2026, 7, 22, 15)))).toBe(false);
-    expect(isPeak(new Date(Date.UTC(2026, 7, 22, 7)))).toBe(true);
-    // At the gate instant (Saturday 2026-08-22 16:00 UTC = Sunday 00:00 Beijing): off-peak.
-    expect(weekendOffPeakActive(new Date(Date.UTC(2026, 7, 22, 16)))).toBe(true);
-    expect(isPeak(new Date(Date.UTC(2026, 7, 22, 16)))).toBe(false);
-  });
-
   it("isBeijingWeekendDay uses Beijing time — Friday 16:00 UTC is already Saturday there", () => {
     expect(isBeijingWeekendDay(new Date(Date.UTC(2026, 8, 4, 16)))).toBe(true); // Sat 00:00 Beijing
     expect(isBeijingWeekendDay(new Date(Date.UTC(2026, 8, 4, 15, 59)))).toBe(false); // Fri 23:59 Beijing
@@ -81,7 +71,7 @@ describe("minutesUntilRateChange", () => {
     [3, 0, 60], // 03:00 → 04:00 (off-peak)
     [5, 0, 60], // 05:00 → 06:00 (peak)
     [9, 0, 60], // 09:00 → 10:00 (off-peak)
-    [10, 0, 900], // 10:00 → 01:00 tomorrow (15h) — legacy wrap, pre-effective date
+    [10, 0, 900], // 10:00 → 01:00 tomorrow (15h) — weekday wrap, next day is Friday
     [12, 30, 750], // 12:30 → 01:00 tomorrow (12.5h)
   ])("UTC %i:%02i → %i min", (hour, minute, mins) => {
     expect(minutesUntilRateChange(weekday(hour, minute))).toBe(mins);
