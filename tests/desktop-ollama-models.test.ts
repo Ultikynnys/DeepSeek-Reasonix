@@ -2,7 +2,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  deriveNativeOllamaOrigin,
   detectOllamaVision,
   fetchOllamaPlan,
   fetchOllamaUsage,
@@ -13,6 +12,7 @@ import {
   resetOllamaCatalogCacheForTest,
   showPayloadIsVision,
 } from "../src/cli/commands/desktop.js";
+import { deriveNativeOllamaOrigin } from "../src/config.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

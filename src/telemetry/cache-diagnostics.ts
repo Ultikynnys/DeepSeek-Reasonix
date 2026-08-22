@@ -204,7 +204,7 @@ export function renderCacheMissReport(
   const lines = [
     "cache miss report",
     `turns: ${valid.length} · input: ${totalInput.toLocaleString()} · cached: ${totalCached.toLocaleString()} · hit rate: ${pct(hitRate)} · saved: ${usd(saved)}`,
-    "note: DeepSeek does not return a cache-miss reason. Reasonix infers the reason locally from byte-stable prefix evidence.",
+    "note: DeepSeek does not return a cache-miss reason; Ollama reports no hit/miss split (hits are estimated from prefix overlap). Reasonix infers miss reasons locally from byte-stable prefix evidence.",
     "",
   ];
   for (const entry of recent) {

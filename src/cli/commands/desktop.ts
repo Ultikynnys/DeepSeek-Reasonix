@@ -76,6 +76,7 @@ import {
   DEFAULT_MODEL,
   DEFAULT_OLLAMA_CHAT_URL,
   bridgeEndpointEnv,
+  deriveNativeOllamaOrigin,
   isOpenAIStandardEndpoint,
   isPlausibleKey,
   isReasoningEffort,
@@ -170,12 +171,14 @@ import {
   signOutOpenAI,
 } from "../../oauth.js";
 import {
+  contextTokensForModel,
   loadOllamaVerdicts,
   ollamaVerdictsPath,
   partitionByVerdicts,
   saveOllamaVerdicts,
   scopeKeyFor,
   setVerdict,
+  showPayloadContextLength,
   verdictFor,
   visionModelsFor,
 } from "../../ollama-model-map.js";
@@ -891,27 +894,8 @@ export async function probeOllamaModel(
   return "error";
 }
 
-/** Derive the native Ollama API origin from an OpenAI-compat base URL by
- *  stripping a trailing `/v1`. Local daemon `http://localhost:11434/v1` →
- *  `http://localhost:11434`; cloud `https://ollama.com/v1` →
- *  `https://ollama.com`. The native `/api/*` endpoints live at that root. */
-export function deriveNativeOllamaOrigin(baseUrl: string): string {
-  try {
-    const url = new URL(baseUrl);
-    const path = url.pathname.replace(/\/+$/, "");
-    if (path === "/v1" || path.endsWith("/v1")) {
-      url.pathname = path.slice(0, -3) || "/";
-    }
-    return url.toString().replace(/\/+$/, "");
-  } catch {
-    return baseUrl;
-  }
-}
-
-/** Parse a native `/api/show` payload and decide whether the model is
- *  vision-capable. The reliable signal is the presence of a vision encoder /
- *  projector block: a non-empty `projector_info` object, or any `model_info`
- *  key under the `vision.` namespace. Absence of both ⇒ text-only. */
+/** Parse a native `/api/show` payload for a vision encoder: non-empty
+ *  `projector_info`, or any `model_info` key under `vision.`. */
 export function showPayloadIsVision(data: unknown): boolean {
   if (typeof data !== "object" || data === null) return false;
   const rec = data as Record<string, unknown>;
@@ -928,18 +912,14 @@ export function showPayloadIsVision(data: unknown): boolean {
   return false;
 }
 
-/** A 1×1 transparent PNG as a data URL — the smallest payload that exercises
- *  a model's vision tower through the OpenAI-compat `/v1/chat/completions`
- *  endpoint. Used to probe vision on endpoints where the native `/api/show`
- *  route isn't available (e.g. Ollama cloud). */
+/** A 1×1 transparent PNG data URL — the smallest payload that exercises a
+ *  model's vision tower through the OpenAI-compat `/v1/chat/completions`. */
 const TINY_PNG_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
 
-/** Probe whether `model` accepts image content parts by POSTing a single
- *  user message containing a tiny data-URL image to the OpenAI-compat chat
- *  endpoint. A 2xx means the model consumed the image (vision-capable); a
- *  400 means it rejected the image (text-only). Never throws — returns
- *  `undefined` when the outcome is indeterminate. */
+/** Probe whether `model` accepts image parts by POSTing one user message
+ *  with a tiny data-URL image to the OpenAI-compat chat endpoint: 2xx ⇒
+ *  vision-capable, 400 ⇒ text-only, else indeterminate (`undefined`). */
 export async function probeOllamaVision(
   baseUrl: string,
   model: string,
@@ -973,17 +953,14 @@ export async function probeOllamaVision(
   }
 }
 
-/** Resolve vision capability for one model: prefer the native `/api/show`
- *  metadata (fast, no generation), fall back to an image probe through the
- *  OpenAI-compat endpoint when the native route 404s/405s. Returns `true` /
- *  `false` when confidently determined, or `undefined` when indeterminate
- *  (endpoint unreachable, both routes failed) — caller treats that as unknown. */
-export async function detectOllamaVision(
+/** One `/api/show` fetch for vision + context window; undefined when both
+ *  /api/show and the image probe fail (vision is determinate when answered). */
+export async function fetchOllamaShowInfo(
   baseUrl: string,
   model: string,
   apiKey: string,
   timeoutMs = 15_000,
-): Promise<boolean | undefined> {
+): Promise<{ vision?: boolean; contextTokens?: number } | undefined> {
   const origin = deriveNativeOllamaOrigin(baseUrl);
   try {
     const show = await fetch(`${origin}/api/show?model=${encodeURIComponent(model)}`, {
@@ -992,14 +969,28 @@ export async function detectOllamaVision(
     });
     if (show.ok) {
       const data = (await show.json().catch(() => undefined)) as unknown;
-      return showPayloadIsVision(data);
+      const contextTokens = showPayloadContextLength(data);
+      return {
+        vision: showPayloadIsVision(data),
+        ...(contextTokens !== undefined ? { contextTokens } : {}),
+      };
     }
     // 404 / 405 on /api/show — cloud gateway likely; fall through to the probe.
     if (show.status !== 404 && show.status !== 405) return undefined;
   } catch {
     return undefined;
   }
-  return probeOllamaVision(baseUrl, model, apiKey, timeoutMs);
+  const vision = await probeOllamaVision(baseUrl, model, apiKey, timeoutMs);
+  return vision === undefined ? undefined : { vision };
+}
+
+export async function detectOllamaVision(
+  baseUrl: string,
+  model: string,
+  apiKey: string,
+  timeoutMs = 15_000,
+): Promise<boolean | undefined> {
+  return (await fetchOllamaShowInfo(baseUrl, model, apiKey, timeoutMs))?.vision;
 }
 
 /** Batch size that stays under the cloud's parallel-burst rate limit (19
@@ -1160,11 +1151,11 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
       const toProbe = visible.filter((m) => !cached.has(m));
       let visionPersisted = false;
       for (const m of toProbe) {
-        const isVision = await detectOllamaVision(base, m, apiKey ?? "");
-        if (isVision === true) vision.add(m);
-        if (isVision !== undefined && visionScope && plan) {
+        const info = await fetchOllamaShowInfo(base, m, apiKey ?? "");
+        if (info?.vision === true) vision.add(m);
+        if (info !== undefined && visionScope && plan) {
           // Re-read the cached entry if present so we don't clobber a tier
-          // verdict that a concurrent pass wrote; then stamp the vision flag.
+          // verdict that a concurrent pass wrote; then stamp vision + window.
           const existing = verdictFor(visionStore, plan, visionScope, m, Date.now());
           setVerdict(
             visionStore,
@@ -1173,7 +1164,8 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
             m,
             existing?.result ?? "ok",
             existing?.at ?? Date.now(),
-            isVision,
+            info.vision,
+            info.contextTokens,
           );
           visionPersisted = true;
         }
@@ -1914,13 +1906,24 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = tab.currentReasoningEffort;
+  // Ollama tabs calibrate compaction against the server's real window when one
+  // has been learned from /api/show (verdict store); the user `contextTokens`
+  // override (clamped ≥300K) is the fallback, then the per-model default.
+  const ctxMaxOverride =
+    provider === "ollama"
+      ? (contextTokensForModel(
+          loadOllamaVerdicts(ollamaVerdictsPath()),
+          tab.currentModel.replace(/^ollama\//, ""),
+          Date.now(),
+        ) ?? tab.ctxMaxOverride)
+      : tab.ctxMaxOverride;
   const loop = new CacheFirstLoop({
     client,
     prefix,
     tools: toolset.tools,
     model: tab.currentModel,
     budgetUsd: tab.budgetUsd,
-    ctxMaxOverride: tab.ctxMaxOverride,
+    ctxMaxOverride,
     session: tab.currentSession,
     reasoningEffort,
     maxIterPerTurn: loadMaxIterPerTurn(),

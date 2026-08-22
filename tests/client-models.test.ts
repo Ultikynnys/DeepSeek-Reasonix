@@ -212,7 +212,65 @@ describe("DeepSeekClient ollama provider (keyless + prefix strip)", () => {
     }
   });
 
-  it("keyless chat omits the Authorization header and strips the ollama/ prefix", async () => {
+  it("keyless chat omits the Authorization header, strips the ollama/ prefix, and hits the native /api/chat endpoint", async () => {
+    const savedKeepAlive = process.env.OLLAMA_KEEP_ALIVE;
+    const savedNumCtx = process.env.OLLAMA_NUM_CTX;
+    process.env.OLLAMA_KEEP_ALIVE = "30m";
+    // biome-ignore lint/performance/noDelete: test needs the env unset
+    delete process.env.OLLAMA_NUM_CTX;
+    try {
+      let capturedUrl = "";
+      let capturedInit: RequestInit | undefined;
+      const fetch = vi.fn(async (url, init) => {
+        capturedUrl = String(url);
+        capturedInit = init as RequestInit;
+        return new Response(
+          JSON.stringify({
+            model: "llama3.1:latest",
+            message: { role: "assistant", content: "hi" },
+            done: true,
+            done_reason: "stop",
+            prompt_eval_count: 5,
+            eval_count: 1,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as unknown as typeof fetch;
+      const client = new DeepSeekClient({
+        baseUrl: "http://localhost:11434/v1",
+        allowMissingKey: true,
+        fetch,
+      });
+
+      const res = await client.chat({
+        model: "ollama/llama3.1:latest",
+        messages: [{ role: "user", content: "hi" }],
+      });
+
+      expect(capturedUrl).toBe("http://localhost:11434/api/chat");
+      expect(capturedInit!.headers).not.toHaveProperty("Authorization");
+      const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
+      expect(body.model).toBe("llama3.1:latest");
+      expect(body.keep_alive).toBe("30m");
+      expect(body.options).toBeUndefined();
+      expect(res.content).toBe("hi");
+    } finally {
+      if (savedKeepAlive === undefined) {
+        // biome-ignore lint/performance/noDelete: restore exact env state
+        delete process.env.OLLAMA_KEEP_ALIVE;
+      } else {
+        process.env.OLLAMA_KEEP_ALIVE = savedKeepAlive;
+      }
+      if (savedNumCtx === undefined) {
+        // biome-ignore lint/performance/noDelete: restore exact env state
+        delete process.env.OLLAMA_NUM_CTX;
+      } else {
+        process.env.OLLAMA_NUM_CTX = savedNumCtx;
+      }
+    }
+  });
+
+  it("a cloud key IS sent when configured, and ollama maps effort to think instead of DeepSeek fields", async () => {
     let capturedUrl = "";
     let capturedInit: RequestInit | undefined;
     const fetch = vi.fn(async (url, init) => {
@@ -220,38 +278,12 @@ describe("DeepSeekClient ollama provider (keyless + prefix strip)", () => {
       capturedInit = init as RequestInit;
       return new Response(
         JSON.stringify({
-          choices: [{ message: { role: "assistant", content: "hi" } }],
-          usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    }) as unknown as typeof fetch;
-    const client = new DeepSeekClient({
-      baseUrl: "http://localhost:11434/v1",
-      allowMissingKey: true,
-      fetch,
-    });
-
-    const res = await client.chat({
-      model: "ollama/llama3.1:latest",
-      messages: [{ role: "user", content: "hi" }],
-    });
-
-    expect(capturedUrl).toBe("http://localhost:11434/v1/chat/completions");
-    expect(capturedInit!.headers).not.toHaveProperty("Authorization");
-    const body = JSON.parse(String(capturedInit!.body)) as { model?: string };
-    expect(body.model).toBe("llama3.1:latest");
-    expect(res.content).toBe("hi");
-  });
-
-  it("a cloud key IS sent when configured, and ollama drops DeepSeek-only fields", async () => {
-    let capturedInit: RequestInit | undefined;
-    const fetch = vi.fn(async (_url, init) => {
-      capturedInit = init as RequestInit;
-      return new Response(
-        JSON.stringify({
-          choices: [{ message: { role: "assistant", content: "ok" } }],
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          model: "qwen3:32b",
+          message: { role: "assistant", content: "ok" },
+          done: true,
+          done_reason: "stop",
+          prompt_eval_count: 1,
+          eval_count: 1,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -265,15 +297,18 @@ describe("DeepSeekClient ollama provider (keyless + prefix strip)", () => {
     await client.chat({
       model: "ollama/qwen3:32b",
       messages: [{ role: "user", content: "hi" }],
-      thinking: "high",
+      thinking: "enabled",
       reasoningEffort: "high",
     });
 
+    expect(capturedUrl).toBe("https://ollama.example.com/api/chat");
     const headers = capturedInit!.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer sk-ollama-cloud");
     const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
     expect(body.model).toBe("qwen3:32b");
     expect(body.extra_body).toBeUndefined();
     expect(body.reasoning_effort).toBeUndefined();
+    // thinking wins over effort in the native `think` field.
+    expect(body.think).toBe(true);
   });
 });

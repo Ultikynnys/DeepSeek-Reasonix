@@ -1,11 +1,24 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
-import { loadRateLimit, providerForModel, resolveBaseUrlEnv } from "./config.js";
+import {
+  deriveNativeOllamaOrigin,
+  loadOllamaKeepAlive,
+  loadOllamaNumCtx,
+  loadRateLimit,
+  providerForModel,
+  resolveBaseUrlEnv,
+} from "./config.js";
 import { createLogger } from "./logging.js";
+import { showPayloadContextLength } from "./ollama-model-map.js";
 import { buildResponsesPayload } from "./responses-api.js";
 import { type RetryOptions, fetchWithRetry } from "./retry.js";
+import { estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
 
 const log = createLogger("client");
+
+/** How long a learned Ollama context window is trusted before re-probing
+ *  `/api/show` (model registry changes are rare; 10 min keeps it fresh). */
+const OLLAMA_SHOW_PROBE_TTL_MS = 10 * 60_000;
 
 export class Usage {
   constructor(
@@ -14,6 +27,9 @@ export class Usage {
     public totalTokens = 0,
     public promptCacheHitTokens = 0,
     public promptCacheMissTokens = 0,
+    public promptEvalDurationMs = 0,
+    public evalDurationMs = 0,
+    public loadDurationMs = 0,
   ) {}
 
   get cacheHitRatio(): number {
@@ -51,7 +67,99 @@ export class Usage {
       u.total_tokens ?? promptTokens + completionTokens,
       cacheHitTokens,
       cacheMissTokens,
+      nsToMs(u.prompt_eval_duration),
+      nsToMs(u.eval_duration),
+      nsToMs(u.load_duration),
     );
+  }
+}
+
+/** Ollama native metrics report durations in nanoseconds — normalize to ms. */
+function nsToMs(ns: number | undefined): number {
+  return typeof ns === "number" && Number.isFinite(ns) ? Math.round(ns / 1_000_000) : 0;
+}
+/** Convert a ChatMessage to Ollama's native message shape: content parts split
+ *  into text + `images` (data-URI base64 stripped), tool-call arguments parsed
+ *  from JSON strings into objects, reasoning round-tripped as `thinking`. */
+function toNativeOllamaMessage(msg: ChatMessage): Record<string, unknown> {
+  const out: Record<string, unknown> = { role: msg.role };
+  if (msg.name) out.tool_name = msg.name;
+  if (msg.tool_call_id) out.tool_call_id = msg.tool_call_id;
+  if (msg.reasoning_content) out.thinking = msg.reasoning_content;
+  if (Array.isArray(msg.content)) {
+    const text: string[] = [];
+    const images: string[] = [];
+    for (const part of msg.content) {
+      if (part.type === "text") {
+        text.push(part.text);
+      } else if (part.type === "image_url") {
+        // Native messages carry raw base64 bytes, not data URIs — strip the
+        // `data:image/...;base64,` prefix if present.
+        const url = part.image_url.url;
+        const comma = url.indexOf(",");
+        images.push(comma >= 0 ? url.slice(comma + 1) : url);
+      }
+    }
+    if (text.length > 0) out.content = text.join("\n");
+    if (images.length > 0) out.images = images;
+  } else if (typeof msg.content === "string") {
+    out.content = msg.content;
+  }
+  if (msg.tool_calls?.length) {
+    out.tool_calls = msg.tool_calls.map((tc) => ({
+      function: {
+        name: tc.function?.name ?? "",
+        arguments: parseToolCallArguments(tc.function?.arguments),
+      },
+    }));
+  }
+  return out;
+}
+
+/** Native tool-call arguments are objects, not JSON strings — parse, and treat
+ *  malformed input as an empty object rather than dropping the call. */
+function parseToolCallArguments(raw: string | undefined): unknown {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The inverse — native responses hand tool-call arguments back as objects;
+ *  the loop consumes them as JSON strings. */
+function stringifyNativeToolCallArguments(args: unknown): string {
+  if (typeof args === "string") return args;
+  try {
+    return JSON.stringify(args ?? {});
+  } catch {
+    return "{}";
+  }
+}
+
+/** Byte-stable equality for the cache-prefix overlap check — key order is
+ *  deterministic because both sides serialize the same source objects. */
+function sameMessage(a: ChatMessage, b: ChatMessage): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Map reasoningEffort / thinking to Ollama's `think` field — mirrors Ollama's
+ *  own thinkFromReasoningEffort ladder (none→false, minimal→low, xhigh/ultra→max). */
+function ollamaThinkValue(opts: ChatRequestOptions): boolean | string | undefined {
+  if (opts.thinking === "enabled") return true;
+  if (opts.thinking === "disabled") return false;
+  switch (opts.reasoningEffort) {
+    case "low":
+    case "medium":
+    case "high":
+      return opts.reasoningEffort;
+    case "xhigh":
+    case "max":
+      return "max";
+    default:
+      return undefined;
   }
 }
 
@@ -189,6 +297,15 @@ export class DeepSeekClient {
   private readonly transportResolver?: () => Promise<ResolvedTransport | null>;
   private nextChatRequestAt = 0;
 
+  /** What was last sent per Ollama model, for cache-prefix inference. */
+  private readonly ollamaLastSent = new Map<
+    string,
+    { messages: readonly ChatMessage[]; toolsKey: string }
+  >();
+
+  /** Learned context windows per Ollama model (from `/api/show`), with timestamps. */
+  private readonly ollamaContextCache = new Map<string, { at: number; contextTokens?: number }>();
+
   constructor(opts: DeepSeekClientOptions = {}) {
     // Keyless endpoints (local Ollama) must NOT fall back to the
     // DEEPSEEK_API_KEY env — that would ship the DeepSeek key to whatever the
@@ -283,13 +400,20 @@ export class DeepSeekClient {
     } else {
       Object.assign(headers, await this.authHeaders());
     }
+    const isOllama = providerForModel(opts.model) === "ollama";
+    const endpoint =
+      transport?.endpoint ??
+      (isOllama
+        ? `${deriveNativeOllamaOrigin(this.baseUrl)}/api/chat`
+        : `${this.baseUrl}/chat/completions`);
+    const ollamaNumCtx = isOllama ? await this.resolveOllamaNumCtx(opts) : undefined;
     const resp = await fetchWithRetry(
       this._fetch,
-      transport?.endpoint ?? `${this.baseUrl}/chat/completions`,
+      endpoint,
       {
         method: "POST",
         headers,
-        body: stringifyJsonTransport(this.buildPayload(opts, stream, transport)),
+        body: stringifyJsonTransport(this.buildPayload(opts, stream, transport, ollamaNumCtx)),
         signal,
       },
       { ...this.retry, signal },
@@ -320,12 +444,19 @@ export class DeepSeekClient {
     opts: ChatRequestOptions,
     stream: boolean,
     transport: ResolvedTransport | null,
+    ollamaNumCtx?: number,
   ) {
     // The ChatGPT Codex backend speaks the Responses API — chat-completions
     // fields (messages, stream_options, max_tokens, ...) are rejected with a
     // 400, so the whole payload is converted.
     if (transport?.api === "responses") {
       return buildResponsesPayload(opts, stream);
+    }
+    // Ollama speaks its native `/api/chat` wire format — `options.num_ctx`,
+    // `keep_alive` and `think` are all silently dropped by the OpenAI-compat
+    // endpoint, so this branch never reaches the chat-completions payload below.
+    if (providerForModel(opts.model) === "ollama") {
+      return this.buildOllamaPayload(opts, stream, ollamaNumCtx);
     }
     const isOllama = providerForModel(opts.model) === "ollama";
     const payload: Record<string, unknown> = {
@@ -372,6 +503,32 @@ export class DeepSeekClient {
     if (opts.reasoningEffort && !isOllama) {
       payload.reasoning_effort = opts.reasoningEffort;
     }
+    return payload;
+  }
+
+  /** Native `/api/chat` payload — the compat endpoint drops `options.num_ctx`,
+   *  `keep_alive` and `think`, so this path is the only way to control them. */
+  private buildOllamaPayload(
+    opts: ChatRequestOptions,
+    stream: boolean,
+    ollamaNumCtx?: number,
+  ): Record<string, unknown> {
+    const options: Record<string, unknown> = {};
+    if (opts.maxTokens !== undefined) options.num_predict = opts.maxTokens;
+    if (opts.temperature !== undefined) options.temperature = opts.temperature;
+    if (ollamaNumCtx !== undefined) options.num_ctx = ollamaNumCtx;
+    const payload: Record<string, unknown> = {
+      // `ollama/<id>` namespacing is client-side routing — the server wants the raw id.
+      model: opts.model.replace(/^ollama\//, ""),
+      messages: opts.messages.map((m) => toNativeOllamaMessage(m)),
+      stream,
+    };
+    if (Object.keys(options).length > 0) payload.options = options;
+    payload.keep_alive = opts.ollama?.keepAlive ?? loadOllamaKeepAlive();
+    if (opts.tools?.length) payload.tools = opts.tools;
+    if (opts.responseFormat?.type === "json_object") payload.format = "json";
+    const think = ollamaThinkValue(opts);
+    if (think !== undefined) payload.think = think;
     return payload;
   }
 
@@ -446,6 +603,9 @@ export class DeepSeekClient {
     if (transport?.api === "responses") {
       return this.chatViaStream(opts);
     }
+    if (providerForModel(opts.model) === "ollama") {
+      return this.chatOllama(opts);
+    }
     const { signal, timer } = this.withTimeout(opts.signal);
     try {
       const { resp } = await this.prepareRequest(opts, false, signal);
@@ -459,6 +619,37 @@ export class DeepSeekClient {
         reasoningContent: choice.reasoning_content ?? choice.reasoning ?? null,
         toolCalls: choice.tool_calls ?? [],
         usage: Usage.fromApi(data.usage ?? data),
+        raw: data,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Native `/api/chat` non-streaming response — `message` instead of
+   *  `choices[0].message`, tool-call arguments as objects, metrics inline. */
+  private async chatOllama(opts: ChatRequestOptions): Promise<ChatResponse> {
+    const { signal, timer } = this.withTimeout(opts.signal);
+    try {
+      const { resp } = await this.prepareRequest(opts, false, signal);
+      if (!resp.ok) {
+        throw new Error(`${this._errorPrefix()} ${resp.status}: ${await resp.text()}`);
+      }
+      const data: any = await resp.json();
+      const message = data.message ?? {};
+      const toolCalls: ToolCall[] = (message.tool_calls ?? []).map((tc: any) => ({
+        id: tc.id,
+        type: "function" as const,
+        function: {
+          name: tc.function?.name ?? "",
+          arguments: stringifyNativeToolCallArguments(tc.function?.arguments),
+        },
+      }));
+      return {
+        content: message.content ?? "",
+        reasoningContent: message.thinking ?? null,
+        toolCalls,
+        usage: this.usageForOllama(opts, data),
         raw: data,
       };
     } finally {
@@ -505,7 +696,173 @@ export class DeepSeekClient {
     return { content, reasoningContent: reasoning || null, toolCalls, usage, raw };
   }
 
+  /** Native `/api/chat` streaming — Ollama streams newline-delimited JSON, not
+   *  SSE. Each line is a full object: content arrives as deltas, tool calls
+   *  arrive complete, and the final `done: true` line carries the metrics. */
+  private async *streamOllama(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
+    const { signal, timer } = this.withTimeout(opts.signal);
+    let resp: Response;
+    try {
+      ({ resp } = await this.prepareRequest(opts, true, signal));
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
+    if (!resp.ok || !resp.body) {
+      clearTimeout(timer);
+      throw new Error(
+        `${this._errorPrefix()} ${resp.status}: ${await resp.text().catch(() => "")}`,
+      );
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const emitLine = (line: string): void => {
+      if (!line.trim()) return;
+      let json: any;
+      try {
+        json = JSON.parse(line);
+      } catch {
+        return; // skip malformed frame
+      }
+      const chunk = this.parseNativeOllamaChunk(opts, json);
+      if (chunk) queue.push(chunk);
+    };
+    const queue: StreamChunk[] = [];
+    try {
+      while (true) {
+        if (queue.length > 0) {
+          yield queue.shift()!;
+          continue;
+        }
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newline = buffer.indexOf("\n");
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          emitLine(line);
+          newline = buffer.indexOf("\n");
+        }
+      }
+      // A trailing frame without a final newline.
+      if (buffer.trim()) emitLine(buffer);
+      while (queue.length > 0) yield queue.shift()!;
+    } finally {
+      clearTimeout(timer);
+      reader.releaseLock();
+    }
+  }
+
+  /** Convert one native NDJSON line into a StreamChunk. Content and thinking
+   *  arrive as deltas; tool calls are complete objects; the done line carries
+   *  the metrics and the finish reason. */
+  private parseNativeOllamaChunk(opts: ChatRequestOptions, json: any): StreamChunk | null {
+    const chunk: StreamChunk = { raw: json };
+    const message = json.message ?? {};
+    if (typeof message.content === "string" && message.content.length > 0) {
+      chunk.contentDelta = message.content;
+    }
+    if (typeof message.thinking === "string" && message.thinking.length > 0) {
+      chunk.reasoningDelta = message.thinking;
+    }
+    if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      const tc = message.tool_calls[0];
+      chunk.toolCallDelta = {
+        index: 0,
+        id: tc.id,
+        name: tc.function?.name ?? "",
+        argumentsDelta: stringifyNativeToolCallArguments(tc.function?.arguments),
+      };
+    }
+    if (json.done === true) {
+      chunk.finishReason =
+        typeof json.done_reason === "string" && json.done_reason ? json.done_reason : "stop";
+      if (json.prompt_eval_count !== undefined || json.eval_count !== undefined) {
+        chunk.usage = this.usageForOllama(opts, json);
+      }
+    }
+    return chunk.contentDelta !== undefined ||
+      chunk.reasoningDelta !== undefined ||
+      chunk.toolCallDelta !== undefined ||
+      chunk.usage !== undefined ||
+      chunk.finishReason !== undefined
+      ? chunk
+      : null;
+  }
+
+  /** Ollama reports prompt_eval_count / eval_count / durations, never a
+   *  cache-hit split — cache-hit tokens are inferred from prefix overlap
+   *  between consecutive requests (see applyOllamaCacheEstimate). */
+  private usageForOllama(opts: ChatRequestOptions, raw: RawUsage): Usage {
+    const usage = Usage.fromApi(raw);
+    this.applyOllamaCacheEstimate(opts, usage);
+    return usage;
+  }
+
+  /** Infer cache-hit tokens from the message prefix shared with the previous
+   *  request; Ollama reports no hit/miss split, so this is a local estimate
+   *  that shrinks on tool-list changes and folds. */
+  private applyOllamaCacheEstimate(opts: ChatRequestOptions, usage: Usage): void {
+    if (usage.promptTokens <= 0 || opts.messages.length === 0) return;
+    const toolsKey = JSON.stringify(opts.tools ?? []);
+    const previous = this.ollamaLastSent.get(opts.model);
+    let hitTokens = 0;
+    if (previous && previous.toolsKey === toolsKey) {
+      const max = Math.min(previous.messages.length, opts.messages.length);
+      let common = 0;
+      while (common < max && sameMessage(previous.messages[common]!, opts.messages[common]!)) {
+        common++;
+      }
+      if (common > 0) {
+        hitTokens = estimateRequestTokens(opts.messages.slice(0, common), opts.tools);
+      }
+    }
+    this.ollamaLastSent.set(opts.model, { messages: [...opts.messages], toolsKey });
+    if (hitTokens > 0) {
+      usage.promptCacheHitTokens = Math.min(hitTokens, usage.promptTokens);
+      usage.promptCacheMissTokens = Math.max(0, usage.promptTokens - usage.promptCacheHitTokens);
+      usage.totalTokens =
+        usage.promptCacheHitTokens + usage.promptCacheMissTokens + usage.completionTokens;
+    }
+  }
+
+  /** num_ctx for an Ollama request: explicit option > config/env > a lazy
+   *  `/api/show` probe (cached, fail-soft) — so server and compaction agree. */
+  private async resolveOllamaNumCtx(opts: ChatRequestOptions): Promise<number | undefined> {
+    if (opts.ollama?.numCtx !== undefined) return opts.ollama.numCtx;
+    const configured = loadOllamaNumCtx();
+    if (configured !== undefined) return configured;
+    const cached = this.ollamaContextCache.get(opts.model);
+    if (cached && Date.now() - cached.at < OLLAMA_SHOW_PROBE_TTL_MS) return cached.contextTokens;
+    const contextTokens = await this.probeOllamaContextLength(opts.model);
+    this.ollamaContextCache.set(opts.model, { at: Date.now(), contextTokens });
+    return contextTokens;
+  }
+
+  /** GET {origin}/api/show — the model's max context length, not the runner's
+   *  current num_ctx. Fail-soft: unknown means the caller sends no num_ctx. */
+  private async probeOllamaContextLength(model: string): Promise<number | undefined> {
+    try {
+      const resp = await this._fetch(
+        `${deriveNativeOllamaOrigin(this.baseUrl)}/api/show?model=${encodeURIComponent(
+          model.replace(/^ollama\//, ""),
+        )}`,
+        { headers: await this.authHeaders(), signal: AbortSignal.timeout(10_000) },
+      );
+      if (!resp.ok) return undefined;
+      return showPayloadContextLength(await resp.json().catch(() => undefined));
+    } catch {
+      return undefined;
+    }
+  }
+
   async *stream(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
+    if (providerForModel(opts.model) === "ollama") {
+      yield* this.streamOllama(opts);
+      return;
+    }
     const { signal, timer, timedOut } = this.withTimeout(opts.signal);
     let transport: ResolvedTransport | null = null;
     let resp: Response;

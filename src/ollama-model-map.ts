@@ -16,6 +16,10 @@ export interface OllamaVerdictEntry {
    *  means "unknown" — a legacy entry written before vision probing, or one
    *  where the vision probe couldn't run. */
   vision?: boolean;
+  /** Server-side context window in tokens, learned from `/api/show`
+   *  `model_info.llama.context_length` — the model's maximum sequence length,
+   *  not the runner's default num_ctx (4096). Absent/undefined = unknown. */
+  contextTokens?: number;
 }
 
 /** Persistent verdict map: `plan -> (endpoint|keyHash) -> model -> entry`.
@@ -54,7 +58,14 @@ function isVerdictEntry(value: unknown): value is OllamaVerdictEntry {
   const result = (value as { result?: unknown }).result;
   const at = (value as { at?: unknown }).at;
   const vision = (value as { vision?: unknown }).vision;
+  const contextTokens = (value as { contextTokens?: unknown }).contextTokens;
   if ((result !== "ok" && result !== "gated") || typeof at !== "number" || !Number.isFinite(at)) {
+    return false;
+  }
+  if (
+    contextTokens !== undefined &&
+    (typeof contextTokens !== "number" || !Number.isFinite(contextTokens) || contextTokens <= 0)
+  ) {
     return false;
   }
   // `vision` is optional — a legacy entry without it is still valid (means unknown).
@@ -115,12 +126,59 @@ export function setVerdict(
   result: OllamaModelVerdict,
   at: number,
   vision?: boolean,
+  contextTokens?: number,
 ): void {
   let plans = store.plans[plan];
   if (!plans) plans = store.plans[plan] = {};
   let scoped = plans[scope];
   if (!scoped) scoped = plans[scope] = {};
-  scoped[model] = { result, at, ...(vision === undefined ? {} : { vision }) };
+  scoped[model] = {
+    result,
+    at,
+    ...(vision === undefined ? {} : { vision }),
+    ...(contextTokens === undefined ? {} : { contextTokens }),
+  };
+}
+
+/** Context window in tokens from a native `/api/show` payload — the
+ *  `model_info.llama.context_length` key is the model's maximum sequence
+ *  length, not the runner's current num_ctx (which defaults to 4096). */
+export function showPayloadContextLength(data: unknown): number | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const rec = data as Record<string, unknown>;
+  const modelInfo = rec.model_info;
+  if (typeof modelInfo !== "object" || modelInfo === null) return undefined;
+  const raw = (modelInfo as Record<string, unknown>)["llama.context_length"];
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  return undefined;
+}
+
+/** Best-effort context-window lookup across every plan/scope bucket — used at
+ *  loop-bootstrap time when the caller may not know the account plan yet.
+ *  Returns the freshest entry's contextTokens within the TTL. */
+export function contextTokensForModel(
+  store: OllamaVerdictStore,
+  model: string,
+  now: number,
+  ttlMs: number = OLLAMA_VERDICT_TTL_MS,
+): number | undefined {
+  let bestAt = Number.NEGATIVE_INFINITY;
+  let best: number | undefined;
+  for (const scopes of Object.values(store.plans)) {
+    for (const perModel of Object.values(scopes)) {
+      const entry = perModel[model];
+      if (
+        entry &&
+        typeof entry.contextTokens === "number" &&
+        now - entry.at < ttlMs &&
+        entry.at > bestAt
+      ) {
+        bestAt = entry.at;
+        best = entry.contextTokens;
+      }
+    }
+  }
+  return best;
 }
 
 /** Split the model list into `known` (fresh cached verdicts) and `unknown`
@@ -143,11 +201,8 @@ export function partitionByVerdicts(
   return { known, unknown };
 }
 
-/** The set of models (within `models`) whose cached verdict marks them
- *  vision-capable. `vision` is `true` only — models with a gated/ok verdict but
- *  no recorded vision flag are not included (unknown is treated as not-vision;
- *  vision is an additive capability so this can only under-promise, never
- *  over-promise image support). */
+/** Models (within `models`) whose cached verdict marks them vision-capable.
+ *  Only `vision === true` counts — unknown never promises image support. */
 export function visionModelsFor(
   models: readonly string[],
   store: OllamaVerdictStore,

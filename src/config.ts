@@ -58,6 +58,21 @@ export { modelAcceptsImages } from "@reasonix/core-utils";
  *  cloud service requires OLLAMA_API_KEY — so the key is resolved but optional. */
 export const DEFAULT_OLLAMA_CHAT_URL = "http://localhost:11434/v1";
 
+/** Native Ollama API origin: strip a trailing `/v1` — the `/api/*` endpoints
+ *  live at that root (localhost:11434/v1 → localhost:11434). */
+export function deriveNativeOllamaOrigin(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl);
+    const path = url.pathname.replace(/\/+$/, "");
+    if (path === "/v1" || path.endsWith("/v1")) {
+      url.pathname = path.slice(0, -3) || "/";
+    }
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return baseUrl;
+  }
+}
+
 /** (baseUrl, apiKey) tuple for the Ollama provider — baseUrl from
  *  OLLAMA_BASE_URL env > `ollamaBaseUrl` config > local daemon default; the
  *  apiKey is the Ollama cloud key (undefined for a keyless local daemon). */
@@ -272,6 +287,14 @@ export interface ReasonixConfig {
   ollamaApiKey?: string;
   /** Ollama chat endpoint (OpenAI-compatible). Falls back to OLLAMA_BASE_URL env, then http://localhost:11434/v1. Local daemon is keyless; cloud requires ollamaApiKey. */
   ollamaBaseUrl?: string;
+  /** Keep-alive sent with every Ollama `/api/chat` request: how long the model
+   *  stays loaded after a turn. Defaults to "30m"; "-1" pins it loaded
+   *  indefinitely, "0" unloads immediately after each turn. */
+  ollamaKeepAlive?: string;
+  /** Context window (`num_ctx`) sent with every Ollama `/api/chat` request.
+   *  When unset, the window learned from `/api/show` (or the server default)
+   *  is used. */
+  ollamaNumCtx?: number;
   /** Brave Search API key. Falls back to BRAVE_SEARCH_API_KEY env var. Free 2000/mo signup at https://brave.com/search/api/ */
   braveApiKey?: string;
 
@@ -459,6 +482,25 @@ export function loadOllamaApiKey(path: string = defaultConfigPath()): string | u
   if (process.env.ollamaApiKey) return process.env.ollamaApiKey.trim();
   const cfg = readConfig(path).ollamaApiKey;
   if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
+/** Ollama keep-alive — env OLLAMA_KEEP_ALIVE > config > "30m" default; the env
+ *  matches the server's own variable, and per-request overrides its 5m default. */
+export function loadOllamaKeepAlive(path: string = defaultConfigPath()): string {
+  const env = process.env.OLLAMA_KEEP_ALIVE?.trim();
+  if (env) return env;
+  const cfg = readConfig(path).ollamaKeepAlive;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return "30m";
+}
+
+/** Ollama context window (`num_ctx`) — env OLLAMA_NUM_CTX > config > undefined. */
+export function loadOllamaNumCtx(path: string = defaultConfigPath()): number | undefined {
+  const env = process.env.OLLAMA_NUM_CTX?.trim();
+  if (env && /^\d+$/.test(env)) return Number(env);
+  const cfg = readConfig(path).ollamaNumCtx;
+  if (typeof cfg === "number" && Number.isFinite(cfg) && cfg > 0) return Math.floor(cfg);
   return undefined;
 }
 

@@ -57,6 +57,12 @@ export interface RawUsage {
   prompt_eval_count?: number;
   /** Ollama native API: output tokens generated. */
   eval_count?: number;
+  /** Ollama native API: prompt evaluation time, nanoseconds. */
+  prompt_eval_duration?: number;
+  /** Ollama native API: output generation time, nanoseconds. */
+  eval_duration?: number;
+  /** Ollama native API: model load time, nanoseconds. */
+  load_duration?: number;
   /** OpenAI Responses API usage names (codex backend / /v1/responses). */
   input_tokens?: number;
   output_tokens?: number;
@@ -75,4 +81,12 @@ export interface ChatRequestOptions {
   responseFormat?: { type: "json_object" | "text" };
   thinking?: "enabled" | "disabled";
   reasoningEffort?: import("./config.js").ReasoningEffort;
+  /** Ollama native `/api/chat` extras — the OpenAI-compat layer silently drops
+   *  both fields, so they only reach the server through the native transport. */
+  ollama?: {
+    /** Server-side context window (`num_ctx`). Unset → config/env, then learned. */
+    numCtx?: number;
+    /** Model residency after the turn. Unset → config/env, then "30m". */
+    keepAlive?: string;
+  };
 }

@@ -73,8 +73,12 @@ export const DEFAULT_CONTEXT_TOKENS = 131_072;
  *  (clamped to [300K, 1M]), else the model table, else the safe fallback — every ctxMax consumer
  *  resolves through here so the meter, the budget checks and the compaction thresholds agree. */
 export function resolveContextTokens(model: string, configured?: number): number {
+  // Ollama windows are set by the model/server (`num_ctx`) and can be far
+  // below the DeepSeek 300K floor — never clamp an explicit Ollama value up.
+  const isOllama = typeof model === "string" && model.startsWith("ollama/");
   if (typeof configured === "number" && Number.isFinite(configured)) {
-    return Math.min(MAX_CONTEXT_TOKENS, Math.max(MIN_CONTEXT_TOKENS, Math.floor(configured)));
+    const floor = isOllama ? 1_024 : MIN_CONTEXT_TOKENS;
+    return Math.min(MAX_CONTEXT_TOKENS, Math.max(floor, Math.floor(configured)));
   }
   return DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
 }
