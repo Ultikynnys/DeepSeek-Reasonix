@@ -179,7 +179,7 @@ export const zhCN: typeof en = {
     budgetHint: "每会话 USD 上限。留空 = 不限。",
     budgetPlaceholder: "不限",
     contextWindow: "上下文窗口",
-    contextWindowHint: "压缩前代理保留在记忆中的令牌数。300000–1000000；留空 = 模型默认值（300000）。",
+    contextWindowHint: "压缩前代理保留在记忆中的令牌数。300000–1000000；超过当前模型最大上下文长度的值会被钳制到该上限。留空 = 模型默认值（300000）。",
     contextWindowPlaceholder: "默认（300000）",
     webSearchEngine: "搜索引擎",
     webSearchEngineBing: "bing — 默认，国内裸 IP 直连，无需代理",

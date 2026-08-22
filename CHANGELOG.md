@@ -21,6 +21,16 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Every consumer resolves through one path (`resolveContextTokens`) so they stay consistent: the compaction thresholds (fold at 75%, aggressive fold at 78%, force-summary at 80% of the cap), the turn-start budget check, the desktop context meter's denominator and compaction ticks, and the `$ctx_breakdown` / `$settings` events.
 - Changing the setting hot-applies to the running session from the next budget decision via `loop.configure()` — no runtime rebuild, no session restart. Out-of-range config values clamp silently; unknown models fall back to the 131072 default only when no override is set.
 
+**Fixed — the effective context cap is now clamped to the model's max context length.**
+
+- A `contextTokens` setting above the model's known window used to raise the effective cap all the way to the 1M API ceiling: e.g. 750K on a 300K-window model made the context meter's denominator, the compaction thresholds (fold 75% / force-summary 80% of cap) and the turn-start budget check all assume 750K — a limit above what the model accepts. `resolveContextTokens` now clamps any override to the model's max context length (the per-model table), so the meter always shows and the loop always enforces what the model actually handles. The stored setting is kept as entered; only the effective value is clamped.
+- The desktop context meter now resolves the same verdict-aware override the loop uses on Ollama tabs (learned `/api/show` window when fresh, else the user setting), so the denominator can no longer drift from the enforced cap.
+
+**Fixed — model pickers now tag every vision-capable model.**
+
+- The composer model dropdown and Settings → Models only tagged Ollama models with a `vision` badge (from the daemon's runtime probe); `deepseek-v4-flash-vision-exp` and the gpt-5.6 family rendered untagged even though they accept images. Both pickers now resolve the badge through the shared `modelAcceptsImages` predicate.
+- The two duplicated `KNOWN_MODELS` lists are consolidated into one core-utils export, which also restores `deepseek-v4-flash-vision-exp` to the Settings → Models grid (it was missing from that list entirely).
+
 **Fixed — force-cancelled tool calls now tell the model they were cancelled, not that they failed.**
 
 - A turn aborted via "Send now" / queue force used to record an in-flight tool call as `{"error": "AbortError: ..."}` (model blames the tool) or abandon it entirely (healing then silently dropped the unpaired `tool_calls`, so the model never learned what happened). Both paths now write a truthful `cancelledByUser` result — same voice as the shell tools' `USER_CANCEL_NOTE` — so the next prompt reads "cancelled because the conversation stopped" instead of a tool failure.

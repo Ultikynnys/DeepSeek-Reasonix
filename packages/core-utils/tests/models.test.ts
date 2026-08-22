@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelAcceptsImages } from "../src/models.js";
+import { KNOWN_MODELS, modelAcceptsImages } from "../src/models.js";
 
 describe("modelAcceptsImages", () => {
   it("accepts the GPT-5.6 family", () => {
@@ -45,5 +45,19 @@ describe("modelAcceptsImages", () => {
     const vision = new Set(["ollama/llava", "gpt-5.6-sol"]);
     expect(modelAcceptsImages("gpt-5.6-sol", vision)).toBe(true);
     expect(modelAcceptsImages("deepseek-v4-flash-vision-exp", vision)).toBe(true);
+  });
+});
+
+describe("KNOWN_MODELS", () => {
+  it("offers DeepSeek's official line including the vision model", () => {
+    expect(KNOWN_MODELS).toContain("deepseek-v4-flash");
+    expect(KNOWN_MODELS).toContain("deepseek-v4-pro");
+    expect(KNOWN_MODELS).toContain("deepseek-v4-flash-vision-exp");
+  });
+
+  it("offers the GPT-5.6 family", () => {
+    expect(KNOWN_MODELS).toContain("gpt-5.6-sol");
+    expect(KNOWN_MODELS).toContain("gpt-5.6-terra");
+    expect(KNOWN_MODELS).toContain("gpt-5.6-luna");
   });
 });

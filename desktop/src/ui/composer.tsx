@@ -1,4 +1,4 @@
-import { SUPPORTED_IMAGE_EXTENSIONS } from "@reasonix/core-utils";
+import { KNOWN_MODELS, SUPPORTED_IMAGE_EXTENSIONS, modelAcceptsImages } from "@reasonix/core-utils";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   type ChangeEvent,
@@ -893,15 +893,6 @@ function Popup({
   );
 }
 
-const KNOWN_MODELS: readonly string[] = [
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "deepseek-v4-flash-vision-exp",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-];
-
 function ModelEffortMenu({
   modelLabel,
   currentEffort,
@@ -956,6 +947,9 @@ function ModelEffortMenu({
             <div className="nm">
               <span className="cmd">{m}</span>
             </div>
+            {modelAcceptsImages(m, ollamaVisionModels) ? (
+              <span className="badge">vision</span>
+            ) : null}
           </div>
         ))}
         {ollamaGroup || ollamaModelsError ? (
@@ -1002,7 +996,9 @@ function ModelEffortMenu({
                       <div className="nm">
                         <span className="cmd">{full}</span>
                       </div>
-                      {ollamaVisionModels?.has(full) ? <span className="badge">vision</span> : null}
+                      {modelAcceptsImages(full, ollamaVisionModels) ? (
+                        <span className="badge">vision</span>
+                      ) : null}
                     </div>
                   );
                 })

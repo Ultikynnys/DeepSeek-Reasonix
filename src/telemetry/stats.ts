@@ -44,9 +44,9 @@ export function pricingFor(model: string, path?: string): ModelPricing | undefin
 /** Reference Claude Sonnet 4.6 pricing (USD per 1M tokens). */
 export const CLAUDE_SONNET_PRICING = { input: 3.0, output: 15.0 };
 
-/** Prompt-side window only; completion caps live server-side. Deliberately below the API's
- *  1M-token ceiling: quality degrades past ~300K, and compaction thresholds in context-manager.ts
- *  are fractions of this cap (fold at 0.75 × 300K = 225K). Users may raise it via the `contextTokens` setting (see resolveContextTokens) — the API ceiling is 1M tokens. */
+/** Known per-model max context length (tokens), prompt-side only. This is the model's
+ *  capability: resolveContextTokens clamps any `contextTokens` setting to it, so the
+ *  effective cap never exceeds the model's max window. */
 export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
   "deepseek-v4-flash": 300_000,
   "deepseek-v4-pro": 300_000,
@@ -69,18 +69,26 @@ export const MAX_CONTEXT_TOKENS = 1_000_000;
 /** Fallback when the caller's model id isn't in the table — safe lower bound. */
 export const DEFAULT_CONTEXT_TOKENS = 131_072;
 
-/** The effective context cap for a model: the configured `contextTokens` override when set
- *  (clamped to [300K, 1M]), else the model table, else the safe fallback — every ctxMax consumer
- *  resolves through here so the meter, the budget checks and the compaction thresholds agree. */
+/** The effective context cap for a model: the configured `contextTokens` override when set,
+ *  clamped to the model's known max context length, else the model table, else the safe
+ *  fallback — every ctxMax consumer resolves through here so they all agree. */
 export function resolveContextTokens(model: string, configured?: number): number {
   // Ollama windows are set by the model/server (`num_ctx`) and can be far
   // below the DeepSeek 300K floor — never clamp an explicit Ollama value up.
   const isOllama = typeof model === "string" && model.startsWith("ollama/");
+  const modelDefault = DEEPSEEK_CONTEXT_TOKENS[model];
   if (typeof configured === "number" && Number.isFinite(configured)) {
     const floor = isOllama ? 1_024 : MIN_CONTEXT_TOKENS;
-    return Math.min(MAX_CONTEXT_TOKENS, Math.max(floor, Math.floor(configured)));
+    const v = Math.max(floor, Math.floor(configured));
+    // Hard invariant: the effective cap never exceeds the model's known max
+    // context length (the table is the model's capability). The user may set
+    // any value in settings, but the model max clamps it here — so the meter,
+    // the compaction thresholds and the turn-start budget check all agree
+    // with what the model actually accepts.
+    if (modelDefault !== undefined) return Math.min(v, modelDefault);
+    return Math.min(v, MAX_CONTEXT_TOKENS);
   }
-  return DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+  return modelDefault ?? DEFAULT_CONTEXT_TOKENS;
 }
 
 /** Maximum turns retained in memory before old entries are rolled into carryover.

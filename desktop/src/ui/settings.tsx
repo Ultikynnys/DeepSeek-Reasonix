@@ -1,3 +1,4 @@
+import { KNOWN_MODELS, modelAcceptsImages } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
@@ -978,14 +979,6 @@ export function OpenAISection({
   );
 }
 
-const KNOWN_MODELS = [
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-] as const;
-
 const EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const;
 type EffortValue = (typeof EFFORT_VALUES)[number];
 
@@ -1041,7 +1034,7 @@ function PageModels({
 }) {
   const [draft, setDraft] = useState(settings.model);
   useEffect(() => setDraft(settings.model), [settings.model]);
-  const isKnown = (KNOWN_MODELS as readonly string[]).includes(settings.model);
+  const isKnown = KNOWN_MODELS.includes(settings.model);
   return (
     <>
       <section className="section">
@@ -1056,6 +1049,9 @@ function PageModels({
               onKeyDown={activationHandler(() => onSave({ model: id }))}
             >
               <div className="nm">{id}</div>
+              {modelAcceptsImages(id, ollamaVisionModels) ? (
+                <span className="badge">vision</span>
+              ) : null}
             </div>
           ))}
         </div>
@@ -1150,7 +1146,9 @@ function PageModels({
                   onKeyDown={activationHandler(() => onSave({ model: full }))}
                 >
                   <div className="nm">{full}</div>
-                  {ollamaVisionModels?.has(full) ? <span className="badge">vision</span> : null}
+                  {modelAcceptsImages(full, ollamaVisionModels) ? (
+                    <span className="badge">vision</span>
+                  ) : null}
                 </div>
               );
             })}

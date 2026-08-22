@@ -1616,8 +1616,9 @@ function emitCtxBreakdown(tab: Tab): void {
     }
   }
   // ctxMax drives the panel meter's denominator + compaction-limit ticks —
-  // keep it in sync with the loop's context cap (resolveContextTokens).
-  const ctxMax = resolveContextTokens(tab.currentModel, tab.ctxMaxOverride);
+  // keep it in sync with the loop's context cap (resolveContextTokens + the
+  // verdict-aware override, so Ollama tabs show the same cap the loop enforces).
+  const ctxMax = resolveContextTokens(tab.currentModel, tabCtxMaxOverride(tab));
   emitTabDiagnostic(tab, "context.breakdown", {
     reservedTokens: sys + tools,
     logTokens,
@@ -1886,6 +1887,20 @@ function tabHasCredential(tab: Tab): boolean {
   return !!loadApiKey();
 }
 
+/** Effective ctxMaxOverride for a tab: Ollama tabs use the server's learned /api/show
+ *  window (verdict store) when fresh, else the user `contextTokens` setting — every ctxMax
+ *  consumer (loop, meter, settings changes) must resolve the same value. */
+function tabCtxMaxOverride(tab: Tab): number | undefined {
+  if (providerForModel(tab.currentModel) !== "ollama") return tab.ctxMaxOverride;
+  return (
+    contextTokensForModel(
+      loadOllamaVerdicts(ollamaVerdictsPath()),
+      tab.currentModel.replace(/^ollama\//, ""),
+      Date.now(),
+    ) ?? tab.ctxMaxOverride
+  );
+}
+
 function buildRuntimeFor(tab: Tab): RuntimeState {
   if (!tab.toolset) throw new Error("buildRuntimeFor called before initTabToolset finished");
   const toolset = tab.toolset;
@@ -1924,14 +1939,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   // Ollama tabs calibrate compaction against the server's real window when one
   // has been learned from /api/show (verdict store); the user `contextTokens`
   // override (clamped ≥300K) is the fallback, then the per-model default.
-  const ctxMaxOverride =
-    provider === "ollama"
-      ? (contextTokensForModel(
-          loadOllamaVerdicts(ollamaVerdictsPath()),
-          tab.currentModel.replace(/^ollama\//, ""),
-          Date.now(),
-        ) ?? tab.ctxMaxOverride)
-      : tab.ctxMaxOverride;
+  const ctxMaxOverride = tabCtxMaxOverride(tab);
   const loop = new CacheFirstLoop({
     client,
     prefix,
@@ -3842,7 +3850,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           saveContextTokens(msg.contextTokens);
           const next = loadContextTokens();
           tab.ctxMaxOverride = next;
-          tab.runtime?.loop.configure({ ctxMaxOverride: next ?? null });
+          // Re-resolve verdict-aware so an Ollama tab keeps its learned window
+          // while the new user value stays the fallback (matches boot logic).
+          tab.runtime?.loop.configure({ ctxMaxOverride: tabCtxMaxOverride(tab) ?? null });
           emitCtxBreakdown(tab);
           emitSettings(tab);
         }

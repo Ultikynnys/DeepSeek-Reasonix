@@ -191,7 +191,7 @@ export const de: typeof en = {
     budgetHint: "USD pro Sitzung. Leer = keine Grenze.",
     budgetPlaceholder: "keine Grenze",
     contextWindow: "Kontextfenster",
-    contextWindowHint: "Tokens, die der Agent vor der Komprimierung im Speicher behält. 300000–1000000; leer = Modellstandard (300000).",
+    contextWindowHint: "Tokens, die der Agent vor der Komprimierung im Speicher behält. 300000–1000000; Werte über der maximalen Kontextlänge des Modells werden darauf begrenzt. Leer = Modellstandard (300000).",
     contextWindowPlaceholder: "Standard (300000)",
     webSearchEngine: "Suchmaschine",
     webSearchEngineBing: "bing — Standard, funktioniert von CN ohne Proxy",

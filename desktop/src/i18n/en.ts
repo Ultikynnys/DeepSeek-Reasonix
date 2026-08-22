@@ -179,7 +179,7 @@ export const en = {
     budgetHint: "USD per session. Empty = no cap.",
     budgetPlaceholder: "no cap",
     contextWindow: "Context window",
-    contextWindowHint: "Tokens the agent keeps in memory before compacting. 300000–1000000; empty = model default (300000).",
+    contextWindowHint: "Tokens the agent keeps in memory before compacting. 300000–1000000; values above the current model's max context length are clamped to it. Empty = model default (300000).",
     contextWindowPlaceholder: "default (300000)",
     webSearchEngine: "search engine",
     webSearchEngineBing: "bing — default, works from CN without proxy",

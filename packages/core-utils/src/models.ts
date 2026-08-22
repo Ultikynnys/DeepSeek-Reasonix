@@ -1,6 +1,18 @@
 /** Model capability predicates — shared by the daemon (src/) and the desktop
  *  UI so the two sides can't drift on which model ids accept images. */
 
+/** Model ids offered in the desktop model pickers (composer dropdown and
+ *  Settings → Models): DeepSeek's official line plus the GPT-5.6 family.
+ *  One list — picker surfaces must not drift on which ids are selectable. */
+export const KNOWN_MODELS: readonly string[] = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-v4-flash-vision-exp",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+];
+
 /** Model ids that accept image attachments in user messages — the GPT-5.6
  *  family plus DeepSeek's vision line. Drives the composer's paste/drop
  *  affordance, the daemon's @-mention conversion, and the images hard gate.
