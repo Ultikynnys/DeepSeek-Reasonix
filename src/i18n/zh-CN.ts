@@ -663,6 +663,8 @@ export const zhCN: TranslationSchema = {
       "已达到 {max} 次迭代上限，但本轮仍在正常推进。继续运行至 {grace} 次迭代。可在配置中设置 `maxIterPerTurn`，或设置 REASONIX_MAX_ITER 以提高上限。",
     iterLimitPaused:
       "已达到 {grace} 次迭代硬上限。本轮已暂停；对话记录完好。回复“继续”即可接着做，或在配置中设置 `maxIterPerTurn` / REASONIX_MAX_ITER 以提高上限。",
+    iterLimitYolo:
+      "YOLO 模式：已达到 {max} 次迭代上限，但本轮继续无人值守运行 — YOLO 模式下迭代上限不会暂停对话。卡死循环仍会强制总结。",
   },
   errors: {
     contextOverflow:

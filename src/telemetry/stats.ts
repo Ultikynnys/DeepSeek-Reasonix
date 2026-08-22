@@ -46,6 +46,7 @@ export const CLAUDE_SONNET_PRICING = { input: 3.0, output: 15.0 };
 export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
   "deepseek-v4-flash": 300_000,
   "deepseek-v4-pro": 300_000,
+  "deepseek-v4-flash-vision-exp": 300_000,
   "deepseek-chat": 300_000,
   "deepseek-reasoner": 300_000,
   // GPT-5.6 advertises a 1.05M window; same 300K quality cap as DeepSeek

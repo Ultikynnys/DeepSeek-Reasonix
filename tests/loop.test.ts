@@ -3570,4 +3570,103 @@ describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
     // customCap model requests + 1 force-summary call. No grace window.
     expect(fetchMock).toHaveBeenCalledTimes(customCap + 1);
   });
+
+  it("yolo mode never pauses on the iteration cap — the turn runs past it", async () => {
+    const cap = 3;
+    const hardCap = cap + graceFor(cap);
+    // Unique tool calls past the cap, then a text completion so the turn ends
+    // naturally (the fake client round-robins, so the text must be consumed
+    // before the last tool call would repeat into a storm).
+    const fetchMock = fakeFetch([...infiniteToolResponses(cap + 10), { content: "finally done" }]);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = registerNoop();
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+      maxIterPerTurn: cap,
+      getEditMode: () => "yolo",
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      events.push(ev);
+    }
+
+    // The cap fired, noted once, and the turn kept going: no pause warning,
+    // no grace grant (yolo bypasses before the grace branch), no forced summary.
+    const yoloEv = events.find((e) => e.role === "warning" && /YOLO mode/.test(e.content ?? ""));
+    expect(yoloEv).toBeDefined();
+    expect(yoloEv!.content).toContain(String(cap));
+    expect(
+      events.filter((e) => e.role === "warning" && /paused/.test(e.content ?? "")),
+    ).toHaveLength(0);
+    expect(
+      events.filter((e) => e.role === "warning" && /Continuing up to/.test(e.content ?? "")),
+    ).toHaveLength(0);
+    expect(events.find((e) => e.role === "assistant_final" && e.forcedSummary)).toBeUndefined();
+
+    // The turn completed naturally (text response) AFTER passing the cap.
+    expect(events.find((e) => e.role === "done")).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(cap + 11);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(hardCap);
+  });
+
+  it("still force-summarizes a STUCK turn at the cap in yolo", async () => {
+    // Yolo bypasses the productive-turn pause, but the storm-breaker's stuck
+    // path must keep collapsing garbage loops: three identical calls latch
+    // `_turnSelfCorrected`, and at the cap the turn is force-summarized even
+    // with auto-shell.
+    const customCap = 6;
+    const responses: FakeResponseShape[] = [
+      ...Array.from({ length: 3 }, () => ({
+        content: "",
+        tool_calls: [
+          {
+            id: "call_0",
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i: 0 }) },
+          },
+        ],
+      })),
+      ...Array.from({ length: customCap - 3 }, (_, i) => ({
+        content: "",
+        tool_calls: [
+          {
+            id: `call_${i + 3}`,
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i: i + 3 }) },
+          },
+        ],
+      })),
+      { content: "Here is what I found." },
+    ];
+    const fetchMock = fakeFetch(responses);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = registerNoop();
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+      maxIterPerTurn: customCap,
+      getEditMode: () => "yolo",
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      events.push(ev);
+    }
+
+    const capEv = events.find(
+      (e) => e.role === "warning" && /forcing a summary/.test(e.content ?? ""),
+    );
+    expect(capEv).toBeDefined();
+    expect(
+      events.find((e) => e.role === "assistant_final" && e.forcedSummary === true),
+    ).toBeDefined();
+    expect(events.find((e) => e.role === "done")).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(customCap + 1);
+  });
 });

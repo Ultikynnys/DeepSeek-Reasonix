@@ -298,6 +298,7 @@ export interface TranslationSchema {
     iterLimitReached: string;
     iterLimitGrace: string;
     iterLimitPaused: string;
+    iterLimitYolo: string;
   };
   errors: {
     contextOverflow: string;

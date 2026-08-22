@@ -28,6 +28,7 @@ export const DEFAULT_MODEL = "deepseek-v4-flash";
 export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
   "deepseek-v4-flash",
   "deepseek-v4-pro",
+  "deepseek-v4-flash-vision-exp",
 ];
 
 /** GPT-5.6 family (Sol/Terra/Luna) — OpenAI's flagship series (2026-07 GA).
@@ -47,6 +48,10 @@ export function providerForModel(model: string | undefined | null): ModelProvide
   if (typeof model === "string" && model.startsWith("ollama/")) return "ollama";
   return "deepseek";
 }
+
+/** Model ids that accept image attachments in user messages — shared with the
+ *  desktop UI so both sides agree on which models get the image affordance. */
+export { modelAcceptsImages } from "@reasonix/core-utils";
 
 /** OpenAI-compatible base URL for a provider's model id. The Ollama chat
  *  endpoint is keyless when local (the daemon ignores Authorization), but the

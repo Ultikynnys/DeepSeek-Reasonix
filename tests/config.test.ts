@@ -249,6 +249,14 @@ describe("config", () => {
     expect(loadModel(path)).toBe("deepseek-v4-pro");
   });
 
+  it("loadModel keeps the vision-exp model and saveModel persists it", () => {
+    // DeepSeek's vision line ships on the official endpoint like flash/pro.
+    writeConfig({ model: "deepseek-v4-flash-vision-exp" }, path);
+    expect(loadModel(path)).toBe("deepseek-v4-flash-vision-exp");
+    saveModel("deepseek-v4-flash-vision-exp", path);
+    expect(loadModel(path)).toBe("deepseek-v4-flash-vision-exp");
+  });
+
   it("loadEndpoint: env tuple wins when env sets baseUrl", () => {
     process.env.DEEPSEEK_BASE_URL = "https://env-proxy.example.com";
     process.env.DEEPSEEK_API_KEY = "sk-env-tuple-token-abc";

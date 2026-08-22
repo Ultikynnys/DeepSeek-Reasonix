@@ -185,8 +185,8 @@ export function Composer({
   ollamaModelsError?: string;
   /** Models hidden because the account's plan doesn't cover them. */
   ollamaHiddenCount?: number;
-  /** Re-fetch the Ollama model list (also called on open when the group is empty). */
-  onRefreshOllamaModels?: () => void;
+  /** Re-fetch the Ollama model list (`force` bypasses the backend's cache). */
+  onRefreshOllamaModels?: (force?: boolean) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   slashCommands: SlashCmd[];
   onMentionQuery?: (q: string, nonce: number) => void;
@@ -903,6 +903,7 @@ function Popup({
 const KNOWN_MODELS: readonly string[] = [
   "deepseek-v4-flash",
   "deepseek-v4-pro",
+  "deepseek-v4-flash-vision-exp",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -925,7 +926,7 @@ function ModelEffortMenu({
   ollamaModels?: string[];
   ollamaModelsError?: string;
   ollamaHiddenCount?: number;
-  onRefreshOllamaModels?: () => void;
+  onRefreshOllamaModels?: (force?: boolean) => void;
 }) {
   const [draft, setDraft] = useState(modelLabel);
   const ollamaGroup = ollamaModels && ollamaModels.length > 0;
@@ -975,12 +976,16 @@ function ModelEffortMenu({
                 type="button"
                 className="mini-btn"
                 title={t("composer.modelOllamaRefresh")}
-                onClick={onRefreshOllamaModels}
+                onClick={() => onRefreshOllamaModels?.(true)}
               >
                 <I.refresh size={10} />
               </button>
             </div>
-            {ollamaModelsError && !ollamaGroup ? (
+            {/* The error only matters when the tab's model IS an Ollama model —
+                a DeepSeek/OpenAI tab with a down local daemon would otherwise
+                show a spurious "Ollama unreachable" line. The Models settings
+                page surfaces it unconditionally. */}
+            {ollamaModelsError && !ollamaGroup && modelLabel.startsWith("ollama/") ? (
               <div className="model-menu-error">
                 {t("composer.modelOllamaError", { error: ollamaModelsError })}
               </div>

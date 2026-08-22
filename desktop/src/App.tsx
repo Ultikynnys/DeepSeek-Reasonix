@@ -5,6 +5,7 @@ import {
   flattenText,
   isFilePathTool,
   messageOf,
+  modelAcceptsImages,
   parseFilesDroppedMarker,
   redactDiagnosticText,
   redactDiagnosticValue,
@@ -418,14 +419,6 @@ type State = {
   ollamaQuotaRefreshing: boolean;
   /** Why the last Ollama usage fetch produced no data — shown in the chip tooltip. */
   ollamaQuotaReason: string | null;
-  /** Dynamically fetched Ollama model catalog (raw ids, e.g. `llama3.1:latest`). */
-  ollamaModels: string[];
-  /** Why the last Ollama model fetch failed — replaces the picker list. */
-  ollamaModelsError: string | null;
-  /** The account's Ollama plan (e.g. `free`) when the cloud reported it. */
-  ollamaPlan: string | null;
-  /** Models hidden because the account's plan doesn't cover them. */
-  ollamaHiddenCount: number;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
   mcpSpecs: McpSpecInfo[];
@@ -1294,15 +1287,6 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ollamaQuota: ev.model.startsWith("ollama/") ? state.ollamaQuota : null,
       };
     }
-    case "$ollama_models": {
-      return {
-        ...state,
-        ollamaModels: ev.models,
-        ollamaModelsError: ev.error ?? null,
-        ollamaPlan: ev.plan ?? null,
-        ollamaHiddenCount: ev.hiddenCount ?? 0,
-      };
-    }
     case "$session_loaded": {
       // A resync echo of the session we're ALREADY streaming must not
       // clobber the live transcript — the on-disk snapshot is behind the
@@ -1807,6 +1791,17 @@ interface TabRuntimeProps {
   onToggleSide: () => void;
   onToggleCtx: () => void;
   onToggleCurrency: () => void;
+  /** App-global Ollama model catalog (raw ids, e.g. `llama3.1:latest`) — shared
+   *  across every tab; the catalog depends on global config, not on the tab. */
+  ollamaModels: string[];
+  /** Why the last Ollama model fetch failed — replaces the picker list. */
+  ollamaModelsError: string | null;
+  /** The account's Ollama plan (e.g. `free`) when the cloud reported it. */
+  ollamaPlan: string | null;
+  /** Models hidden because the account's plan doesn't cover them. */
+  ollamaHiddenCount: number;
+  /** Re-fetch the app-global Ollama catalog (`force` bypasses the cache). */
+  onRefreshOllamaModels: (force?: boolean) => void;
   tabsList: { id: string; workspaceDir?: string }[];
   activeTabId: string;
   setActiveTabId: (id: string) => void;
@@ -1841,6 +1836,11 @@ function TabRuntime({
   onToggleSide,
   onToggleCtx,
   onToggleCurrency,
+  ollamaModels,
+  ollamaModelsError,
+  ollamaPlan,
+  ollamaHiddenCount,
+  onRefreshOllamaModels,
   tabsList,
   activeTabId,
   setActiveTabId,
@@ -1868,10 +1868,6 @@ function TabRuntime({
     ollamaQuota: null,
     ollamaQuotaRefreshing: false,
     ollamaQuotaReason: null,
-    ollamaModels: [],
-    ollamaModelsError: null,
-    ollamaPlan: null,
-    ollamaHiddenCount: 0,
     mentionResults: null,
     mentionPreview: null,
     mcpSpecs: [],
@@ -1982,17 +1978,16 @@ function TabRuntime({
     dispatch({ t: "ollama_quota_refreshing" });
     sendRpc({ cmd: "ollama_quota_get" });
   }, [sendRpc]);
-  const requestOllamaModels = useCallback(() => {
-    sendRpc({ cmd: "ollama_models_list" });
-  }, [sendRpc]);
   // Fetch the Ollama catalog whenever the tab's model is an Ollama model — the
-  // composer menu and the Models settings page render the fetched list.
+  // composer menu and the Models settings page render the fetched list. The
+  // list itself is app-global (backend cache + App-level state), so this only
+  // nudges a refresh; non-force calls reuse the backend's 60s cache.
   const activeModel = state.settings?.model;
   useEffect(() => {
     if (typeof activeModel === "string" && activeModel.startsWith("ollama/")) {
-      requestOllamaModels();
+      onRefreshOllamaModels();
     }
-  }, [activeModel, requestOllamaModels]);
+  }, [activeModel, onRefreshOllamaModels]);
   const applySettingsPatch = useCallback(
     (patch: SettingsPatch) => {
       dispatch({ t: "settings_patch", patch });
@@ -2039,10 +2034,10 @@ function TabRuntime({
     pushToast(msg, opts);
   }, [pushToast]);
 
-  // Vision attachments (ChatGPT models only): paste carries bytes from the
-  // webview; picked/dropped files ship a path the daemon reads. Pending
-  // images render as thumbnails above the composer until send.
-  const imageCapable = state.model?.startsWith("gpt-") === true;
+  // Vision attachments (gpt-* + DeepSeek vision models): paste carries bytes
+  // from the webview; picked/dropped files ship a path the daemon reads.
+  // Pending images render as thumbnails above the composer until send.
+  const imageCapable = modelAcceptsImages(state.model);
   const attachPastedImage = useCallback(
     async (file: File) => {
       try {
@@ -2139,9 +2134,9 @@ function TabRuntime({
           delete document.body.dataset.dragOver;
           const paths = event.payload.paths ?? [];
           if (paths.length === 0) return;
-          // ChatGPT models accept image attachments; everything else (and all
-          // non-image files) still drops in as @-mentions.
-          const imageCapable = state.model?.startsWith("gpt-") === true;
+          // Vision-capable models accept image attachments; everything else
+          // (and all non-image files) still drops in as @-mentions.
+          const imageCapable = modelAcceptsImages(state.model);
           const imagePaths = imageCapable ? paths.filter(isImagePath) : [];
           const mentionPaths = imageCapable ? paths.filter((p) => !isImagePath(p)) : paths;
           for (const p of imagePaths) attachPickedImage(p);
@@ -3133,10 +3128,10 @@ function TabRuntime({
                 textareaRef={composerRef}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
                 reasoningEffort={state.settings?.reasoningEffort ?? "high"}
-                ollamaModels={state.ollamaModels}
-                ollamaModelsError={state.ollamaModelsError ?? undefined}
-                ollamaHiddenCount={state.ollamaHiddenCount}
-                onRefreshOllamaModels={requestOllamaModels}
+                ollamaModels={ollamaModels}
+                ollamaModelsError={ollamaModelsError ?? undefined}
+                ollamaHiddenCount={ollamaHiddenCount}
+                onRefreshOllamaModels={onRefreshOllamaModels}
                 onModelChange={(model) => {
                   applySettingsPatch({ model });
                   flashToast(t("app.toast.modelSwitched", { model }));
@@ -3271,11 +3266,11 @@ function TabRuntime({
             onSave={saveSettings}
             onSaveApiKey={saveApiKey}
             ollamaBaseUrl={state.settings?.ollamaBaseUrl}
-            ollamaModels={state.ollamaModels}
-            ollamaModelsError={state.ollamaModelsError ?? undefined}
-            ollamaPlan={state.ollamaPlan ?? undefined}
-            ollamaHiddenCount={state.ollamaHiddenCount}
-            onRefreshOllamaModels={requestOllamaModels}
+            ollamaModels={ollamaModels}
+            ollamaModelsError={ollamaModelsError ?? undefined}
+            ollamaPlan={ollamaPlan ?? undefined}
+            ollamaHiddenCount={ollamaHiddenCount}
+            onRefreshOllamaModels={onRefreshOllamaModels}
             oauthWaiting={state.oauthWaiting}
             onOAuthBegin={() => sendRpc({ cmd: "oauth_begin" })}
             onOAuthCancel={() => {
@@ -4163,6 +4158,15 @@ export function App() {
     setGlobalToasts((prev) => [...prev, { id, msg, severity }]);
     window.setTimeout(() => setGlobalToasts((prev) => prev.filter((t) => t.id !== id)), severity === "error" ? 6000 : 3500);
   }, []);
+  // App-global Ollama catalog — the backend fetches it once at launch and
+  // broadcasts it tabId-less, so every tab renders the same shared list
+  // instead of per-tab copies.
+  const [ollamaCatalog, setOllamaCatalog] = useState<{
+    models: string[];
+    error: string | null;
+    plan: string | null;
+    hiddenCount: number;
+  }>({ models: [], error: null, plan: null, hiddenCount: 0 });
   const [startupRetryNonce, setStartupRetryNonce] = useState(0);
   const dispatchersRef = useRef<Map<string, TabDispatcher>>(new Map());
   const pendingEventsRef = useRef<Map<string, TabAction[]>>(new Map());
@@ -4183,6 +4187,15 @@ export function App() {
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
+
+  const requestOllamaModels = useCallback(
+    (force?: boolean) => {
+      rpcSend({ tabId: activeTabIdRef.current, cmd: "ollama_models_list", force }).catch((err) =>
+        console.error("ollama_models_list failed", err),
+      );
+    },
+    [],
+  );
 
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "installing" | "error">("idle");
@@ -4550,6 +4563,19 @@ export function App() {
               return;
             }
 
+            // App-global Ollama catalog — the backend broadcasts it tabId-less
+            // (it depends on global config, not on the tab), so it updates
+            // shared state here instead of any single tab's reducer.
+            if (ev.type === "$ollama_models") {
+              setOllamaCatalog({
+                models: ev.models,
+                error: ev.error ?? null,
+                plan: ev.plan ?? null,
+                hiddenCount: ev.hiddenCount ?? 0,
+              });
+              return;
+            }
+
             const target = tabId;
             if (target) {
               flushTabDeltas(target);
@@ -4789,6 +4815,11 @@ export function App() {
           onToggleSide={onToggleSide}
           onToggleCtx={onToggleCtx}
           onToggleCurrency={onToggleCurrency}
+          ollamaModels={ollamaCatalog.models}
+          ollamaModelsError={ollamaCatalog.error}
+          ollamaPlan={ollamaCatalog.plan}
+          ollamaHiddenCount={ollamaCatalog.hiddenCount}
+          onRefreshOllamaModels={requestOllamaModels}
           tabsList={tabs}
           activeTabId={activeTabId}
           setActiveTabId={setActiveTabId}

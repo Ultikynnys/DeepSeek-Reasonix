@@ -78,10 +78,6 @@ function initialState(): Parameters<typeof reduce>[0] {
     ollamaQuota: null,
     ollamaQuotaRefreshing: false,
     ollamaQuotaReason: null,
-    ollamaModels: [],
-    ollamaModelsError: null,
-    ollamaPlan: null,
-    ollamaHiddenCount: 0,
     mentionResults: null,
     mentionPreview: null,
     mcpSpecs: [],
@@ -1340,45 +1336,6 @@ describe("Desktop App reducer — subagent progress", () => {
         },
       ],
     });
-  });
-});
-
-describe("Desktop App reducer — Ollama model catalog", () => {
-  it("$ollama_models stores the fetched catalog and clears the error", () => {
-    const next = reduce(initialState(), {
-      t: "incoming",
-      event: { type: "$ollama_models", models: ["llama3.1:latest", "qwen3:32b"] },
-    });
-    expect(next.ollamaModels).toEqual(["llama3.1:latest", "qwen3:32b"]);
-    expect(next.ollamaModelsError).toBeNull();
-  });
-
-  it("$ollama_models carries the plan and hidden-model count", () => {
-    const next = reduce(initialState(), {
-      t: "incoming",
-      event: {
-        type: "$ollama_models",
-        models: ["gpt-oss:20b"],
-        plan: "free",
-        hiddenCount: 17,
-      },
-    });
-    expect(next.ollamaModels).toEqual(["gpt-oss:20b"]);
-    expect(next.ollamaPlan).toBe("free");
-    expect(next.ollamaHiddenCount).toBe(17);
-  });
-
-  it("$ollama_models with an error replaces the list so the picker degrades", () => {
-    const base = {
-      ...initialState(),
-      ollamaModels: ["llama3.1:latest"],
-    };
-    const next = reduce(base, {
-      t: "incoming",
-      event: { type: "$ollama_models", models: [], error: "Ollama unreachable: ECONNREFUSED" },
-    });
-    expect(next.ollamaModels).toEqual([]);
-    expect(next.ollamaModelsError).toBe("Ollama unreachable: ECONNREFUSED");
   });
 });
 

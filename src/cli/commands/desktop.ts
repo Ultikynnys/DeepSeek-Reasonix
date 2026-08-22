@@ -102,6 +102,7 @@ import {
   loadSubagentModels,
   loadTavilyApiKey,
   loadWorkspaceDir,
+  modelAcceptsImages,
   providerForModel,
   pushRecentWorkspace,
   readConfig,
@@ -892,12 +893,59 @@ export async function probeOllamaModel(
  *  concurrent probes 429'd ~half of them; 6 with a 429 retry stays clean). */
 const OLLAMA_PROBE_BATCH = 6;
 
-/** Dynamically fetched Ollama model list — `GET {base}/models` on the resolved
- *  endpoint. For cloud keys the plan (POST /api/me) gates which models get
- *  probed and hidden; errors ship as `error`, never a crash. */
-async function emitOllamaModels(tab: Tab): Promise<void> {
+/** App-global snapshot of the fetched Ollama catalog — endpoint + key are
+ *  global config, so the catalog is fetched once and shared across every tab
+ *  (previously each tab fetched and cached its own copy). */
+export interface OllamaCatalogSnapshot {
+  models: string[];
+  plan?: string;
+  hiddenCount?: number;
+  error?: string;
+  fetchedAt: number;
+}
+
+/** Reuse the cached catalog for this long on non-force refreshes — rapid
+ *  model-menu opens / tab effects hit the cache instead of the network. */
+const OLLAMA_CATALOG_TTL_MS = 60_000;
+
+let ollamaCatalogCache: OllamaCatalogSnapshot | null = null;
+let ollamaCatalogInflight: Promise<OllamaCatalogSnapshot> | null = null;
+
+/** Test-only: reset the module-level catalog cache between tests. */
+export function resetOllamaCatalogCacheForTest(): void {
+  ollamaCatalogCache = null;
+  ollamaCatalogInflight = null;
+}
+
+/** Broadcast the current catalog to every tab — emitted without a tabId so the
+ *  frontend routes it into app-global state (all tabs share one list). */
+function emitOllamaCatalog(snap: OllamaCatalogSnapshot): void {
+  emit({
+    type: "$ollama_models",
+    models: snap.models,
+    ...(snap.error !== undefined ? { error: snap.error } : {}),
+    ...(snap.plan !== undefined ? { plan: snap.plan } : {}),
+    ...(snap.hiddenCount !== undefined ? { hiddenCount: snap.hiddenCount } : {}),
+  });
+}
+
+/** Fetch the Ollama catalog — `GET {base}/models` on the resolved endpoint;
+ *  cloud keys' plan (POST /api/me) gates probing; errors ship as `error`.
+ *  The optional `tab` only feeds diagnostics — the result is tab-independent. */
+async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
   const ep = loadOllamaEndpoint();
   const base = ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL;
+  const diag = (
+    event: string,
+    details?: Record<string, unknown>,
+    level: DesktopDiagnosticEvent["level"] = "debug",
+  ): void => {
+    emitDiagnostic(
+      event,
+      { ...(tab ? tabDiagnosticState(tab) : {}), ...details },
+      { tabId: tab?.id, level },
+    );
+  };
   try {
     const resp = await fetch(`${base}/models`, {
       method: "GET",
@@ -906,26 +954,22 @@ async function emitOllamaModels(tab: Tab): Promise<void> {
     });
     if (!resp.ok) {
       const status = resp.status;
-      emitTabDiagnostic(tab, "ollama.models_fetch.failed", { status });
-      emit(
-        {
-          type: "$ollama_models",
-          models: [],
-          error:
-            status === 401 || status === 403
-              ? "Ollama API key rejected"
-              : `Ollama endpoint returned HTTP ${status}`,
-        },
-        tab.id,
-      );
-      return;
+      diag("ollama.models_fetch.failed", { status });
+      return {
+        models: [],
+        error:
+          status === 401 || status === 403
+            ? "Ollama API key rejected"
+            : `Ollama endpoint returned HTTP ${status}`,
+        fetchedAt: Date.now(),
+      };
     }
     const data = (await resp.json()) as { data?: Array<{ id?: unknown }> };
     const models = (data?.data ?? [])
       .map((m) => (typeof m.id === "string" && m.id.length > 0 ? m.id : undefined))
       .filter((id): id is string => id !== undefined)
       .sort();
-    emitTabDiagnostic(tab, "ollama.models_fetch.ok", { count: models.length });
+    diag("ollama.models_fetch.ok", { count: models.length });
 
     const gated = new Set<string>();
     const apiKey = ep.apiKey;
@@ -960,36 +1004,58 @@ async function emitOllamaModels(tab: Tab): Promise<void> {
         try {
           saveOllamaVerdicts(store, path);
         } catch (err) {
-          emitTabDiagnostic(
-            tab,
+          diag(
             "ollama.verdicts.save_failed",
             { message: err instanceof Error ? err.message : String(err) },
             "warn",
           );
         }
-        emitTabDiagnostic(tab, "ollama.probe.done", {
+        diag("ollama.probe.done", {
           total: unknown.length,
           cached: known.size,
           gated: gated.size,
         });
       }
-      emitTabDiagnostic(tab, "ollama.plan.resolved", { plan });
+      diag("ollama.plan.resolved", { plan });
     }
     const visible = gated.size > 0 ? models.filter((m) => !gated.has(m)) : models;
-    emit(
-      {
-        type: "$ollama_models",
-        models: visible,
-        plan,
-        hiddenCount: gated.size > 0 ? gated.size : undefined,
-      },
-      tab.id,
-    );
+    return {
+      models: visible,
+      plan,
+      hiddenCount: gated.size > 0 ? gated.size : undefined,
+      fetchedAt: Date.now(),
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    emitTabDiagnostic(tab, "ollama.models_fetch.error", { message });
-    emit({ type: "$ollama_models", models: [], error: `Ollama unreachable: ${message}` }, tab.id);
+    diag("ollama.models_fetch.error", { message });
+    return { models: [], error: `Ollama unreachable: ${message}`, fetchedAt: Date.now() };
   }
+}
+
+/** Refresh (or reuse) the app-global Ollama catalog and broadcast it to every
+ *  tab. Concurrent calls collapse onto one in-flight fetch; non-force calls
+ *  reuse a fresh cache (< TTL). Errors broadcast but are never cached. */
+export async function refreshOllamaModels(
+  force: boolean,
+  tab?: Tab,
+): Promise<OllamaCatalogSnapshot> {
+  if (ollamaCatalogInflight) return ollamaCatalogInflight;
+  const cached = ollamaCatalogCache;
+  if (!force && cached && !cached.error && Date.now() - cached.fetchedAt < OLLAMA_CATALOG_TTL_MS) {
+    emitOllamaCatalog(cached);
+    return cached;
+  }
+  const inflight = fetchOllamaCatalog(tab)
+    .then((snap) => {
+      if (!snap.error) ollamaCatalogCache = snap;
+      emitOllamaCatalog(snap);
+      return snap;
+    })
+    .finally(() => {
+      ollamaCatalogInflight = null;
+    });
+  ollamaCatalogInflight = inflight;
+  return inflight;
 }
 
 async function emitBalance(tab: Tab): Promise<void> {
@@ -1685,6 +1751,9 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     reasoningEffort,
     maxIterPerTurn: loadMaxIterPerTurn(),
     maxOutputTokens: loadMaxOutputTokens(),
+    // Live thunk (not a snapshot) so a mid-session Shift+Tab / /mode flip
+    // stops the iteration cap from pausing the turn in yolo.
+    getEditMode: () => loadEditMode(),
     hooks: tab.hooks,
     hookCwd: tab.rootDir,
     onPreCompaction: () => toolset.jobs.cancelAll(),
@@ -2147,15 +2216,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     const rt = tab.runtime;
-    // Images are a ChatGPT-model-only feature — DeepSeek 400s on image
-    // content parts. The UI hides the affordance for non-OpenAI models;
-    // this is the hard gate so a stale or forged request can't reach the API.
-    if (images && images.length > 0 && providerForModel(tab.currentModel) !== "openai") {
+    // Only vision-capable models accept image content parts — DeepSeek 400s
+    // otherwise. The UI hides the affordance for non-vision models; this is
+    // the hard gate so a stale or forged request can't reach the API.
+    if (images && images.length > 0 && !modelAcceptsImages(tab.currentModel)) {
       emitTabDiagnostic(
         tab,
         "turn.start.rejected",
         {
-          reason: "images-require-openai",
+          reason: "images-require-vision-model",
           imageCount: images.length,
         },
         "error",
@@ -2163,7 +2232,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emit(
         {
           type: "$error",
-          message: "Images require a ChatGPT (gpt-*) model — switch models to attach images.",
+          message:
+            "Images require a vision-capable model (gpt-* or deepseek-v4-flash-vision-exp) — switch models to attach images.",
         },
         tab.id,
       );
@@ -3091,6 +3161,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           active: t.id === lastActiveTabId,
         })),
       });
+      // Auto-refresh the Ollama catalog once per launch/WebView reload — the
+      // catalog is app-global (endpoint + key are global config), so a single
+      // fetch broadcasts to every tab. Unconditional: even a tab on a
+      // DeepSeek/OpenAI model benefits when a local Ollama daemon is up, and a
+      // failure only surfaces on the Models settings page (the composer hides
+      // the error unless the tab's model is an Ollama model).
+      void refreshOllamaModels(true);
       return;
     }
     if (msg.cmd === "jobs_list") {
@@ -3541,7 +3618,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "ollama_models_list") {
-      void emitOllamaModels(tab);
+      // `force` (manual refresh button) refetches; plain calls reuse the
+      // app-global cache within its TTL so tab effects don't hammer the
+      // endpoint. The broadcast is tabId-less — every tab shares the result.
+      void refreshOllamaModels(!!msg.force, tab);
       return;
     }
     if (msg.cmd === "settings_save") {
@@ -3828,10 +3908,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       void (async () => {
         let text = msg.text;
         let attachments = msg.images ? [...msg.images] : [];
-        // OpenAI models accept image parts — auto-parse `@path` mentions of
-        // local images into vision attachments so typing or picking an image
-        // path just works. DeepSeek never gets image parts (runTurn gates).
-        if (providerForModel(tab.currentModel) === "openai") {
+        // Vision-capable models accept image parts — auto-parse `@path`
+        // mentions of local images into vision attachments so typing or
+        // picking an image path just works. Other models never get image
+        // parts (runTurn gates).
+        if (modelAcceptsImages(tab.currentModel)) {
           const converted = await extractImageMentions(text, tab.rootDir);
           if (converted.attachments.length > 0) {
             text = converted.text;

@@ -1,6 +1,6 @@
 import { messageOf } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "./client.js";
-import type { ReasoningEffort } from "./config.js";
+import type { EditMode, ReasoningEffort } from "./config.js";
 import type { PauseGate } from "./core/pause-gate.js";
 import { pauseGate as defaultPauseGate } from "./core/pause-gate.js";
 import { type ResolvedHook, runHooks } from "./hooks.js";
@@ -122,6 +122,10 @@ export interface CacheFirstLoopOptions {
   maxOutputTokens?: number;
   /** Maximum tool-call iterations per turn. Overrides config/env. Default 50. */
   maxIterPerTurn?: number;
+  /** Live edit-mode getter — yolo never pauses on the iteration cap. Thunk
+   *  (not a snapshot) so a mid-session Shift+Tab flip takes effect, same
+   *  pattern as shell.ts's `allowAll`. */
+  getEditMode?: () => EditMode;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
   /** User-configured context-window cap (tokens), forwarded to the ContextManager.
@@ -262,6 +266,10 @@ export class CacheFirstLoop {
   private _iterGrace = 0;
   /** True once the cap fired and the grace window latched this turn. The hard stop moves to maxIterPerTurn + _iterGrace. */
   private _iterGraceApplied = false;
+  /** True once a yolo turn bypassed the cap — the cap block is skipped for the rest of the turn. */
+  private _iterCapBypassed = false;
+  /** Live edit-mode getter — hosts that don't pass it keep the default pause. */
+  private readonly _getEditMode: (() => EditMode) | undefined;
   private _foldedThisTurn = false;
   /** Latched once per turn — the empty-completion guard retries exactly once. */
   private _emptyResponseRetried = false;
@@ -294,6 +302,7 @@ export class CacheFirstLoop {
     this.reasoningEffort = opts.reasoningEffort ?? "high";
     this.maxOutputTokens = opts.maxOutputTokens;
     this.maxIterPerTurn = opts.maxIterPerTurn ?? CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN;
+    this._getEditMode = opts.getEditMode;
     this.budgetUsd =
       typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
     this.ctxMaxOverride = opts.ctxMaxOverride;
@@ -932,6 +941,7 @@ export class CacheFirstLoop {
     // cap for the whole session and skip the grace warning on continue.
     this._iterGrace = 0;
     this._iterGraceApplied = false;
+    this._iterCapBypassed = false;
     this._foldedThisTurn = false;
     this._emptyResponseRetried = false;
     this._providerErrorRetried = false;
@@ -1061,8 +1071,12 @@ export class CacheFirstLoop {
       //    compressed recap. If the grace window also exhausts, the turn pauses
       //    NON-destructively: the log stays intact, so the next "continue"
       //    resumes with full state.
+      //  - YOLO mode (`getEditMode() === "yolo"`): the cap never pauses a
+      //    productive turn — nobody is watching to say "continue". Noted once,
+      //    then the turn runs without the cap. The STUCK path above still
+      //    applies: a garbage loop must collapse even with auto-shell.
       const hardCap = this.maxIterPerTurn + (this._iterGraceApplied ? this._iterGrace : 0);
-      if (iter >= hardCap) {
+      if (iter >= hardCap && !this._iterCapBypassed) {
         if (this._turnSelfCorrected) {
           yield {
             turn: this._turn,
@@ -1074,6 +1088,16 @@ export class CacheFirstLoop {
           restoreModelIfNeeded();
           this._steerQueue.length = 0;
           return;
+        }
+        if (this._getEditMode?.() === "yolo") {
+          this._iterCapBypassed = true;
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "low",
+            content: t("loop.iterLimitYolo", { max: this.maxIterPerTurn }),
+          };
+          continue;
         }
         if (!this._iterGraceApplied) {
           this._iterGrace = Math.max(5, Math.round(this.maxIterPerTurn / 2));

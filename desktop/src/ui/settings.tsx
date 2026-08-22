@@ -142,8 +142,8 @@ export function SettingsModal({
   ollamaPlan?: string;
   /** Models hidden because the account's plan doesn't cover them. */
   ollamaHiddenCount?: number;
-  /** Re-fetch the Ollama model catalog. */
-  onRefreshOllamaModels?: () => void;
+  /** Re-fetch the Ollama model catalog (`force` bypasses the backend's cache). */
+  onRefreshOllamaModels?: (force?: boolean) => void;
   oauthWaiting: boolean;
   onOAuthBegin: () => void;
   onOAuthCancel: () => void;
@@ -1021,8 +1021,8 @@ function PageModels({
   ollamaPlan?: string;
   /** Models hidden because the account's plan doesn't cover them. */
   ollamaHiddenCount?: number;
-  /** Re-fetch the Ollama model catalog. */
-  onRefreshOllamaModels?: () => void;
+  /** Re-fetch the Ollama model catalog (`force` bypasses the backend's cache). */
+  onRefreshOllamaModels?: (force?: boolean) => void;
   oauthSignedIn: boolean;
   oauthAccount?: string;
   oauthFlowError?: string;
@@ -1114,7 +1114,7 @@ function PageModels({
                 : t("settings.ollamaModelsHint")}
             </div>
           </div>
-          <button type="button" className="btn" onClick={onRefreshOllamaModels}>
+          <button type="button" className="btn" onClick={() => onRefreshOllamaModels?.(true)}>
             {t("settings.ollamaModelsRefresh")}
           </button>
         </div>

@@ -692,6 +692,8 @@ export const EN: TranslationSchema = {
       "Reached the {max}-iteration cap, but the turn is still making progress. Continuing up to {grace} iterations. Set `maxIterPerTurn` in config or REASONIX_MAX_ITER for a higher cap.",
     iterLimitPaused:
       'Reached the {grace}-iteration hard cap. The turn paused; the conversation is intact. Say "continue" to keep going, or set `maxIterPerTurn` in config / REASONIX_MAX_ITER for a higher cap.',
+    iterLimitYolo:
+      "YOLO mode: reached the {max}-iteration cap, but the turn keeps running unattended — yolo never pauses on the iteration cap. Stuck loops still force-summarize.",
   },
   errors: {
     contextOverflow:

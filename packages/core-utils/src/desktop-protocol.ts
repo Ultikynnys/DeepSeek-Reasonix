@@ -581,7 +581,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | ({ cmd: "settings_save" } & SettingsPatch)
   | { cmd: "codex_quota_get" }
   | { cmd: "ollama_quota_get" }
-  | { cmd: "ollama_models_list" }
+  | { cmd: "ollama_models_list"; force?: boolean }
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
   | { cmd: "mention_picked"; path: string }
