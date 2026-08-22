@@ -182,6 +182,7 @@ import {
   verdictFor,
   visionModelsFor,
 } from "../../ollama-model-map.js";
+import { registerSeeImageTool } from "../../tools/see-image.js";
 import type { SubagentEvent } from "../../tools/subagent.js";
 
 import {
@@ -1852,9 +1853,23 @@ function restoreSessionModelPrefs(tab: Tab, meta: SessionMeta): void {
         hasSemanticSearch: tab.toolset.semantic.enabled,
         modelId: tab.currentModel,
       });
+      syncVisionTool(tab);
     }
   }
   tab.currentReasoningEffort = prefs.reasoningEffort;
+}
+
+/** The toolset is built once per tab — keep `see_image` registered iff the
+ *  current model accepts images (vision models only; the schema is dead
+ *  weight for text models). Model switches and session restores must sync. */
+function syncVisionTool(tab: Tab): void {
+  if (!tab.toolset) return;
+  const tools = tab.toolset.tools;
+  if (modelAcceptsImages(tab.currentModel, ollamaVisionModelIds())) {
+    if (!tools.has("see_image")) registerSeeImageTool(tools, { rootDir: tab.rootDir });
+  } else {
+    tools.unregister("see_image");
+  }
 }
 
 /** Provider-aware credential check — gpt tabs need an OpenAI key or an OAuth
@@ -2150,6 +2165,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       onSkillInstalled: () => emitSkills(tab),
       onJobsChanged: () => emitJobs(),
       subagentSink: subagentSinkFor(tab),
+      visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.toolset = toolset;
     tab.system = codeSystemPrompt(tab.rootDir, {
@@ -2657,6 +2673,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       onSkillInstalled: () => emitSkills(tab),
       onJobsChanged: () => emitJobs(),
       subagentSink: subagentSinkFor(tab),
+      visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.system = codeSystemPrompt(target, {
       hasSemanticSearch: tab.toolset.semantic.enabled,
@@ -3895,6 +3912,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
                 hasSemanticSearch: tab.toolset.semantic.enabled,
                 modelId: tab.currentModel,
               });
+              syncVisionTool(tab);
               if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
             }
           }

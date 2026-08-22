@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
+import { ToolRegistry } from "../src/tools.js";
+import { registerSeeImageTool } from "../src/tools/see-image.js";
 import { makeFakeClient } from "./support/fake-client.js";
 
 const DATA_URL = "data:image/png;base64,iVBORw0KGgo=";
@@ -54,5 +56,33 @@ describe("CacheFirstLoop — image attachments (OpenAI vision parts)", () => {
     expect(userMsg?.content).toEqual([
       { type: "image_url", image_url: { url: DATA_URL, detail: "low" } },
     ]);
+  });
+
+  it("forwards the turn's attached images into tool dispatch (see_image)", async () => {
+    const { client, captured } = makeFakeClient([
+      {
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "see_image", arguments: "{}" },
+          },
+        ],
+      },
+      { content: "ok" },
+    ]);
+    const tools = new ToolRegistry();
+    registerSeeImageTool(tools);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: false,
+      tools,
+    });
+    await consume(loop, "what does this show?", [DATA_URL]);
+
+    const toolMsg = captured[1]!.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.content).toContain("1 image(s) attached to the current turn");
+    expect(toolMsg?.content).toContain("visible to you directly");
   });
 });

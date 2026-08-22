@@ -245,6 +245,10 @@ export class CacheFirstLoop {
   /** Set true when a steer was consumed this turn; cleared on next step() entry. */
   private _steerConsumed = false;
 
+  /** Data-URL images attached to the current user turn — forwarded into every
+   *  tool dispatch ctx so vision tools (see_image) can confirm attachments. */
+  private _turnImages: readonly string[] = [];
+
   /** UI calls this to inject a mid-turn steer message without aborting the current turn.
    *  New text resets steerConsumed because a fresh steer is queued. */
   steer(text: string | null): void {
@@ -612,6 +616,7 @@ export class CacheFirstLoop {
         confirmationGate: this.confirmationGate,
         readTracker: this.readTracker,
         rootDir: this.hookCwd,
+        images: this._turnImages,
       });
 
       const postReport = await runHooks({
@@ -865,6 +870,7 @@ export class CacheFirstLoop {
     try {
       yield* this.stepTurn(userInput, images);
     } finally {
+      this._turnImages = [];
       if (this._turnAbort.signal.aborted) this.resetAbortState();
       // A turn force-closed mid-dispatch (desktop Send now / queue force)
       // abandons in-flight tool calls: their results never reach the log.
@@ -879,6 +885,7 @@ export class CacheFirstLoop {
   ): AsyncGenerator<LoopEvent> {
     // Reset per-turn flags.
     this._steerConsumed = false;
+    this._turnImages = images ?? [];
 
     // Budget gate runs FIRST, before any per-turn state mutation, so a
     // refusal leaves the loop unchanged and the user can correct the

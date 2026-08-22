@@ -23,6 +23,10 @@ export interface ToolCallContext {
   confirmationGate?: PauseGate;
   /** Per-session tracker of files the model has read. Filesystem tools mark on read/write, edit_file/multi_edit consult before mutating. */
   readTracker?: ReadTracker;
+  /** Data-URL image attachments of the current user turn (vision tools). */
+  images?: readonly string[];
+  /** Project root the turn is running in — for resolving relative paths. */
+  rootDir?: string;
 }
 
 export interface ToolDefinition<A = any, R = any> {
@@ -205,6 +209,8 @@ export class ToolRegistry {
       readTracker?: ReadTracker;
       /** Project root directory for saving truncated results. Defaults to process.cwd(). */
       rootDir?: string;
+      /** Data-URL image attachments of the current user turn — forwarded into the tool ctx for vision tools. */
+      images?: readonly string[];
     } = {},
   ): Promise<string> {
     const tool = this._tools.get(name);
@@ -316,6 +322,8 @@ export class ToolRegistry {
         cancelSignal: opts.cancelSignal,
         confirmationGate: opts.confirmationGate,
         readTracker: opts.readTracker,
+        images: opts.images,
+        rootDir: opts.rootDir,
       });
       const str = typeof result === "string" ? result : JSON.stringify(result);
       // Pre-clip at dispatch so a single fat result can't balloon the

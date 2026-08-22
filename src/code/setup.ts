@@ -27,6 +27,7 @@ import { JobRegistry } from "../tools/jobs.js";
 import { registerMemoryTools } from "../tools/memory.js";
 import { registerPlanTool } from "../tools/plan.js";
 import { registerScaffoldTools } from "../tools/scaffold.js";
+import { registerSeeImageTool } from "../tools/see-image.js";
 import { registerShellTools } from "../tools/shell.js";
 import { type SkillInstalledHook, registerSkillTools } from "../tools/skills.js";
 import {
@@ -48,6 +49,8 @@ export interface CodeToolsetOpts {
   onJobsChanged?: () => void;
   /** Shared `{current: callback}` sink the TUI populates after mount. Setup forwards it into every `spawnSubagent` so live progress events reach the rich subagent row even though setup runs before the UI does. */
   subagentSink?: SubagentSink;
+  /** True when the tab's model accepts image content parts (gpt-*, deepseek-v4-flash-vision-exp, confirmed Ollama vision models). Registers the `see_image` tool so the model's toolset matches its vision capability. */
+  visionEnabled?: boolean;
 }
 
 export interface CodeToolset {
@@ -94,6 +97,9 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   registerPlanTool(tools);
   registerChoiceTool(tools);
   registerTodoTool(tools);
+  if (opts.visionEnabled) {
+    registerSeeImageTool(tools, { rootDir: opts.rootDir });
+  }
   registerScaffoldTools(tools, { projectRoot: opts.rootDir });
   if (searchEnabled()) {
     registerWebTools(tools);
