@@ -4,257 +4,185 @@
   <strong>English</strong>
   &nbsp;·&nbsp;
   <a href="./README.zh-CN.md">简体中文</a>
-  &nbsp;·&nbsp;
-  <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>
-  &nbsp;·&nbsp;
-  <a href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html">Guide</a>
-  &nbsp;·&nbsp;
-  <a href="./docs/ARCHITECTURE.md">Architecture</a>
-  &nbsp;·&nbsp;
-  <strong><a href="https://discord.gg/XF78rEME2D">Discord</a></strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/esengine/reasonix/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/reasonix/release.yml?style=flat-square&label=release&labelColor=161b22&logo=githubactions&logoColor=white" alt="Release"/></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/esengine/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
-  <a href="https://github.com/esengine/reasonix/stargazers"><img src="https://img.shields.io/github/stars/esengine/reasonix.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
-  <a href="https://atomgit.com/esengine/DeepSeek-Reasonix"><img src="https://atomgit.com/esengine/DeepSeek-Reasonix/star/badge.svg" alt="AtomGit stars"/></a>
-  <a href="https://github.com/esengine/reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
-  <a href="https://github.com/esengine/reasonix/discussions"><img src="https://img.shields.io/github/discussions/esengine/reasonix.svg?style=flat-square&color=58a6ff&labelColor=161b22&logo=github&logoColor=white" alt="Discussions"/></a>
-  <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
-</p>
-
-<p align="center">
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/9e931d80-2050-4b10-902e-44970cc133ad.svg" alt="oosmetrics — Top 2 in Agents by velocity"/></a>
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/556d94b3-61b7-486b-baf2-888b9327deab.svg" alt="oosmetrics — Top 3 in LLMs by velocity"/></a>
+  <a href="https://github.com/Ultikynnys/DeepSeek-Reasonix/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/Ultikynnys/DeepSeek-Reasonix/release.yml?style=flat-square&label=release&labelColor=161b22&logo=githubactions&logoColor=white" alt="Release"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/Ultikynnys/DeepSeek-Reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D22-339933?style=flat-square&labelColor=161b22" alt="Node >= 22"/>
 </p>
 
 <br/>
 
-<h3 align="center">A DeepSeek-native AI coding agent for your desktop.</h3>
-<p align="center">Engineered around prefix-cache stability — so token costs stay low across long sessions, and you can leave it running.</p>
-
-<br/>
-
-> [!TIP]
-> **Cache stability isn't a feature you turn on; it's an invariant the loop is designed around.** Every layer is tuned to the byte-stable prefix-cache mechanic — DeepSeek stays the default and best-cached backend. The OpenAI GPT-5.6 family (Sol / Terra / Luna) is supported as an option; see [Models](#models).
+<h3 align="center">A DeepSeek-native coding agent for Windows, engineered around prefix-cache stability.</h3>
+<p align="center">Token costs stay low across long sessions, so it is a tool you can leave running.</p>
 
 > [!NOTE]
-> **Real user, single day (2026-05-01):** 435M input tokens, **99.82% cache hit**, ~$12 instead of the ~$61 the same workload would cost with no cache on `v4-flash`. DeepSeek provides the cacheable bytes; the four mechanisms in [Pillar 1](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) are how Reasonix keeps them cacheable across long sessions.
+> **This is a fork.** This repository is a personal, desktop-only line of
+> [esengine/DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix): the Ink TUI and the
+> interactive CLI chat modes are gone, the only product surface is the Tauri 2 Windows app backed by
+> a headless JSON-RPC daemon, and the cache-first loop from the v1 line was ported forward. The
+> concrete differences are listed in [Divergence from upstream](#divergence-from-upstream).
 
-> [!IMPORTANT]
-> **Community · 加入社区** — bilingual Discord with channels for setup help (`#help` / `#求助`), workflow showcases, feature ideas, and contributor-only PR coordination. Verify your GitHub in-server to get the **Contributor** role automatically. → **<https://discord.gg/XF78rEME2D>**
+> [!TIP]
+> **Cache stability is not a feature you turn on; it is an invariant the loop is designed around.**
+> DeepSeek bills cached input at a small fraction of the miss rate, and the cache only hits when the
+> exact byte prefix of the previous request is preserved. Every layer of the loop is tuned to keep
+> that prefix byte-stable. DeepSeek remains the default backend; the GPT-5.6 family and Ollama are
+> supported as options (see [Backends and models](#backends-and-models)).
 
 <br/>
 
 ## Install
 
-### Desktop app for Windows (recommended)
+### Windows desktop app (recommended)
 
-Download the latest Windows installer from [GitHub Releases](https://github.com/esengine/DeepSeek-Reasonix/releases) and run `Reasonix_x.y.z_x64-setup.exe`. The app bundles its own Node runtime and the same `~/.reasonix` config — multi-tab sessions, a right panel listing files the agent read or edited, and the live cost / cache / token meters. No `npm install`, no Node needed; grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) on first run.
+Download the latest Windows installer from
+[GitHub Releases](https://github.com/Ultikynnys/DeepSeek-Reasonix/releases) and run
+`Reasonix_x.y.z_x64-setup.exe`. The installer is built and published by the
+[release workflow](https://github.com/Ultikynnys/DeepSeek-Reasonix/actions/workflows/release.yml) on
+every push to `main`, and the app auto-updates from the same releases. The app bundles its own Node
+runtime, so no `npm install` or Node installation is needed.
 
-- **Windows** — SmartScreen may warn "Unknown publisher" while installers are unsigned: click **More info → Run anyway**.
+- First run asks for a [DeepSeek API key](https://platform.deepseek.com/api_keys). The key is stored
+  in the app's config; `DEEPSEEK_API_KEY` in `.env` is read as a fallback.
+- SmartScreen may warn "Unknown publisher" while installers are unsigned: click **More info → Run
+  anyway**. See [desktop/SIGNING.md](desktop/SIGNING.md) for the signing setup.
+- Windows only. User data lives in `~/.reasonix` (config, sessions, memory, skills).
 
-### QQ channel
+## Backends and models
 
-QQ can extend an existing desktop session as a remote channel. It is part of the current session flow, not a separate runtime mode.
+| Backend | Models | Auth |
+| --- | --- | --- |
+| DeepSeek (default) | `deepseek-v4-flash`, `deepseek-v4-pro`, `deepseek-v4-flash-vision-exp` (experimental vision line) | `DEEPSEEK_API_KEY` |
+| OpenAI-compatible | GPT-5.6 family: `gpt-5.6` (alias of Sol) / `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` | `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` for proxies / Azure-compatible gateways |
+| Ollama | any local model via `ollama/<name>`; cloud Ollama is also supported | local daemon is keyless; cloud needs `OLLAMA_API_KEY` |
 
-- Desktop: open `Settings -> General -> QQ Channel`
-
-Once connected, QQ messages can enter the current session, assistant replies route back to QQ, and follow-up interactions can continue remotely.
-
-For full setup, desktop quick start, and troubleshooting, see [QQ channel setup](./docs/qq-connect.md).
-
-<details>
-<summary><strong>Author your first skill</strong></summary>
-
-**Author your first skill.** No remote registry — write them directly. Edit the file (`description:` frontmatter + body), then `/skill list`. Add `runAs: subagent` to spawn an isolated subagent loop instead of inlining the body.
-
-~~~bash
-/skill new my-skill              # <project>/.reasonix/skills/my-skill.md
-/skill new my-skill --global     # ~/.reasonix/skills for cross-project use
-~~~
-
-**Claude-format skills also load.** `<project>/.claude/skills/<name>/SKILL.md` and `~/.claude/skills/` are read alongside Reasonix's native paths, so tooling that emits Claude-format skills works out of the box. Example — drop OpenSpec workflows in without an upstream adapter:
-
-~~~bash
-npx openspec init --tools claude    # writes .claude/skills/openspec-*/SKILL.md
-/skill openspec-propose <task>      # then invoke from Reasonix
-~~~
-
-</details>
-
-<br/>
-
-## Configuration
-
-One JSON file at `~/.reasonix/config.json` plus per-project overrides under `<project>/.reasonix/`. The full bilingual reference — every key, every slash command, the on-disk shape of skills/memory/hooks — lives at:
-
-> 📘 **[Configuration Guide](https://esengine.github.io/DeepSeek-Reasonix/configuration.html)** · [中文](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh)
-
-| Topic | Quick read |
-|---|---|
-| [MCP servers](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#mcp) | stdio · SSE · Streamable HTTP. Configured in the desktop Settings or `config.json` — one spec format. |
-| [Skills](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#skills) | Markdown playbooks the model can invoke. `inline` or `subagent` mode. |
-| [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#memory) | User-private knowledge pinned into the prefix. `user` / `feedback` / `project` / `reference` types. |
-| [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#hooks) | Shell commands on lifecycle events. `PreToolUse` (gating) · `PostToolUse` · `UserPromptSubmit` · `Stop`. |
-| [Permissions](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#permissions) | Per-workspace shell allowlist. Exact-prefix match. |
-| [Web search](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#search) | Mojeek by default; switch to self-hosted SearXNG or Metaso with `/search-engine`. |
-| [Semantic index](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#index) | Local Ollama or any OpenAI-compatible embedding endpoint. |
-
-<br/>
-
-### Models
-
-DeepSeek is the default backend (`deepseek-v4-flash` / `deepseek-v4-pro`). The OpenAI **GPT-5.6 family** — Sol (flagship, alias `gpt-5.6`), Terra (balanced), Luna (fast / cheap) — is supported as a first-class alternative:
-
-- Pick a model with `--model` (CLI), the composer picker, or Settings → Models.
-- `gpt-*` ids route to `https://api.openai.com/v1` automatically and need `OPENAI_API_KEY` (optionally `OPENAI_BASE_URL` for proxies / Azure-compatible gateways); DeepSeek ids use `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (see `.env.example`).
-- All three tiers accept `reasoning_effort` `low|medium|high|xhigh|max` — the same `/effort` knob and Settings control DeepSeek uses, with `xhigh` and `max` as the extra-deep tiers.
-- Skills run subagents on `deepseek-v4-flash` by default; set `model: gpt-5.6-sol` in a skill's frontmatter to run its subagent on OpenAI (needs an OpenAI key).
-
-<br/>
+- Models are picked in Settings → Models or from the composer. The Ollama catalog is fetched once at
+  launch, cached for 60 s, and shared by every tab; refresh buttons force a refetch.
+- `gpt-*` ids route to `https://api.openai.com/v1` automatically; DeepSeek ids route to
+  `https://api.deepseek.com` (overridable via `DEEPSEEK_BASE_URL`).
+- Reasoning effort (`low | medium | high | xhigh | max`) is set per model via the `/effort` command
+  or Settings.
+- Image attachments (paste or drop) are enabled for vision-capable models: the GPT-5.6 family and
+  `deepseek-v4-flash-vision-exp`. DeepSeek bills image tokens as input tokens.
+- See [.env.example](.env.example) for the full list of supported environment variables.
 
 ## What makes Reasonix different
 
-The loop is organized around three pillars. Each one solves a problem generic agent frameworks don't even see — because they were designed for a different cache mechanic.
+The loop is organized around three pillars, each one a response to DeepSeek's exact-prefix cache
+billing:
 
-<sub align="center">
+1. **Cache-first loop.** Context is partitioned into an immutable prefix (system + tool specs,
+   computed and pinned once per session), an append-only event log, and a volatile scratch region
+   that never reaches the API. No rewrites, no injected timestamps: consecutive turns share a
+   byte-stable prefix, so the cache hits turn after turn.
+2. **Tool-call repair.** Malformed, truncated, or redundant tool calls are repaired (flatten,
+   scavenge, storm, truncation) and re-dispatched instead of failing the turn.
+3. **Cost control.** Flash-first defaults for the main loop and for every auxiliary call
+   (subagents, summaries, compaction), turn-end auto-compaction of oversized tool results, a
+   per-turn iteration cap with a grace window, an optional USD budget, and live cost/cache metering
+   with off-peak/peak rate awareness (peak hours bill at 2x; off-peak applies all day on weekends,
+   Beijing time).
 
-Click through to the full architecture writeup → [Pillar 1 — Cache-first loop](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) · [Pillar 2 — Tool-call repair](./docs/ARCHITECTURE.md#pillar-2--tool-call-repair) · [Pillar 3 — Cost control](./docs/ARCHITECTURE.md#pillar-3--cost-control-v06)
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full writeup.
 
-</sub>
+## Features
 
-<br/>
+**Desktop app (Tauri 2, React)**
 
-## Capabilities
+- Multi-tab sessions with persistent per-workspace state, a session list, and session titles.
+- Composer with `@`-mentions for workspace files, image paste/drop for vision models, slash
+  commands (`/new`, `/clear`, `/abort`, `/copy`, `/model`, `/search-engine`, `/skill`, `/theme`,
+  `/currency`, `/lang`, `/plan <mode>`, `/effort <level>`), and queued sends.
+- Edit modes `plan`, `review`, `auto`, `yolo` (Shift+Tab or `/model <mode>`): SEARCH/REPLACE edits
+  are shown for approval in review mode; yolo mode skips approval and never pauses a productive turn
+  at the iteration cap.
+- Context panel listing files the agent read or edited; jobs panel for background processes.
+- Status bar: live cache-hit %, context tokens, this-turn cost (USD/CNY), the current off-peak/peak
+  rate period, account balance (DeepSeek) or weekly quota (GPT-5.6 Codex, Ollama plan), workspace,
+  model + effort.
+- Settings pages: general, models, MCP, skills, memory, rules, billing, shortcuts.
+- Themes (dark/light plus accent styles), i18n (English, Deutsch, 简体中文), keyboard shortcuts.
 
-- Cell-diff renderer (SEARCH/REPLACE review) · MCP servers · plan mode · permissions
-- Persistent sessions · hooks / skills / memory · semantic search · auto-checkpoints
-- `/effort` knob · transcript replay · event log · embedded web dashboard
+**Agent runtime**
 
-<br/>
+- MCP client with stdio, SSE, and Streamable HTTP transports, a server catalog, `.mcp.json` project
+  config, and in-app server management.
+- Skills: markdown playbooks in `<project>/.reasonix/skills/` and `~/.reasonix/skills/`, run inline
+  or as isolated subagents; Claude-format skills under `.claude/skills/` load as-is.
+- Memory: project (`REASONIX.md`), session, user, and runtime stores; user memory pins preferences
+  into the prefix.
+- Hooks: shell commands on lifecycle events, `PreToolUse` (gating), `PostToolUse`,
+  `UserPromptSubmit`, `Stop`.
+- Web search: `bing` by default (works from CN without a proxy), switchable in Settings to
+  `bing-intl`, `searxng`, `metaso`, `baidu`, `tavily`, `perplexity`, `exa`, `brave`, or Ollama
+  cloud search.
+- Semantic index over the workspace via local Ollama embeddings (`nomic-embed-text` by default) or
+  any OpenAI-compatible embedding endpoint.
+- Plan mode with structured, reviewable plans.
+- Shell: allowlisted command execution with config-based permissions, command chains, background
+  jobs with streaming output.
+- Event log: every session is an append-only JSONL of typed kernel events, replayable through pure
+  projections.
 
-## How it compares
+## Configuration
 
-|                                   | Reasonix         | Claude Code       | Cursor              | Aider              |
-|-----------------------------------|------------------|-------------------|---------------------|--------------------|
-| Backend                           | DeepSeek / GPT-5.6 | Anthropic         | OpenAI / Anthropic  | any (OpenRouter)   |
-| License                           | **MIT**          | closed            | closed              | Apache 2           |
-| Cost profile                      | **low per task** | premium           | subscription + use  | varies             |
-| DeepSeek prefix-cache             | **engineered**   | not applicable    | not applicable      | incidental         |
-| Embedded web dashboard            | yes              | —                 | n/a (IDE)           | —                  |
-| Configurable web search engine    | `/search-engine` | —             | —                   | —                  |
-| Persistent per-workspace sessions | yes              | partial           | n/a                 | —                  |
-| Plan mode · MCP · hooks · skills  | yes              | yes               | yes                 | partial            |
-| Web search (Mojeek + SearXNG + Metaso)   | yes              | yes               | yes                 | yes                |
-| Open community development        | yes              | —                 | —                   | yes                |
+- User config: `~/.reasonix/config.json` (model, reasoning effort, web search engine, pricing
+  overrides, rate limits, and more).
+- Per-project: `<project>/.reasonix/settings.json` (hooks), `<project>/.reasonix/skills/`, and
+  `<project>/REASONIX.md` (project memory).
+- Environment variables: see [.env.example](.env.example). `REASONIX_LOG_LEVEL=INFO` controls
+  logging; `REASONIX_TRANSCRIPT_DIR` relocates session transcripts.
+- Pricing overrides: `pricingOverride` in `config.json` sets per-model USD rates when a model's
+  published price is missing or wrong.
 
-<br/>
+## Development
+
+Requires Node >= 22 and npm.
+
+| Command | What it does |
+| --- | --- |
+| `npm install` | install dependencies (runs `scripts/postinstall.mjs`) |
+| `npm run dev` | run the headless desktop backend (`tsx src/cli/index.ts desktop`) |
+| `npm run build` | tsup bundle into `dist/` |
+| `npm run build:desktop` | build the desktop UI (vite) |
+| `npm run test` | vitest |
+| `npm run lint` / `npm run format` | biome |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run typecheck:desktop` | desktop app typecheck |
+| `npm run verify` | build + lint + typecheck + typecheck:desktop + tests (the pre-push gate) |
+
+- Desktop UI dev server: `npm --prefix desktop run dev`; the Tauri shell lives in
+  `desktop/src-tauri/`.
+- CI: `.github/workflows/release.yml` verifies every push to `main` on Windows, bumps the patch
+  version, tags `vX.Y.Z`, and publishes the NSIS installer to a GitHub Release (the app's updater
+  reads `latest.json` from the latest release).
 
 ## Documentation
 
-- [**Architecture**](./docs/ARCHITECTURE.md) — three pillars: cache-first loop, tool-call repair, cost control
-- [**QQ channel setup**](./docs/qq-connect.md) — desktop entry, CLI first-connect flow, and QQ Open Platform credentials
-- [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard
-- [**Contributing**](./CONTRIBUTING.md) — comment policy, error-handling rules, library-over-hand-rolled
-- [**Code of Conduct**](./CODE_OF_CONDUCT.md) · [**Security policy**](./SECURITY.md)
+- [Architecture](docs/ARCHITECTURE.md): the three pillars, cache-first loop, tool-call repair,
+  and cost control
+- [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security
+  policy](SECURITY.md)
+- [Installer signing](desktop/SIGNING.md)
 
-<br/>
+## Divergence from upstream
 
-## Community
+The fork keeps the MIT license and the cache-first core, and removes or changes the rest:
 
-> [!NOTE]
-> Reasonix is open source and community-developed. Every avatar in the Acknowledgments wall at the bottom of this file is a real PR that shipped.
+- **Removed**: the Ink TUI and the interactive CLI commands (`code`, `replay`, `diff`); the
+  embedded web dashboard server (config helpers remain, but nothing serves it); the QQ channel
+  integration and its docs; upstream's community pages (Discord, sponsors, acknowledgments wall).
+- **Added / changed**: the Tauri 2 Windows app as the only product surface; Ollama support (local
+  and cloud) with a shared, cached model catalog; the GPT-5.6 family and
+  `deepseek-v4-flash-vision-exp` in the official model list; image attachments; edit modes including
+  `yolo`; the per-turn iteration cap with a grace window (yolo bypasses the pause); off-peak/peak
+  rate display and the current pricing table; Codex and Ollama quota chips in the status bar.
+- The CLI entry (`src/cli/index.ts`) exposes a single `desktop` command: headless JSON-RPC over
+  stdio, spawned by the Tauri shell.
 
-Scoped starter tickets — each with background, code pointers, acceptance criteria, and hints — live under the [`good first issue`](https://github.com/esengine/reasonix/labels/good%20first%20issue) label. Pick anything open.
+## License
 
-**Open Discussions — opinions wanted:**
-
-- [#21 · Dashboard design](https://github.com/esengine/reasonix/discussions/21) — react against the [proposed mockup](https://esengine.github.io/DeepSeek-Reasonix/design/agent-dashboard.html)
-- [#22 · Future feature wishlist](https://github.com/esengine/reasonix/discussions/22) — what would you build into Reasonix next?
-
-**Already using Reasonix and willing to help others discover it?** Publish blog posts, articles, screenshots, talks, or videos to [**Show and tell**](https://github.com/esengine/reasonix/discussions/categories/show-and-tell). The project has no marketing budget — community word of mouth is how new users find it. Sustained advocates earn the badge below, displayed next to the contributors wall once awarded:
-
-<p align="center">
-  <a href="https://github.com/esengine/reasonix/discussions/categories/show-and-tell">
-    <img src="https://img.shields.io/badge/REASONIX-📣%20ADVOCATE-c4b5fd?style=for-the-badge&labelColor=0d1117" alt="Reasonix Advocate badge — earned by sustained advocates"/>
-  </a>
-</p>
-
-**Before your first PR**: read [`CONTRIBUTING.md`](./CONTRIBUTING.md) — short, strict rules (comments, errors, libraries-over-hand-rolled). `tests/comment-policy.test.ts` enforces the comment ones; `npm run verify` is the pre-push gate. By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md). Security issues → [SECURITY.md](./SECURITY.md).
-
-<br/>
-
-## Non-goals
-
-> [!IMPORTANT]
-> Reasonix is opinionated. Some things it deliberately *doesn't* do — listed here so you can pick the right tool for your work.
-
-- **Multi-provider flexibility.** DeepSeek-only on purpose. Coupling to one backend is the feature, not a limitation.
-- **IDE integration.** Desktop-first. The Windows app is the primary surface. The dashboard is a companion, not a Cursor replacement.
-- **Hardest-leaderboard reasoning.** Claude Opus still wins some benchmarks. DeepSeek is competitive on coding; if your work is "solve this PhD proof" rather than "fix this auth bug," start with Claude.
-- **Air-gapped / fully-free.** Reasonix needs a paid DeepSeek API key. For air-gapped or zero-cost runs see Aider + Ollama or [Continue](https://continue.dev).
-
-<br/>
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=esengine%2FDeepSeek-Reasonix&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
- </picture>
-</a>
-
-<br/>
-
-## Support
-
-If Reasonix has been useful and you'd like to say thanks, you can. It stays a coffee, not a contract — donations don't buy feature priority or change how issues get triaged.
-
-- **International** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
-- **国内** — 微信支付（扫码）
-
-<p align="center">
-  <img src=".github/sponsor/wechat-pay.jpg" alt="WeChat Pay QR code" width="240"/>
-</p>
-
-<br/>
-
-## Acknowledgments
-
-A small list of folks whose work has shaped Reasonix the most — measured
-by both commit count and code volume. **Listed alphabetically, no ordering
-of importance.** The full contributor graph is on
-[GitHub](https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors).
-
-- [**ctharvey**](https://github.com/ctharvey)
-- [**dimasd-angga**](https://github.com/dimasd-angga) (Dimas D. Angga)
-- [**Evan-Pycraft**](https://github.com/Evan-Pycraft)
-- [**ForeverYoungPp**](https://github.com/ForeverYoungPp)
-- [**GTC2080**](https://github.com/GTC2080) (TaoMu)
-- [**kabaka9527**](https://github.com/kabaka9527)
-- [**lisniuse**](https://github.com/lisniuse) (Richie)
-- [**wade19990814-hue**](https://github.com/wade19990814-hue)
-- [**wviana**](https://github.com/wviana) (Wesley Viana)
-
-Also a separate thank-you to [**Bernardxu123**](https://github.com/Bernardxu123)
-for designing the project logo, and to [AIGC Link](https://xhslink.com/m/80ngts127cA) for promoting the project on XiaoHongShu.
-
-<p align="center">
-  <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=esengine/DeepSeek-Reasonix&max=100&columns=12" alt="Contributors to esengine/DeepSeek-Reasonix" width="860"/>
-  </a>
-</p>
-
-<br/>
-
----
-
-<p align="center">
-  <sub>MIT — see <a href="./LICENSE">LICENSE</a></sub>
-  <br/>
-  <sub>Built by the community at <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a></sub>
-</p>
+MIT. See [LICENSE](LICENSE). Upstream project:
+[esengine/DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix).
