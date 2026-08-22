@@ -4,12 +4,7 @@ mod rpc;
 
 use rpc::{RpcState, rpc_kill, rpc_send, rpc_spawn};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-fn pasted_images_dir() -> PathBuf {
-    std::env::temp_dir().join("reasonix-pasted-images")
-}
+use std::path::Path;
 
 #[derive(Serialize)]
 struct FileEntry {
@@ -228,44 +223,6 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, &content).map_err(|e| format!("write failed: {e}"))
 }
 
-fn sanitize_image_extension(raw: Option<&str>) -> String {
-    let cleaned = raw
-        .map(|s| s.trim().trim_start_matches('.').to_ascii_lowercase())
-        .unwrap_or_default();
-    let ok = !cleaned.is_empty()
-        && cleaned.len() <= 8
-        && cleaned.chars().all(|c| c.is_ascii_alphanumeric());
-    if ok { cleaned } else { "png".to_string() }
-}
-
-#[tauri::command]
-fn save_clipboard_image(bytes: Vec<u8>, extension: Option<String>) -> Result<String, String> {
-    let ext = sanitize_image_extension(extension.as_deref());
-    let dir = pasted_images_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir failed: {e}"))?;
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| format!("clock error: {e}"))?
-        .as_millis();
-    let path = dir.join(format!("reasonix-pasted-{ts}.{ext}"));
-    std::fs::write(&path, bytes).map_err(|e| format!("write failed: {e}"))?;
-    Ok(path.to_string_lossy().into_owned())
-}
-
-fn purge_old_pasted_images(max_age: Duration) {
-    let dir = pasted_images_dir();
-    let Ok(entries) = std::fs::read_dir(&dir) else { return };
-    let cutoff = SystemTime::now().checked_sub(max_age);
-    for entry in entries.flatten() {
-        let Ok(metadata) = entry.metadata() else { continue };
-        if !metadata.is_file() { continue }
-        let Ok(modified) = metadata.modified() else { continue };
-        if cutoff.is_some_and(|t| modified < t) {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -282,12 +239,10 @@ fn main() {
             open_in_editor,
             list_workspace_tree,
             git_status,
-            write_text_file,
-            save_clipboard_image
+            write_text_file
         ])
         .setup(|app| {
             use tauri::Manager;
-            std::thread::spawn(|| purge_old_pasted_images(Duration::from_secs(24 * 60 * 60)));
             if let Some(w) = app.get_webview_window("main") {
                 // HiDPI fit: the JSON config asks for 1024x720 logical px.
                 // On Windows laptops at 200% scale (1920x1080 → 960x540
@@ -331,35 +286,4 @@ fn main() {
         });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::sanitize_image_extension;
 
-    #[test]
-    fn accepts_alphanumeric_extensions() {
-        assert_eq!(sanitize_image_extension(Some("png")), "png");
-        assert_eq!(sanitize_image_extension(Some("JPG")), "jpg");
-        assert_eq!(sanitize_image_extension(Some(".webp")), "webp");
-        assert_eq!(sanitize_image_extension(Some("svg")), "svg");
-    }
-
-    #[test]
-    fn falls_back_when_missing_or_invalid() {
-        assert_eq!(sanitize_image_extension(None), "png");
-        assert_eq!(sanitize_image_extension(Some("")), "png");
-        assert_eq!(sanitize_image_extension(Some("   ")), "png");
-    }
-
-    #[test]
-    fn rejects_path_separators_and_traversal() {
-        assert_eq!(sanitize_image_extension(Some("png/../../foo")), "png");
-        assert_eq!(sanitize_image_extension(Some("png\\foo")), "png");
-        assert_eq!(sanitize_image_extension(Some("../bin")), "png");
-        assert_eq!(sanitize_image_extension(Some("p.n.g")), "png");
-    }
-
-    #[test]
-    fn rejects_overlong_extensions() {
-        assert_eq!(sanitize_image_extension(Some("verylongext")), "png");
-    }
-}

@@ -102,6 +102,8 @@ export const en = {
     imageFilterName: "Images",
     removeImage: "Remove image",
     imageAttachFailed: "Couldn't attach the image",
+    imageRequiresVision:
+      "This model can't receive images. Switch to a vision-capable model (gpt-* or deepseek-v4-flash-vision-exp) to attach pasted images.",
     commandsLabel: "commands",
     mentionLabel: "mention",
     workspaceRoot: "workspace root",

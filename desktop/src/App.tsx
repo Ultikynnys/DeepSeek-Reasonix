@@ -1800,6 +1800,9 @@ interface TabRuntimeProps {
   ollamaPlan: string | null;
   /** Models hidden because the account's plan doesn't cover them. */
   ollamaHiddenCount: number;
+  /** Prefixed vision-capable Ollama model ids (`ollama/llava`) confirmed by the
+   *  daemon — lets image-capable Ollama models accept attachments. */
+  ollamaVisionModels: ReadonlySet<string>;
   /** Re-fetch the app-global Ollama catalog (`force` bypasses the cache). */
   onRefreshOllamaModels: (force?: boolean) => void;
   tabsList: { id: string; workspaceDir?: string }[];
@@ -1840,6 +1843,7 @@ function TabRuntime({
   ollamaModelsError,
   ollamaPlan,
   ollamaHiddenCount,
+  ollamaVisionModels,
   onRefreshOllamaModels,
   tabsList,
   activeTabId,
@@ -2037,7 +2041,11 @@ function TabRuntime({
   // Vision attachments (gpt-* + DeepSeek vision models): paste carries bytes
   // from the webview; picked/dropped files ship a path the daemon reads.
   // Pending images render as thumbnails above the composer until send.
-  const imageCapable = modelAcceptsImages(state.model);
+  // Capability follows the SELECTED model (settings.model, mirrored from the
+  // daemon's $settings): the top-level state.model only updates when a turn
+  // starts, so right after a switch to a vision model it still reports the
+  // previous model and would misroute pastes to the non-vision path.
+  const imageCapable = modelAcceptsImages(state.settings?.model, ollamaVisionModels);
   const attachPastedImage = useCallback(
     async (file: File) => {
       try {
@@ -2136,7 +2144,7 @@ function TabRuntime({
           if (paths.length === 0) return;
           // Vision-capable models accept image attachments; everything else
           // (and all non-image files) still drops in as @-mentions.
-          const imageCapable = modelAcceptsImages(state.model);
+          const imageCapable = modelAcceptsImages(state.settings?.model, ollamaVisionModels);
           const imagePaths = imageCapable ? paths.filter(isImagePath) : [];
           const mentionPaths = imageCapable ? paths.filter((p) => !isImagePath(p)) : paths;
           for (const p of imagePaths) attachPickedImage(p);
@@ -2170,7 +2178,7 @@ function TabRuntime({
       unlisten?.();
       delete document.body.dataset.dragOver;
     };
-  }, [state.settings?.workspaceDir, state.model, markMentionPicked, attachPickedImage]);
+  }, [state.settings?.workspaceDir, state.settings?.model, markMentionPicked, attachPickedImage]);
 
   const send = useCallback(
     (override?: string) => {
@@ -3131,6 +3139,7 @@ function TabRuntime({
                 ollamaModels={ollamaModels}
                 ollamaModelsError={ollamaModelsError ?? undefined}
                 ollamaHiddenCount={ollamaHiddenCount}
+                ollamaVisionModels={ollamaVisionModels}
                 onRefreshOllamaModels={onRefreshOllamaModels}
                 onModelChange={(model) => {
                   applySettingsPatch({ model });
@@ -3156,6 +3165,12 @@ function TabRuntime({
                 onRemoveImage={removePendingImage}
                 imageCapable={imageCapable}
                 onPasteImage={attachPastedImage}
+                onImageRejected={() =>
+                  flashToast(t("composer.imageRequiresVision"), {
+                    severity: "warning",
+                    duration: 5000,
+                  })
+                }
                 onPickImage={attachPickedImage}
               />
             </>
@@ -3270,6 +3285,7 @@ function TabRuntime({
             ollamaModelsError={ollamaModelsError ?? undefined}
             ollamaPlan={ollamaPlan ?? undefined}
             ollamaHiddenCount={ollamaHiddenCount}
+            ollamaVisionModels={ollamaVisionModels}
             onRefreshOllamaModels={onRefreshOllamaModels}
             oauthWaiting={state.oauthWaiting}
             onOAuthBegin={() => sendRpc({ cmd: "oauth_begin" })}
@@ -4163,10 +4179,12 @@ export function App() {
   // instead of per-tab copies.
   const [ollamaCatalog, setOllamaCatalog] = useState<{
     models: string[];
+    /** Prefixed vision-capable ids (`ollama/llava`) confirmed by the daemon. */
+    visionModels: Set<string>;
     error: string | null;
     plan: string | null;
     hiddenCount: number;
-  }>({ models: [], error: null, plan: null, hiddenCount: 0 });
+  }>({ models: [], visionModels: new Set(), error: null, plan: null, hiddenCount: 0 });
   const [startupRetryNonce, setStartupRetryNonce] = useState(0);
   const dispatchersRef = useRef<Map<string, TabDispatcher>>(new Map());
   const pendingEventsRef = useRef<Map<string, TabAction[]>>(new Map());
@@ -4569,6 +4587,7 @@ export function App() {
             if (ev.type === "$ollama_models") {
               setOllamaCatalog({
                 models: ev.models,
+                visionModels: new Set((ev.visionModels ?? []).map((id) => `ollama/${id}`)),
                 error: ev.error ?? null,
                 plan: ev.plan ?? null,
                 hiddenCount: ev.hiddenCount ?? 0,
@@ -4819,6 +4838,7 @@ export function App() {
           ollamaModelsError={ollamaCatalog.error}
           ollamaPlan={ollamaCatalog.plan}
           ollamaHiddenCount={ollamaCatalog.hiddenCount}
+          ollamaVisionModels={ollamaCatalog.visionModels}
           onRefreshOllamaModels={requestOllamaModels}
           tabsList={tabs}
           activeTabId={activeTabId}

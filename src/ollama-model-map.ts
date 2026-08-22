@@ -12,6 +12,10 @@ export interface OllamaVerdictEntry {
   result: OllamaModelVerdict;
   /** Epoch ms when the verdict was learned — staleness is measured from here. */
   at: number;
+  /** Whether the model is vision-capable (multimodal). Absent/undefined
+   *  means "unknown" — a legacy entry written before vision probing, or one
+   *  where the vision probe couldn't run. */
+  vision?: boolean;
 }
 
 /** Persistent verdict map: `plan -> (endpoint|keyHash) -> model -> entry`.
@@ -49,7 +53,12 @@ function isVerdictEntry(value: unknown): value is OllamaVerdictEntry {
   if (typeof value !== "object" || value === null) return false;
   const result = (value as { result?: unknown }).result;
   const at = (value as { at?: unknown }).at;
-  return (result === "ok" || result === "gated") && typeof at === "number" && Number.isFinite(at);
+  const vision = (value as { vision?: unknown }).vision;
+  if ((result !== "ok" && result !== "gated") || typeof at !== "number" || !Number.isFinite(at)) {
+    return false;
+  }
+  // `vision` is optional — a legacy entry without it is still valid (means unknown).
+  return vision === undefined || typeof vision === "boolean";
 }
 
 function isVerdictStore(value: unknown): value is OllamaVerdictStore {
@@ -105,12 +114,13 @@ export function setVerdict(
   model: string,
   result: OllamaModelVerdict,
   at: number,
+  vision?: boolean,
 ): void {
   let plans = store.plans[plan];
   if (!plans) plans = store.plans[plan] = {};
   let scoped = plans[scope];
   if (!scoped) scoped = plans[scope] = {};
-  scoped[model] = { result, at };
+  scoped[model] = { result, at, ...(vision === undefined ? {} : { vision }) };
 }
 
 /** Split the model list into `known` (fresh cached verdicts) and `unknown`
@@ -131,4 +141,25 @@ export function partitionByVerdicts(
     else unknown.push(model);
   }
   return { known, unknown };
+}
+
+/** The set of models (within `models`) whose cached verdict marks them
+ *  vision-capable. `vision` is `true` only — models with a gated/ok verdict but
+ *  no recorded vision flag are not included (unknown is treated as not-vision;
+ *  vision is an additive capability so this can only under-promise, never
+ *  over-promise image support). */
+export function visionModelsFor(
+  models: readonly string[],
+  store: OllamaVerdictStore,
+  plan: string,
+  scope: string,
+  now: number,
+  ttlMs: number = OLLAMA_VERDICT_TTL_MS,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const model of models) {
+    const entry = verdictFor(store, plan, scope, model, now, ttlMs);
+    if (entry?.vision === true) out.add(model);
+  }
+  return out;
 }

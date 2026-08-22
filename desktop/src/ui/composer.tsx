@@ -1,5 +1,4 @@
 import { SUPPORTED_IMAGE_EXTENSIONS } from "@reasonix/core-utils";
-import { invoke } from "@tauri-apps/api/core";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   type ChangeEvent,
@@ -117,17 +116,6 @@ function atIcon(k: MentionItem["kind"]) {
   return <I.at size={12} />;
 }
 
-function guessImageExtension(mime: string): string {
-  const normalized = mime.toLowerCase();
-  if (normalized === "image/jpeg") return "jpg";
-  if (normalized === "image/png") return "png";
-  if (normalized === "image/gif") return "gif";
-  if (normalized === "image/webp") return "webp";
-  if (normalized === "image/svg+xml") return "svg";
-  const slash = normalized.indexOf("/");
-  return slash >= 0 ? normalized.slice(slash + 1).replace(/[^a-z0-9]+/g, "") || "png" : "png";
-}
-
 export function Composer({
   draft,
   setDraft,
@@ -147,6 +135,7 @@ export function Composer({
   ollamaModels,
   ollamaModelsError,
   ollamaHiddenCount,
+  ollamaVisionModels,
   onRefreshOllamaModels,
   textareaRef,
   slashCommands,
@@ -163,6 +152,7 @@ export function Composer({
   onRemoveImage,
   imageCapable,
   onPasteImage,
+  onImageRejected,
   onPickImage,
 }: {
   draft: string;
@@ -187,6 +177,8 @@ export function Composer({
   ollamaHiddenCount?: number;
   /** Re-fetch the Ollama model list (`force` bypasses the backend's cache). */
   onRefreshOllamaModels?: (force?: boolean) => void;
+  /** Prefixed vision-capable Ollama ids (`ollama/llava`) — shown as a badge. */
+  ollamaVisionModels?: ReadonlySet<string>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   slashCommands: SlashCmd[];
   onMentionQuery?: (q: string, nonce: number) => void;
@@ -208,6 +200,9 @@ export function Composer({
   imageCapable?: boolean;
   /** Vision path for clipboard images — bytes downscaled and attached. */
   onPasteImage?: (file: File) => Promise<void>;
+  /** Fired when a paste is dropped because the active model can't accept
+   *  image attachments. Lets the app explain and point at vision models. */
+  onImageRejected?: () => void;
   /** Vision path for picked/dropped image paths — daemon reads the bytes. */
   onPickImage?: (path: string) => void;
 }) {
@@ -316,16 +311,13 @@ export function Composer({
       }
       return;
     }
-    try {
-      const buffer = await file.arrayBuffer();
-      const savedPath = await invoke<string>("save_clipboard_image", {
-        bytes: buffer,
-        extension: guessImageExtension(file.type),
-      });
-      insertMention(savedPath);
-    } catch (err) {
-      console.error("clipboard image paste failed", err);
-    }
+    // Non-vision models can't receive image parts at all (the daemon hard-gates
+    // them), so there's no point saving the bytes to a temp file and injecting
+    // an @temp-path mention: the daemon only converts mentions for vision
+    // models, and the temp dir sits outside the workspace the model's tools can
+    // read. Reject loudly so the user switches models instead of sending a
+    // dead path.
+    onImageRejected?.();
   };
 
   const slashItems = useMemo(() => {
@@ -737,6 +729,7 @@ export function Composer({
                   ollamaModels={ollamaModels}
                   ollamaModelsError={ollamaModelsError}
                   ollamaHiddenCount={ollamaHiddenCount}
+                  ollamaVisionModels={ollamaVisionModels}
                   onRefreshOllamaModels={onRefreshOllamaModels}
                   onPickModel={(m) => {
                     onModelChange(m);
@@ -917,6 +910,7 @@ function ModelEffortMenu({
   ollamaModels,
   ollamaModelsError,
   ollamaHiddenCount,
+  ollamaVisionModels,
   onRefreshOllamaModels,
 }: {
   modelLabel: string;
@@ -926,6 +920,7 @@ function ModelEffortMenu({
   ollamaModels?: string[];
   ollamaModelsError?: string;
   ollamaHiddenCount?: number;
+  ollamaVisionModels?: ReadonlySet<string>;
   onRefreshOllamaModels?: (force?: boolean) => void;
 }) {
   const [draft, setDraft] = useState(modelLabel);
@@ -1007,6 +1002,7 @@ function ModelEffortMenu({
                       <div className="nm">
                         <span className="cmd">{full}</span>
                       </div>
+                      {ollamaVisionModels?.has(full) ? <span className="badge">vision</span> : null}
                     </div>
                   );
                 })

@@ -104,6 +104,8 @@ export const zhCN: typeof en = {
     imageFilterName: "图片",
     removeImage: "移除图片",
     imageAttachFailed: "无法附加图片",
+    imageRequiresVision:
+      "当前模型无法接收图片，请切换到支持视觉的模型（gpt-* 或 deepseek-v4-flash-vision-exp）以附加图片。",
     commandsLabel: "命令",
     mentionLabel: "提及",
     workspaceRoot: "工作区根目录",

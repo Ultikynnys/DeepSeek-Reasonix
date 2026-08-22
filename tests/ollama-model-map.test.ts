@@ -14,6 +14,7 @@ import {
   scopeKeyFor,
   setVerdict,
   verdictFor,
+  visionModelsFor,
 } from "../src/ollama-model-map.js";
 
 let dir: string;
@@ -149,6 +150,31 @@ describe("partitionByVerdicts", () => {
     const { known, unknown } = partitionByVerdicts(["m"], store, "pro", "s", 2_000);
     expect(known.size).toBe(0);
     expect(unknown).toEqual(["m"]);
+  });
+});
+
+describe("vision flag", () => {
+  it("stamps the vision flag via setVerdict and reports it via visionModelsFor", () => {
+    const store = emptyOllamaVerdicts();
+    setVerdict(store, "free", "s", "llava", "ok", 1_000, true);
+    setVerdict(store, "free", "s", "llama3.1:latest", "ok", 1_000, false);
+    const vision = visionModelsFor(["llava", "llama3.1:latest"], store, "free", "s", 2_000);
+    expect([...vision]).toEqual(["llava"]);
+  });
+
+  it("treats an entry without the vision flag as not-vision", () => {
+    const store = emptyOllamaVerdicts();
+    setVerdict(store, "free", "s", "llava", "ok", 1_000); // no vision flag
+    const vision = visionModelsFor(["llava"], store, "free", "s", 2_000);
+    expect(vision.size).toBe(0);
+  });
+
+  it("loads a legacy entry without the vision field as a valid verdict", () => {
+    const store = emptyOllamaVerdicts();
+    store.plans.free = { s: { llava: { result: "ok", at: 1_000 } } };
+    const entry = verdictFor(store, "free", "s", "llava", 2_000);
+    expect(entry?.result).toBe("ok");
+    expect(entry?.vision).toBeUndefined();
   });
 });
 

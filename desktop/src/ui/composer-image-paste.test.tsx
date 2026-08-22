@@ -60,19 +60,27 @@ describe("Composer image paste (ChatGPT vision path)", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("keeps the save-to-disk path (no onPasteImage) when the model is DeepSeek", async () => {
-    const onPasteImage = vi.fn(async () => undefined);
+  it("rejects the paste without a path mention when the model can't accept images", async () => {
+    const onImageRejected = vi.fn();
+    const setDraft = vi.fn();
     const file = new File([new Uint8Array([1])], "shot.png", { type: "image/png" });
     const { container } = render(
-      <Composer {...baseProps} imageCapable={false} onPasteImage={onPasteImage} />,
+      <Composer
+        {...baseProps}
+        setDraft={setDraft}
+        imageCapable={false}
+        onPasteImage={vi.fn(async () => undefined)}
+        onImageRejected={onImageRejected}
+      />,
     );
     const textarea = container.querySelector("textarea")!;
     firePaste(textarea, file);
-    expect(onPasteImage).not.toHaveBeenCalled();
-    // The fallback is async (file.arrayBuffer → invoke), so wait for the call.
-    await vi.waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("save_clipboard_image", expect.anything()),
-    );
+    await vi.waitFor(() => expect(onImageRejected).toHaveBeenCalled());
+    // The paste must never fall through to the temp-file save or inject a
+    // @temp-path mention: the daemon only converts mentions for vision
+    // models, so the path would just reach the model as dead text.
+    expect(invoke).not.toHaveBeenCalled();
+    expect(setDraft).not.toHaveBeenCalled();
   });
 
   it("renders pending image thumbnails with a working remove button", () => {

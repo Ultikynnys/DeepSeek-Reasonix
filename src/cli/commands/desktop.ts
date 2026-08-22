@@ -176,6 +176,8 @@ import {
   saveOllamaVerdicts,
   scopeKeyFor,
   setVerdict,
+  verdictFor,
+  visionModelsFor,
 } from "../../ollama-model-map.js";
 import type { SubagentEvent } from "../../tools/subagent.js";
 
@@ -889,6 +891,117 @@ export async function probeOllamaModel(
   return "error";
 }
 
+/** Derive the native Ollama API origin from an OpenAI-compat base URL by
+ *  stripping a trailing `/v1`. Local daemon `http://localhost:11434/v1` →
+ *  `http://localhost:11434`; cloud `https://ollama.com/v1` →
+ *  `https://ollama.com`. The native `/api/*` endpoints live at that root. */
+export function deriveNativeOllamaOrigin(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl);
+    const path = url.pathname.replace(/\/+$/, "");
+    if (path === "/v1" || path.endsWith("/v1")) {
+      url.pathname = path.slice(0, -3) || "/";
+    }
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return baseUrl;
+  }
+}
+
+/** Parse a native `/api/show` payload and decide whether the model is
+ *  vision-capable. The reliable signal is the presence of a vision encoder /
+ *  projector block: a non-empty `projector_info` object, or any `model_info`
+ *  key under the `vision.` namespace. Absence of both ⇒ text-only. */
+export function showPayloadIsVision(data: unknown): boolean {
+  if (typeof data !== "object" || data === null) return false;
+  const rec = data as Record<string, unknown>;
+  const projector = rec.projector_info;
+  if (typeof projector === "object" && projector !== null && Object.keys(projector).length > 0) {
+    return true;
+  }
+  const modelInfo = rec.model_info;
+  if (typeof modelInfo === "object" && modelInfo !== null) {
+    for (const key of Object.keys(modelInfo as Record<string, unknown>)) {
+      if (key.startsWith("vision.")) return true;
+    }
+  }
+  return false;
+}
+
+/** A 1×1 transparent PNG as a data URL — the smallest payload that exercises
+ *  a model's vision tower through the OpenAI-compat `/v1/chat/completions`
+ *  endpoint. Used to probe vision on endpoints where the native `/api/show`
+ *  route isn't available (e.g. Ollama cloud). */
+const TINY_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+
+/** Probe whether `model` accepts image content parts by POSTing a single
+ *  user message containing a tiny data-URL image to the OpenAI-compat chat
+ *  endpoint. A 2xx means the model consumed the image (vision-capable); a
+ *  400 means it rejected the image (text-only). Never throws — returns
+ *  `undefined` when the outcome is indeterminate. */
+export async function probeOllamaVision(
+  baseUrl: string,
+  model: string,
+  apiKey: string,
+  timeoutMs = 30_000,
+): Promise<boolean | undefined> {
+  try {
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "hi" },
+              { type: "image_url", image_url: { url: TINY_PNG_DATA_URL } },
+            ],
+          },
+        ],
+        max_tokens: 1,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (resp.ok) return true;
+    if (resp.status === 400) return false;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Resolve vision capability for one model: prefer the native `/api/show`
+ *  metadata (fast, no generation), fall back to an image probe through the
+ *  OpenAI-compat endpoint when the native route 404s/405s. Returns `true` /
+ *  `false` when confidently determined, or `undefined` when indeterminate
+ *  (endpoint unreachable, both routes failed) — caller treats that as unknown. */
+export async function detectOllamaVision(
+  baseUrl: string,
+  model: string,
+  apiKey: string,
+  timeoutMs = 15_000,
+): Promise<boolean | undefined> {
+  const origin = deriveNativeOllamaOrigin(baseUrl);
+  try {
+    const show = await fetch(`${origin}/api/show?model=${encodeURIComponent(model)}`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (show.ok) {
+      const data = (await show.json().catch(() => undefined)) as unknown;
+      return showPayloadIsVision(data);
+    }
+    // 404 / 405 on /api/show — cloud gateway likely; fall through to the probe.
+    if (show.status !== 404 && show.status !== 405) return undefined;
+  } catch {
+    return undefined;
+  }
+  return probeOllamaVision(baseUrl, model, apiKey, timeoutMs);
+}
+
 /** Batch size that stays under the cloud's parallel-burst rate limit (19
  *  concurrent probes 429'd ~half of them; 6 with a 429 retry stays clean). */
 const OLLAMA_PROBE_BATCH = 6;
@@ -898,6 +1011,8 @@ const OLLAMA_PROBE_BATCH = 6;
  *  (previously each tab fetched and cached its own copy). */
 export interface OllamaCatalogSnapshot {
   models: string[];
+  /** Subset of `models` confirmed vision-capable (raw ids, e.g. `llava`). */
+  visionModels?: string[];
   plan?: string;
   hiddenCount?: number;
   error?: string;
@@ -911,6 +1026,15 @@ const OLLAMA_CATALOG_TTL_MS = 60_000;
 let ollamaCatalogCache: OllamaCatalogSnapshot | null = null;
 let ollamaCatalogInflight: Promise<OllamaCatalogSnapshot> | null = null;
 
+/** Prefixed vision set (`ollama/<id>`) built from the last fetched catalog.
+ *  Empty set when the catalog is unavailable — image capability then falls
+ *  back to the static allowlist (no Ollama model is treated as vision). */
+export function ollamaVisionModelIds(): ReadonlySet<string> {
+  const snap = ollamaCatalogCache;
+  if (!snap?.visionModels) return new Set();
+  return new Set(snap.visionModels.map((id) => `ollama/${id}`));
+}
+
 /** Test-only: reset the module-level catalog cache between tests. */
 export function resetOllamaCatalogCacheForTest(): void {
   ollamaCatalogCache = null;
@@ -923,6 +1047,7 @@ function emitOllamaCatalog(snap: OllamaCatalogSnapshot): void {
   emit({
     type: "$ollama_models",
     models: snap.models,
+    ...(snap.visionModels !== undefined ? { visionModels: snap.visionModels } : {}),
     ...(snap.error !== undefined ? { error: snap.error } : {}),
     ...(snap.plan !== undefined ? { plan: snap.plan } : {}),
     ...(snap.hiddenCount !== undefined ? { hiddenCount: snap.hiddenCount } : {}),
@@ -1019,8 +1144,57 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
       diag("ollama.plan.resolved", { plan });
     }
     const visible = gated.size > 0 ? models.filter((m) => !gated.has(m)) : models;
+    // Vision capability is independent of tier gating: probe every visible
+    // model once (native /api/show with image-probe fallback) and persist the
+    // result on the existing verdict entry when a plan/scope is available.
+    // Keyless local daemons have no scope — the set still lives on the
+    // snapshot so the UI can enable image upload for vision models.
+    const vision = new Set<string>();
+    if (visible.length > 0) {
+      const visionPath = ollamaVerdictsPath();
+      const visionStore = loadOllamaVerdicts(visionPath);
+      const visionScope = plan && apiKey ? scopeKeyFor(base, apiKey) : undefined;
+      const cached = visionScope
+        ? visionModelsFor(visible, visionStore, plan!, visionScope, Date.now())
+        : new Set<string>();
+      const toProbe = visible.filter((m) => !cached.has(m));
+      let visionPersisted = false;
+      for (const m of toProbe) {
+        const isVision = await detectOllamaVision(base, m, apiKey ?? "");
+        if (isVision === true) vision.add(m);
+        if (isVision !== undefined && visionScope && plan) {
+          // Re-read the cached entry if present so we don't clobber a tier
+          // verdict that a concurrent pass wrote; then stamp the vision flag.
+          const existing = verdictFor(visionStore, plan, visionScope, m, Date.now());
+          setVerdict(
+            visionStore,
+            plan,
+            visionScope,
+            m,
+            existing?.result ?? "ok",
+            existing?.at ?? Date.now(),
+            isVision,
+          );
+          visionPersisted = true;
+        }
+      }
+      for (const m of cached) vision.add(m);
+      if (visionPersisted) {
+        try {
+          saveOllamaVerdicts(visionStore, visionPath);
+        } catch (err) {
+          diag(
+            "ollama.vision.save_failed",
+            { message: err instanceof Error ? err.message : String(err) },
+            "warn",
+          );
+        }
+      }
+      diag("ollama.vision.done", { total: visible.length, vision: vision.size });
+    }
     return {
       models: visible,
+      visionModels: vision.size > 0 ? [...vision].sort() : undefined,
       plan,
       hiddenCount: gated.size > 0 ? gated.size : undefined,
       fetchedAt: Date.now(),
@@ -2219,7 +2393,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // Only vision-capable models accept image content parts — DeepSeek 400s
     // otherwise. The UI hides the affordance for non-vision models; this is
     // the hard gate so a stale or forged request can't reach the API.
-    if (images && images.length > 0 && !modelAcceptsImages(tab.currentModel)) {
+    if (
+      images &&
+      images.length > 0 &&
+      !modelAcceptsImages(tab.currentModel, ollamaVisionModelIds())
+    ) {
       emitTabDiagnostic(
         tab,
         "turn.start.rejected",
@@ -3912,7 +4090,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         // mentions of local images into vision attachments so typing or
         // picking an image path just works. Other models never get image
         // parts (runTurn gates).
-        if (modelAcceptsImages(tab.currentModel)) {
+        if (modelAcceptsImages(tab.currentModel, ollamaVisionModelIds())) {
           const converted = await extractImageMentions(text, tab.rootDir);
           if (converted.attachments.length > 0) {
             text = converted.text;

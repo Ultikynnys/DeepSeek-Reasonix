@@ -111,6 +111,8 @@ export const de: typeof en = {
     imageFilterName: "Bilder",
     removeImage: "Bild entfernen",
     imageAttachFailed: "Bild konnte nicht angehängt werden",
+    imageRequiresVision:
+      "Dieses Modell kann keine Bilder empfangen. Wechsle zu einem visionfähigen Modell (gpt-* oder deepseek-v4-flash-vision-exp), um Bilder anzuhängen.",
     commandsLabel: "Befehle",
     mentionLabel: "Erwähnen",
     workspaceRoot: "Arbeitsbereich-Root",

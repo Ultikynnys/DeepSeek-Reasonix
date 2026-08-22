@@ -2,12 +2,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  deriveNativeOllamaOrigin,
+  detectOllamaVision,
   fetchOllamaPlan,
   fetchOllamaUsage,
   isSubscriptionGatedResponse,
   probeOllamaModel,
+  probeOllamaVision,
   refreshOllamaModels,
   resetOllamaCatalogCacheForTest,
+  showPayloadIsVision,
 } from "../src/cli/commands/desktop.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -174,6 +178,110 @@ describe("isSubscriptionGatedResponse", () => {
   });
 });
 
+describe("deriveNativeOllamaOrigin", () => {
+  it("strips a trailing /v1 from a local daemon base", () => {
+    expect(deriveNativeOllamaOrigin("http://localhost:11434/v1")).toBe("http://localhost:11434");
+  });
+
+  it("strips a trailing /v1 from the cloud base", () => {
+    expect(deriveNativeOllamaOrigin("https://ollama.com/v1")).toBe("https://ollama.com");
+  });
+
+  it("leaves a non-/v1 path untouched", () => {
+    expect(deriveNativeOllamaOrigin("https://ollama.com")).toBe("https://ollama.com");
+    expect(deriveNativeOllamaOrigin("http://gateway.example/proxy/v1")).toBe(
+      "http://gateway.example/proxy",
+    );
+  });
+
+  it("returns the input on a malformed URL", () => {
+    expect(deriveNativeOllamaOrigin("not a url")).toBe("not a url");
+  });
+});
+
+describe("showPayloadIsVision", () => {
+  it("is true when projector_info is present and non-empty", () => {
+    expect(showPayloadIsVision({ projector_info: { arch: "clip" } })).toBe(true);
+  });
+
+  it("is true when model_info carries a vision.* key", () => {
+    expect(showPayloadIsVision({ model_info: { "vision.projector.embedding_length": 1024 } })).toBe(
+      true,
+    );
+  });
+
+  it("is false for a text-only model", () => {
+    expect(
+      showPayloadIsVision({ model_info: { "general.architecture": "llama" }, projector_info: {} }),
+    ).toBe(false);
+  });
+
+  it("is false for null / non-object / missing fields", () => {
+    expect(showPayloadIsVision(null)).toBe(false);
+    expect(showPayloadIsVision(undefined)).toBe(false);
+    expect(showPayloadIsVision("x")).toBe(false);
+    expect(showPayloadIsVision({})).toBe(false);
+  });
+});
+
+describe("probeOllamaVision / detectOllamaVision", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("probeOllamaVision returns true on a 2xx", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ choices: [] }));
+    await expect(probeOllamaVision("http://localhost:11434/v1", "llava", "")).resolves.toBe(true);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("http://localhost:11434/v1/chat/completions");
+    const body = JSON.parse(String(init?.body));
+    expect(body.messages[0].content).toContainEqual({
+      type: "image_url",
+      image_url: { url: expect.stringContaining("data:image/png;base64,") },
+    });
+  });
+
+  it("probeOllamaVision returns false on a 400 (text-only model)", async () => {
+    fetchMock.mockResolvedValueOnce(textResponse("image not supported", 400));
+    await expect(probeOllamaVision("http://localhost:11434/v1", "llama3.1", "")).resolves.toBe(
+      false,
+    );
+  });
+
+  it("probeOllamaVision returns undefined on network failure", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    await expect(probeOllamaVision("http://localhost:11434/v1", "m", "")).resolves.toBeUndefined();
+  });
+
+  it("detectOllamaVision trusts the native /api/show metadata first", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ projector_info: { arch: "clip" } }));
+    await expect(detectOllamaVision("http://localhost:11434/v1", "llava", "")).resolves.toBe(true);
+    const url = String(fetchMock.mock.calls[0]![0]);
+    expect(url).toBe("http://localhost:11434/api/show?model=llava");
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no probe fallback
+  });
+
+  it("detectOllamaVision falls back to the image probe when /api/show 404s", async () => {
+    fetchMock.mockResolvedValueOnce(textResponse("not found", 404));
+    fetchMock.mockResolvedValueOnce(jsonResponse({ choices: [] })); // probe → 2xx
+    await expect(detectOllamaVision("https://ollama.com/v1", "llava", "key")).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("detectOllamaVision follows the probe to false when the model rejects the image", async () => {
+    fetchMock.mockResolvedValueOnce(textResponse("not found", 404));
+    fetchMock.mockResolvedValueOnce(textResponse("bad", 400)); // probe → text-only
+    await expect(detectOllamaVision("https://ollama.com/v1", "llama3.1", "key")).resolves.toBe(
+      false,
+    );
+  });
+});
+
 describe("fetchOllamaUsage", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
@@ -308,5 +416,28 @@ describe("refreshOllamaModels — app-global catalog cache", () => {
     // instead of serving a stale failure.
     await refreshOllamaModels(false);
     expect(modelsFetchCount()).toBe(2);
+  });
+
+  it("carries visionModels probed from the native /api/show", async () => {
+    // Keyless local daemon: catalog + one native /api/show per model.
+    fetchMock.mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.endsWith("/models")) {
+        return Promise.resolve(
+          jsonResponse({ data: [{ id: "llava" }, { id: "llama3.1:latest" }] }),
+        );
+      }
+      // Native /api/show — llava is vision, llama3.1 is text-only.
+      if (u.includes("/api/show?model=llava")) {
+        return Promise.resolve(jsonResponse({ projector_info: { arch: "clip" } }));
+      }
+      if (u.includes("/api/show?model=")) {
+        return Promise.resolve(jsonResponse({ model_info: { "general.architecture": "llama" } }));
+      }
+      return Promise.resolve(textResponse("unexpected", 500));
+    });
+    const snap = await refreshOllamaModels(true);
+    expect(snap.visionModels).toEqual(["llava"]);
+    expect(snap.models).toEqual(["llama3.1:latest", "llava"]);
   });
 });

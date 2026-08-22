@@ -486,6 +486,10 @@ export interface OllamaModelsEvent {
   type: "$ollama_models";
   /** Raw model ids the endpoint reported (e.g. `llama3.1:latest`). */
   models: string[];
+  /** Subset of `models` confirmed vision-capable (multimodal) — the UI uses
+   *  this to enable image upload for those models. Absent when none detected
+   *  or the catalog couldn't be probed. */
+  visionModels?: string[];
   /** The account's Ollama plan (`free`, `pro`, ...) when resolvable via the
    *  cloud `/api/me` endpoint — lets the picker explain filtering. */
   plan?: string;

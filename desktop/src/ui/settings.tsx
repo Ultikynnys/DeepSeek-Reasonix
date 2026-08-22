@@ -97,6 +97,7 @@ export function SettingsModal({
   ollamaModelsError,
   ollamaPlan,
   ollamaHiddenCount,
+  ollamaVisionModels,
   onRefreshOllamaModels,
   onPickWorkspace,
   onAddMcpSpec,
@@ -144,6 +145,8 @@ export function SettingsModal({
   ollamaHiddenCount?: number;
   /** Re-fetch the Ollama model catalog (`force` bypasses the backend's cache). */
   onRefreshOllamaModels?: (force?: boolean) => void;
+  /** Prefixed vision-capable Ollama ids (`ollama/llava`) — shown as a badge. */
+  ollamaVisionModels?: ReadonlySet<string>;
   oauthWaiting: boolean;
   onOAuthBegin: () => void;
   onOAuthCancel: () => void;
@@ -252,6 +255,7 @@ export function SettingsModal({
                 ollamaModelsError={ollamaModelsError}
                 ollamaPlan={ollamaPlan}
                 ollamaHiddenCount={ollamaHiddenCount}
+                ollamaVisionModels={ollamaVisionModels}
                 onRefreshOllamaModels={onRefreshOllamaModels}
                 oauthSignedIn={settings.openaiOAuth?.signedIn ?? false}
                 oauthAccount={settings.openaiOAuth?.account}
@@ -996,6 +1000,7 @@ function PageModels({
   ollamaModelsError,
   ollamaPlan,
   ollamaHiddenCount,
+  ollamaVisionModels,
   onRefreshOllamaModels,
   oauthSignedIn,
   oauthAccount,
@@ -1021,6 +1026,8 @@ function PageModels({
   ollamaPlan?: string;
   /** Models hidden because the account's plan doesn't cover them. */
   ollamaHiddenCount?: number;
+  /** Prefixed vision-capable Ollama ids (`ollama/llava`) — shown as a badge. */
+  ollamaVisionModels?: ReadonlySet<string>;
   /** Re-fetch the Ollama model catalog (`force` bypasses the backend's cache). */
   onRefreshOllamaModels?: (force?: boolean) => void;
   oauthSignedIn: boolean;
@@ -1143,6 +1150,7 @@ function PageModels({
                   onKeyDown={activationHandler(() => onSave({ model: full }))}
                 >
                   <div className="nm">{full}</div>
+                  {ollamaVisionModels?.has(full) ? <span className="badge">vision</span> : null}
                 </div>
               );
             })}

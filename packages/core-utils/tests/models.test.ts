@@ -23,4 +23,27 @@ describe("modelAcceptsImages", () => {
     expect(modelAcceptsImages(null)).toBe(false);
     expect(modelAcceptsImages(undefined)).toBe(false);
   });
+
+  it("accepts an Ollama model confirmed vision-capable", () => {
+    const vision = new Set(["ollama/llava", "ollama/qwen2.5-vl"]);
+    expect(modelAcceptsImages("ollama/llava", vision)).toBe(true);
+    expect(modelAcceptsImages("ollama/qwen2.5-vl", vision)).toBe(true);
+  });
+
+  it("rejects an Ollama model not in the vision set", () => {
+    const vision = new Set(["ollama/llava"]);
+    expect(modelAcceptsImages("ollama/llama3.1:latest", vision)).toBe(false);
+  });
+
+  it("treats Ollama models as non-vision when the set is omitted", () => {
+    expect(modelAcceptsImages("ollama/llava")).toBe(false);
+    expect(modelAcceptsImages("ollama/llava", undefined)).toBe(false);
+    expect(modelAcceptsImages("ollama/llava", null)).toBe(false);
+  });
+
+  it("ignores the Ollama vision set for non-Ollama ids", () => {
+    const vision = new Set(["ollama/llava", "gpt-5.6-sol"]);
+    expect(modelAcceptsImages("gpt-5.6-sol", vision)).toBe(true);
+    expect(modelAcceptsImages("deepseek-v4-flash-vision-exp", vision)).toBe(true);
+  });
 });
