@@ -42,7 +42,12 @@ runtime, so no `npm install` or Node installation is needed.
   in the app's config; `DEEPSEEK_API_KEY` in `.env` is read as a fallback.
 - SmartScreen may warn "Unknown publisher" while installers are unsigned: click **More info → Run
   anyway**. See [desktop/SIGNING.md](desktop/SIGNING.md) for the signing setup.
-- Windows only. User data lives in `~/.reasonix` (config, sessions, memory, skills).
+- **Windows only, by design.** Supported devices were deliberately simplified to a single
+  platform: this fork is maintained by one person who runs Reasonix on Windows only, and removing
+  the macOS/Linux and CLI code (platform-specific Tauri configs, the bundled-Node platform
+  branches, the Ink TUI, the interactive CLI commands) was the obvious way to keep the project
+  lightweight and stable. There are no plans to bring other platforms back.
+- User data lives in `~/.reasonix` (config, sessions, memory, skills).
 
 ## Backends and models
 
@@ -168,6 +173,8 @@ The fork keeps the MIT license and the cache-first core, and removes or changes 
 - **Removed**: the Ink TUI and the interactive CLI commands (`code`, `replay`, `diff`); the
   embedded web dashboard server (config helpers remain, but nothing serves it); the QQ channel
   integration and its docs; upstream's community pages (Discord, sponsors, acknowledgments wall).
+  All of it is scope: the fork targets Windows only, so every cross-platform and CLI surface was
+  cut to keep the build and runtime lightweight and stable.
 - **Added / changed**: the Tauri 2 Windows app as the only product surface; Ollama support (local
   and cloud) with a shared, cached model catalog; the GPT-5.6 family and
   `deepseek-v4-flash-vision-exp` in the official model list; image attachments; edit modes including
