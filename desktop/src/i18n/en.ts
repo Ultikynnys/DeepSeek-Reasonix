@@ -628,9 +628,9 @@ export const en = {
     offPeak: "off-peak",
     peak: "peak",
     offPeakTitle:
-      "Off-peak — half of peak rates · Peak hours 01:00–04:00 & 06:00–10:00 UTC · changes in {mins} min",
+      "Off-peak — half of peak rates · Peak hours 01:00–04:00 & 06:00–10:00 UTC (weekdays), off-peak all day on weekends · changes in {when}",
     peakTitle:
-      "Peak — double the off-peak rate · Peak hours 01:00–04:00 & 06:00–10:00 UTC · changes in {mins} min",
+      "Peak — double the off-peak rate · Peak hours 01:00–04:00 & 06:00–10:00 UTC (weekdays), off-peak all day on weekends · changes in {when}",
     authOauth: "oauth",
     authKey: "key",
     authNone: "no key",

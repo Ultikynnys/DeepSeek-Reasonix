@@ -655,9 +655,9 @@ export const de: typeof en = {
     offPeak: "Off-Peak",
     peak: "Peak",
     offPeakTitle:
-      "Off-Peak — halber Peak-Preis · Peak-Zeiten 01:00–04:00 & 06:00–10:00 UTC · Wechsel in {mins} Min",
+      "Off-Peak — halber Peak-Preis · Peak-Zeiten 01:00–04:00 & 06:00–10:00 UTC (werktags) · am Wochenende ganztägig Off-Peak · Wechsel in {when}",
     peakTitle:
-      "Peak — doppelter Off-Peak-Preis · Peak-Zeiten 01:00–04:00 & 06:00–10:00 UTC · Wechsel in {mins} Min",
+      "Peak — doppelter Off-Peak-Preis · Peak-Zeiten 01:00–04:00 & 06:00–10:00 UTC (werktags) · am Wochenende ganztägig Off-Peak · Wechsel in {when}",
     authOauth: "OAuth",
     authKey: "Schlüssel",
     authNone: "kein Schlüssel",

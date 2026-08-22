@@ -203,17 +203,27 @@ export function StatusBar({
     codexQuotaReason,
   ]);
   // Rate period (peak / off-peak) — this turn's pricing depends on the UTC
-  // hour, so the chip re-evaluates on a short tick instead of only on parent
-  // re-renders (the parent has no per-minute state of its own).
+  // hour and whether the Beijing day is a weekend (off-peak all day), so the
+  // chip re-evaluates on a short tick instead of only on parent re-renders
+  // (the parent has no per-minute state of its own).
   const [rateNow, setRateNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setRateNow(new Date()), 30_000);
     return () => clearInterval(id);
   }, []);
   const offPeak = isOffPeak(rateNow);
+  const rateMins = minutesUntilRateChange(rateNow);
+  // Weekends push the next change past a full day — render "2d 9h" instead of
+  // a raw "3420 min".
+  const when =
+    rateMins >= 1440
+      ? `${Math.floor(rateMins / 1440)}d ${Math.floor((rateMins % 1440) / 60)}h`
+      : rateMins >= 60
+        ? `${Math.floor(rateMins / 60)}h ${rateMins % 60}m`
+        : `${rateMins}m`;
   const rateTitle = offPeak
-    ? t("statusbar.offPeakTitle", { mins: minutesUntilRateChange(rateNow) })
-    : t("statusbar.peakTitle", { mins: minutesUntilRateChange(rateNow) });
+    ? t("statusbar.offPeakTitle", { when })
+    : t("statusbar.peakTitle", { when });
   const [themeOpen, setThemeOpen] = useState(false);
   const themePopRef = useRef<HTMLDivElement | null>(null);
   const themeButtonRef = useRef<HTMLSpanElement | null>(null);
