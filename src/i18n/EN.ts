@@ -688,6 +688,10 @@ export const EN: TranslationSchema = {
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
     iterLimitReached:
       "Reached the {max}-iteration cap for this turn — forcing a summary of what was gathered. Raise with `maxIterPerTurn` config or REASONIX_MAX_ITER, or ask again in a fresh turn.",
+    iterLimitGrace:
+      "Reached the {max}-iteration cap, but the turn is still making progress. Continuing up to {grace} iterations. Set `maxIterPerTurn` in config or REASONIX_MAX_ITER for a higher cap.",
+    iterLimitPaused:
+      'Reached the {grace}-iteration hard cap. The turn paused; the conversation is intact. Say "continue" to keep going, or set `maxIterPerTurn` in config / REASONIX_MAX_ITER for a higher cap.',
   },
   errors: {
     contextOverflow:

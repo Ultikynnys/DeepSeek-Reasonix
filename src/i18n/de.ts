@@ -697,6 +697,10 @@ export const de: TranslationSchema = {
       "Kontext {before}/{ctxMax} ({pct}%) — erzwinge Zusammenfassung aus dem Gesammelten. Führe /compact, /clear oder /new aus, um zurückzusetzen.",
     iterLimitReached:
       "Iterationslimit ({max}) dieser Runde erreicht — erzwinge Zusammenfassung des Gesammelten. Erhöhe mit `maxIterPerTurn`-Konfiguration oder REASONIX_MAX_ITER, oder frag erneut in einer neuen Runde.",
+    iterLimitGrace:
+      "Iterationslimit ({max}) erreicht, aber die Runde macht weiterhin Fortschritt. Sie läuft bis zu {grace} Iterationen weiter. Setze `maxIterPerTurn` in der Konfiguration oder REASONIX_MAX_ITER für eine höhere Grenze.",
+    iterLimitPaused:
+      'Obergrenze von {grace} Iterationen erreicht. Die Runde wurde pausiert; die Unterhaltung ist unversehrt. Antworte mit "continue", um fortzufahren, oder setze `maxIterPerTurn` in der Konfiguration / REASONIX_MAX_ITER für eine höhere Grenze.',
   },
   errors: {
     ...EN.errors,

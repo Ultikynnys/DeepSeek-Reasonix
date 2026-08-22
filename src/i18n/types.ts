@@ -296,6 +296,8 @@ export interface TranslationSchema {
     providerErrorRetry: string;
     forcingSummary: string;
     iterLimitReached: string;
+    iterLimitGrace: string;
+    iterLimitPaused: string;
   };
   errors: {
     contextOverflow: string;

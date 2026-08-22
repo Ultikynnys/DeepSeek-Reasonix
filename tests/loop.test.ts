@@ -3374,29 +3374,23 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
 });
 
 describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
-  it("stops at DEFAULT_MAX_ITER_PER_TURN and forces summary", async () => {
-    // Build a client that always returns a tool call — the loop would
-    // run forever without the iteration cap. Use unique call IDs AND
-    // unique arguments so the storm breaker (threshold=3 for identical
-    // (name, args) tuples) doesn't fire first.
-    const infiniteResponses: FakeResponseShape[] = Array.from(
-      { length: CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN + 50 },
-      (_, i) => ({
-        content: "",
-        tool_calls: [
-          {
-            id: `call_${i}`,
-            type: "function" as const,
-            function: { name: "noop", arguments: JSON.stringify({ i }) },
-          },
-        ],
-      }),
-    );
-    // The last response (force-summary) must be a plain text reply.
-    infiniteResponses.push({ content: "Here is what I found." });
+  // Build a client that always returns a tool call — the loop would
+  // run forever without the iteration cap. Use unique call IDs AND
+  // unique arguments so the storm breaker (threshold=3 for identical
+  // (name, args) tuples) doesn't fire first.
+  const infiniteToolResponses = (count: number): FakeResponseShape[] =>
+    Array.from({ length: count }, (_, i) => ({
+      content: "",
+      tool_calls: [
+        {
+          id: `call_${i}`,
+          type: "function" as const,
+          function: { name: "noop", arguments: JSON.stringify({ i }) },
+        },
+      ],
+    }));
 
-    const fetchMock = fakeFetch(infiniteResponses);
-    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+  const registerNoop = (): ToolRegistry => {
     const tools = new ToolRegistry();
     tools.register({
       name: "noop",
@@ -3404,7 +3398,18 @@ describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
       parameters: { type: "object", properties: {} },
       fn: async () => "ok",
     });
+    return tools;
+  };
 
+  // Mirrors the loop's grace grant: max(5, round(cap / 2)) extra iterations.
+  const graceFor = (cap: number) => Math.max(5, Math.round(cap / 2));
+
+  it("grants a grace window on a productive turn, then pauses with the log intact", async () => {
+    const cap = CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN;
+    const hardCap = cap + graceFor(cap);
+    const fetchMock = fakeFetch(infiniteToolResponses(hardCap + 10));
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = registerNoop();
     const loop = new CacheFirstLoop({
       client,
       prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
@@ -3417,48 +3422,35 @@ describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
       events.push(ev);
     }
 
-    // Must have emitted the iteration-limit warning.
-    const warnEv = events.find(
-      (e) => e.role === "warning" && /iteration cap/i.test(e.content ?? ""),
+    // Productive turn: the cap fires at maxIterPerTurn but grants a grace
+    // window instead of force-summarizing.
+    const graceEv = events.find(
+      (e) => e.role === "warning" && /Continuing up to/.test(e.content ?? ""),
     );
-    expect(warnEv).toBeDefined();
+    expect(graceEv).toBeDefined();
+    expect(graceEv!.content).toContain(String(cap));
+    expect(graceEv!.content).toContain(String(hardCap));
 
-    // Must have produced a final summary (forced).
-    const finalEv = events.find((e) => e.role === "assistant_final");
-    expect(finalEv).toBeDefined();
+    // Grace exhausts: the turn PAUSES. No forced summary, no done event,
+    // the log stays intact so the next "continue" resumes with full state.
+    const pauseEv = events.find((e) => e.role === "warning" && /paused/.test(e.content ?? ""));
+    expect(pauseEv).toBeDefined();
+    expect(pauseEv!.content).toContain(String(hardCap));
+    expect(events.find((e) => e.role === "done")).toBeUndefined();
+    expect(events.find((e) => e.role === "assistant_final" && e.forcedSummary)).toBeUndefined();
 
-    // Tool dispatches = DEFAULT_MAX_ITER_PER_TURN (one per iter).
-    // The +1 is the summary API call.
-    expect(fetchMock).toHaveBeenCalledTimes(CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN + 1);
+    // One API call per iter; the grace-grant iteration (the cap check at
+    // maxIterPerTurn) consumes no request. cap + grace - 1 calls, zero
+    // summary calls.
+    expect(fetchMock).toHaveBeenCalledTimes(hardCap - 1);
   });
 
   it("respects custom maxIterPerTurn option", async () => {
     const customCap = 3;
-    const infiniteResponses: FakeResponseShape[] = Array.from(
-      { length: customCap + 50 },
-      (_, i) => ({
-        content: "",
-        tool_calls: [
-          {
-            id: `call_${i}`,
-            type: "function" as const,
-            function: { name: "noop", arguments: JSON.stringify({ i }) },
-          },
-        ],
-      }),
-    );
-    infiniteResponses.push({ content: "Summary." });
-
-    const fetchMock = fakeFetch(infiniteResponses);
+    const hardCap = customCap + graceFor(customCap);
+    const fetchMock = fakeFetch(infiniteToolResponses(hardCap + 10));
     const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
-    const tools = new ToolRegistry();
-    tools.register({
-      name: "noop",
-      description: "does nothing",
-      parameters: { type: "object", properties: {} },
-      fn: async () => "ok",
-    });
-
+    const tools = registerNoop();
     const loop = new CacheFirstLoop({
       client,
       prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
@@ -3472,13 +3464,110 @@ describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
       events.push(ev);
     }
 
-    const warnEv = events.find(
-      (e) => e.role === "warning" && /iteration cap/i.test(e.content ?? ""),
+    const graceEv = events.find(
+      (e) => e.role === "warning" && /Continuing up to/.test(e.content ?? ""),
     );
-    expect(warnEv).toBeDefined();
-    expect(warnEv!.content).toContain(String(customCap));
+    expect(graceEv).toBeDefined();
+    expect(graceEv!.content).toContain(String(customCap));
+    expect(graceEv!.content).toContain(String(hardCap));
+    expect(events.find((e) => e.role === "done")).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(hardCap - 1);
+  });
 
-    // Tool dispatches = customCap (one per iter) + 1 force-summary call.
+  it("grants a FRESH grace window on the turn after a pause", async () => {
+    const customCap = 3;
+    const hardCap = customCap + graceFor(customCap);
+    const fetchMock = fakeFetch(infiniteToolResponses(hardCap * 2 + 10));
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = registerNoop();
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+      maxIterPerTurn: customCap,
+    });
+
+    const all: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      all.push(ev);
+    }
+    for await (const ev of loop.step("continue")) {
+      all.push(ev);
+    }
+
+    // Both turns hit the cap while productive and each got its OWN grace
+    // grant: proves the latch is per-turn, not a session-wide cap raise.
+    const graceWarnings = all.filter(
+      (e) => e.role === "warning" && /Continuing up to/.test(e.content ?? ""),
+    );
+    expect(graceWarnings).toHaveLength(2);
+    const pauseWarnings = all.filter((e) => e.role === "warning" && /paused/.test(e.content ?? ""));
+    expect(pauseWarnings).toHaveLength(2);
+    expect(all.find((e) => e.role === "done")).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes((hardCap - 1) * 2);
+  });
+
+  it("force-summarizes a stuck-then-productive turn at the cap", async () => {
+    // The turn starts stuck: three IDENTICAL calls trip the storm breaker
+    // (threshold=3) on the third, latching `_turnSelfCorrected` (the stub
+    // + "try something different" continuation happens in-loop). The model
+    // then produces DISTINCT calls, so the turn is productive again, but
+    // the latch is set: at the cap it is force-summarized instead of
+    // granted a grace window.
+    const customCap = 6;
+    const responses: FakeResponseShape[] = [
+      ...Array.from({ length: 3 }, () => ({
+        content: "",
+        tool_calls: [
+          {
+            id: "call_0",
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i: 0 }) },
+          },
+        ],
+      })),
+      ...Array.from({ length: customCap - 3 }, (_, i) => ({
+        content: "",
+        tool_calls: [
+          {
+            id: `call_${i + 3}`,
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i: i + 3 }) },
+          },
+        ],
+      })),
+      { content: "Here is what I found." },
+    ];
+    const fetchMock = fakeFetch(responses);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = registerNoop();
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+      maxIterPerTurn: customCap,
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      events.push(ev);
+    }
+
+    const capEv = events.find(
+      (e) => e.role === "warning" && /forcing a summary/.test(e.content ?? ""),
+    );
+    expect(capEv).toBeDefined();
+    expect(capEv!.content).toContain(String(customCap));
+
+    // The forced summary replaced the log and ended the turn.
+    expect(
+      events.find((e) => e.role === "assistant_final" && e.forcedSummary === true),
+    ).toBeDefined();
+    expect(events.find((e) => e.role === "done")).toBeDefined();
+
+    // customCap model requests + 1 force-summary call. No grace window.
     expect(fetchMock).toHaveBeenCalledTimes(customCap + 1);
   });
 });

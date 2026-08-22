@@ -258,6 +258,10 @@ export class CacheFirstLoop {
   }
 
   private _turnSelfCorrected = false;
+  /** Grace-window size granted when the iter cap fires on a productive turn. Set once per turn, at first fire. */
+  private _iterGrace = 0;
+  /** True once the cap fired and the grace window latched this turn. The hard stop moves to maxIterPerTurn + _iterGrace. */
+  private _iterGraceApplied = false;
   private _foldedThisTurn = false;
   /** Latched once per turn — the empty-completion guard retries exactly once. */
   private _emptyResponseRetried = false;
@@ -922,6 +926,12 @@ export class CacheFirstLoop {
     // naturally as this turn's tool calls flow through.
     this.repair.resetStorm();
     this._turnSelfCorrected = false;
+    // Grace state is per-turn too: a paused turn's "continue" starts a fresh
+    // turn with the base cap restored (and a fresh grace grant if it stays
+    // productive). Keeping the latch would silently raise every later turn's
+    // cap for the whole session and skip the grace warning on continue.
+    this._iterGrace = 0;
+    this._iterGraceApplied = false;
     this._foldedThisTurn = false;
     this._emptyResponseRetried = false;
     this._providerErrorRetried = false;
@@ -1040,16 +1050,53 @@ export class CacheFirstLoop {
         return;
       }
       // Hard iteration cap — prevents runaway tool-call loops from
-      // consuming unlimited API budget. The model gets one final
-      // force-summary call when the cap fires. (#2037)
-      if (iter >= this.maxIterPerTurn) {
+      // consuming unlimited API budget. What happens at the cap depends
+      // on the turn's health (#2037):
+      //  - STUCK turn (storm-breaker latched `_turnSelfCorrected`): one final
+      //    force-summary call, then stop — collapses the garbage loop so the
+      //    next turn starts from a recap instead of re-sending it.
+      //  - PRODUCTIVE turn (distinct calls, results flowing): the cap grants a
+      //    grace window (~50% more, min 5) instead of a hard stop — killing a
+      //    healthy long task mid-flow just forces the user to re-prompt from a
+      //    compressed recap. If the grace window also exhausts, the turn pauses
+      //    NON-destructively: the log stays intact, so the next "continue"
+      //    resumes with full state.
+      const hardCap = this.maxIterPerTurn + (this._iterGraceApplied ? this._iterGrace : 0);
+      if (iter >= hardCap) {
+        if (this._turnSelfCorrected) {
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "high",
+            content: t("loop.iterLimitReached", { max: this.maxIterPerTurn }),
+          };
+          yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
+          restoreModelIfNeeded();
+          this._steerQueue.length = 0;
+          return;
+        }
+        if (!this._iterGraceApplied) {
+          this._iterGrace = Math.max(5, Math.round(this.maxIterPerTurn / 2));
+          this._iterGraceApplied = true;
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "low",
+            content: t("loop.iterLimitGrace", {
+              max: this.maxIterPerTurn,
+              grace: this.maxIterPerTurn + this._iterGrace,
+            }),
+          };
+          continue;
+        }
         yield {
           turn: this._turn,
           role: "warning",
           severity: "high",
-          content: t("loop.iterLimitReached", { max: this.maxIterPerTurn }),
+          content: t("loop.iterLimitPaused", {
+            grace: this.maxIterPerTurn + this._iterGrace,
+          }),
         };
-        yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
         restoreModelIfNeeded();
         this._steerQueue.length = 0;
         return;

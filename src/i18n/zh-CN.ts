@@ -659,6 +659,10 @@ export const zhCN: TranslationSchema = {
       "上下文 {before}/{ctxMax}（{pct}%）— 基于已收集到的内容强制总结。请运行 /compact、/clear 或 /new 重置。",
     iterLimitReached:
       "本轮已达到 {max} 次迭代上限 — 正在基于已收集到的内容强制总结。可通过 `maxIterPerTurn` 配置或 REASONIX_MAX_ITER 提高上限，或在新的轮次中重新提问。",
+    iterLimitGrace:
+      "已达到 {max} 次迭代上限，但本轮仍在正常推进。继续运行至 {grace} 次迭代。可在配置中设置 `maxIterPerTurn`，或设置 REASONIX_MAX_ITER 以提高上限。",
+    iterLimitPaused:
+      "已达到 {grace} 次迭代硬上限。本轮已暂停；对话记录完好。回复“继续”即可接着做，或在配置中设置 `maxIterPerTurn` / REASONIX_MAX_ITER 以提高上限。",
   },
   errors: {
     contextOverflow:
