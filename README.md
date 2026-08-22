@@ -1,12 +1,6 @@
 <h1 align="center">Reasonix</h1>
 
 <p align="center">
-  <strong>English</strong>
-  &nbsp;·&nbsp;
-  <a href="./README.zh-CN.md">简体中文</a>
-</p>
-
-<p align="center">
   <a href="https://github.com/Ultikynnys/DeepSeek-Reasonix/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/Ultikynnys/DeepSeek-Reasonix/release.yml?style=flat-square&label=release&labelColor=161b22&logo=githubactions&logoColor=white" alt="Release"/></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/Ultikynnys/DeepSeek-Reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22-339933?style=flat-square&labelColor=161b22" alt="Node >= 22"/>
