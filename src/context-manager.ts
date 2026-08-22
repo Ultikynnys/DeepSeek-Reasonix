@@ -54,8 +54,9 @@ export const HISTORY_FOLD_SUMMARY_MIN_CHARS = 16;
 // Base hard deadline for fold summaries so a hung request cannot stall the turn loop. The real
 // deadline scales with the size of the head being summarized: a fixed short cap deterministically
 // kills legitimate folds at large contexts (prefill + queue time grows with the prompt) — exactly
-// when compaction matters most.
-export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
+// when compaction matters most. The base covers the typical 30-60s summary call at small heads;
+// raised from 15s after real sessions timed out there.
+export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 45_000;
 /** Normal-band folds should pay for themselves over a short horizon; aggressive folds still prioritize headroom. */
 export const HISTORY_FOLD_ECONOMIC_HORIZON_TURNS = 3;
 export const HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_FRACTION = 0.15;

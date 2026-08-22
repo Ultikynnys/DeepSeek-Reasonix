@@ -128,8 +128,10 @@ describe("ContextManager fold timeout", () => {
     const beforeMessages = loop.log.length;
 
     const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
-    // Attempt 1 exhausts the client's internal 4× backoff retries and fails fast.
-    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_TIMEOUT_MS + 5_000);
+    // Attempt 1 exhausts the client's internal 4× backoff retries and fails fast;
+    // the fold is now in its 30s retry pause. Advance most of the pause — the
+    // scaled deadline (base + head×1ms) has ample headroom over it.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS - 1_000);
     expect(await Promise.race([resultPromise, Promise.resolve("still-pending" as const)])).toBe(
       "still-pending",
     );
@@ -204,8 +206,9 @@ describe("ContextManager fold timeout", () => {
     const beforeMessages = loop.log.length;
 
     const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
-    // Attempt 1 fails fast; the fold is now in its 30s retry pause.
-    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_TIMEOUT_MS + 5_000);
+    // Attempt 1 fails fast; the fold is now in its 30s retry pause — advance most
+    // of the pause, not the deadline base, so the assertion holds at any base.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS - 1_000);
     expect(await Promise.race([resultPromise, Promise.resolve("still-pending" as const)])).toBe(
       "still-pending",
     );

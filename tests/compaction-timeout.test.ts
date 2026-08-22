@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 import { ContextManager, FILE_TRIAGE_TIMEOUT_MS } from "../src/context-manager.js";
 import { COMPACTION_RETRY_DELAY_MS } from "../src/loop/compaction-retry.js";
-import { type ForceSummaryContext, forceSummaryAfterIterLimit } from "../src/loop/force-summary.js";
+import {
+  FORCE_SUMMARY_TIMEOUT_MS,
+  type ForceSummaryContext,
+  forceSummaryAfterIterLimit,
+} from "../src/loop/force-summary.js";
 import type { LoopEvent } from "../src/loop/types.js";
 import { AppendOnlyLog } from "../src/memory/runtime.js";
 import { SessionStats } from "../src/telemetry/stats.js";
@@ -61,8 +65,8 @@ describe("compaction model-call deadlines", () => {
     expect((await gen.next()).value).toMatchObject({ role: "status" });
 
     const next = gen.next();
-    // Tiny context → base deadline (~15s), well under the 30s advance.
-    await vi.advanceTimersByTimeAsync(30_000);
+    // Tiny context → base deadline (45s); advance past it.
+    await vi.advanceTimersByTimeAsync(FORCE_SUMMARY_TIMEOUT_MS + 1_000);
     const errorEv = await next;
     expect(errorEv.done).toBe(false);
     const ev = errorEv.value as LoopEvent & { error?: string; errorDetail?: { name?: string } };

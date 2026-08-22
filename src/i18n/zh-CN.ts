@@ -639,7 +639,7 @@ export const zhCN: TranslationSchema = {
     hallucinatedFallback:
       "（模型生成了伪造的工具调用标记而非纯文本总结 — 试试 /retry 换个更窄的问题，或 /think 查看 R1 的推理）",
     failedAfterReason:
-      "{label}，且回退的总结调用也失败：{message}。请运行 /clear 后用更窄的问题重试，或提高 --max-tool-iters。",
+      "{label}，且回退的总结调用也失败：{message}。对话记录完好 — 可 /retry 或直接继续。若迭代上限反复触发，可在配置中调高 `maxIterPerTurn`，或设置 REASONIX_MAX_ITER。",
   },
   loop: {
     budgetExhausted:

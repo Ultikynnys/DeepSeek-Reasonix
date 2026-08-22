@@ -675,7 +675,7 @@ export const de: TranslationSchema = {
     hallucinatedFallback:
       "(Modell hat gefälschte Tool-Call-Markup statt einer Prosa-Zusammenfassung ausgegeben — versuche /retry mit einer engeren Frage, oder /think zur Inspektion von R1s Reasoning)",
     failedAfterReason:
-      "{label} und der Fallback-Summary-Aufruf sind fehlgeschlagen: {message}. Führe /clear aus und versuche es mit einer engeren Frage, oder erhöhe --max-tool-iters.",
+      "{label} und der Fallback-Summary-Aufruf ist fehlgeschlagen: {message}. Die Unterhaltung ist unversehrt — versuche /retry oder fahre fort. Falls die Iterationsgrenze erneut erreicht wird, erhöhe `maxIterPerTurn` in der Konfiguration oder setze REASONIX_MAX_ITER.",
   },
   loop: {
     ...EN.loop,

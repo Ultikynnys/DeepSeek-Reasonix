@@ -14,13 +14,15 @@ import type { LoopEvent } from "./types.js";
 // Scaled deadline for the summary call, mirroring the fold summarizer's pattern
 // (context-manager.ts): prefill + queue time grows with the prompt, so a fixed
 // short cap would deterministically kill summaries at large contexts — exactly
-// when the 80% guard fires. The client's own socket cap (11 min) still bounds
-// a hung connection, but an 11-min stall freezes the whole turn: the loop
-// consumes this generator inline, so in-flight tool dispatch (shell instances
-// included) hangs until it settles. The scaled deadline keeps the wait
-// proportional to the context (~4 min at a 240k-token context) instead of
-// pathological.
-const FORCE_SUMMARY_TIMEOUT_MS = 15_000;
+// when the 80% guard fires. The base covers the typical 30-60s summary call at
+// small contexts (raised from 15s after real sessions timed out there). The
+// client's own socket cap (11 min) still bounds a hung connection, but an
+// 11-min stall freezes the whole turn: the loop consumes this generator
+// inline, so in-flight tool dispatch (shell instances included) hangs until it
+// settles. The scaled deadline keeps the wait proportional to the context
+// (~4 min at a 240k-token context) instead of pathological.
+const FORCE_SUMMARY_TIMEOUT_MS = 45_000; // exported for the deadline regression test
+export { FORCE_SUMMARY_TIMEOUT_MS };
 const FORCE_SUMMARY_PER_TOKEN_MS = 1.0;
 const FORCE_SUMMARY_MAX_TIMEOUT_MS = 300_000;
 

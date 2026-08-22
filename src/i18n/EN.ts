@@ -664,7 +664,7 @@ export const EN: TranslationSchema = {
     hallucinatedFallback:
       "(model emitted fake tool-call markup instead of a prose summary — try /retry with a narrower question, or /think to inspect R1's reasoning)",
     failedAfterReason:
-      "{label} and the fallback summary call failed: {message}. Run /clear and retry with a narrower question, or raise --max-tool-iters.",
+      "{label} and the fallback summary call failed: {message}. The conversation is intact — try /retry or continue from here. If the iteration cap keeps tripping, raise `maxIterPerTurn` in config or set REASONIX_MAX_ITER.",
   },
   loop: {
     budgetExhausted:
