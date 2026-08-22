@@ -10,9 +10,16 @@ name: Release
 #
 # `workflow_dispatch` with a `tag` input rebuilds an existing tag instead
 # of auto-versioning (e.g. v0.53.6 — the tag must exist on the remote).
+#
+# Docs-only pushes (README*, docs/, any *.md) skip the pipeline ENTIRELY:
+# no verify job, no version bump, no installer. Code pushes still run
+# everything; `workflow_dispatch` stays available for manual releases.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   workflow_dispatch:
     inputs:
       tag:
