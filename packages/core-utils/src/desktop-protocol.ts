@@ -349,6 +349,8 @@ export interface SettingsEvent {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
+  /** Ollama chat endpoint (OpenAI-compatible) — shown in the Models settings page. */
+  ollamaBaseUrl?: string;
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
   webSearchEndpoint?: string;
@@ -375,9 +377,9 @@ export interface SettingsEvent {
 }
 
 /** Endpoint + auth state for the tab's CURRENT model — the status bar's API
- *  chip is per tab and flips between DeepSeek and OpenAI with the model. */
+ *  chip is per tab and flips between DeepSeek, OpenAI and Ollama with the model. */
 export interface ModelEndpointInfo {
-  provider: "deepseek" | "openai";
+  provider: "deepseek" | "openai" | "ollama";
   baseUrl: string;
   /** Auth source for OpenAI endpoints — absent for the DeepSeek provider. */
   openaiAuth?: "oauth" | "apiKey" | "none";
@@ -440,6 +442,23 @@ export interface CodexQuotaEvent {
   reason?: string;
 }
 
+/** Dynamically fetched model list for the Ollama provider — driven by the
+ *  picker's "Ollama" section so the hundreds of available models don't need
+ *  hardcoding. `error` replaces the list when the endpoint is unreachable,
+ *  auth was rejected, or the payload was malformed. */
+export interface OllamaModelsEvent {
+  type: "$ollama_models";
+  /** Raw model ids the endpoint reported (e.g. `llama3.1:latest`). */
+  models: string[];
+  /** The account's Ollama plan (`free`, `pro`, ...) when resolvable via the
+   *  cloud `/api/me` endpoint — lets the picker explain filtering. */
+  plan?: string;
+  /** Models hidden because the account's plan doesn't cover them (only set
+   *  when the endpoint is subscription-gated and the probe detected some). */
+  hiddenCount?: number;
+  error?: string;
+}
+
 // ---- commands ----
 
 export interface SettingsPatch {
@@ -451,6 +470,8 @@ export interface SettingsPatch {
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;
+  /** Ollama chat endpoint override (OpenAI-compatible). null = back to the local default. */
+  ollamaBaseUrl?: string | null;
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
   webSearchEndpoint?: string | null;
@@ -522,6 +543,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "settings_get" }
   | ({ cmd: "settings_save" } & SettingsPatch)
   | { cmd: "codex_quota_get" }
+  | { cmd: "ollama_models_list" }
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
   | { cmd: "mention_picked"; path: string }

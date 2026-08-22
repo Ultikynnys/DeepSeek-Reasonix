@@ -39,6 +39,7 @@ import type {
   MentionResultsEvent,
   ModelEndpointInfo,
   NeedsSetupEvent,
+  OllamaModelsEvent,
   PathAccessRequiredEvent,
   PlanClearedEvent,
   PlanRequiredEvent,
@@ -72,6 +73,7 @@ import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
 import { fetchCodexQuotaViaOAuth, resolveCodexTransport } from "../../codex-backend.js";
 import {
   DEFAULT_MODEL,
+  DEFAULT_OLLAMA_CHAT_URL,
   bridgeEndpointEnv,
   isOpenAIStandardEndpoint,
   isPlausibleKey,
@@ -88,6 +90,7 @@ import {
   loadMetasoApiKey,
   loadModel,
   loadOllamaApiKey,
+  loadOllamaEndpoint,
   loadPerplexityApiKey,
   loadReasoningEffort,
   loadRecentWorkspaces,
@@ -162,6 +165,14 @@ import {
   resolveOpenAIToken,
   signOutOpenAI,
 } from "../../oauth.js";
+import {
+  loadOllamaVerdicts,
+  ollamaVerdictsPath,
+  partitionByVerdicts,
+  saveOllamaVerdicts,
+  scopeKeyFor,
+  setVerdict,
+} from "../../ollama-model-map.js";
 import type { SubagentEvent } from "../../tools/subagent.js";
 
 import {
@@ -243,6 +254,7 @@ type EmittableEvent =
   | SettingsEvent
   | BalanceEvent
   | CodexQuotaEvent
+  | OllamaModelsEvent
   | MentionResultsEvent
   | MentionPreviewEvent
   | RetryResultEvent
@@ -726,6 +738,13 @@ let lastOAuthError: string | null = null;
  *  DeepSeek models report the DeepSeek endpoint; gpt-* models the OpenAI one
  *  plus auth source (OAuth sign-in > static key > none). Exported for tests. */
 export function modelEndpointFor(model: string, path?: string): ModelEndpointInfo {
+  if (providerForModel(model) === "ollama") {
+    const oep = loadOllamaEndpoint(path);
+    return {
+      provider: "ollama",
+      baseUrl: oep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL,
+    };
+  }
   if (providerForModel(model) !== "openai") {
     return {
       provider: "deepseek",
@@ -761,6 +780,7 @@ function emitSettings(tab: Tab): void {
       workspaceDir: tab.rootDir,
       recentWorkspaces: recent,
       model: tab.currentModel,
+      ollamaBaseUrl: readConfig().ollamaBaseUrl,
       editor: loadEditor(),
       webSearchEngine: readWebSearchEngine(),
       webSearchEndpoint: readConfig().webSearchEndpoint,
@@ -786,6 +806,177 @@ function emitSettings(tab: Tab): void {
     oauthSignedIn: !!oauth?.accessToken,
   });
   void emitCodexQuota(tab);
+}
+
+/** Account plan for a cloud Ollama endpoint — `POST {origin}/api/me` with the
+ *  same Bearer key. Undefined on any failure (proxy, local daemon, down):
+ *  an unknown plan means "no filtering", never a hidden model list. */
+export async function fetchOllamaPlan(
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs = 10_000,
+): Promise<string | undefined> {
+  try {
+    const resp = await fetch(`${new URL(baseUrl).origin}/api/me`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: "{}",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!resp.ok) return undefined;
+    const data = (await resp.json()) as { Plan?: unknown };
+    return typeof data.Plan === "string" && data.Plan.length > 0 ? data.Plan : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export type OllamaProbeResult = "ok" | "gated" | "error";
+
+/** Whether an upstream chat response marks the model as subscription-gated.
+ *  Ollama's 403 variants: "requires a subscription" and "requires both a
+ *  Pro, Max, or Team plan ..." — both share the "upgrade for access" tail. */
+export function isSubscriptionGatedResponse(status: number, bodyText: string): boolean {
+  return (
+    status === 403 &&
+    (bodyText.includes("requires a subscription") || bodyText.includes("upgrade for access"))
+  );
+}
+
+/** Minimal chat probe — 1-token completion; 403 = gated, 429 gets one retry.
+ *  Timeout is long: cold big models are slow to first token, and a timeout
+ *  leaves the model unmapped (re-probed on every refresh). */
+export async function probeOllamaModel(
+  baseUrl: string,
+  model: string,
+  apiKey: string,
+  timeoutMs = 30_000,
+): Promise<OllamaProbeResult> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch {
+      return "error";
+    }
+    if (resp.ok) return "ok";
+    if (resp.status === 429 && attempt === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      continue;
+    }
+    const body = await resp.text().catch(() => "");
+    return isSubscriptionGatedResponse(resp.status, body) ? "gated" : "error";
+  }
+  return "error";
+}
+
+/** Batch size that stays under the cloud's parallel-burst rate limit (19
+ *  concurrent probes 429'd ~half of them; 6 with a 429 retry stays clean). */
+const OLLAMA_PROBE_BATCH = 6;
+
+/** Dynamically fetched Ollama model list — `GET {base}/models` on the resolved
+ *  endpoint. For cloud keys the plan (POST /api/me) gates which models get
+ *  probed and hidden; errors ship as `error`, never a crash. */
+async function emitOllamaModels(tab: Tab): Promise<void> {
+  const ep = loadOllamaEndpoint();
+  const base = ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL;
+  try {
+    const resp = await fetch(`${base}/models`, {
+      method: "GET",
+      headers: ep.apiKey ? { Authorization: `Bearer ${ep.apiKey}` } : {},
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) {
+      const status = resp.status;
+      emitTabDiagnostic(tab, "ollama.models_fetch.failed", { status });
+      emit(
+        {
+          type: "$ollama_models",
+          models: [],
+          error:
+            status === 401 || status === 403
+              ? "Ollama API key rejected"
+              : `Ollama endpoint returned HTTP ${status}`,
+        },
+        tab.id,
+      );
+      return;
+    }
+    const data = (await resp.json()) as { data?: Array<{ id?: unknown }> };
+    const models = (data?.data ?? [])
+      .map((m) => (typeof m.id === "string" && m.id.length > 0 ? m.id : undefined))
+      .filter((id): id is string => id !== undefined)
+      .sort();
+    emitTabDiagnostic(tab, "ollama.models_fetch.ok", { count: models.length });
+
+    const gated = new Set<string>();
+    const apiKey = ep.apiKey;
+    // Plan is re-checked every refresh (one cheap request) so the verdict
+    // scope matches the current plan; learned verdicts persist in
+    // `~/.reasonix/ollama-model-map.json`, keyed by plan + endpoint + key hash.
+    const plan = apiKey ? await fetchOllamaPlan(base, apiKey) : undefined;
+    if (plan && apiKey) {
+      const path = ollamaVerdictsPath();
+      const store = loadOllamaVerdicts(path);
+      const scope = scopeKeyFor(base, apiKey);
+      const { known, unknown } = partitionByVerdicts(models, store, plan, scope, Date.now());
+      for (const [model, verdict] of known) {
+        if (verdict.result === "gated") gated.add(model);
+      }
+      if (unknown.length > 0) {
+        for (let i = 0; i < unknown.length; i += OLLAMA_PROBE_BATCH) {
+          const batch = unknown.slice(i, i + OLLAMA_PROBE_BATCH);
+          const results = await Promise.allSettled(
+            batch.map((m) => probeOllamaModel(base, m, apiKey)),
+          );
+          results.forEach((r, j) => {
+            const model = batch[j]!;
+            if (r.status === "fulfilled" && (r.value === "ok" || r.value === "gated")) {
+              setVerdict(store, plan, scope, model, r.value, Date.now());
+              if (r.value === "gated") gated.add(model);
+            }
+            // Probe errors stay unmapped — retried next refresh, so a
+            // transient failure can never permanently hide a model.
+          });
+        }
+        try {
+          saveOllamaVerdicts(store, path);
+        } catch (err) {
+          emitTabDiagnostic(
+            tab,
+            "ollama.verdicts.save_failed",
+            { message: err instanceof Error ? err.message : String(err) },
+            "warn",
+          );
+        }
+        emitTabDiagnostic(tab, "ollama.probe.done", {
+          total: unknown.length,
+          cached: known.size,
+          gated: gated.size,
+        });
+      }
+      emitTabDiagnostic(tab, "ollama.plan.resolved", { plan });
+    }
+    const visible = gated.size > 0 ? models.filter((m) => !gated.has(m)) : models;
+    emit(
+      {
+        type: "$ollama_models",
+        models: visible,
+        plan,
+        hiddenCount: gated.size > 0 ? gated.size : undefined,
+      },
+      tab.id,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    emitTabDiagnostic(tab, "ollama.models_fetch.error", { message });
+    emit({ type: "$ollama_models", models: [], error: `Ollama unreachable: ${message}` }, tab.id);
+  }
 }
 
 async function emitBalance(tab: Tab): Promise<void> {
@@ -1336,6 +1527,9 @@ function tabHasCredential(tab: Tab): boolean {
     if (ep.apiKey) return true;
     return !!readConfig().openaiOAuth?.accessToken;
   }
+  // Local Ollama is keyless — the daemon omits the Authorization header. Cloud
+  // users configure ollamaApiKey; a missing one surfaces as a per-turn 401.
+  if (providerForModel(tab.currentModel) === "ollama") return true;
   return !!loadApiKey();
 }
 
@@ -1344,6 +1538,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   const toolset = tab.toolset;
   applyPlanMode(toolset.tools, loadEditMode());
   const ep = loadEndpointForModel(tab.currentModel);
+  const provider = providerForModel(tab.currentModel);
   const isOpenAI = isOpenAIStandardEndpoint(tab.currentModel);
   const log = createLogger("desktop");
   if (isOpenAI) {
@@ -1351,12 +1546,18 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     log.debug(
       `model ${tab.currentModel} → OpenAI; ${keyStatus}Codex backend transport enabled (plan quota)`,
     );
+  } else if (provider === "ollama") {
+    log.debug(
+      `model ${tab.currentModel} → Ollama; endpoint ${ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL}`,
+    );
   } else {
     log.debug(`model ${tab.currentModel} → DeepSeek; endpoint ${ep.baseUrl ?? "default"}`);
   }
   const client = new DeepSeekClient({
     apiKey: ep.apiKey,
     baseUrl: ep.baseUrl,
+    // Local Ollama is keyless — the client omits the Authorization header.
+    allowMissingKey: provider === "ollama",
     // OAuth tokens refresh per request — fallback for when the Codex backend
     // transport declines (no OAuth creds or token refresh failed). Without
     // OAuth, the static API key is used and requests bill to platform credits.
@@ -3226,6 +3427,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       void emitCodexQuota(tab);
       return;
     }
+    if (msg.cmd === "ollama_models_list") {
+      void emitOllamaModels(tab);
+      return;
+    }
     if (msg.cmd === "settings_save") {
       try {
         if (msg.reasoningEffort !== undefined && isReasoningEffort(msg.reasoningEffort)) {
@@ -3257,6 +3462,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
         if (msg.editor !== undefined) saveEditor(msg.editor);
         if (msg.showSystemEvents !== undefined) saveShowSystemEvents(msg.showSystemEvents);
+        if (msg.ollamaBaseUrl !== undefined) {
+          const cfg = readConfig();
+          cfg.ollamaBaseUrl = msg.ollamaBaseUrl?.trim() || undefined;
+          writeConfig(cfg);
+        }
         if (
           msg.webSearchEngine !== undefined ||
           msg.webSearchEndpoint !== undefined ||

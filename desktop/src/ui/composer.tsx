@@ -142,6 +142,12 @@ export function Composer({
   onEffortChange,
   editMode,
   onEditModeChange,
+  /** Dynamically fetched Ollama models (`GET {base}/models`) — rendered as a scrollable
+   *  group under the known models so the hundreds Ollama offers stay browsable. */
+  ollamaModels,
+  ollamaModelsError,
+  ollamaHiddenCount,
+  onRefreshOllamaModels,
   textareaRef,
   slashCommands,
   onMentionQuery,
@@ -173,6 +179,14 @@ export function Composer({
   onEffortChange: (effort: ReasoningEffort) => void;
   editMode: EditMode;
   onEditModeChange: (mode: EditMode) => void;
+  /** Dynamically fetched Ollama models (raw ids, e.g. `llama3.1:latest`). */
+  ollamaModels?: string[];
+  /** Why the fetch failed — replaces the list so the failure isn't silent. */
+  ollamaModelsError?: string;
+  /** Models hidden because the account's plan doesn't cover them. */
+  ollamaHiddenCount?: number;
+  /** Re-fetch the Ollama model list (also called on open when the group is empty). */
+  onRefreshOllamaModels?: () => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   slashCommands: SlashCmd[];
   onMentionQuery?: (q: string, nonce: number) => void;
@@ -720,6 +734,10 @@ export function Composer({
                 <ModelEffortMenu
                   modelLabel={modelLabel}
                   currentEffort={reasoningEffort}
+                  ollamaModels={ollamaModels}
+                  ollamaModelsError={ollamaModelsError}
+                  ollamaHiddenCount={ollamaHiddenCount}
+                  onRefreshOllamaModels={onRefreshOllamaModels}
                   onPickModel={(m) => {
                     onModelChange(m);
                     setModelMenuOpen(false);
@@ -895,13 +913,22 @@ function ModelEffortMenu({
   currentEffort,
   onPickModel,
   onPickEffort,
+  ollamaModels,
+  ollamaModelsError,
+  ollamaHiddenCount,
+  onRefreshOllamaModels,
 }: {
   modelLabel: string;
   currentEffort: ReasoningEffort;
   onPickModel: (model: string) => void;
   onPickEffort: (effort: ReasoningEffort) => void;
+  ollamaModels?: string[];
+  ollamaModelsError?: string;
+  ollamaHiddenCount?: number;
+  onRefreshOllamaModels?: () => void;
 }) {
   const [draft, setDraft] = useState(modelLabel);
+  const ollamaGroup = ollamaModels && ollamaModels.length > 0;
   return (
     <div
       className="popup"
@@ -917,7 +944,8 @@ function ModelEffortMenu({
         <span className="tok">M</span>
         <span>{t("composer.switchModel")}</span>
       </div>
-      <div className="popup-list">
+      {/* Scrollable — the Ollama group alone can run to hundreds of ids. */}
+      <div className="popup-list model-menu-list">
         {KNOWN_MODELS.map((m) => (
           <div
             key={m}
@@ -934,6 +962,52 @@ function ModelEffortMenu({
             </div>
           </div>
         ))}
+        {ollamaGroup || ollamaModelsError ? (
+          <>
+            <div className="model-menu-group">
+              <span className="grow">{t("composer.modelOllamaGroup")}</span>
+              {ollamaHiddenCount && ollamaHiddenCount > 0 ? (
+                <span className="model-menu-note">
+                  {t("composer.modelOllamaHidden", { count: ollamaHiddenCount })}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                className="mini-btn"
+                title={t("composer.modelOllamaRefresh")}
+                onClick={onRefreshOllamaModels}
+              >
+                <I.refresh size={10} />
+              </button>
+            </div>
+            {ollamaModelsError && !ollamaGroup ? (
+              <div className="model-menu-error">
+                {t("composer.modelOllamaError", { error: ollamaModelsError })}
+              </div>
+            ) : null}
+            {ollamaModels && ollamaModels.length > 0
+              ? ollamaModels.map((id) => {
+                  const full = `ollama/${id}`;
+                  return (
+                    <div
+                      key={full}
+                      className="popup-item"
+                      data-active={full === modelLabel}
+                      onClick={() => onPickModel(full)}
+                      onKeyDown={activationHandler(() => onPickModel(full))}
+                    >
+                      <span className="ico">
+                        <I.bot size={12} />
+                      </span>
+                      <div className="nm">
+                        <span className="cmd">{full}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              : null}
+          </>
+        ) : null}
         <div style={{ padding: "6px 8px", display: "flex", gap: 6 }}>
           <input
             className="field mono"

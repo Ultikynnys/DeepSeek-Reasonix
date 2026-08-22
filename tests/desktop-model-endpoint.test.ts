@@ -14,6 +14,8 @@ const ENV_NAMES = [
   "DEEPSEEK_API_BASE_URL",
   "OPENAI_API_KEY",
   "OPENAI_BASE_URL",
+  "OLLAMA_API_KEY",
+  "OLLAMA_BASE_URL",
 ] as const;
 
 describe("desktop modelEndpointFor (#1529)", () => {
@@ -130,6 +132,29 @@ describe("desktop modelEndpointFor (#1529)", () => {
       provider: "openai",
       baseUrl: "https://gateway.example.com/v1",
       openaiAuth: "apiKey",
+    });
+  });
+
+  it("ollama model reports the local keyless endpoint by default", () => {
+    expect(modelEndpointFor("ollama/llama3.1:latest", path)).toEqual({
+      provider: "ollama",
+      baseUrl: "http://localhost:11434/v1",
+    });
+  });
+
+  it("ollama model follows a custom ollamaBaseUrl", () => {
+    writeConfig({ ollamaBaseUrl: "https://ollama.example.com/v1" }, path);
+    expect(modelEndpointFor("ollama/qwen3:32b", path)).toEqual({
+      provider: "ollama",
+      baseUrl: "https://ollama.example.com/v1",
+    });
+  });
+
+  it("ollama model follows OLLAMA_BASE_URL env", () => {
+    process.env.OLLAMA_BASE_URL = "https://env.ollama.example.com";
+    expect(modelEndpointFor("ollama/llama4-maverick", path)).toEqual({
+      provider: "ollama",
+      baseUrl: "https://env.ollama.example.com",
     });
   });
 });

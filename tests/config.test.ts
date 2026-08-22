@@ -1189,4 +1189,84 @@ describe("config", () => {
       expect(readConfig(path).subagentModels).toBeUndefined();
     });
   });
+
+  describe("Ollama provider routing", () => {
+    const origOllamaKey = process.env.OLLAMA_API_KEY;
+    const origOllamaBase = process.env.OLLAMA_BASE_URL;
+
+    beforeEach(() => {
+      // biome-ignore lint/performance/noDelete: restore exact env state
+      delete process.env.OLLAMA_API_KEY;
+      // biome-ignore lint/performance/noDelete: same reason
+      delete process.env.OLLAMA_BASE_URL;
+    });
+
+    afterEach(() => {
+      if (origOllamaKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason as beforeEach
+        delete process.env.OLLAMA_API_KEY;
+      } else {
+        process.env.OLLAMA_API_KEY = origOllamaKey;
+      }
+      if (origOllamaBase === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason as beforeEach
+        delete process.env.OLLAMA_BASE_URL;
+      } else {
+        process.env.OLLAMA_BASE_URL = origOllamaBase;
+      }
+    });
+
+    it("providerForModel routes ollama/* ids to ollama; unprefixed ids stay deepseek", () => {
+      expect(providerForModel("ollama/llama3.1:latest")).toBe("ollama");
+      expect(providerForModel("ollama/qwen3:32b")).toBe("ollama");
+      expect(providerForModel("deepseek-r1:8b")).toBe("deepseek");
+      expect(providerForModel(undefined)).toBe("deepseek");
+    });
+
+    it("loadEndpointForModel: ollama ids default to the local keyless daemon", () => {
+      const ep = loadEndpointForModel("ollama/llama3.1:latest", path);
+      expect(ep.baseUrl).toBe("http://localhost:11434/v1");
+      expect(ep.apiKey).toBeUndefined();
+    });
+
+    it("loadEndpointForModel: ollama cloud baseUrl + key come from config", () => {
+      writeConfig(
+        { ollamaBaseUrl: "https://ollama.example.com/v1", ollamaApiKey: "sk-ollama-config" },
+        path,
+      );
+      const ep = loadEndpointForModel("ollama/qwen3:32b", path);
+      expect(ep.baseUrl).toBe("https://ollama.example.com/v1");
+      expect(ep.apiKey).toBe("sk-ollama-config");
+    });
+
+    it("loadEndpointForModel: OLLAMA_BASE_URL env owns the tuple over config", () => {
+      process.env.OLLAMA_BASE_URL = "https://env.ollama.example.com";
+      process.env.OLLAMA_API_KEY = "sk-ollama-env";
+      writeConfig(
+        { ollamaBaseUrl: "https://ollama.example.com/v1", ollamaApiKey: "sk-ollama-config" },
+        path,
+      );
+      const ep = loadEndpointForModel("ollama/llama4-maverick", path);
+      expect(ep.baseUrl).toBe("https://env.ollama.example.com");
+      expect(ep.apiKey).toBe("sk-ollama-env");
+    });
+
+    it("loadEndpointForModel: the DeepSeek apiKey never bleeds into the ollama tuple", () => {
+      process.env.DEEPSEEK_API_KEY = "sk-deepseek-env";
+      writeConfig({ apiKey: "sk-deepseek-config" }, path);
+      const ep = loadEndpointForModel("ollama/llama3.1:latest", path);
+      expect(ep.apiKey).toBeUndefined();
+    });
+
+    it("saveModel / loadModel accept ollama/* ids without a custom baseUrl", () => {
+      saveModel("ollama/llama3.1:latest", path);
+      expect(readConfig(path).model).toBe("ollama/llama3.1:latest");
+      expect(loadModel(path)).toBe("ollama/llama3.1:latest");
+    });
+
+    it("loadModel keeps a persisted ollama/* id without a custom baseUrl", () => {
+      writeConfig({ model: "ollama/qwen3:32b" }, path);
+      expect(loadModel(path)).toBe("ollama/qwen3:32b");
+    });
+  });
 });

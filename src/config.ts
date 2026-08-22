@@ -38,12 +38,31 @@ export const GPT56_MODELS: readonly string[] = ["gpt-5.6-sol", "gpt-5.6-terra", 
 /** Everything the default endpoints accept without a custom baseUrl, across providers. */
 export const SUPPORTED_MODELS: readonly string[] = [...SUPPORTED_OFFICIAL_MODELS, ...GPT56_MODELS];
 
-/** Which provider a model id routes to. `gpt-` prefixed ids → OpenAI, everything else → DeepSeek. */
-export type ModelProvider = "deepseek" | "openai";
+/** Which provider a model id routes to. `gpt-` prefixed ids → OpenAI,
+ *  `ollama/` prefixed ids → Ollama (local daemon or cloud), everything else → DeepSeek. */
+export type ModelProvider = "deepseek" | "openai" | "ollama";
 
 export function providerForModel(model: string | undefined | null): ModelProvider {
   if (typeof model === "string" && model.startsWith("gpt-")) return "openai";
+  if (typeof model === "string" && model.startsWith("ollama/")) return "ollama";
   return "deepseek";
+}
+
+/** OpenAI-compatible base URL for a provider's model id. The Ollama chat
+ *  endpoint is keyless when local (the daemon ignores Authorization), but the
+ *  cloud service requires OLLAMA_API_KEY — so the key is resolved but optional. */
+export const DEFAULT_OLLAMA_CHAT_URL = "http://localhost:11434/v1";
+
+/** (baseUrl, apiKey) tuple for the Ollama provider — baseUrl from
+ *  OLLAMA_BASE_URL env > `ollamaBaseUrl` config > local daemon default; the
+ *  apiKey is the Ollama cloud key (undefined for a keyless local daemon). */
+export function loadOllamaEndpoint(path: string = defaultConfigPath()): ResolvedEndpoint {
+  const envBaseUrl = process.env.OLLAMA_BASE_URL?.trim();
+  if (envBaseUrl) return { baseUrl: envBaseUrl, apiKey: loadOllamaApiKey(path) };
+  const cfg = readConfig(path);
+  const cfgBaseUrl = cfg.ollamaBaseUrl?.trim();
+  if (cfgBaseUrl) return { baseUrl: cfgBaseUrl, apiKey: loadOllamaApiKey(path) };
+  return { baseUrl: DEFAULT_OLLAMA_CHAT_URL, apiKey: loadOllamaApiKey(path) };
 }
 
 import type { EditMode, ReasoningEffort } from "@reasonix/core-utils";
@@ -235,8 +254,10 @@ export interface ReasonixConfig {
   perplexityApiKey?: string;
   /** Exa API key. Falls back to EXA_API_KEY env var. Free 1000/mo signup at https://exa.ai */
   exaApiKey?: string;
-  /** Ollama cloud API key. Falls back to OLLAMA_API_KEY env var. Used for Ollama web_search/web_fetch. */
+  /** Ollama cloud API key. Falls back to OLLAMA_API_KEY env var. Used for Ollama web_search/web_fetch and chat when the Ollama provider is a cloud endpoint. */
   ollamaApiKey?: string;
+  /** Ollama chat endpoint (OpenAI-compatible). Falls back to OLLAMA_BASE_URL env, then http://localhost:11434/v1. Local daemon is keyless; cloud requires ollamaApiKey. */
+  ollamaBaseUrl?: string;
   /** Brave Search API key. Falls back to BRAVE_SEARCH_API_KEY env var. Free 2000/mo signup at https://brave.com/search/api/ */
   braveApiKey?: string;
 
@@ -735,6 +756,9 @@ export function loadEndpointForModel(
       baseUrl: "https://api.openai.com/v1",
       apiKey: process.env.OPENAI_API_KEY ?? cfg.openaiApiKey,
     };
+  }
+  if (providerForModel(model) === "ollama") {
+    return loadOllamaEndpoint(path);
   }
   return loadEndpoint(path);
 }
@@ -1322,6 +1346,7 @@ export function loadModel(path: string = defaultConfigPath()): string {
   // Custom-endpoint owners pick their own model namespace; trust them.
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
   if (customEndpoint) return trimmed;
+  if (providerForModel(trimmed) === "ollama") return trimmed;
   return SUPPORTED_MODELS.includes(trimmed) ? trimmed : DEFAULT_MODEL;
 }
 
@@ -1332,7 +1357,8 @@ export function saveModel(model: string, path: string = defaultConfigPath()): vo
   // Custom-endpoint owners set their own namespace — validation is on them.
   const cfg = readConfig(path);
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
-  if (!customEndpoint && !SUPPORTED_MODELS.includes(trimmed)) {
+  const accepted = SUPPORTED_MODELS.includes(trimmed) || providerForModel(trimmed) === "ollama";
+  if (!customEndpoint && !accepted) {
     throw new Error(
       `Unsupported model "${trimmed}". Official endpoints only accept: ${SUPPORTED_MODELS.join(", ")}. Set a custom baseUrl to use other models.`,
     );

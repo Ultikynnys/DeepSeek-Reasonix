@@ -39,6 +39,7 @@ import type {
   MentionResultsEvent,
   ModelEndpointInfo,
   NeedsSetupEvent,
+  OllamaModelsEvent,
   OutgoingCommand,
   PathAccessRequiredEvent,
   PlanClearedEvent,
@@ -79,6 +80,7 @@ export type {
   BtwResultEvent,
   DesktopDiagnosticEvent,
   DesktopDiagnosticLevel,
+  OllamaModelsEvent,
   CheckpointRequiredEvent,
   CheckpointVerdict,
   ChoiceOption,
@@ -349,6 +351,7 @@ export type IncomingEvent = { tabId?: string } & (
   | SettingsEvent
   | BalanceEvent
   | CodexQuotaEvent
+  | OllamaModelsEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent
   | StepCompletedEvent

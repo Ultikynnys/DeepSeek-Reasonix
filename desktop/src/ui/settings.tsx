@@ -92,6 +92,12 @@ export function SettingsModal({
   onOAuthCancel,
   onOAuthSignOut,
   onSaveOpenAIApiKey,
+  ollamaBaseUrl,
+  ollamaModels,
+  ollamaModelsError,
+  ollamaPlan,
+  ollamaHiddenCount,
+  onRefreshOllamaModels,
   onPickWorkspace,
   onAddMcpSpec,
   onRemoveMcpSpec,
@@ -126,6 +132,18 @@ export function SettingsModal({
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
   onSaveApiKey: (key: string) => void;
+  /** Ollama chat endpoint (OpenAI-compatible) shown on the Models page. */
+  ollamaBaseUrl?: string;
+  /** Dynamically fetched Ollama models (raw ids) — rendered as a scrollable grid. */
+  ollamaModels?: string[];
+  /** Why the last fetch failed — replaces the grid so the failure isn't silent. */
+  ollamaModelsError?: string;
+  /** The account's Ollama plan (e.g. `free`) when the cloud reported it. */
+  ollamaPlan?: string;
+  /** Models hidden because the account's plan doesn't cover them. */
+  ollamaHiddenCount?: number;
+  /** Re-fetch the Ollama model catalog. */
+  onRefreshOllamaModels?: () => void;
   oauthWaiting: boolean;
   onOAuthBegin: () => void;
   onOAuthCancel: () => void;
@@ -229,6 +247,12 @@ export function SettingsModal({
                 baseUrl={settings.baseUrl}
                 apiKeyPrefix={settings.apiKeyPrefix}
                 onSaveApiKey={onSaveApiKey}
+                ollamaBaseUrl={ollamaBaseUrl}
+                ollamaModels={ollamaModels}
+                ollamaModelsError={ollamaModelsError}
+                ollamaPlan={ollamaPlan}
+                ollamaHiddenCount={ollamaHiddenCount}
+                onRefreshOllamaModels={onRefreshOllamaModels}
                 oauthSignedIn={settings.openaiOAuth?.signedIn ?? false}
                 oauthAccount={settings.openaiOAuth?.account}
                 oauthFlowError={settings.openaiOAuth?.flowError}
@@ -956,6 +980,12 @@ function PageModels({
   baseUrl,
   apiKeyPrefix,
   onSaveApiKey,
+  ollamaBaseUrl,
+  ollamaModels,
+  ollamaModelsError,
+  ollamaPlan,
+  ollamaHiddenCount,
+  onRefreshOllamaModels,
   oauthSignedIn,
   oauthAccount,
   oauthFlowError,
@@ -970,6 +1000,18 @@ function PageModels({
   baseUrl?: string;
   apiKeyPrefix?: string;
   onSaveApiKey: (key: string) => void;
+  /** Ollama chat endpoint (OpenAI-compatible) shown in the section below. */
+  ollamaBaseUrl?: string;
+  /** Dynamically fetched Ollama models (raw ids) — rendered as a scrollable grid. */
+  ollamaModels?: string[];
+  /** Why the last fetch failed — replaces the grid so the failure isn't silent. */
+  ollamaModelsError?: string;
+  /** The account's Ollama plan (e.g. `free`) when the cloud reported it. */
+  ollamaPlan?: string;
+  /** Models hidden because the account's plan doesn't cover them. */
+  ollamaHiddenCount?: number;
+  /** Re-fetch the Ollama model catalog. */
+  onRefreshOllamaModels?: () => void;
   oauthSignedIn: boolean;
   oauthAccount?: string;
   oauthFlowError?: string;
@@ -1024,6 +1066,75 @@ function PageModels({
         {!isKnown ? (
           <div className="h" style={{ marginTop: 6 }}>
             {t("settings.modelCustomActive", { model: settings.model })}
+          </div>
+        ) : null}
+      </section>
+      <section className="section">
+        <div className="stitle">{t("settings.ollamaSection")}</div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.ollamaBaseUrl")}</div>
+            <div className="h">{t("settings.ollamaBaseUrlHint")}</div>
+          </div>
+          <input
+            className="field mono"
+            defaultValue={ollamaBaseUrl ?? ""}
+            placeholder={t("settings.ollamaBaseUrlPlaceholder")}
+            onBlur={(e) => {
+              const next = e.target.value.trim();
+              if (next === (ollamaBaseUrl ?? "")) return;
+              onSave({ ollamaBaseUrl: next || null });
+            }}
+          />
+        </div>
+        <WebSearchApiKeyRow
+          engine="ollama"
+          patchKey="ollamaApiKey"
+          signupUrl="https://ollama.com/settings/keys"
+          prefix={settings.webSearchApiKeys?.ollama}
+          onSave={onSave}
+        />
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.ollamaModels")}</div>
+            <div className="h">
+              {ollamaModelsError
+                ? t("settings.ollamaModelsError", { error: ollamaModelsError })
+                : t("settings.ollamaModelsHint")}
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={onRefreshOllamaModels}>
+            {t("settings.ollamaModelsRefresh")}
+          </button>
+        </div>
+        {ollamaHiddenCount && ollamaHiddenCount > 0 ? (
+          <div className="h" style={{ marginTop: 4 }}>
+            {t("settings.ollamaSubscription", {
+              count: ollamaHiddenCount,
+              plan: ollamaPlan ?? "free",
+            })}
+          </div>
+        ) : ollamaPlan ? (
+          <div className="h" style={{ marginTop: 4 }}>
+            {t("settings.ollamaPlan", { plan: ollamaPlan })}
+          </div>
+        ) : null}
+        {ollamaModels && ollamaModels.length > 0 ? (
+          <div className="model-grid ollama-model-grid">
+            {ollamaModels.map((id) => {
+              const full = `ollama/${id}`;
+              return (
+                <div
+                  key={full}
+                  className="mcard"
+                  data-on={settings.model === full}
+                  onClick={() => onSave({ model: full })}
+                  onKeyDown={activationHandler(() => onSave({ model: full }))}
+                >
+                  <div className="nm">{full}</div>
+                </div>
+              );
+            })}
           </div>
         ) : null}
       </section>

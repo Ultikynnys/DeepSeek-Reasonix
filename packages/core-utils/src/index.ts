@@ -113,6 +113,7 @@ export type {
   CodexQuotaEvent,
   CodexQuotaWindow,
   ModelEndpointInfo,
+  OllamaModelsEvent,
   SettingsPatch,
   OutgoingCommand,
   UserImageAttachment,

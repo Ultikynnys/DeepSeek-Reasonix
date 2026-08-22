@@ -107,7 +107,9 @@ export function StatusBar({
         ? t("statusbar.apiOpenaiKey", { baseUrl: ep?.baseUrl ?? "" })
         : openaiAuth === "none"
           ? t("statusbar.apiOpenaiNone", { baseUrl: ep?.baseUrl ?? "" })
-          : `API · ${settings?.baseUrl ?? "api.deepseek.com"}`;
+          : ep?.provider === "ollama"
+            ? t("statusbar.apiOllama", { baseUrl: ep.baseUrl })
+            : `API · ${settings?.baseUrl ?? "api.deepseek.com"}`;
   if (authFailed) apiTitle += `\n${t("statusbar.oauthFailed", { message: oauthFlowError })}`;
   const dotDanger = connState === "off" || authFailed;
   const dotWarn = !dotDanger && openaiAuth === "none";

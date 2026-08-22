@@ -5,6 +5,15 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Added — Ollama as a chat model provider.**
+
+- New `ollama/<id>` model namespace routes to Ollama's OpenAI-compatible endpoint: the local daemon by default (`http://localhost:11434/v1`, keyless), or a custom `ollamaBaseUrl` / `OLLAMA_BASE_URL` for Ollama cloud.
+- `OLLAMA_API_KEY` / `ollamaApiKey` are honored on cloud endpoints; the client omits the Authorization header entirely for keyless local daemons. The `ollama/` prefix is stripped before the request so servers see the raw model id.
+- Desktop pickers fetch the live model catalog (`GET {base}/models`) on the resolved endpoint — the composer model menu and Settings → Models render it in bounded, scrollable lists with a refresh button. Unreachable / auth-rejected endpoints degrade to an error hint plus the manual id input instead of a crash.
+- On Ollama cloud, the picker only shows models the account can run: the daemon reads the plan via `POST {origin}/api/me` and, for free accounts, probes each model with a 1-token chat (batched, 10-min cached) to hide subscription-gated ids. Local daemons, proxies, and unknown plans always show the full list. Settings shows the plan and how many models were hidden.
+- Learned model-tier verdicts persist per plan in `~/.reasonix/ollama-model-map.json` (keyed by endpoint + API-key hash, never the raw key), so each model is probed once: refreshes re-check only unmapped or 24 h stale models and the whole catalog gets mapped progressively instead of re-probed on every fetch.
+- The status bar shows the Ollama endpoint; cost and context accounting degrade safely (zero cost, 131K context fallback) for local models.
+
 **Added — configurable context window (300K default, up to 1M tokens).**
 
 - The context cap (previously hardcoded at 300K per model) is now a user setting: `contextTokens` in `~/.reasonix/config.json`, or the new "Context window" field in desktop Settings → Behavior. Range 300000–1000000; empty = per-model default (300K).

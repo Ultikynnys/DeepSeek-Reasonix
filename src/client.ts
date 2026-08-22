@@ -130,6 +130,9 @@ export interface DeepSeekClientOptions {
   apiKeyResolver?: () => Promise<string | undefined>;
   /** Per-request transport override for plan-quota billing via Codex backend. */
   transportResolver?: () => Promise<ResolvedTransport | null>;
+  /** Skip the "No API key" constructor throw — for keyless endpoints like the
+   *  local Ollama daemon, where the Authorization header is simply omitted. */
+  allowMissingKey?: boolean;
 }
 
 // DeepSeek's strict JSON parser rejects lone UTF-16 surrogate escapes
@@ -187,8 +190,11 @@ export class DeepSeekClient {
   private nextChatRequestAt = 0;
 
   constructor(opts: DeepSeekClientOptions = {}) {
-    const apiKey = opts.apiKey ?? process.env.DEEPSEEK_API_KEY;
-    if (!apiKey && !opts.apiKeyResolver && !opts.transportResolver) {
+    // Keyless endpoints (local Ollama) must NOT fall back to the
+    // DEEPSEEK_API_KEY env — that would ship the DeepSeek key to whatever the
+    // baseUrl points at (a cloud Ollama endpoint could capture it).
+    const apiKey = opts.apiKey ?? (opts.allowMissingKey ? undefined : process.env.DEEPSEEK_API_KEY);
+    if (!apiKey && !opts.apiKeyResolver && !opts.transportResolver && !opts.allowMissingKey) {
       throw new Error(
         "No API key: set DEEPSEEK_API_KEY (deepseek-* models) or OPENAI_API_KEY (gpt-* models) in .env, or pass apiKey to DeepSeekClient.",
       );
@@ -232,6 +238,13 @@ export class DeepSeekClient {
     return this.transportResolver();
   }
 
+  /** Authorization header when a key exists — omitted entirely for keyless
+   *  endpoints (Ollama's local daemon ignores auth, so `Bearer ` would be noise). */
+  private async authHeaders(): Promise<Record<string, string>> {
+    const key = await this.resolveApiKey();
+    return key ? { Authorization: `Bearer ${key}` } : {};
+  }
+
   /** Timer + combined-signal pair for one request — the caller clears the
    *  timer in its finally. Combining keeps timeoutMs reaching fetch (#1535). */
   private withTimeout(signal?: AbortSignal): {
@@ -268,7 +281,7 @@ export class DeepSeekClient {
       log.verbose(`${stream ? "stream" : "chat"} → ${transport.endpoint}`);
       Object.assign(headers, transport.headers);
     } else {
-      headers.Authorization = `Bearer ${await this.resolveApiKey()}`;
+      Object.assign(headers, await this.authHeaders());
     }
     const resp = await fetchWithRetry(
       this._fetch,
@@ -314,8 +327,11 @@ export class DeepSeekClient {
     if (transport?.api === "responses") {
       return buildResponsesPayload(opts, stream);
     }
+    const isOllama = providerForModel(opts.model) === "ollama";
     const payload: Record<string, unknown> = {
-      model: opts.model,
+      // Ollama model ids are namespaced `ollama/<id>` for provider routing, but
+      // the server expects the raw id (`llama3.1:latest`) — strip the prefix.
+      model: isOllama ? opts.model.replace(/^ollama\//, "") : opts.model,
       messages: opts.messages,
       stream,
     };
@@ -342,10 +358,18 @@ export class DeepSeekClient {
     // safe and keeps the request payload diffable against OpenAI tooling.
     // OpenAI (and Azure) reject the proprietary field — GPT models control
     // reasoning via reasoning_effort instead, so never send it for them.
-    if (opts.thinking && !this._isAzureEndpoint() && providerForModel(opts.model) !== "openai") {
+    // Proprietary fields are provider-locked: DeepSeek's thinking toggle and
+    // reasoning_effort are rejected (or ignored) by other backends — Ollama's
+    // OpenAI-compat layer maps only known chat fields.
+    if (
+      opts.thinking &&
+      !this._isAzureEndpoint() &&
+      !isOllama &&
+      providerForModel(opts.model) !== "openai"
+    ) {
       payload.extra_body = { thinking: { type: opts.thinking } };
     }
-    if (opts.reasoningEffort) {
+    if (opts.reasoningEffort && !isOllama) {
       payload.reasoning_effort = opts.reasoningEffort;
     }
     return payload;
@@ -384,7 +408,7 @@ export class DeepSeekClient {
     try {
       const resp = await this._fetch(`${this.baseUrl}/user/balance`, {
         method: "GET",
-        headers: { Authorization: `Bearer ${await this.resolveApiKey()}` },
+        headers: await this.authHeaders(),
         signal: opts.signal,
       });
       if (!resp.ok) return null;
@@ -401,7 +425,7 @@ export class DeepSeekClient {
     try {
       const resp = await this._fetch(`${this.baseUrl}/models`, {
         method: "GET",
-        headers: { Authorization: `Bearer ${await this.resolveApiKey()}` },
+        headers: await this.authHeaders(),
         signal: opts.signal,
       });
       if (!resp.ok) return null;

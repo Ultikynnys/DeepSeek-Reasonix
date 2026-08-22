@@ -122,6 +122,8 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
         subagentClient = new DeepSeekClient({
           apiKey: ep.apiKey,
           baseUrl: ep.baseUrl,
+          // Local Ollama is keyless — the client omits the Authorization header.
+          allowMissingKey: providerForModel(model) === "ollama",
           // OAuth fallback — when Codex backend is unavailable the static key is used
           // (bills platform credits). OAuth tokens are audience-locked to api.openai.com.
           apiKeyResolver: isOpenAI ? () => resolveOpenAIToken() : undefined,

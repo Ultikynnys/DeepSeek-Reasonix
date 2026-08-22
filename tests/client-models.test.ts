@@ -184,3 +184,96 @@ describe("DeepSeekClient request serialization", () => {
     expect(JSON.parse(sentBody).messages[0].content).toBe("bad \uFFFD text");
   });
 });
+
+describe("DeepSeekClient ollama provider (keyless + prefix strip)", () => {
+  it("allowMissingKey skips the no-key constructor throw", () => {
+    expect(
+      () => new DeepSeekClient({ baseUrl: "http://localhost:11434/v1", allowMissingKey: true }),
+    ).not.toThrow();
+  });
+
+  it("without allowMissingKey the constructor still throws for a missing key", () => {
+    // The runner env may carry DEEPSEEK_API_KEY — the fallback must not mask
+    // the missing-key throw, so clear it for this assertion.
+    const saved = process.env.DEEPSEEK_API_KEY;
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.DEEPSEEK_API_KEY;
+    try {
+      expect(() => new DeepSeekClient({ baseUrl: "http://localhost:11434/v1" })).toThrow(
+        /No API key/,
+      );
+    } finally {
+      if (saved === undefined) {
+        // biome-ignore lint/performance/noDelete: restore exact env state
+        delete process.env.DEEPSEEK_API_KEY;
+      } else {
+        process.env.DEEPSEEK_API_KEY = saved;
+      }
+    }
+  });
+
+  it("keyless chat omits the Authorization header and strips the ollama/ prefix", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const fetch = vi.fn(async (url, init) => {
+      capturedUrl = String(url);
+      capturedInit = init as RequestInit;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "hi" } }],
+          usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+
+    const res = await client.chat({
+      model: "ollama/llama3.1:latest",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(capturedUrl).toBe("http://localhost:11434/v1/chat/completions");
+    expect(capturedInit!.headers).not.toHaveProperty("Authorization");
+    const body = JSON.parse(String(capturedInit!.body)) as { model?: string };
+    expect(body.model).toBe("llama3.1:latest");
+    expect(res.content).toBe("hi");
+  });
+
+  it("a cloud key IS sent when configured, and ollama drops DeepSeek-only fields", async () => {
+    let capturedInit: RequestInit | undefined;
+    const fetch = vi.fn(async (_url, init) => {
+      capturedInit = init as RequestInit;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "https://ollama.example.com",
+      apiKey: "sk-ollama-cloud",
+      fetch,
+    });
+
+    await client.chat({
+      model: "ollama/qwen3:32b",
+      messages: [{ role: "user", content: "hi" }],
+      thinking: "high",
+      reasoningEffort: "high",
+    });
+
+    const headers = capturedInit!.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer sk-ollama-cloud");
+    const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
+    expect(body.model).toBe("qwen3:32b");
+    expect(body.extra_body).toBeUndefined();
+    expect(body.reasoning_effort).toBeUndefined();
+  });
+});

@@ -328,6 +328,8 @@ export type Settings = {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
+  /** Ollama chat endpoint (OpenAI-compatible) — shown in the Models settings page. */
+  ollamaBaseUrl?: string;
   editor?: string;
   webSearchEngine?:
     | "bing"
@@ -406,6 +408,14 @@ type State = {
   codexQuotaRefreshing: boolean;
   /** Why the last quota fetch produced no data — shown in the chip tooltip. */
   codexQuotaReason: string | null;
+  /** Dynamically fetched Ollama model catalog (raw ids, e.g. `llama3.1:latest`). */
+  ollamaModels: string[];
+  /** Why the last Ollama model fetch failed — replaces the picker list. */
+  ollamaModelsError: string | null;
+  /** The account's Ollama plan (e.g. `free`) when the cloud reported it. */
+  ollamaPlan: string | null;
+  /** Models hidden because the account's plan doesn't cover them. */
+  ollamaHiddenCount: number;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
   mcpSpecs: McpSpecInfo[];
@@ -485,12 +495,16 @@ function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
     perplexityApiKey: _perplexity,
     exaApiKey: _exa,
     ollamaApiKey: _ollama,
+    ollamaBaseUrl: _ollamaBaseUrl,
     webSearchEndpoint,
     ...rest
   } = patch;
   const sanitized: Partial<Settings> = { ...rest };
   if (webSearchEndpoint !== undefined) {
     sanitized.webSearchEndpoint = webSearchEndpoint ?? undefined;
+  }
+  if (_ollamaBaseUrl !== undefined) {
+    sanitized.ollamaBaseUrl = _ollamaBaseUrl ?? undefined;
   }
   return sanitized;
 }
@@ -1257,6 +1271,15 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         codexQuota: ev.model.startsWith("gpt-") ? state.codexQuota : null,
       };
     }
+    case "$ollama_models": {
+      return {
+        ...state,
+        ollamaModels: ev.models,
+        ollamaModelsError: ev.error ?? null,
+        ollamaPlan: ev.plan ?? null,
+        ollamaHiddenCount: ev.hiddenCount ?? 0,
+      };
+    }
     case "$session_loaded": {
       // A resync echo of the session we're ALREADY streaming must not
       // clobber the live transcript — the on-disk snapshot is behind the
@@ -1819,6 +1842,10 @@ function TabRuntime({
     codexQuota: null,
     codexQuotaRefreshing: false,
     codexQuotaReason: null,
+    ollamaModels: [],
+    ollamaModelsError: null,
+    ollamaPlan: null,
+    ollamaHiddenCount: 0,
     mentionResults: null,
     mentionPreview: null,
     mcpSpecs: [],
@@ -1925,6 +1952,17 @@ function TabRuntime({
     dispatch({ t: "codex_quota_refreshing" });
     sendRpc({ cmd: "codex_quota_get" });
   }, [sendRpc]);
+  const requestOllamaModels = useCallback(() => {
+    sendRpc({ cmd: "ollama_models_list" });
+  }, [sendRpc]);
+  // Fetch the Ollama catalog whenever the tab's model is an Ollama model — the
+  // composer menu and the Models settings page render the fetched list.
+  const activeModel = state.settings?.model;
+  useEffect(() => {
+    if (typeof activeModel === "string" && activeModel.startsWith("ollama/")) {
+      requestOllamaModels();
+    }
+  }, [activeModel, requestOllamaModels]);
   const applySettingsPatch = useCallback(
     (patch: SettingsPatch) => {
       dispatch({ t: "settings_patch", patch });
@@ -3065,6 +3103,10 @@ function TabRuntime({
                 textareaRef={composerRef}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
                 reasoningEffort={state.settings?.reasoningEffort ?? "high"}
+                ollamaModels={state.ollamaModels}
+                ollamaModelsError={state.ollamaModelsError ?? undefined}
+                ollamaHiddenCount={state.ollamaHiddenCount}
+                onRefreshOllamaModels={requestOllamaModels}
                 onModelChange={(model) => {
                   applySettingsPatch({ model });
                   flashToast(t("app.toast.modelSwitched", { model }));
@@ -3194,6 +3236,12 @@ function TabRuntime({
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
             onSaveApiKey={saveApiKey}
+            ollamaBaseUrl={state.settings?.ollamaBaseUrl}
+            ollamaModels={state.ollamaModels}
+            ollamaModelsError={state.ollamaModelsError ?? undefined}
+            ollamaPlan={state.ollamaPlan ?? undefined}
+            ollamaHiddenCount={state.ollamaHiddenCount}
+            onRefreshOllamaModels={requestOllamaModels}
             oauthWaiting={state.oauthWaiting}
             onOAuthBegin={() => sendRpc({ cmd: "oauth_begin" })}
             onOAuthCancel={() => {

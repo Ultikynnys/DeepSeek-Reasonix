@@ -3973,6 +3973,49 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   overflow-x: auto;
   padding: 4px;
 }
+/* model picker — the Ollama group alone can run to hundreds of ids, so the
+   menu list gets a bounded height and scrolls instead of overflowing. */
+.model-menu-list {
+  max-height: 300px;
+}
+.model-menu-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 2px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.model-menu-error {
+  padding: 2px 8px 6px;
+  font-size: 11px;
+  color: var(--danger);
+}
+.model-menu-note {
+  margin-left: auto;
+  padding: 2px 0 0;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.mini-btn:hover {
+  color: var(--fg);
+  background: var(--panel);
+}
 .at-popup-list .popup-item {
   min-width: max-content;
 }
@@ -5540,6 +5583,11 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+/* the Ollama grid is dynamic and can be large — bound the height and scroll */
+.ollama-model-grid {
+  max-height: 280px;
+  overflow-y: auto;
 }
 .mcard {
   border: 1px solid var(--border);
