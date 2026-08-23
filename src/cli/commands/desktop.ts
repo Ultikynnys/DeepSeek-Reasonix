@@ -4073,12 +4073,29 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         );
         return;
       }
+      // A cancelled turn's fold can still be running in the background even
+      // though no turn is in flight (its summary is non-interruptible, and the
+      // host closes the generator fire-and-forget). That fold owns the loop's
+      // _compacting lock — starting a /compact now would overlap it and one of
+      // the two finallys would prematurely release the shared lock mid-rewrite.
+      // Refuse rather than race; the in-flight fold clears the lock itself.
+      const rt = tab.runtime;
+      if (rt.loop.isCompacting) {
+        emit(
+          {
+            type: "$error",
+            message:
+              "A compaction is already running — wait for it to finish before compacting again.",
+          },
+          tab.id,
+        );
+        return;
+      }
       // Compaction card lifecycle — routed through the SAME LoopEvent stream as
       // tool / reasoning / shell actions: the loop yields compaction_start →
       // compaction_end (plus session.compacted when the fold commits) and the
       // eventizer converts them, so user /compact renders the identical card
       // shape and records the identical kernel events as auto folds.
-      const rt = tab.runtime;
       void (async () => {
         try {
           for await (const ev of rt.loop.compactHistoryWithEvents()) {

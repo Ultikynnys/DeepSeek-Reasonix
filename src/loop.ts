@@ -310,6 +310,13 @@ export class CacheFirstLoop {
     return this._turn;
   }
 
+  /** True while a compaction fold is in flight — blocks new tool dispatch.
+   *  Exposed so the host can gate /compact against a cancelled turn's
+   *  still-running background fold, avoiding overlapping log rewrites. */
+  get isCompacting(): boolean {
+    return this._compacting;
+  }
+
   constructor(opts: CacheFirstLoopOptions) {
     this.client = opts.client;
     this.prefix = opts.prefix;
