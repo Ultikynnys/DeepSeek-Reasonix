@@ -80,6 +80,17 @@ export interface NormalizeImageError {
   message: string;
 }
 
+/** Decode a WebP's first frame to PNG pixels via sharp (lazy-imported to keep
+ *  startup light — sharp is a native addon only needed on the WebP path). */
+async function decodeWebpFirstFrameToPng(buf: Buffer): Promise<Buffer | null> {
+  try {
+    const { default: sharp } = await import("sharp");
+    return await sharp(buf, { page: 0, pages: 1 }).png().toBuffer();
+  } catch {
+    return null;
+  }
+}
+
 /** Normalize raw image bytes into a data URL the model's vision API accepts.
  *  Formats DeepSeek accepts pass through; non-raster/garbage is re-encoded to PNG. */
 export async function normalizeImageToDataUrl(
@@ -97,15 +108,23 @@ export async function normalizeImageToDataUrl(
   const format = sniffImageFormat(buf);
   // WebP can't be decoded by jimp in Node (it ships no WebP decoder), but the
   // vision APIs accept a STATIC webp as input, so pass the original bytes
-  // through with the correct MIME. Animated WebP is a different story: the
-  // APIs reject it, and we can't re-encode it (no decoder), so refuse it with
-  // a clear error instead of shipping bytes that would 400 downstream.
+  // through with the correct MIME. Animated WebP is rejected by those APIs, so
+  // extract its FIRST frame to a static PNG via sharp — a clean result instead
+  // of shipping bytes that would 400 downstream.
   if (format === "webp") {
     if (isAnimatedWebp(buf)) {
+      const firstFrame = await decodeWebpFirstFrameToPng(buf);
+      if (firstFrame) {
+        return {
+          ok: true,
+          dataUrl: `data:image/png;base64,${firstFrame.toString("base64")}`,
+          mime: "image/png",
+        };
+      }
       return {
         ok: false,
         message:
-          "animated WebP is not supported by the vision API — save/export the image as a static PNG, JPEG, or GIF.",
+          "animated WebP could not be decoded — save/export the image as a static PNG, JPEG, or GIF.",
       };
     }
     return {

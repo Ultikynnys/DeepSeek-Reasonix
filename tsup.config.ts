@@ -25,7 +25,9 @@ export default defineConfig([
     platform: "node",
     noExternal: [/.*/],
     esbuildOptions(opts) {
-      opts.external = [...(opts.external ?? []), "react-devtools-core"];
+      // sharp is a native addon — its platform binaries must resolve from
+      // node_modules at runtime, not be inlined into the bundle.
+      opts.external = [...(opts.external ?? []), "react-devtools-core", "sharp"];
     },
   },
 ]);
