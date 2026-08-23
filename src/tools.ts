@@ -9,7 +9,7 @@ import {
 import type { ReadTracker } from "./tools/read-tracker.js";
 import { USER_CANCEL_NOTE } from "./tools/shell.js";
 import { saveTruncatedResult, shouldSkipSave } from "./tools/truncated-result-saver.js";
-import type { JSONSchema, ToolSpec } from "./types.js";
+import type { JSONSchema, ToolSpec, UserContentPart } from "./types.js";
 
 export interface ToolCallContext {
   /** Turn abort signal — Esc/Stop fires this, ending the entire turn. */
@@ -212,7 +212,7 @@ export class ToolRegistry {
       /** Data-URL image attachments of the current user turn — forwarded into the tool ctx for vision tools. */
       images?: readonly string[];
     } = {},
-  ): Promise<string> {
+  ): Promise<string | UserContentPart[]> {
     const tool = this._tools.get(name);
     if (!tool) {
       return JSON.stringify({ error: `unknown tool: ${name}` });
@@ -305,7 +305,7 @@ export class ToolRegistry {
       return JSON.stringify(rateLimit.result);
     }
 
-    let finalResult: string;
+    let finalResult: string | UserContentPart[];
     try {
       try {
         this._auditListener?.({ name, args });
@@ -325,38 +325,46 @@ export class ToolRegistry {
         images: opts.images,
         rootDir: opts.rootDir,
       });
-      const str = typeof result === "string" ? result : JSON.stringify(result);
-      // Pre-clip at dispatch so a single fat result can't balloon the
-      // log (and disk session file) on its way in. Healing at load time
-      // still catches pre-existing oversize entries; this closes the
-      // door on new ones.
-      //
-      // Two caps available: `maxResultTokens` (preferred — bounds the
-      // real context footprint, so CJK doesn't slip past at 2× density)
-      // and `maxResultChars` (legacy). If both are set, apply both and
-      // the tighter one wins; char-only callers keep their old behavior.
-      let clipped = str;
-      if (opts.maxResultTokens !== undefined) {
-        clipped = truncateForModelByTokens(clipped, opts.maxResultTokens);
-      }
-      if (opts.maxResultChars !== undefined) {
-        clipped = truncateForModel(clipped, opts.maxResultChars);
-      }
-      // If truncated and the tool allows saving, persist the full result
-      // and re-truncate with the save-path note embedded in the marker.
-      if (clipped !== str && !shouldSkipSave(name, tool?.skipTruncationSave)) {
-        const relPath = saveTruncatedResult(str, name, opts.rootDir ?? process.cwd());
-        const note = `Full result saved at: ${relPath}`;
-        let annotated = str;
+      // A content-parts array (e.g. see_image returning an image_url part so a
+      // vision model receives the actual pixels) flows through unchanged — it
+      // must NOT be JSON-stringified (the client maps image_url parts to native
+      // images) and string-only truncation would corrupt the base64 image.
+      if (Array.isArray(result)) {
+        finalResult = result;
+      } else {
+        const str = typeof result === "string" ? result : JSON.stringify(result);
+        // Pre-clip at dispatch so a single fat result can't balloon the
+        // log (and disk session file) on its way in. Healing at load time
+        // still catches pre-existing oversize entries; this closes the
+        // door on new ones.
+        //
+        // Two caps available: `maxResultTokens` (preferred — bounds the
+        // real context footprint, so CJK doesn't slip past at 2× density)
+        // and `maxResultChars` (legacy). If both are set, apply both and
+        // the tighter one wins; char-only callers keep their old behavior.
+        let clipped = str;
         if (opts.maxResultTokens !== undefined) {
-          annotated = truncateForModelByTokens(annotated, opts.maxResultTokens, note);
+          clipped = truncateForModelByTokens(clipped, opts.maxResultTokens);
         }
         if (opts.maxResultChars !== undefined) {
-          annotated = truncateForModel(annotated, opts.maxResultChars, note);
+          clipped = truncateForModel(clipped, opts.maxResultChars);
         }
-        finalResult = annotated;
-      } else {
-        finalResult = clipped;
+        // If truncated and the tool allows saving, persist the full result
+        // and re-truncate with the save-path note embedded in the marker.
+        if (clipped !== str && !shouldSkipSave(name, tool?.skipTruncationSave)) {
+          const relPath = saveTruncatedResult(str, name, opts.rootDir ?? process.cwd());
+          const note = `Full result saved at: ${relPath}`;
+          let annotated = str;
+          if (opts.maxResultTokens !== undefined) {
+            annotated = truncateForModelByTokens(annotated, opts.maxResultTokens, note);
+          }
+          if (opts.maxResultChars !== undefined) {
+            annotated = truncateForModel(annotated, opts.maxResultChars, note);
+          }
+          finalResult = annotated;
+        } else {
+          finalResult = clipped;
+        }
       }
     } catch (err) {
       const e = err as Error & { toToolResult?: () => unknown };
@@ -385,6 +393,11 @@ export class ToolRegistry {
       }
     }
 
+    if (Array.isArray(finalResult)) {
+      // Content-part results (image_url etc.) bypass the string-only
+      // gate-rejection dedup and result augmenter (which append text hints).
+      return finalResult;
+    }
     finalResult = this._noteGateRejection(name, fingerprint, finalResult);
     return this._augmentResult(name, args, finalResult);
   }

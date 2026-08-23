@@ -1,12 +1,12 @@
 import { parseRateLimitedToolResult } from "../tools/rate-limit.js";
 import { USER_CANCEL_NOTE } from "../tools/shell.js";
-import type { ChatMessage, ToolCall } from "../types.js";
+import type { ChatMessage, ToolCall, UserContentPart } from "../types.js";
 import type { LoopEvent } from "./types.js";
 
 export interface RunOneToolCallResult {
   preWarnings: LoopEvent[];
   postWarnings: LoopEvent[];
-  result: string;
+  result: string | UserContentPart[];
 }
 
 export interface DispatchContext {
@@ -31,6 +31,18 @@ export interface DispatchContext {
 function readParallelMax(): number {
   const raw = Number.parseInt(process.env.REASONIX_PARALLEL_MAX ?? "", 10);
   return Number.isFinite(raw) && raw >= 1 ? Math.min(raw, 16) : 3;
+}
+
+/** Collapse a content-parts tool result to a display string for the string-typed
+ *  LoopEvent.content (UI renderer). Image parts are noted, not dumped. */
+function contentPartsToString(parts: UserContentPart[]): string {
+  const text = parts
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("\n");
+  const imageCount = parts.filter((p) => p.type === "image_url").length;
+  const imageNote = imageCount > 0 ? `\n[${imageCount} image(s) attached]` : "";
+  return `${text}${imageNote}`.trim();
 }
 
 /** Env override wins; gpt-* default to SERIAL so their parallel bursts
@@ -90,7 +102,7 @@ export async function* dispatchToolCallsChunked(
       const args = call.function?.arguments ?? "{}";
       const s = settled[k]!;
 
-      let result: string;
+      let result: string | UserContentPart[];
       let preWarnings: LoopEvent[] = [];
       let postWarnings: LoopEvent[] = [];
       if (s.status === "fulfilled") {
@@ -114,7 +126,7 @@ export async function* dispatchToolCallsChunked(
       for (const w of preWarnings) yield w;
       for (const w of postWarnings) yield w;
 
-      const rateLimited = parseRateLimitedToolResult(result);
+      const rateLimited = typeof result === "string" ? parseRateLimitedToolResult(result) : null;
       if (rateLimited && !ctx.rateLimitState.shown) {
         ctx.rateLimitState.shown = true;
         yield {
@@ -128,15 +140,26 @@ export async function* dispatchToolCallsChunked(
         role: "tool",
         tool_call_id: call.id ?? "",
         name,
-        content: result,
+        content: Array.isArray(result) ? contentPartsToString(result) : result,
       });
       // The result is in the log — the call is no longer abandoned.
       ctx.abandonedCalls.delete(call.id ?? "");
 
+      // Image-bearing tool results (see_image) must reach the model on a USER
+      // message — Ollama vision models silently ignore images on tool-role
+      // messages (ollama/ollama#16038), so a follow-up user message carrying
+      // the image_url parts is the only delivery channel that renders.
+      if (Array.isArray(result)) {
+        ctx.appendAndPersist({
+          role: "user",
+          content: result,
+        });
+      }
+
       yield {
         turn: ctx.turn,
         role: "tool",
-        content: result,
+        content: Array.isArray(result) ? contentPartsToString(result) : result,
         toolName: name,
         toolArgs: args,
         callId: ctx.inflightIdFor(call),

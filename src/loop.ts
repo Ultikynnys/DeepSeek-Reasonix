@@ -95,6 +95,18 @@ function buildUserContent(
   return parts;
 }
 
+/** Collapse a content-parts tool result to a display string for string-typed
+ *  consumers (hooks, LoopEvent.content). Image parts are noted, not dumped. */
+function contentPartsToString(parts: UserContentPart[]): string {
+  const text = parts
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("\n");
+  const imageCount = parts.filter((p) => p.type === "image_url").length;
+  const imageNote = imageCount > 0 ? `\n[${imageCount} image(s) attached]` : "";
+  return `${text}${imageNote}`.trim();
+}
+
 export {
   fixToolCallPairing,
   formatLoopError,
@@ -554,7 +566,11 @@ export class CacheFirstLoop {
   private async runOneToolCall(
     call: ToolCall,
     signal: AbortSignal,
-  ): Promise<{ preWarnings: LoopEvent[]; postWarnings: LoopEvent[]; result: string }> {
+  ): Promise<{
+    preWarnings: LoopEvent[];
+    postWarnings: LoopEvent[];
+    result: string | UserContentPart[];
+  }> {
     const name = call.function?.name ?? "";
     const args = call.function?.arguments ?? "{}";
     const parsedArgs = safeParseToolArgs(args);
@@ -626,7 +642,7 @@ export class CacheFirstLoop {
           cwd: this.hookCwd,
           toolName: name,
           toolArgs: parsedArgs,
-          toolResult: result,
+          toolResult: Array.isArray(result) ? contentPartsToString(result) : result,
         },
       });
       const postWarnings = [...hookWarnings(postReport.outcomes, this._turn)];
