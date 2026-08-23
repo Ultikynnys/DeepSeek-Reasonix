@@ -3527,6 +3527,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emitSessions(tab);
       return;
     }
+    if (msg.cmd === "session_clear") {
+      for (const s of listSessionsForWorkspace(tab.rootDir)) deleteSession(s.name);
+      emitSessions(tab);
+      return;
+    }
     if (msg.cmd === "session_rename") {
       try {
         const trimmed = normalizeSessionTitle(msg.title);

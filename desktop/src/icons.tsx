@@ -60,6 +60,11 @@ export const I = {
       <path d="M6 6l12 12M18 6 6 18" />
     </Ic>
   ),
+  trash: (p: IconProps) => (
+    <Ic {...p}>
+      <path d="M4 7h16M10 7V4h4v3M6 7l1 13h10l1-13M10 11v6M14 11v6" />
+    </Ic>
+  ),
   pencil: (p: IconProps) => (
     <Ic {...p}>
       <path d="m4 20 4-1L20 7l-3-3L5 16l-1 4Z" />

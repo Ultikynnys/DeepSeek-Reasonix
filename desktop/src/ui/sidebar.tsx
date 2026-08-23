@@ -16,6 +16,11 @@ type PendingDelete = {
   y: number;
 };
 
+type PendingClear = {
+  x: number;
+  y: number;
+};
+
 type PendingImport = {
   x: number;
   y: number;
@@ -57,6 +62,7 @@ export function Sidebar({
   onNewChat,
   onLoadSession,
   onDeleteSession,
+  onClearSessions,
   onRenameSession,
   onRefreshImportSources,
   onImportDetectedSessions,
@@ -74,6 +80,7 @@ export function Sidebar({
   onNewChat: () => void;
   onLoadSession: (name: string) => void;
   onDeleteSession: (name: string) => void;
+  onClearSessions: () => void;
   onRenameSession: (name: string, title: string) => void;
   onRefreshImportSources: () => void;
   onImportDetectedSessions: (sources: ImportSource[]) => void;
@@ -87,6 +94,7 @@ export function Sidebar({
   useLang();
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [pendingClear, setPendingClear] = useState<PendingClear | null>(null);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -101,14 +109,20 @@ export function Sidebar({
     : sessions;
 
   useEffect(() => {
-    if (!pendingDelete && !pendingImport) return;
+    if (!pendingDelete && !pendingClear && !pendingImport) return;
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      if (!target?.closest(".session-delete-popover")) setPendingDelete(null);
+      if (!target?.closest(".session-delete-popover")) {
+        setPendingDelete(null);
+        setPendingClear(null);
+      }
       if (!target?.closest(".session-import-popover")) setPendingImport(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPendingDelete(null);
+      if (e.key === "Escape") {
+        setPendingDelete(null);
+        setPendingClear(null);
+      }
       if (e.key === "Escape") setPendingImport(null);
     };
     window.addEventListener("mousedown", onMouseDown);
@@ -117,7 +131,7 @@ export function Sidebar({
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("keydown", onKey);
     };
-  }, [pendingDelete, pendingImport]);
+  }, [pendingDelete, pendingClear, pendingImport]);
 
   return (
     <aside className="sidebar">
@@ -191,6 +205,21 @@ export function Sidebar({
           <div className="label">
             <span>{t("sidebarPanel.recent")}</span>
             <span className="count">{filtered.length}</span>
+            {sessions.length > 0 ? (
+              <button
+                type="button"
+                className="clear-all-btn"
+                title={t("sidebarPanel.clearAllSessions")}
+                aria-label={t("sidebarPanel.clearAllSessions")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setPendingClear({ x: rect.right, y: rect.bottom });
+                }}
+              >
+                <I.trash size={12} />
+              </button>
+            ) : null}
           </div>
           {sessions.length === 0 ? (
             <div
@@ -361,12 +390,28 @@ export function Sidebar({
       </div>
 
       {pendingDelete ? (
-        <SessionDeletePopover
-          target={pendingDelete}
+        <SessionConfirmPopover
+          anchor={pendingDelete}
+          message={t("sidebarPanel.deleteSession")}
+          name={pendingDelete.pretty}
+          confirmLabel={t("sidebarPanel.delete")}
           onCancel={() => setPendingDelete(null)}
           onConfirm={() => {
             onDeleteSession(pendingDelete.name);
             setPendingDelete(null);
+          }}
+        />
+      ) : null}
+      {pendingClear ? (
+        <SessionConfirmPopover
+          anchor={pendingClear}
+          message={t("sidebarPanel.clearAllSessions")}
+          name={t("sidebarPanel.clearAllConfirm", { count: sessions.length })}
+          confirmLabel={t("sidebarPanel.deleteAll")}
+          onCancel={() => setPendingClear(null)}
+          onConfirm={() => {
+            onClearSessions();
+            setPendingClear(null);
           }}
         />
       ) : null}
@@ -412,23 +457,29 @@ function useClampedPopupPosition(
   }, [ref.current, anchor.x, anchor.y, pos.left, pos.top, setPos]);
 }
 
-function SessionDeletePopover({
-  target,
+function SessionConfirmPopover({
+  anchor,
+  message,
+  name,
+  confirmLabel,
   onCancel,
   onConfirm,
 }: {
-  target: PendingDelete;
+  anchor: { x: number; y: number };
+  message: string;
+  name: string;
+  confirmLabel: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({
-    left: target.x,
-    top: target.y,
+    left: anchor.x,
+    top: anchor.y,
   });
 
-  useClampedPopupPosition(ref, target, pos, setPos);
+  useClampedPopupPosition(ref, anchor, pos, setPos);
   useLayoutEffect(() => {
     cancelRef.current?.focus();
   }, []);
@@ -443,16 +494,16 @@ function SessionDeletePopover({
       style={{ left: pos.left, top: pos.top }}
     >
       <div className="msg">
-        {t("sidebarPanel.deleteSession")}
-        <span className="name">{target.pretty}</span>
+        {message}
+        <span className="name">{name}</span>
       </div>
       <div className="actions">
         <button ref={cancelRef} type="button" className="cancel" onClick={onCancel}>
           {t("sidebarPanel.cancel")}
         </button>
         <button type="button" className="confirm" onClick={onConfirm}>
-          <I.x size={11} />
-          {t("sidebarPanel.delete")}
+          <I.trash size={11} />
+          {confirmLabel}
         </button>
       </div>
     </div>

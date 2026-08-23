@@ -557,6 +557,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "session_list" }
   | { cmd: "desktop_resync" }
   | { cmd: "session_delete"; name: string }
+  | { cmd: "session_clear" }
   | { cmd: "session_load"; name: string }
   | { cmd: "session_rename"; name: string; title: string }
   | { cmd: "session_import"; source: ExternalSessionSource; path: string; name?: string }

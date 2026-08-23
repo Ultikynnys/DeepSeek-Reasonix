@@ -282,6 +282,30 @@ describe("session persistence", () => {
     expect(existsSync(planPath)).toBe(false);
   });
 
+  it("clear-all deletes every workspace session while leaving other workspaces intact", () => {
+    // Mirrors the daemon's session_clear loop: enumerate the workspace's
+    // sessions and deleteSession each, covering meta-tagged + legacy
+    // code-<base>- prefix matches, and leaving unrelated sessions alone.
+    appendSessionMessage("in-a", { role: "user", content: "x" });
+    appendSessionMessage("in-a2", { role: "user", content: "x" });
+    appendSessionMessage("code-a-202605251200", { role: "user", content: "x" });
+    appendSessionMessage("in-b", { role: "user", content: "x" });
+    appendSessionMessage("unrelated", { role: "user", content: "x" });
+    patchSessionMeta("in-a", { workspace: "/proj/a" });
+    patchSessionMeta("in-a2", { workspace: "/proj/a" });
+    patchSessionMeta("in-b", { workspace: "/proj/b" });
+
+    for (const s of listSessionsForWorkspace("/proj/a")) deleteSession(s.name);
+
+    expect(existsSync(sessionPath("in-a"))).toBe(false);
+    expect(existsSync(sessionPath("in-a2"))).toBe(false);
+    expect(existsSync(sessionPath("code-a-202605251200"))).toBe(false);
+    expect(existsSync(sessionPath("in-b"))).toBe(true);
+    expect(existsSync(sessionPath("unrelated"))).toBe(true);
+    expect(listSessionsForWorkspace("/proj/a")).toEqual([]);
+    expect(listSessionsForWorkspace("/proj/b").map((s) => s.name)).toEqual(["in-b"]);
+  });
+
   it("pruneStaleSessions deletes sessions older than the cutoff and leaves fresh ones", () => {
     // Three sessions: two backdated past the 90-day default, one
     // fresh. Backdate via utimesSync since createTime/mtime is what

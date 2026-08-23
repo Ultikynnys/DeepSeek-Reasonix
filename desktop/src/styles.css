@@ -1185,6 +1185,29 @@ html[data-platform="macos"] .titlebar .tb-left {
   border-radius: 4px;
   padding: 0 5px;
 }
+.side-section .label .clear-all-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 120ms, color 120ms;
+}
+.side-section .label .clear-all-btn:hover {
+  background: var(--panel-2, rgba(255, 80, 80, 0.12));
+  color: var(--danger, #e25555);
+}
+.side-section .label .clear-all-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
 
 .session-item {
   display: flex;

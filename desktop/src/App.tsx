@@ -2844,6 +2844,7 @@ function TabRuntime({
             sendRpc({ cmd: "session_load", name });
           }}
           onDeleteSession={(name) => sendRpc({ cmd: "session_delete", name })}
+          onClearSessions={() => sendRpc({ cmd: "session_clear" })}
           onRenameSession={(name, title) => sendRpc({ cmd: "session_rename", name, title })}
           onRefreshImportSources={() => sendRpc({ cmd: "session_import_scan" })}
           onImportDetectedSessions={(sources: ExternalSessionSource[]) =>
