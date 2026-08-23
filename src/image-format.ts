@@ -47,9 +47,7 @@ export function sniffImageFormat(buf: Buffer): SniffedImageFormat | undefined {
   return undefined;
 }
 
-/** True when a WebP's RIFF chunk list carries an ANIM / ANMF chunk (animated).
- *  jimp has no WebP decoder, so animated WebP can only be refused, never
- *  re-encoded, and the vision APIs reject it while accepting static WebP. */
+/** True when a WebP's RIFF chunk list carries an ANIM / ANMF chunk (animated). */
 export function isAnimatedWebp(buf: Buffer): boolean {
   if (buf.length < 12) return false;
   if (buf.subarray(0, 4).toString("ascii") !== "RIFF") return false;
@@ -70,7 +68,7 @@ export function isAnimatedWebp(buf: Buffer): boolean {
 
 export interface NormalizeImageResult {
   ok: true;
-  /** Guaranteed-acceptable data URL (data:image/webp|png|jpeg). */
+  /** Guaranteed-acceptable data URL (data:image/png|jpeg|gif — WebP is converted). */
   dataUrl: string;
   mime: string;
 }
@@ -106,31 +104,22 @@ export async function normalizeImageToDataUrl(
     };
   }
   const format = sniffImageFormat(buf);
-  // WebP can't be decoded by jimp in Node (it ships no WebP decoder), but the
-  // vision APIs accept a STATIC webp as input, so pass the original bytes
-  // through with the correct MIME. Animated WebP is rejected by those APIs, so
-  // extract its FIRST frame to a static PNG via sharp — a clean result instead
-  // of shipping bytes that would 400 downstream.
+  // jimp can't decode WebP, and the vision APIs reject it (animated and often
+  // static alike) despite the error text listing it — so ALWAYS convert WebP
+  // to PNG via sharp. An animated WebP yields its first frame; a static one
+  // its single frame. Removes any dependence on format-acceptance quirks.
   if (format === "webp") {
-    if (isAnimatedWebp(buf)) {
-      const firstFrame = await decodeWebpFirstFrameToPng(buf);
-      if (firstFrame) {
-        return {
-          ok: true,
-          dataUrl: `data:image/png;base64,${firstFrame.toString("base64")}`,
-          mime: "image/png",
-        };
-      }
+    const png = await decodeWebpFirstFrameToPng(buf);
+    if (png) {
       return {
-        ok: false,
-        message:
-          "animated WebP could not be decoded — save/export the image as a static PNG, JPEG, or GIF.",
+        ok: true,
+        dataUrl: `data:image/png;base64,${png.toString("base64")}`,
+        mime: "image/png",
       };
     }
     return {
-      ok: true,
-      dataUrl: `data:image/webp;base64,${buf.toString("base64")}`,
-      mime: MIME_BY_FORMAT.webp,
+      ok: false,
+      message: "WebP could not be decoded — save/export the image as a static PNG, JPEG, or GIF.",
     };
   }
   if (format === "png" || format === "jpeg" || format === "gif") {
