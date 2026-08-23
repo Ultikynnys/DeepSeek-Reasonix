@@ -7,7 +7,6 @@ import { createInterface } from "node:readline";
 import {
   MAX_IMAGE_BYTES,
   flattenText,
-  imageMimeForExtension,
   messageOf,
   redactDiagnosticText,
   redactDiagnosticValue,
@@ -139,6 +138,7 @@ import {
   readMemoryEntryDetail,
   writeMemoryEntry,
 } from "../../desktop/memory-browser.js";
+import { normalizeImageToDataUrl } from "../../image-format.js";
 
 import { loadDotenv } from "../../env.js";
 import { type ResolvedHook, formatHookOutcomeMessage, loadHooks, runHooks } from "../../hooks.js";
@@ -603,9 +603,7 @@ function elideLoadedMessages(messages: LoadedMessage[]): LoadedMessage[] {
   });
 }
 
-/** Clipboard attachments already carry bytes as a data URL; dropped files ship
- *  a path the daemon reads (the webview has no fs access for arbitrary OS
- *  paths). Restricted to raster formats OpenAI accepts, size-capped. */
+/** Clipboard data URLs pass through; dropped files are read, sniffed and re-encoded. */
 async function resolveUserImages(
   attachments: ReadonlyArray<UserImageAttachment>,
 ): Promise<string[]> {
@@ -624,13 +622,11 @@ async function resolveUserImages(
         `image too large (${(stat.size / 1024 / 1024).toFixed(1)} MB > ${MAX_IMAGE_BYTES / 1024 / 1024} MB)`,
       );
     }
-    const ext = att.path.split(".").pop()?.toLowerCase() ?? "";
-    const mime = imageMimeForExtension(ext);
-    if (!mime) {
-      throw new Error(`unsupported image type ".${ext}" — use PNG, JPEG or WebP`);
+    const normalized = await normalizeImageToDataUrl(await readFile(att.path));
+    if (!normalized.ok) {
+      throw new Error(normalized.message);
     }
-    const buf = await readFile(att.path);
-    out.push(`data:${mime};base64,${buf.toString("base64")}`);
+    out.push(normalized.dataUrl);
   }
   return out;
 }

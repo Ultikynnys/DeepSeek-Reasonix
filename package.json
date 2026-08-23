@@ -53,6 +53,7 @@
     "eventsource-parser": "^3.0.0",
     "iconv-lite": "^0.7.2",
     "ignore": "^7.0.5",
+    "jimp": "^1.6.1",
     "node-html-parser": "^7.1.0",
     "picomatch": "^4.0.4",
     "semver": "^7.6.3",

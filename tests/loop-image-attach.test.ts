@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Jimp } from "jimp";
 import { describe, expect, it } from "vitest";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
@@ -92,8 +93,10 @@ describe("CacheFirstLoop — image attachments (OpenAI vision parts)", () => {
   it("delivers a see_image path call's pixels to the model on a USER message", async () => {
     const root = mkdtempSync(join(tmpdir(), "see-image-loop-"));
     try {
-      const bytes = "fake-png-bytes";
-      writeFileSync(join(root, "sprite.png"), bytes, "utf8");
+      const bytes = await new Jimp({ width: 4, height: 4, color: 0x00ff00ff }).getBuffer(
+        "image/png",
+      );
+      writeFileSync(join(root, "sprite.png"), bytes);
       const { client, captured } = makeFakeClient([
         {
           tool_calls: [
@@ -127,8 +130,7 @@ describe("CacheFirstLoop — image attachments (OpenAI vision parts)", () => {
       const parts = imgUserMsg?.content as Array<{ type: string; image_url?: { url: string } }>;
       expect(Array.isArray(parts)).toBe(true);
       const image = parts.find((p) => p.type === "image_url");
-      const b64 = image?.image_url?.url?.split(",")[1] ?? "";
-      expect(Buffer.from(b64, "base64").toString("utf8")).toBe(bytes);
+      expect(image?.image_url?.url?.startsWith("data:image/png;base64,")).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
