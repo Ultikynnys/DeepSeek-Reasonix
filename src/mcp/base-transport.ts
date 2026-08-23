@@ -10,6 +10,8 @@ import type { JsonRpcMessage } from "./types.js";
 export abstract class BaseMcpTransport {
   protected readonly incoming = new MessageQueue();
   protected closed = false;
+  /** Abort signal for in-flight fetches — aborted on close. */
+  protected readonly controller = new AbortController();
 
   /** Async iterator over incoming messages. Ends when the connection closes. */
   messages(): AsyncIterableIterator<JsonRpcMessage> {
@@ -27,6 +29,15 @@ export abstract class BaseMcpTransport {
     this.closed = true;
     this.incoming.close();
     return true;
+  }
+
+  /** Abort in-flight fetches. Safe to call more than once. */
+  protected abortFetch(): void {
+    try {
+      this.controller.abort();
+    } catch {
+      /* already aborted */
+    }
   }
 
   /** Consume an SSE body, pushing a synthetic error notification if the stream dies while open. Shared by the SSE and Streamable HTTP transports. */

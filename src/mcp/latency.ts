@@ -9,7 +9,7 @@ export interface SlowEvent {
   sampleSize: number;
 }
 
-export interface LatencyTrackerOptions {
+interface LatencyTrackerOptions {
   thresholdMs?: number;
   onSlow?: (ev: SlowEvent) => void;
 }
@@ -42,7 +42,7 @@ export class LatencyTracker {
 }
 
 /** Plain p95 — sort the buffer and pick the index at floor(N * 0.95). */
-export function computeP95(samples: readonly number[]): number {
+function computeP95(samples: readonly number[]): number {
   if (samples.length === 0) return 0;
   const sorted = [...samples].sort((a, b) => a - b);
   const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95));

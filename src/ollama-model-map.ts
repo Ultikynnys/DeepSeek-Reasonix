@@ -35,7 +35,7 @@ export interface OllamaVerdictStore {
  *  between 403 and 200 within a session) eventually propagate. */
 export const OLLAMA_VERDICT_TTL_MS = 24 * 60 * 60_000;
 
-export const OLLAMA_VERDICTS_FILENAME = "ollama-model-map.json";
+const OLLAMA_VERDICTS_FILENAME = "ollama-model-map.json";
 
 /** `~/.reasonix/ollama-model-map.json` — global user state, next to config.json. */
 export function ollamaVerdictsPath(home: string = reasonixHome()): string {

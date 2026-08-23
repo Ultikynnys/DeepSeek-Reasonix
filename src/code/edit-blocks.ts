@@ -1,23 +1,19 @@
 /** SEARCH must match byte-for-byte; empty SEARCH = create new file. No fuzzy match — silent wrong edit beats a missing one. */
 
 import {
-  chmodSync,
   closeSync,
   existsSync,
   fstatSync,
-  fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
   readSync,
   realpathSync,
-  renameSync,
-  unlinkSync,
   writeSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { looksLikeAbsoluteSystemPath, pathIsUnder } from "@reasonix/core-utils/path-utils";
-import { tmpSiblingPath } from "../core/atomic-write.js";
+import { atomicReplaceFileSync } from "../core/atomic-write.js";
 import { decodeFileBuffer, encodeFile } from "./file-encoding.js";
 
 export interface EditBlock {
@@ -82,61 +78,6 @@ function resolveEditPath(rootDir: string, rawPath: string): string {
     rooted = rooted.slice(1);
   }
   return resolve(absRoot, rooted || ".");
-}
-
-function writeAllSync(fd: number, buf: Buffer): void {
-  let written = 0;
-  while (written < buf.length) {
-    const n = writeSync(fd, buf, written, buf.length - written, written);
-    if (n <= 0) throw new Error("write returned 0 bytes before completing");
-    written += n;
-  }
-}
-
-function fsyncDirectoryBestEffort(path: string): void {
-  let fd: number | undefined;
-  try {
-    fd = openSync(path, "r");
-    fsyncSync(fd);
-  } catch {
-    /* directory fsync is best-effort across platforms */
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
-}
-
-function atomicReplaceFileSync(path: string, buf: Buffer, mode: number): void {
-  const tmp = tmpSiblingPath(path);
-  const permissions = mode & 0o7777;
-  let fd: number | undefined;
-  try {
-    fd = openSync(tmp, "wx", permissions);
-    writeAllSync(fd, buf);
-    try {
-      chmodSync(tmp, permissions);
-    } catch {
-      /* preserve mode when the platform allows it */
-    }
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
-    renameSync(tmp, path);
-    fsyncDirectoryBestEffort(dirname(path));
-  } catch (err) {
-    if (fd !== undefined) {
-      try {
-        closeSync(fd);
-      } catch {
-        /* fd may already be closed after a prior failure */
-      }
-    }
-    try {
-      unlinkSync(tmp);
-    } catch {
-      /* tmp may not exist */
-    }
-    throw err;
-  }
 }
 
 export function applyEditBlock(block: EditBlock, rootDir: string): ApplyResult {

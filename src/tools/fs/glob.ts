@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
-import * as pathMod from "node:path";
 import picomatch from "picomatch";
 import { displayRel } from "./rel.js";
+import { walkDir } from "./walk.js";
 
 export interface GlobContext {
   rootDir: string;
@@ -19,49 +19,37 @@ export async function globFiles(
     signal?: AbortSignal;
   },
 ): Promise<string> {
-  if (args.signal?.aborted) {
-    throw new DOMException("glob aborted by user", "AbortError");
-  }
   const includeDeps = args.include_deps === true;
   const sortBy = args.sort_by ?? "mtime";
   const limit = Math.max(1, Math.min(1000, Math.floor(args.limit ?? 200)));
   const isMatch = picomatch(args.pattern, { dot: true, nocase: true });
 
   const hits: { rel: string; mtimeMs: number }[] = [];
-
-  const walk = async (dir: string): Promise<void> => {
-    if (args.signal?.aborted) {
-      throw new DOMException("glob aborted by user", "AbortError");
-    }
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = pathMod.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (!includeDeps && ctx.skipDirNames.has(e.name)) continue;
-        await walk(full);
-        continue;
-      }
-      if (!e.isFile() && !e.isSymbolicLink()) continue;
-      const rel = displayRel(ctx.rootDir, full);
-      if (!isMatch(rel)) continue;
+  await walkDir(
+    startAbs,
+    {
+      includeDeps,
+      skipDirNames: ctx.skipDirNames,
+      signal: args.signal,
+      label: "glob",
+    },
+    async (entry) => {
+      if (!entry.dirent.isFile() && !entry.dirent.isSymbolicLink()) return true;
+      const rel = displayRel(ctx.rootDir, entry.full);
+      if (!isMatch(rel)) return true;
       let mtimeMs = 0;
       if (sortBy === "mtime") {
         try {
-          const st = await fs.stat(full);
+          const st = await fs.stat(entry.full);
           mtimeMs = st.mtimeMs;
         } catch {
-          continue;
+          return true;
         }
       }
       hits.push({ rel, mtimeMs });
-    }
-  };
-  await walk(startAbs);
+      return true;
+    },
+  );
 
   if (hits.length === 0) return "(no matches)";
   if (sortBy === "mtime") hits.sort((a, b) => b.mtimeMs - a.mtimeMs);

@@ -16,7 +16,6 @@ export interface SseTransportOptions {
 export class SseTransport extends BaseMcpTransport implements McpTransport {
   private readonly url: string;
   private readonly headers: Record<string, string>;
-  private readonly controller = new AbortController();
   private postUrl: string | null = null;
   private readonly endpointReady: Promise<string>;
   private resolveEndpoint!: (url: string) => void;
@@ -57,11 +56,7 @@ export class SseTransport extends BaseMcpTransport implements McpTransport {
     if (!this.markClosed()) return;
     // Reject any still-pending send() that was waiting for the endpoint.
     this.rejectEndpoint(new Error("MCP SSE transport closed before endpoint was ready"));
-    try {
-      this.controller.abort();
-    } catch {
-      /* already aborted */
-    }
+    this.abortFetch();
   }
 
   private async runStream(): Promise<void> {

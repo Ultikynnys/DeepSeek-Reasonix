@@ -17,7 +17,6 @@ const SESSION_HEADER = "mcp-session-id";
 export class StreamableHttpTransport extends BaseMcpTransport implements McpTransport {
   private readonly url: string;
   private readonly extraHeaders: Record<string, string>;
-  private readonly controller = new AbortController();
   /** Session id minted by server on (typically) the initialize response. */
   private sessionId: string | null = null;
   /** Background SSE read-loops kicked off by send(); awaited on close(). */
@@ -120,11 +119,7 @@ export class StreamableHttpTransport extends BaseMcpTransport implements McpTran
 
   async close(): Promise<void> {
     if (!this.markClosed()) return;
-    try {
-      this.controller.abort();
-    } catch {
-      /* already aborted */
-    }
+    this.abortFetch();
     // Wait for any in-flight SSE streams to wind down so a subsequent
     // process.exit() doesn't trip on a hanging socket. Cap at "done";
     // controller.abort() above unblocks them.

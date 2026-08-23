@@ -3,6 +3,7 @@ import * as pathMod from "node:path";
 import { looksBinary } from "./binary.js";
 import { getRegexRunner } from "./regex-runner.js";
 import { displayRel } from "./rel.js";
+import { throwIfAborted } from "./walk.js";
 
 export interface SearchContext {
   rootDir: string;
@@ -11,11 +12,6 @@ export interface SearchContext {
   isBinaryByName: (name: string) => boolean;
   /** Pre-baked filename→regex/substring matcher; null when no glob filter. */
   nameMatch: ((name: string, rel: string) => boolean) | null;
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  throw new DOMException("search aborted by user", "AbortError");
 }
 
 export async function searchFiles(

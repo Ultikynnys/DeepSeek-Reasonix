@@ -9,7 +9,7 @@ import { accountFromIdToken, resolveOpenAIToken } from "./oauth.js";
 const log = createLogger("codex");
 
 /** ChatGPT plan-quota endpoint (OpenAI Responses-API compatible). */
-export const CODEX_BACKEND_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
+const CODEX_BACKEND_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 
 interface CodexAuth {
   accessToken: string;
@@ -59,7 +59,7 @@ export async function resolveCodexTransport(): Promise<ResolvedTransport | null>
 // ── OAuth-based quota fetch (no codex CLI dependency) ──────────────────────
 
 /** Official Codex usage endpoint used by the Codex client for ChatGPT accounts. */
-export const CODEX_QUOTA_ENDPOINT = "https://chatgpt.com/backend-api/wham/usage";
+const CODEX_QUOTA_ENDPOINT = "https://chatgpt.com/backend-api/wham/usage";
 /** Kept as a compatibility fallback for older ChatGPT backend deployments. */
 const LEGACY_CODEX_QUOTA_ENDPOINT = "https://chatgpt.com/backend-api/codex/rate_limits";
 const FIVE_HOUR_MINUTES = 300;
@@ -81,7 +81,7 @@ function windowMinutesFromSeconds(seconds: number | undefined): number | undefin
 
 /** Normalize both the current WHAM snake_case response and the older
  *  camelCase rate_limits response into the wire format used by the ribbon. */
-export function normalizeCodexWindow(raw: JsonObject): CodexQuotaWindow | null {
+function normalizeCodexWindow(raw: JsonObject): CodexQuotaWindow | null {
   const windowMinutes =
     toNumber(raw.windowDurationMins) ??
     windowMinutesFromSeconds(toNumber(raw.limit_window_seconds));
@@ -98,7 +98,7 @@ export function normalizeCodexWindow(raw: JsonObject): CodexQuotaWindow | null {
 
 /** Parse `/wham/usage` — accepts both root-level `{plan_type, rate_limit}` and
  *  nested `{rate_limits: {plan_type, rate_limit}}` envelopes. */
-export function parseCodexQuotaPayload(payload: unknown): CodexQuota | null {
+function parseCodexQuotaPayload(payload: unknown): CodexQuota | null {
   const data = asObject(payload);
   if (!data) return null;
   const envelope = asObject(data.rate_limits) ?? data;
@@ -134,7 +134,7 @@ export function parseCodexQuotaPayload(payload: unknown): CodexQuota | null {
   };
 }
 
-export interface CodexQuotaResult {
+interface CodexQuotaResult {
   quota: CodexQuota | null;
   reason: string | null;
 }

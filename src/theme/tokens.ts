@@ -4,7 +4,7 @@
 
 export type ThemeName = "dark" | "light" | "midnight" | "deep-blue" | "high-contrast";
 
-export const DEFAULT_THEME_NAME: ThemeName = "dark";
+const DEFAULT_THEME_NAME: ThemeName = "dark";
 
 const THEME_NAMES: readonly ThemeName[] = [
   "dark",
