@@ -31,7 +31,7 @@ export default defineConfig({
       "desktop/src/**/*.test.ts",
       "desktop/src/**/*.test.tsx",
     ],
-    setupFiles: ["tests/setup-lang.ts"],
+    setupFiles: [],
     environment: "node",
     globals: false,
     // Forks pool — per-file process isolation, so tokenizer BPE / tree-sitter

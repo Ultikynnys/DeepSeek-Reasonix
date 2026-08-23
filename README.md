@@ -102,7 +102,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full writeup.
   rate period, account balance (DeepSeek) or weekly quota (GPT-5.6 Codex, Ollama plan), workspace,
   model + effort.
 - Settings pages: general, models, MCP, skills, memory, rules, billing, shortcuts.
-- Themes (dark/light plus accent styles), i18n (English, Deutsch, 简体中文), keyboard shortcuts.
+- Themes (dark/light plus accent styles), keyboard shortcuts.
 
 **Agent runtime**
 

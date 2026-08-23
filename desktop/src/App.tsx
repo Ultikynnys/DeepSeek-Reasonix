@@ -27,7 +27,7 @@ import { CommandPalette, ToastStack, buildCommands, useCommandPalette } from "./
 import { WorkspaceProvider } from "./Markdown";
 import { type AbortDraftSource, nextAbortDraftCandidate, restoreAbortedDraft } from "./abort-draft";
 import { formatBytes } from "./format";
-import { getLang, getLangLabel, getSupportedLangs, setLang, t, useLang } from "./i18n";
+import { t, useLang } from "./i18n";
 import { I } from "./icons";
 import { downscaleImage, fileToDataUrl, isImagePath, typedMentionImages } from "./image-attach";
 import {
@@ -2662,17 +2662,6 @@ function TabRuntime({
       cmd: "/currency",
       desc: t("app.cmd.toggleCurrency"),
       run: onToggleCurrency,
-    },
-    {
-      cmd: "/lang",
-      desc: t("app.cmd.toggleLang"),
-      run: () => {
-        const langs = getSupportedLangs();
-        const next = langs[(langs.indexOf(getLang()) + 1) % langs.length] ?? "en";
-        setLang(next);
-        const langName = getLangLabel(next);
-        flashToast(t("app.toast.langSwitched", { lang: langName }));
-      },
     },
     {
       cmd: "/export",

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { setLang } from "./i18n";
 import {
   type ApprovalSnapshot,
   COMPLETION_NOTIFY_MIN_MS,
@@ -18,31 +17,6 @@ function emptySnapshot(): ApprovalSnapshot {
 }
 
 describe("desktop notifications", () => {
-  it("uses the active UI language for notification copy", () => {
-    setLang("zh-CN");
-    const next = emptySnapshot();
-    next.confirms.push({ id: 1, command: "git push" });
-
-    const notifications = deriveDesktopNotifications({
-      previous: emptySnapshot(),
-      current: next,
-      wasBusy: true,
-      isBusy: true,
-      busyDurationMs: 1_000,
-      focused: false,
-    });
-
-    expect(notifications).toEqual([
-      {
-        kind: "approval",
-        title: "等待批准",
-        body: "命令：git push",
-      },
-    ]);
-
-    setLang("en");
-  });
-
   it("notifies when a new approval request appears while unfocused", () => {
     const next = emptySnapshot();
     next.confirms.push({ id: 1, command: "git push" });

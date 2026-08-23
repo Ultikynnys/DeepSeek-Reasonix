@@ -1,7 +1,6 @@
 /** Loop error decorator — context-overflow gets a user hint; everything else passes through. */
 
-import { afterEach, describe, expect, it } from "vitest";
-import { setLanguageRuntime } from "../src/i18n/index.js";
+import { describe, expect, it } from "vitest";
 import {
   formatLoopError,
   healLoadedMessages,
@@ -235,43 +234,6 @@ describe("healLoadedMessagesByTokens", () => {
     const savedArgs = assistant.tool_calls[0]!.function.arguments;
     expect(savedArgs.length).toBeLessThan(bigArgs.length / 5);
     expect(JSON.parse(savedArgs).content).toMatch(/shrunk/);
-  });
-});
-
-describe("formatLoopError — zh-CN runtime switch", () => {
-  afterEach(() => {
-    setLanguageRuntime("EN");
-  });
-
-  it("503 outage notice translates when language is zh-CN", () => {
-    setLanguageRuntime("zh-CN");
-    const out = formatLoopError(new Error("DeepSeek 503: "));
-    expect(out).toContain("服务不可用");
-    expect(out).toContain("503");
-    expect(out).toContain("DeepSeek 服务端问题");
-    expect(out).toContain("status.deepseek.com");
-  });
-
-  it("non-DS host 5xx translates when language is zh-CN, omits DS-specific hints", () => {
-    setLanguageRuntime("zh-CN");
-    const out = formatLoopError(new Error("DeepSeek 502: "), undefined, {
-      upstreamHost: "http://192.168.1.5:8080/v1",
-    });
-    expect(out).toContain("上游服务不可用");
-    expect(out).toContain("502");
-    expect(out).toContain("192.168.1.5:8080");
-    expect(out).not.toContain("status.deepseek.com");
-    expect(out).not.toContain("DeepSeek 服务端问题");
-  });
-
-  it("401 auth error translates when language is zh-CN, preserves the inner DS message", () => {
-    setLanguageRuntime("zh-CN");
-    const out = formatLoopError(
-      new Error('DeepSeek 401: {"error":{"message":"Authentication Fails"}}'),
-    );
-    expect(out).toContain("认证失败");
-    expect(out).toContain("Authentication Fails");
-    expect(out).toContain("reasonix setup");
   });
 });
 

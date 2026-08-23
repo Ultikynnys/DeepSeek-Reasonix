@@ -277,12 +277,6 @@ export const EN: TranslationSchema = {
       description: "show or persist the terminal theme preference. Bare opens picker.",
       argsHint: "[auto|dark|light|midnight|deep-blue|high-contrast]",
     },
-    language: {
-      description: "switch the runtime language",
-      argsHint: "<EN|zh-CN>",
-      success: "Language switched to English.",
-      unsupported: "Unsupported language code: {code}. Supported: {supported}.",
-    },
     budget: {
       description:
         "session USD cap — warns at 80%, refuses next turn at 100%. Off by default. /budget alone shows status",
@@ -419,8 +413,6 @@ export const EN: TranslationSchema = {
     },
   },
   wizard: {
-    languageTitle: "Choose your language",
-    languageSubtitle: "Detected from your system locale. Switch later via /language.",
     welcomeTitle: "Welcome to Reasonix.",
     apiKeyPrompt: "Paste your DeepSeek API key to get started.",
     apiKeyGetOne: "Get one at: https://platform.deepseek.com/api_keys",
@@ -458,7 +450,6 @@ export const EN: TranslationSchema = {
     mcpArgsNotADir: "{path} exists but is not a directory.",
     reviewTitle: "Ready to save",
     reviewLabelApiKey: "API key",
-    reviewLabelLanguage: "Language",
     reviewLabelMcp: "MCP",
     reviewMcpNone: "(none)",
     reviewMcpServers: "{count} server(s)",

@@ -367,7 +367,7 @@ async function searchBing(
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9",
-      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
     },
     signal: searchSignal(opts.signal),
     redirect: "follow",

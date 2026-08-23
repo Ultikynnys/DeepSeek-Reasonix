@@ -4,10 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const nshFiles = [
-  "../desktop/src-tauri/nsis/English.nsh",
-  "../desktop/src-tauri/nsis/SimpChinese.nsh",
-];
+const nshFiles = ["../desktop/src-tauri/nsis/English.nsh"];
 
 const PRODUCT_NAME = "Reasonix";
 const RUNTIME_STRINGS = ["appRunning", "appRunningOkKill", "failedToKillApp"] as const;

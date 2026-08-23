@@ -2,7 +2,7 @@ import { KNOWN_MODELS, modelAcceptsImages } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
-import { getLangLabel, getSupportedLangs, setLang, t, useLang } from "../i18n";
+import { t } from "../i18n";
 import { I } from "../icons";
 import type {
   McpSpecInfo,
@@ -339,7 +339,6 @@ function PageGeneral({
 }) {
   const [editorDraft, setEditorDraft] = useState(settings.editor ?? "");
   const [customFontDraft, setCustomFontDraft] = useState(customFontFamily);
-  const lang = useLang();
   useEffect(() => {
     setCustomFontDraft(customFontFamily);
   }, [customFontFamily]);
@@ -499,24 +498,6 @@ function PageGeneral({
             />
           </div>
         )}
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.language")}</div>
-            <div className="h">{t("settings.languageHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            {getSupportedLangs().map((code) => (
-              <button
-                type="button"
-                key={code}
-                data-on={lang === code}
-                onClick={() => setLang(code)}
-              >
-                {getLangLabel(code)}
-              </button>
-            ))}
-          </div>
-        </div>
       </section>
 
       <section className="section">

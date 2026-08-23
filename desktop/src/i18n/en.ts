@@ -114,12 +114,6 @@ export const en = {
   settings: {
     title: "Settings",
     close: "close",
-    language: "Language",
-    languageHint: "UI only — agent prompts are unaffected.",
-    langEn: "English",
-    langZhCn: "简体中文",
-    langEnDesc: "English UI",
-    langZhCnDesc: "中文界面",
     costCurrency: "Cost currency",
     costCurrencyHint:
       "Display only. Internal cost is computed in USD-equiv per token, converted at fixed 7.2 FX.",
@@ -230,7 +224,7 @@ export const en = {
     model: "model",
     // page nav labels & descriptions
     pageGeneralLabel: "General",
-    pageGeneralDesc: "Appearance, language, behavior",
+    pageGeneralDesc: "Appearance, behavior",
     pageModelsLabel: "Models",
     pageModelsDesc: "Default model & sampling parameters",
     pageMcpLabel: "MCP Servers",
@@ -403,7 +397,6 @@ export const en = {
       exportFailed: "Export failed: {error}",
       exportDialogTitle: "Export conversation",
       emptySession: "Session is empty",
-      langSwitched: "Switched to {lang}",
       modelSwitched: "Model → {model}",
       effortSwitched: "Effort → {effort}",
       modeSwitched: "Mode: {mode}",
@@ -421,7 +414,6 @@ export const en = {
       setEffort: "Set reasoning effort to {effort}",
       toggleTheme: "Toggle theme",
       toggleCurrency: "Toggle currency (CNY / USD)",
-      toggleLang: "Toggle language (CN / EN)",
       exportMd: "Copy session as Markdown",
       help: "Show all commands",
       feedback: "Submit feedback on GitHub (opens browser)",
@@ -467,8 +459,6 @@ export const en = {
     startupFailedMessage: "The desktop backend failed before opening a workspace.",
     startupFailedRetry: "Retry",
     startupFailedUnknown: "Unknown startup error",
-    langZH: "Chinese",
-    langEN: "English",
     titlebar: {
       sidebar: "Sidebar (⌘B)",
       contextPanel: "Context panel",

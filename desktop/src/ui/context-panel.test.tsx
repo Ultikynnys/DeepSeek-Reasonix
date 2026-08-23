@@ -5,7 +5,6 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings, UsageStats } from "../App";
-import { setLang } from "../i18n";
 import { ContextPanel } from "./context-panel";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -56,7 +55,6 @@ function renderPanel(overrides: Partial<Settings> = {}) {
 
 describe("ContextPanel files", () => {
   beforeEach(() => {
-    setLang("en");
     vi.mocked(invoke).mockReset();
     vi.mocked(openPath).mockReset();
   });

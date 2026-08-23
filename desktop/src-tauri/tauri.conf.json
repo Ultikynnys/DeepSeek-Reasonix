@@ -54,12 +54,10 @@
     "windows": {
       "nsis": {
         "languages": [
-          "English",
-          "SimpChinese"
+          "English"
         ],
         "customLanguageFiles": {
-          "English": "nsis/English.nsh",
-          "SimpChinese": "nsis/SimpChinese.nsh"
+          "English": "nsis/English.nsh"
         }
       }
     }

@@ -5,6 +5,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Removed — English-only (language options dropped).**
+
+- The project is now English-only. The runtime language picker (desktop Settings → General), the `/lang` slash command, system-locale auto-detection, the `reasonix.lang` preference, and the `lang` config field are removed.
+- Non-English translation dictionaries (简体中文 / Deutsch / Русский) were deleted from both the backend (`src/i18n/`) and the desktop UI (`desktop/src/i18n/`); the NSIS installer now ships English only.
+- The web search `Accept-Language` header now requests English.
+
 **Added — Ollama as a chat model provider.**
 
 - New `ollama/<id>` model namespace routes to Ollama's OpenAI-compatible endpoint: the local daemon by default (`http://localhost:11434/v1`, keyless), or a custom `ollamaBaseUrl` / `OLLAMA_BASE_URL` for Ollama cloud.

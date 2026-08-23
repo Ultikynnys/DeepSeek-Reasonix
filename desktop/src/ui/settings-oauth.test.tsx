@@ -2,7 +2,6 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { setLang } from "../i18n";
 import { OpenAISection } from "./settings";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -67,12 +66,5 @@ describe("OpenAISection", () => {
     fireEvent.click(screen.getByText("Save"));
     expect(onSaveApiKey).toHaveBeenCalledWith("sk-abc123");
     expect((input as HTMLInputElement).value).toBe("");
-  });
-
-  it("renders with the German locale", () => {
-    setLang("de");
-    renderCard({ waiting: true });
-    expect(screen.getByText("Mit OpenAI anmelden")).toBeTruthy();
-    expect(screen.getByText("Abbrechen")).toBeTruthy();
   });
 });

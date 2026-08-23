@@ -5,7 +5,6 @@ import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { atomicWriteSync, tmpSiblingPath } from "./core/atomic-write.js";
-import type { LanguageCode } from "./i18n/types.js";
 import {
   type IndexUserConfig,
   type ResolvedIndexConfig,
@@ -222,7 +221,6 @@ export interface ReasonixConfig {
   openaiApiKey?: string;
   /** Set by the browser OAuth sign-in; auto-refreshed from refreshToken on expiry. */
   openaiOAuth?: OpenAIOAuthCreds;
-  lang?: LanguageCode;
   /** Persisted DeepSeek model id — `/model <id>` and the dashboard model picker write through this. */
   model?: string;
   editMode?: EditMode;
@@ -665,11 +663,6 @@ export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPat
   _configCache.delete(path);
 }
 
-/** Resolve the language from config file. */
-export function loadLanguage(path: string = defaultConfigPath()): LanguageCode | undefined {
-  return readConfig(path).lang;
-}
-
 export function mcpEnvFor(
   serverName: string | null | undefined,
   cfg: ReasonixConfig,
@@ -793,13 +786,6 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
   }
 
   return result;
-}
-
-/** Persist the language so it survives a relaunch. */
-export function saveLanguage(lang: LanguageCode, path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  cfg.lang = lang;
-  writeConfig(cfg, path);
 }
 
 export interface ResolvedEndpoint {

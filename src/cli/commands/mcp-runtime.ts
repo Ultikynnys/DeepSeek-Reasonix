@@ -112,7 +112,7 @@ export interface McpRuntime {
   size(): number;
   specs(): string[];
   summaries(): McpServerSummary[];
-  /** Last bridge failure per spec — drives the "未桥接" reason shown in the dashboard. */
+  /** Last bridge failure per spec — drives the "not bridged" reason shown in the dashboard. */
   failures(): McpFailure[];
   addSpec(
     raw: string,

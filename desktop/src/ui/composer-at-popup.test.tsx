@@ -2,8 +2,7 @@
 
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { createRef } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setLang } from "../i18n";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./composer";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -43,10 +42,6 @@ function renderComposer(props?: Partial<React.ComponentProps<typeof Composer>>) 
 }
 
 describe("desktop Composer @ popup", () => {
-  beforeEach(() => {
-    setLang("en");
-  });
-
   it("keeps the active mention row when async results shrink", async () => {
     const { container, rerender, onMentionQuery } = renderComposer();
     const textarea = container.querySelector("textarea");

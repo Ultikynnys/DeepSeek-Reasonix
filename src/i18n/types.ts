@@ -1,5 +1,3 @@
-export type LanguageCode = "EN" | "zh-CN" | "de" | "ru";
-
 export interface TranslationSchema {
   common: {
     error: string;
@@ -334,8 +332,6 @@ export interface TranslationSchema {
     };
   };
   wizard: {
-    languageTitle: string;
-    languageSubtitle: string;
     welcomeTitle: string;
     apiKeyPrompt: string;
     apiKeyGetOne: string;
@@ -363,7 +359,6 @@ export interface TranslationSchema {
     themeCaption: Record<string, string>;
     reviewTitle: string;
     reviewLabelApiKey: string;
-    reviewLabelLanguage: string;
     reviewLabelTheme: string;
     reviewLabelMcp: string;
     reviewMcpNone: string;
