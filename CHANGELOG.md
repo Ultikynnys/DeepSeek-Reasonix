@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Changed — Ollama default endpoint.**
+
+- Empty `Ollama base URL` now defaults to Ollama cloud (`https://ollama.com/v1`, requires `ollamaApiKey`/`OLLAMA_API_KEY`) instead of the local daemon. Set `http://localhost:11434/v1` explicitly to use a local, keyless daemon.
+
 **Removed — English-only (language options dropped).**
 
 - The project is now English-only. The runtime language picker (desktop Settings → General), the `/lang` slash command, system-locale auto-detection, the `reasonix.lang` preference, and the `lang` config field are removed.

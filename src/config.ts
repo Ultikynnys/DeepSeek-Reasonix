@@ -55,7 +55,7 @@ export { modelAcceptsImages } from "@reasonix/core-utils";
 /** OpenAI-compatible base URL for a provider's model id. The Ollama chat
  *  endpoint is keyless when local (the daemon ignores Authorization), but the
  *  cloud service requires OLLAMA_API_KEY — so the key is resolved but optional. */
-export const DEFAULT_OLLAMA_CHAT_URL = "http://localhost:11434/v1";
+export const DEFAULT_OLLAMA_CHAT_URL = "https://ollama.com/v1";
 
 /** Native Ollama API origin: strip a trailing `/v1` — the `/api/*` endpoints
  *  live at that root (localhost:11434/v1 → localhost:11434). */
@@ -284,7 +284,7 @@ export interface ReasonixConfig {
   exaApiKey?: string;
   /** Ollama cloud API key. Falls back to OLLAMA_API_KEY env var. Used for Ollama web_search/web_fetch and chat when the Ollama provider is a cloud endpoint. */
   ollamaApiKey?: string;
-  /** Ollama chat endpoint (OpenAI-compatible). Falls back to OLLAMA_BASE_URL env, then http://localhost:11434/v1. Local daemon is keyless; cloud requires ollamaApiKey. */
+  /** Ollama chat endpoint (OpenAI-compatible). Falls back to OLLAMA_BASE_URL env, then https://ollama.com/v1 (Ollama cloud). Local daemon is keyless; cloud requires ollamaApiKey. */
   ollamaBaseUrl?: string;
   /** Keep-alive sent with every Ollama `/api/chat` request: how long the model
    *  stays loaded after a turn. Defaults to "30m"; "-1" pins it loaded
@@ -851,6 +851,17 @@ export function isOpenAIStandardEndpoint(model: string, path?: string): boolean 
 
 export function loadApiKey(path: string = defaultConfigPath()): string | undefined {
   return loadEndpoint(path).apiKey;
+}
+
+/** True when the user has ANY usable provider credential (DeepSeek, OpenAI, or
+ *  explicit Ollama) — used by the desktop setup gate so a ChatGPT/Ollama-only
+ *  install isn't soft-locked behind a DeepSeek key. */
+export function anyProviderConfigured(path: string = defaultConfigPath()): boolean {
+  if (loadApiKey(path)) return true; // DeepSeek
+  const cfg = readConfig(path);
+  if (process.env.OPENAI_API_KEY || cfg.openaiApiKey || cfg.openaiOAuth?.accessToken) return true;
+  if (process.env.OLLAMA_API_KEY || cfg.ollamaApiKey) return true;
+  return !!process.env.OLLAMA_BASE_URL || !!cfg.ollamaBaseUrl;
 }
 
 export function loadBaseUrl(path: string = defaultConfigPath()): string | undefined {

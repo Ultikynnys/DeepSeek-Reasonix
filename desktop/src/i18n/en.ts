@@ -270,8 +270,8 @@ export const en = {
     modelCustomActive: "Currently running on a custom id: {model}",
     ollamaBaseUrl: "Ollama base URL",
     ollamaBaseUrlHint:
-      "OpenAI-compatible endpoint. Empty = local daemon http://localhost:11434/v1; for Ollama cloud set this and the API key below.",
-    ollamaBaseUrlPlaceholder: "http://localhost:11434/v1",
+      "OpenAI-compatible endpoint. Empty = Ollama cloud https://ollama.com/v1 (requires the API key below); set http://localhost:11434/v1 for a local daemon.",
+    ollamaBaseUrlPlaceholder: "https://ollama.com/v1",
     ollamaModels: "Available models",
     ollamaModelsHint: "Fetched live from the endpoint — pick one to use it.",
     ollamaModelsRefresh: "Refresh",
@@ -501,13 +501,23 @@ export const en = {
     setup: {
       welcome: "Welcome to Reasonix",
       description:
-        "First-time setup requires a DeepSeek API Key and workspace directory. The key is stored locally only.",
+        "Choose a provider to get started — DeepSeek, ChatGPT (OpenAI), or a local/cloud Ollama. Credentials are stored locally only.",
       descriptionGpt:
         "You picked a GPT-5.6 (ChatGPT) model — add an OpenAI API key or sign in with your ChatGPT account. DeepSeek keys are not accepted for gpt models.",
+      descriptionOllama:
+        "Point at your Ollama endpoint (local daemon or cloud) and pick a model. Local Ollama is keyless.",
+      providerDeepSeek: "DeepSeek",
+      providerOpenAI: "ChatGPT",
+      providerOllama: "Ollama",
+      ollamaModelPlaceholder: "ollama/llama3.1",
+      ollamaModelLabel: "Ollama model id",
+      ollamaBaseUrlPlaceholder: "http://localhost:11434/v1",
+      ollamaBaseUrlLabel: "Ollama base URL (optional)",
       workspace: "Workspace",
       notSelected: "Not selected",
       choose: "Choose…",
       saveAndStart: "Save & start",
+      useOllama: "Use Ollama",
     },
     update: {
       available: "New version available · {current} → {latest}",

@@ -8,6 +8,7 @@ import {
   SUPPORTED_MODELS,
   addProjectPathAllowed,
   addProjectShellAllowed,
+  anyProviderConfigured,
   clearOpenAIOAuth,
   clearProjectPathAllowed,
   clearProjectShellAllowed,
@@ -158,6 +159,35 @@ describe("config", () => {
 
   it("loadApiKey returns undefined when nothing set", () => {
     expect(loadApiKey(path)).toBeUndefined();
+  });
+
+  it("anyProviderConfigured is false with no credentials anywhere", () => {
+    expect(anyProviderConfigured(path)).toBe(false);
+  });
+
+  it("anyProviderConfigured is true with a DeepSeek key", () => {
+    saveApiKey("sk-deepseek1234567890ab", path);
+    expect(anyProviderConfigured(path)).toBe(true);
+  });
+
+  it("anyProviderConfigured is true with an OpenAI key or OAuth, no DeepSeek key", () => {
+    saveOpenAIApiKey("sk-openai-manual-1234", path);
+    expect(anyProviderConfigured(path)).toBe(true);
+  });
+
+  it("anyProviderConfigured is true with OpenAI OAuth, no DeepSeek key", () => {
+    writeConfig({ openaiOAuth: { accessToken: "at", refreshToken: "rt", expiresAt: 123 } }, path);
+    expect(anyProviderConfigured(path)).toBe(true);
+  });
+
+  it("anyProviderConfigured is true with an explicit Ollama base URL, no DeepSeek key", () => {
+    writeConfig({ ollamaBaseUrl: "http://localhost:11434/v1" }, path);
+    expect(anyProviderConfigured(path)).toBe(true);
+  });
+
+  it("anyProviderConfigured is true with an Ollama cloud key, no DeepSeek key", () => {
+    writeConfig({ ollamaApiKey: "sk-ollama-cloud" }, path);
+    expect(anyProviderConfigured(path)).toBe(true);
   });
 
   it("isPlausibleKey accepts DeepSeek-shaped keys", () => {
@@ -1296,9 +1326,9 @@ describe("config", () => {
       expect(providerForModel(undefined)).toBe("deepseek");
     });
 
-    it("loadEndpointForModel: ollama ids default to the local keyless daemon", () => {
+    it("loadEndpointForModel: ollama ids default to the Ollama cloud endpoint", () => {
       const ep = loadEndpointForModel("ollama/llama3.1:latest", path);
-      expect(ep.baseUrl).toBe("http://localhost:11434/v1");
+      expect(ep.baseUrl).toBe("https://ollama.com/v1");
       expect(ep.apiKey).toBeUndefined();
     });
 

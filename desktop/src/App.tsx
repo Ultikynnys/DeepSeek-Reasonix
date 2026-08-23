@@ -2883,6 +2883,10 @@ function TabRuntime({
               onOAuthBegin={() => sendRpc({ cmd: "oauth_begin" })}
               onSubmit={(key) => sendRpc({ cmd: "setup_save_key", key })}
               onSaveOpenAIApiKey={(key) => sendRpc({ cmd: "setup_save_openai_key", key })}
+              onSaveOllama={(modelId, baseUrl) =>
+                sendRpc({ cmd: "settings_save", model: modelId, ollamaBaseUrl: baseUrl ?? null })
+              }
+              ollamaBaseUrl={state.settings?.ollamaBaseUrl}
             />
           ) : (
             <>
@@ -4007,6 +4011,8 @@ function NeedsSetupView({
   onOAuthBegin,
   onSubmit,
   onSaveOpenAIApiKey,
+  onSaveOllama,
+  ollamaBaseUrl,
 }: {
   workspaceDir?: string;
   onPickWorkspace: () => void;
@@ -4015,10 +4021,25 @@ function NeedsSetupView({
   onOAuthBegin: () => void;
   onSubmit: (key: string) => void;
   onSaveOpenAIApiKey: (key: string) => void;
+  onSaveOllama: (modelId: string, baseUrl?: string) => void;
+  ollamaBaseUrl?: string;
 }) {
   useLang();
   const [key, setKey] = useState("");
-  const openai = typeof model === "string" && model.startsWith("gpt-");
+  const [ollamaModel, setOllamaModel] = useState("");
+  const [baseUrl, setBaseUrl] = useState(ollamaBaseUrl ?? "http://localhost:11434/v1");
+  const [provider, setProvider] = useState<"deepseek" | "openai" | "ollama">(() =>
+    typeof model === "string" && model.startsWith("ollama/")
+      ? "ollama"
+      : typeof model === "string" && model.startsWith("gpt-")
+        ? "openai"
+        : "deepseek",
+  );
+  const tabs: { id: "deepseek" | "openai" | "ollama"; label: string }[] = [
+    { id: "deepseek", label: t("app.setup.providerDeepSeek") },
+    { id: "openai", label: t("app.setup.providerOpenAI") },
+    { id: "ollama", label: t("app.setup.providerOllama") },
+  ];
   return (
     <div
       style={{
@@ -4032,8 +4053,24 @@ function NeedsSetupView({
       }}
     >
       <div style={{ fontSize: 18, fontWeight: 600 }}>{t("app.setup.welcome")}</div>
-      <div style={{ fontSize: 12.5, color: "var(--muted)", maxWidth: 400, textAlign: "center" }}>
-        {openai ? t("app.setup.descriptionGpt") : t("app.setup.description")}
+      <div style={{ fontSize: 12.5, color: "var(--muted)", maxWidth: 420, textAlign: "center" }}>
+        {provider === "openai"
+          ? t("app.setup.descriptionGpt")
+          : provider === "ollama"
+            ? t("app.setup.descriptionOllama")
+            : t("app.setup.description")}
+      </div>
+      <div className="setup-seg" style={{ width: "min(420px, 100%)" }}>
+        {tabs.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            data-on={provider === p.id}
+            onClick={() => setProvider(p.id)}
+          >
+            {p.label}
+          </button>
+        ))}
       </div>
       <div
         style={{
@@ -4052,7 +4089,7 @@ function NeedsSetupView({
             {t("app.setup.choose")}
           </button>
         </div>
-        {openai && (
+        {provider === "openai" && (
           <button
             type="button"
             className="btn primary"
@@ -4062,22 +4099,58 @@ function NeedsSetupView({
             {oauthWaiting ? t("settings.openaiWaiting") : t("settings.openaiSignIn")}
           </button>
         )}
-        <input
-          className="field mono"
-          type="password"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-          placeholder="sk-…"
-          style={{ width: "100%" }}
-        />
-        <button
-          type="button"
-          className="btn primary"
-          disabled={!key.trim()}
-          onClick={() => (openai ? onSaveOpenAIApiKey(key.trim()) : onSubmit(key.trim()))}
-        >
-          {openai ? t("settings.apiKeySave") : t("app.setup.saveAndStart")}
-        </button>
+        {provider === "ollama" && (
+          <>
+            <input
+              className="field mono"
+              type="text"
+              value={ollamaModel}
+              onChange={(e) => setOllamaModel(e.target.value)}
+              placeholder={t("app.setup.ollamaModelPlaceholder")}
+              aria-label={t("app.setup.ollamaModelLabel")}
+              style={{ width: "100%" }}
+            />
+            <input
+              className="field mono"
+              type="text"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder={t("app.setup.ollamaBaseUrlPlaceholder")}
+              aria-label={t("app.setup.ollamaBaseUrlLabel")}
+              style={{ width: "100%" }}
+            />
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!ollamaModel.trim()}
+              onClick={() => onSaveOllama(ollamaModel.trim(), baseUrl.trim() || undefined)}
+            >
+              {t("app.setup.useOllama")}
+            </button>
+          </>
+        )}
+        {provider !== "ollama" && (
+          <input
+            className="field mono"
+            type="password"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder="sk-…"
+            style={{ width: "100%" }}
+          />
+        )}
+        {provider !== "ollama" && (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!key.trim()}
+            onClick={() =>
+              provider === "openai" ? onSaveOpenAIApiKey(key.trim()) : onSubmit(key.trim())
+            }
+          >
+            {provider === "openai" ? t("settings.apiKeySave") : t("app.setup.saveAndStart")}
+          </button>
+        )}
       </div>
     </div>
   );

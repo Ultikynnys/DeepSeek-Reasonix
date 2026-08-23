@@ -135,10 +135,10 @@ describe("desktop modelEndpointFor (#1529)", () => {
     });
   });
 
-  it("ollama model reports the local keyless endpoint by default", () => {
+  it("ollama model reports the Ollama cloud endpoint by default", () => {
     expect(modelEndpointFor("ollama/llama3.1:latest", path)).toEqual({
       provider: "ollama",
-      baseUrl: "http://localhost:11434/v1",
+      baseUrl: "https://ollama.com/v1",
     });
   });
 

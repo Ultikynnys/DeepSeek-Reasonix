@@ -75,6 +75,7 @@ import { fetchCodexQuotaViaOAuth, resolveCodexTransport } from "../../codex-back
 import {
   DEFAULT_MODEL,
   DEFAULT_OLLAMA_CHAT_URL,
+  anyProviderConfigured,
   bridgeEndpointEnv,
   deriveNativeOllamaOrigin,
   isOpenAIStandardEndpoint,
@@ -1873,18 +1874,49 @@ function syncVisionTool(tab: Tab): void {
   }
 }
 
-/** Provider-aware credential check — gpt tabs need an OpenAI key or an OAuth
- *  session; deepseek tabs need the DeepSeek key (env or config). */
-function tabHasCredential(tab: Tab): boolean {
+/** Whether the tab's CURRENT model can be run now — the strict per-turn gate.
+ *  gpt needs an OpenAI key/OAuth; deepseek needs its key; local Ollama is
+ *  keyless but cloud Ollama needs ollamaApiKey. */
+export function tabCurrentModelUsable(tab: Tab): boolean {
   if (providerForModel(tab.currentModel) === "openai") {
     const ep = loadEndpointForModel(tab.currentModel);
     if (ep.apiKey) return true;
     return !!readConfig().openaiOAuth?.accessToken;
   }
-  // Local Ollama is keyless — the daemon omits the Authorization header. Cloud
-  // users configure ollamaApiKey; a missing one surfaces as a per-turn 401.
-  if (providerForModel(tab.currentModel) === "ollama") return true;
+  // Local Ollama omits the Authorization header; a cloud endpoint (default
+  // https://ollama.com/v1) needs ollamaApiKey — a missing key is a per-turn 401.
+  if (providerForModel(tab.currentModel) === "ollama") {
+    const ep = loadOllamaEndpoint();
+    if (ep.apiKey) return true;
+    return isLocalOllamaEndpoint(ep.baseUrl);
+  }
   return !!loadApiKey();
+}
+
+/** True for the keyless local Ollama daemon (localhost / 127.0.0.1 / ::1);
+ *  cloud endpoints are NOT keyless. */
+function isLocalOllamaEndpoint(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return true; // no endpoint resolved → treat as local
+  try {
+    const host = new URL(baseUrl).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+/** Setup/readiness gate: usable if the current model's provider has a
+ *  credential, OR if ANY alternative provider is configured. Keeps a
+ *  ChatGPT/Ollama-only install from being soft-locked behind a DeepSeek key. */
+export function tabHasCredential(tab: Tab): boolean {
+  return tabCurrentModelUsable(tab) || anyProviderConfigured();
+}
+
+/** Re-emit the setup/ready gate for a tab after a credential or model change —
+ *  `$ready` when the tab is now usable, `$needs_setup` when it regressed. */
+function emitTabGate(tab: Tab): void {
+  if (tabHasCredential(tab)) emit({ type: "$ready" }, tab.id);
+  else emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
 }
 
 /** Effective ctxMaxOverride for a tab: Ollama tabs use the server's learned /api/show
@@ -2180,7 +2212,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       hasSemanticSearch: toolset.semantic.enabled,
       modelId: tab.currentModel,
     });
-    if (tabHasCredential(tab)) {
+    if (tabCurrentModelUsable(tab)) {
       bridgeEndpointEnv();
       tab.runtime = buildRuntimeFor(tab);
       emitTabDiagnostic(tab, "tab.runtime.ready", undefined, "info");
@@ -2402,15 +2434,18 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emitTabDiagnostic(tab, "turn.start.rejected", { reason: "runtime-not-ready" }, "error");
       return;
     }
-    if (!tabHasCredential(tab)) {
+    if (!tabCurrentModelUsable(tab)) {
       emitTabDiagnostic(tab, "turn.start.rejected", { reason: "credential-unavailable" }, "error");
       const openai = providerForModel(tab.currentModel) === "openai";
+      const ollama = providerForModel(tab.currentModel) === "ollama";
       emit(
         {
           type: "$error",
           message: openai
             ? `No OpenAI credential for ${tab.currentModel} — add an OpenAI key or sign in with ChatGPT (Settings → OpenAI).`
-            : "No API key configured — paste your DeepSeek API key first.",
+            : ollama
+              ? `No Ollama endpoint configured for ${tab.currentModel} — set a base URL / key (Settings → Models → Ollama).`
+              : "No API key configured — paste your DeepSeek API key first.",
         },
         tab.id,
       );
@@ -3738,11 +3773,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               saveOpenAIOAuth({ ...creds, account });
               lastOAuthError = null;
               // The runtime snapshots the credential source at build time —
-              // rebuild gpt tabs so a fresh sign-in takes effect (and clears
-              // the needs-setup screen) without a model flip.
+              // rebuild now-credentialed tabs so a fresh sign-in takes effect
+              // (and clears the needs-setup screen) without a model flip.
               for (const t of tabs.values()) {
-                if (t.toolset && isOpenAIStandardEndpoint(t.currentModel)) {
-                  t.runtime = buildRuntimeFor(t);
+                if (t.toolset && tabHasCredential(t)) {
+                  if (t.runtime) t.runtime = buildRuntimeFor(t);
                   emit({ type: "$ready" }, t.id);
                 }
               }
@@ -3799,11 +3834,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       try {
         saveOpenAIApiKey(key);
-        // The runtime snapshots the static key at build time — rebuild gpt-model
-        // tabs so a freshly pasted key takes effect without a model flip.
+        // A fresh OpenAI key also unblocks ChatGPT-only installs whose tab still
+        // defaults to a DeepSeek model — flip every now-credentialed tab ready.
         for (const t of tabs.values()) {
-          if (t.toolset && isOpenAIStandardEndpoint(t.currentModel)) {
-            t.runtime = buildRuntimeFor(t);
+          if (t.toolset && tabHasCredential(t)) {
+            if (t.runtime) t.runtime = buildRuntimeFor(t);
             emit({ type: "$ready" }, t.id);
           }
         }
@@ -3928,11 +3963,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
                 modelId: tab.currentModel,
               });
               syncVisionTool(tab);
-              if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
+              // Build even when the tab had no runtime (e.g. a gated welcome
+              // tab that just picked an Ollama model) — only if the new model
+              // is actually usable, else drop a stale runtime.
+              if (tabCurrentModelUsable(tab)) tab.runtime = buildRuntimeFor(tab);
+              else tab.runtime = null;
             }
           }
         }
         emitSettings(tab);
+        emitTabGate(tab);
       } catch (err) {
         emit(
           { type: "$error", message: `settings_save failed: ${(err as Error).message}` },
@@ -4108,12 +4148,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "user_input") {
       if (!tab.runtime) {
         const openai = providerForModel(tab.currentModel) === "openai";
+        const ollama = providerForModel(tab.currentModel) === "ollama";
         emit(
           {
             type: "$error",
             message: openai
               ? "Not configured yet — add an OpenAI key or sign in with ChatGPT (Settings → OpenAI) first."
-              : "Not configured yet — paste your DeepSeek API key first.",
+              : ollama
+                ? "Not configured yet — set an Ollama base URL / key and pick an Ollama model (Settings → Models)."
+                : "Not configured yet — paste your DeepSeek API key first.",
           },
           tab.id,
         );
