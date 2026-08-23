@@ -613,7 +613,14 @@ async function resolveUserImages(
       if (!att.dataUrl.startsWith("data:image/")) {
         throw new Error("clipboard payload is not a data:image URL");
       }
-      out.push(att.dataUrl);
+      // Normalize the same as dropped files: sniff the real bytes so an
+      // animated WebP paste (or a mismatched MIME) is caught here with a clear
+      // error instead of reaching the vision API and 400ing.
+      const comma = att.dataUrl.indexOf(",");
+      const b64 = comma >= 0 ? att.dataUrl.slice(comma + 1) : "";
+      const normalized = await normalizeImageToDataUrl(Buffer.from(b64, "base64"));
+      if (!normalized.ok) throw new Error(normalized.message);
+      out.push(normalized.dataUrl);
       continue;
     }
     const stat = statSync(att.path);

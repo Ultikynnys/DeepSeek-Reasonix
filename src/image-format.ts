@@ -47,6 +47,27 @@ export function sniffImageFormat(buf: Buffer): SniffedImageFormat | undefined {
   return undefined;
 }
 
+/** True when a WebP's RIFF chunk list carries an ANIM / ANMF chunk (animated).
+ *  jimp has no WebP decoder, so animated WebP can only be refused, never
+ *  re-encoded, and the vision APIs reject it while accepting static WebP. */
+export function isAnimatedWebp(buf: Buffer): boolean {
+  if (buf.length < 12) return false;
+  if (buf.subarray(0, 4).toString("ascii") !== "RIFF") return false;
+  if (buf.subarray(8, 12).toString("ascii") !== "WEBP") return false;
+  // Walk the RIFF chunk list: [fourCC(4)][size(4 LE)][payload][pad to even].
+  let offset = 12;
+  while (offset + 8 <= buf.length) {
+    const fourCC = buf.subarray(offset, offset + 4).toString("ascii");
+    const size = buf.readUInt32LE(offset + 4);
+    if (fourCC === "ANIM" || fourCC === "ANMF") return true;
+    // A lone lossy/lossless frame means a single static image, not animation.
+    if (fourCC === "VP8 " || fourCC === "VP8L") return false;
+    if (size === 0) break; // malformed guard — avoids an infinite loop
+    offset += 8 + size + (size & 1);
+  }
+  return false;
+}
+
 export interface NormalizeImageResult {
   ok: true;
   /** Guaranteed-acceptable data URL (data:image/webp|png|jpeg). */
@@ -74,10 +95,19 @@ export async function normalizeImageToDataUrl(
     };
   }
   const format = sniffImageFormat(buf);
-  // WebP can't be decoded by jimp's pure-JS decoders in Node (its wasm codec
-  // fetches over HTTP), but the vision APIs accept webp as input, so pass the
-  // original bytes through with the correct MIME.
+  // WebP can't be decoded by jimp in Node (it ships no WebP decoder), but the
+  // vision APIs accept a STATIC webp as input, so pass the original bytes
+  // through with the correct MIME. Animated WebP is a different story: the
+  // APIs reject it, and we can't re-encode it (no decoder), so refuse it with
+  // a clear error instead of shipping bytes that would 400 downstream.
   if (format === "webp") {
+    if (isAnimatedWebp(buf)) {
+      return {
+        ok: false,
+        message:
+          "animated WebP is not supported by the vision API — save/export the image as a static PNG, JPEG, or GIF.",
+      };
+    }
     return {
       ok: true,
       dataUrl: `data:image/webp;base64,${buf.toString("base64")}`,
