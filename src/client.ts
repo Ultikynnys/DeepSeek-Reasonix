@@ -1,5 +1,6 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
 import {
+  DEFAULT_GEMINI_CHAT_URL,
   deriveNativeOllamaOrigin,
   loadOllamaKeepAlive,
   loadOllamaNumCtx,
@@ -139,6 +140,41 @@ function stringifyNativeToolCallArguments(args: unknown): string {
   }
 }
 
+/** Plain text of a message, joining text parts — used for the Cloud Code
+ *  systemInstruction and tool responses. */
+function messageText(msg: ChatMessage): string {
+  if (typeof msg.content === "string") return msg.content;
+  if (Array.isArray(msg.content)) {
+    return msg.content
+      .filter((p) => p.type === "text")
+      .map((p) => (p as { text: string }).text)
+      .join("\n");
+  }
+  return "";
+}
+
+/** Split a `data:image/png;base64,...` URL into mimeType + base64 data. */
+function parseDataUrl(url: string): { mimeType: string; data: string } {
+  const comma = url.indexOf(",");
+  if (comma >= 0) {
+    const mime = /data:([^;]+)/.exec(url.slice(0, comma))?.[1] ?? "application/octet-stream";
+    return { mimeType: mime, data: url.slice(comma + 1) };
+  }
+  return { mimeType: "application/octet-stream", data: url };
+}
+
+/** Tool result body for a Cloud Code functionResponse — plain text. */
+function toolResultContent(content: ChatMessage["content"]): unknown {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((p) => p.type === "text")
+      .map((p) => (p as { text: string }).text)
+      .join("\n");
+  }
+  return "";
+}
+
 /** Byte-stable equality for the cache-prefix overlap check — key order is
  *  deterministic because both sides serialize the same source objects. */
 function sameMessage(a: ChatMessage, b: ChatMessage): boolean {
@@ -238,6 +274,10 @@ export interface DeepSeekClientOptions {
   apiKeyResolver?: () => Promise<string | undefined>;
   /** Per-request transport override for plan-quota billing via Codex backend. */
   transportResolver?: () => Promise<ResolvedTransport | null>;
+  /** Per-request auth for gemini-* models (Antigravity quota): the Google OAuth
+   *  access token plus the Cloud Code companion project id. Returns null when
+   *  the user isn't signed in — gemini requests then fail with a clear error. */
+  geminiAuthResolver?: () => Promise<{ accessToken: string; projectId?: string } | null>;
   /** Skip the "No API key" constructor throw — for keyless endpoints like the
    *  local Ollama daemon, where the Authorization header is simply omitted. */
   allowMissingKey?: boolean;
@@ -295,6 +335,10 @@ export class DeepSeekClient {
   private readonly minChatIntervalMs: number;
   private readonly apiKeyResolver?: () => Promise<string | undefined>;
   private readonly transportResolver?: () => Promise<ResolvedTransport | null>;
+  private readonly geminiAuthResolver?: () => Promise<{
+    accessToken: string;
+    projectId?: string;
+  } | null>;
   private nextChatRequestAt = 0;
 
   /** What was last sent per Ollama model, for cache-prefix inference. */
@@ -319,6 +363,7 @@ export class DeepSeekClient {
     this.apiKey = apiKey ?? "";
     this.apiKeyResolver = opts.apiKeyResolver;
     this.transportResolver = opts.transportResolver;
+    this.geminiAuthResolver = opts.geminiAuthResolver;
     let url = opts.baseUrl ?? resolveBaseUrlEnv() ?? "https://api.deepseek.com";
     // Manual trim — `/\/+$/` is O(n²) on slash-heavy non-matches per CodeQL js/polynomial-redos.
     while (url.endsWith("/")) url = url.slice(0, -1);
@@ -606,6 +651,9 @@ export class DeepSeekClient {
     if (providerForModel(opts.model) === "ollama") {
       return this.chatOllama(opts);
     }
+    if (providerForModel(opts.model) === "gemini") {
+      return this.chatGemini(opts);
+    }
     const { signal, timer } = this.withTimeout(opts.signal);
     try {
       const { resp } = await this.prepareRequest(opts, false, signal);
@@ -655,6 +703,300 @@ export class DeepSeekClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** Resolve the Google OAuth token + Cloud Code project id for a gemini
+   *  request. Throws a clear error when the user isn't signed in. */
+  private async resolveGeminiAuth(): Promise<{ accessToken: string; projectId?: string }> {
+    if (!this.geminiAuthResolver) {
+      throw new Error("Gemini models require Antigravity sign-in — no auth resolver configured.");
+    }
+    const auth = await this.geminiAuthResolver();
+    if (!auth?.accessToken) {
+      throw new Error(
+        "Not signed in to Google Antigravity — sign in from settings to use gemini models.",
+      );
+    }
+    return auth;
+  }
+
+  /** Cloud Code non-streaming response — unwraps the `{response:{candidates,
+   *  usageMetadata}}` envelope into a ChatResponse. */
+  private parseAntigravityResponse(data: any): ChatResponse {
+    const inner = data?.response ?? {};
+    const candidate = inner.candidates?.[0];
+    const parts = candidate?.content?.parts ?? [];
+    let content = "";
+    const toolCalls: ToolCall[] = [];
+    for (const part of parts) {
+      if (typeof part.text === "string") content += part.text;
+      if (part.functionCall) {
+        toolCalls.push({
+          type: "function" as const,
+          function: {
+            name: part.functionCall.name ?? "",
+            arguments: JSON.stringify(part.functionCall.args ?? {}),
+          },
+        });
+      }
+    }
+    const usage = inner.usageMetadata;
+    return {
+      content,
+      reasoningContent: null,
+      toolCalls,
+      usage: new Usage(
+        usage?.promptTokenCount ?? 0,
+        usage?.candidatesTokenCount ?? 0,
+        usage?.totalTokenCount ?? 0,
+      ),
+      raw: data,
+    };
+  }
+
+  /** Cloud Code non-streaming request — `POST /v1internal:generateContent`. */
+  private async chatGemini(opts: ChatRequestOptions): Promise<ChatResponse> {
+    const auth = await this.resolveGeminiAuth();
+    const { signal, timer } = this.withTimeout(opts.signal);
+    try {
+      const resp = await this._fetch(`${DEFAULT_GEMINI_CHAT_URL}/v1internal:generateContent`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${auth.accessToken}`,
+        },
+        body: stringifyJsonTransport(this.buildAntigravityPayload(opts, auth.projectId)),
+        signal,
+      });
+      if (!resp.ok) {
+        throw new Error(`Upstream ${resp.status}: ${await resp.text()}`);
+      }
+      return this.parseAntigravityResponse(await resp.json());
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Cloud Code streaming request — `POST /v1internal:streamGenerateContent?alt=sse`.
+   *  Each SSE event carries a `{response:{candidates,usageMetadata}}` envelope. */
+  private async *streamGemini(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
+    const auth = await this.resolveGeminiAuth();
+    const { signal, timer, timedOut } = this.withTimeout(opts.signal);
+    let resp: Response;
+    try {
+      resp = await this._fetch(
+        `${DEFAULT_GEMINI_CHAT_URL}/v1internal:streamGenerateContent?alt=sse`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${auth.accessToken}`,
+          },
+          body: stringifyJsonTransport(this.buildAntigravityPayload(opts, auth.projectId)),
+          signal,
+        },
+      );
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
+    if (!resp.ok || !resp.body) {
+      clearTimeout(timer);
+      throw new Error(`Upstream ${resp.status}: ${await resp.text().catch(() => "")}`);
+    }
+    const queue: StreamChunk[] = [];
+    let done = false;
+    const parser = createParser({
+      onEvent: (ev: EventSourceMessage) => {
+        if (!ev.data || ev.data === "[DONE]") {
+          done = true;
+          return;
+        }
+        try {
+          const json = JSON.parse(ev.data);
+          const chunk = this.parseAntigravityStreamChunk(json);
+          if (chunk) queue.push(chunk);
+        } catch {
+          /* skip malformed sse frame */
+        }
+      },
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    try {
+      while (true) {
+        if (queue.length > 0) {
+          yield queue.shift()!;
+          continue;
+        }
+        if (done) break;
+        let value: Uint8Array | undefined;
+        let streamDone: boolean;
+        try {
+          ({ value, done: streamDone } = await reader.read());
+        } catch (readErr) {
+          const cause = readErr instanceof Error ? readErr : new Error(String(readErr));
+          const code = "code" in cause && typeof cause.code === "string" ? cause.code : undefined;
+          throw Object.assign(new Error(`SSE body read failed: ${cause.message}`), {
+            phase: "stream_body_read" as const,
+            code,
+            timedOut: timedOut(),
+          });
+        }
+        if (streamDone) break;
+        parser.feed(decoder.decode(value, { stream: true }));
+      }
+      while (queue.length > 0) yield queue.shift()!;
+    } finally {
+      clearTimeout(timer);
+      reader.releaseLock();
+    }
+  }
+
+  /** Map one Cloud Code SSE envelope to a StreamChunk, or null when it carries
+   *  no usable content. */
+  private parseAntigravityStreamChunk(json: any): StreamChunk | null {
+    const inner = json?.response;
+    if (!inner) return null;
+    const chunk: StreamChunk = { raw: json };
+    if (inner.usageMetadata) {
+      chunk.usage = new Usage(
+        inner.usageMetadata.promptTokenCount ?? 0,
+        inner.usageMetadata.candidatesTokenCount ?? 0,
+        inner.usageMetadata.totalTokenCount ?? 0,
+      );
+    }
+    const candidate = inner.candidates?.[0];
+    if (!candidate) return chunk;
+    if (candidate.finishReason) chunk.finishReason = candidate.finishReason;
+    const parts = candidate.content?.parts ?? [];
+    for (const part of parts) {
+      if (typeof part.text === "string" && part.text.length > 0) {
+        chunk.contentDelta = (chunk.contentDelta ?? "") + part.text;
+      }
+      if (part.functionCall) {
+        chunk.toolCallDelta = {
+          index: 0,
+          name: part.functionCall.name,
+          argumentsDelta: JSON.stringify(part.functionCall.args ?? {}),
+        };
+      }
+    }
+    if (
+      chunk.contentDelta !== undefined ||
+      chunk.toolCallDelta !== undefined ||
+      chunk.usage !== undefined ||
+      chunk.finishReason !== undefined
+    ) {
+      return chunk;
+    }
+    return null;
+  }
+
+  /** Cloud Code request body — `{ model, project, request: { contents,
+   *  systemInstruction, generationConfig, tools, toolConfig } }`. */
+  private buildAntigravityPayload(
+    opts: ChatRequestOptions,
+    projectId?: string,
+  ): Record<string, unknown> {
+    const contents: Array<Record<string, unknown>> = [];
+    let systemInstruction: string | undefined;
+    for (const msg of opts.messages) {
+      switch (msg.role) {
+        case "system": {
+          const text = messageText(msg);
+          systemInstruction = systemInstruction ? `${systemInstruction}\n\n${text}` : text;
+          break;
+        }
+        case "user": {
+          const parts: Array<Record<string, unknown>> = [];
+          if (typeof msg.content === "string") {
+            if (msg.content.length > 0) parts.push({ text: msg.content });
+          } else if (Array.isArray(msg.content)) {
+            for (const part of msg.content) {
+              if (part.type === "text") parts.push({ text: part.text });
+              else if (part.type === "image_url") {
+                const parsed = parseDataUrl(part.image_url.url);
+                parts.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.data } });
+              }
+            }
+          }
+          contents.push({ role: "user", parts });
+          break;
+        }
+        case "assistant": {
+          const parts: Array<Record<string, unknown>> = [];
+          if (typeof msg.content === "string") {
+            if (msg.content.length > 0) parts.push({ text: msg.content });
+          } else if (Array.isArray(msg.content)) {
+            for (const part of msg.content) {
+              if (part.type === "text" && part.text.length > 0) parts.push({ text: part.text });
+            }
+          }
+          for (const tc of msg.tool_calls ?? []) {
+            parts.push({
+              functionCall: {
+                name: tc.function.name,
+                args: parseToolCallArguments(tc.function.arguments),
+              },
+            });
+          }
+          if (parts.length > 0) contents.push({ role: "model", parts });
+          break;
+        }
+        case "tool": {
+          contents.push({
+            role: "function",
+            parts: [
+              {
+                functionResponse: {
+                  name: msg.name ?? "",
+                  response: toolResultContent(msg.content),
+                },
+              },
+            ],
+          });
+          break;
+        }
+      }
+    }
+    const request: Record<string, unknown> = {
+      contents,
+      generationConfig: {
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+        ...(opts.maxTokens !== undefined ? { maxOutputTokens: opts.maxTokens } : {}),
+        thinkingConfig: { includeThoughts: false },
+      },
+    };
+    if (systemInstruction) {
+      request.systemInstruction = { role: "user", parts: [{ text: systemInstruction }] };
+    }
+    if (opts.tools?.length) {
+      request.tools = [
+        {
+          functionDeclarations: opts.tools.map((t) => {
+            const params = t.function.parameters;
+            if (params && typeof params === "object" && "$schema" in params) {
+              const { $schema: _drop, ...clean } = params as Record<string, unknown> & {
+                $schema?: unknown;
+              };
+              return {
+                name: t.function.name,
+                description: t.function.description,
+                parameters: clean,
+              };
+            }
+            return {
+              name: t.function.name,
+              description: t.function.description,
+              parameters: params,
+            };
+          }),
+        },
+      ];
+      request.toolConfig = { functionCallingConfig: { mode: "AUTO" } };
+    }
+    return { model: opts.model, project: projectId, request };
   }
 
   /** Collect a streaming response into a single ChatResponse — used when the
@@ -885,6 +1227,10 @@ export class DeepSeekClient {
   async *stream(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
     if (providerForModel(opts.model) === "ollama") {
       yield* this.streamOllama(opts);
+      return;
+    }
+    if (providerForModel(opts.model) === "gemini") {
+      yield* this.streamGemini(opts);
       return;
     }
     const { signal, timer, timedOut } = this.withTimeout(opts.signal);

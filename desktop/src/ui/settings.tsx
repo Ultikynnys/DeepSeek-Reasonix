@@ -93,6 +93,10 @@ export function SettingsModal({
   onOAuthCancel,
   onOAuthSignOut,
   onSaveOpenAIApiKey,
+  antigravityOAuthWaiting,
+  onAntigravityOAuthBegin,
+  onAntigravityOAuthCancel,
+  onAntigravityOAuthSignOut,
   ollamaBaseUrl,
   ollamaModels,
   ollamaModelsError,
@@ -153,6 +157,10 @@ export function SettingsModal({
   onOAuthCancel: () => void;
   onOAuthSignOut: () => void;
   onSaveOpenAIApiKey: (key: string) => void;
+  antigravityOAuthWaiting: boolean;
+  onAntigravityOAuthBegin: () => void;
+  onAntigravityOAuthCancel: () => void;
+  onAntigravityOAuthSignOut: () => void;
   onPickWorkspace: () => void;
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
@@ -266,6 +274,13 @@ export function SettingsModal({
                 onOAuthCancel={onOAuthCancel}
                 onOAuthSignOut={onOAuthSignOut}
                 onSaveOpenAIApiKey={onSaveOpenAIApiKey}
+                antigravitySignedIn={settings.antigravityOAuth?.signedIn ?? false}
+                antigravityAccount={settings.antigravityOAuth?.account}
+                antigravityFlowError={settings.antigravityOAuth?.flowError}
+                antigravityWaiting={antigravityOAuthWaiting}
+                onAntigravityBegin={onAntigravityOAuthBegin}
+                onAntigravityCancel={onAntigravityOAuthCancel}
+                onAntigravitySignOut={onAntigravityOAuthSignOut}
               />
             )}
             {page === "mcp" && (
@@ -960,6 +975,75 @@ export function OpenAISection({
   );
 }
 
+export function AntigravitySection({
+  signedIn,
+  account,
+  flowError,
+  waiting,
+  onBegin,
+  onCancel,
+  onSignOut,
+}: {
+  signedIn: boolean;
+  account?: string;
+  /** Last OAuth flow failure — shown so a failed sign-in is visible instead of just "not signed in". */
+  flowError?: string;
+  waiting: boolean;
+  onBegin: () => void;
+  onCancel: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <section className="section">
+      <div className="stitle">{t("settings.antigravitySection")}</div>
+      {signedIn ? (
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.antigravitySignedIn")}</div>
+            <div className="h">
+              {account
+                ? t("settings.antigravityAccount", { account })
+                : t("settings.antigravityTokenSet")}
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={onSignOut} disabled={waiting}>
+            {t("settings.antigravitySignOut")}
+          </button>
+        </div>
+      ) : (
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.antigravitySignInTitle")}</div>
+            <div className="h">
+              {waiting ? t("settings.antigravityWaiting") : t("settings.antigravitySignInHint")}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {waiting && (
+              <button type="button" className="btn" onClick={onCancel}>
+                {t("settings.antigravityCancel")}
+              </button>
+            )}
+            <button type="button" className="btn primary" onClick={onBegin} disabled={waiting}>
+              {t("settings.antigravitySignIn")}
+            </button>
+          </div>
+        </div>
+      )}
+      {flowError ? (
+        <div className="setting-row" style={{ borderColor: "var(--danger)" }}>
+          <div className="l">
+            <div className="n">{t("settings.antigravityFlowFailed")}</div>
+            <div className="h" style={{ color: "var(--danger)" }}>
+              {flowError}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 const EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const;
 type EffortValue = (typeof EFFORT_VALUES)[number];
 
@@ -984,6 +1068,13 @@ function PageModels({
   onOAuthCancel,
   onOAuthSignOut,
   onSaveOpenAIApiKey,
+  antigravitySignedIn,
+  antigravityAccount,
+  antigravityFlowError,
+  antigravityWaiting,
+  onAntigravityBegin,
+  onAntigravityCancel,
+  onAntigravitySignOut,
 }: {
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
@@ -1012,6 +1103,13 @@ function PageModels({
   onOAuthCancel: () => void;
   onOAuthSignOut: () => void;
   onSaveOpenAIApiKey: (key: string) => void;
+  antigravitySignedIn: boolean;
+  antigravityAccount?: string;
+  antigravityFlowError?: string;
+  antigravityWaiting: boolean;
+  onAntigravityBegin: () => void;
+  onAntigravityCancel: () => void;
+  onAntigravitySignOut: () => void;
 }) {
   const [draft, setDraft] = useState(settings.model);
   useEffect(() => setDraft(settings.model), [settings.model]);
@@ -1172,6 +1270,15 @@ function PageModels({
         onCancel={onOAuthCancel}
         onSignOut={onOAuthSignOut}
         onSaveApiKey={onSaveOpenAIApiKey}
+      />
+      <AntigravitySection
+        signedIn={antigravitySignedIn}
+        account={antigravityAccount}
+        flowError={antigravityFlowError}
+        waiting={antigravityWaiting}
+        onBegin={onAntigravityBegin}
+        onCancel={onAntigravityCancel}
+        onSignOut={onAntigravitySignOut}
       />
     </>
   );

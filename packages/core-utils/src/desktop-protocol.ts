@@ -366,6 +366,16 @@ export interface SettingsEvent {
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
+  /** Per-field visibility toggles for the bottom status row. Absent = all default to true. */
+  statusBar?: {
+    showBalance?: boolean;
+    showSessionCost?: boolean;
+    showTurnCost?: boolean;
+    showCacheHit?: boolean;
+    showCtxUsage?: boolean;
+    showVersion?: boolean;
+    showFeedbackHint?: boolean;
+  };
   /** Endpoint + auth state for the tab's current model — per tab, follows model switches. */
   modelEndpoint?: ModelEndpointInfo;
   /** OpenAI website-account OAuth state — never ships tokens, only the masked account. */
@@ -375,18 +385,29 @@ export interface SettingsEvent {
     /** Last OAuth flow failure (e.g. upstream invalid_client / timeout) — drives the status-bar auth chip until the next successful sign-in. */
     flowError?: string;
   };
+  /** Google Antigravity OAuth state — powers gemini-* models on the Antigravity quota. */
+  antigravityOAuth?: {
+    signedIn: boolean;
+    account?: string;
+    /** Last OAuth flow failure — drives the status-bar Gemini auth chip until the next successful sign-in. */
+    flowError?: string;
+  };
   version: string;
 }
 
 /** Endpoint + auth state for the tab's CURRENT model — the status bar's API
- *  chip is per tab and flips between DeepSeek, OpenAI and Ollama with the model. */
+ *  chip is per tab and flips between DeepSeek, OpenAI, Ollama and Gemini with the model. */
 export interface ModelEndpointInfo {
-  provider: "deepseek" | "openai" | "ollama";
+  provider: "deepseek" | "openai" | "ollama" | "gemini";
   baseUrl: string;
   /** Auth source for OpenAI endpoints — absent for the DeepSeek provider. */
   openaiAuth?: "oauth" | "apiKey" | "none";
   /** Masked account email when signed in via OAuth. */
   oauthAccount?: string;
+  /** Auth source for gemini endpoints (Antigravity quota). */
+  antigravityAuth?: "oauth" | "none";
+  /** Masked Google account email when signed in via Antigravity OAuth. */
+  antigravityAccount?: string;
 }
 
 export interface BalanceInfoItem {
@@ -582,6 +603,9 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "oauth_begin" }
   | { cmd: "oauth_cancel" }
   | { cmd: "oauth_signout" }
+  | { cmd: "gemini_oauth_begin" }
+  | { cmd: "gemini_oauth_cancel" }
+  | { cmd: "gemini_oauth_signout" }
   | { cmd: "settings_get" }
   | ({ cmd: "settings_save" } & SettingsPatch)
   | { cmd: "codex_quota_get" }

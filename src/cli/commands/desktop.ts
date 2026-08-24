@@ -72,6 +72,7 @@ import { codeSystemPrompt } from "../../code/prompt.js";
 import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
 import { fetchCodexQuotaViaOAuth, resolveCodexTransport } from "../../codex-backend.js";
 import {
+  DEFAULT_GEMINI_CHAT_URL,
   DEFAULT_MODEL,
   DEFAULT_OLLAMA_CHAT_URL,
   anyProviderConfigured,
@@ -108,6 +109,7 @@ import {
   pushRecentWorkspace,
   readConfig,
   webSearchEngine as readWebSearchEngine,
+  saveAntigravityOAuth,
   saveApiKey,
   saveBaseUrl,
   saveContextTokens,
@@ -140,6 +142,13 @@ import {
 } from "../../desktop/memory-browser.js";
 import { normalizeImageToDataUrl } from "../../image-format.js";
 
+import {
+  antigravityAccount,
+  beginAntigravityOAuthFlow,
+  onboardAntigravity,
+  resolveAntigravityToken,
+  signOutAntigravity,
+} from "../../antigravity-oauth.js";
 import { loadDotenv } from "../../env.js";
 import { type ResolvedHook, formatHookOutcomeMessage, loadHooks, runHooks } from "../../hooks.js";
 import {
@@ -248,6 +257,7 @@ type EmittableEvent =
   | { type: "$turn_complete" }
   | DesktopDiagnosticEvent
   | { type: "oauth_begin_result"; url: string }
+  | { type: "gemini_oauth_begin_result"; url: string }
   | ConfirmRequiredEvent
   | PathAccessRequiredEvent
   | ChoiceRequiredEvent
@@ -759,6 +769,27 @@ let pendingOAuth: OAuthFlow | null = null;
  *  chip until the next successful sign-in clears it. */
 let lastOAuthError: string | null = null;
 
+let antigravityOAuthGen = 0;
+let pendingAntigravityOAuth: OAuthFlow | null = null;
+/** Last Antigravity OAuth flow failure — surfaced in the status bar's Gemini
+ *  auth chip until the next successful sign-in clears it. */
+let lastAntigravityOAuthError: string | null = null;
+
+/** Resolve the Google OAuth token + Cloud Code project id for gemini requests.
+ *  Onboards (loadCodeAssist/onboardUser) once when no project id is stored yet,
+ *  persisting the resolved project. Returns null when not signed in. */
+async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId?: string } | null> {
+  const accessToken = await resolveAntigravityToken();
+  if (!accessToken) return null;
+  const creds = readConfig().antigravityOAuth;
+  let projectId = creds?.projectId;
+  if (!projectId) {
+    projectId = await onboardAntigravity(accessToken);
+    if (projectId && creds) saveAntigravityOAuth({ ...creds, projectId });
+  }
+  return { accessToken, projectId };
+}
+
 /** Endpoint + auth state for a model id — drives the status bar's API chip.
  *  DeepSeek models report the DeepSeek endpoint; gpt-* models the OpenAI one
  *  plus auth source (OAuth sign-in > static key > none). Exported for tests. */
@@ -768,6 +799,16 @@ export function modelEndpointFor(model: string, path?: string): ModelEndpointInf
     return {
       provider: "ollama",
       baseUrl: oep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL,
+    };
+  }
+  if (providerForModel(model) === "gemini") {
+    const oep = loadEndpointForModel(model, path);
+    const oauth = readConfig(path).antigravityOAuth;
+    return {
+      provider: "gemini",
+      baseUrl: oep.baseUrl ?? DEFAULT_GEMINI_CHAT_URL,
+      antigravityAuth: oauth?.accessToken ? "oauth" : "none",
+      antigravityAccount: oauth?.account,
     };
   }
   if (providerForModel(model) !== "openai") {
@@ -789,6 +830,7 @@ export function modelEndpointFor(model: string, path?: string): ModelEndpointInf
 
 function emitSettings(tab: Tab): void {
   const oauth = readConfig().openaiOAuth;
+  const antigravityOAuth = readConfig().antigravityOAuth;
   const ep = loadEndpoint();
   const editMode = loadEditMode();
   if (tab.toolset) applyPlanMode(tab.toolset.tools, editMode);
@@ -812,11 +854,17 @@ function emitSettings(tab: Tab): void {
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
       subagentModels: loadSubagentModels(),
       showSystemEvents: loadShowSystemEvents(),
+      statusBar: readConfig().statusBar,
       modelEndpoint: modelEndpointFor(tab.currentModel),
       openaiOAuth: {
         signedIn: !!oauth?.accessToken,
         account: oauth?.account,
         flowError: lastOAuthError ?? undefined,
+      },
+      antigravityOAuth: {
+        signedIn: !!antigravityOAuth?.accessToken,
+        account: antigravityOAuth?.account,
+        flowError: lastAntigravityOAuthError ?? undefined,
       },
       version: VERSION,
     },
@@ -1895,6 +1943,9 @@ export function tabCurrentModelUsable(tab: Tab): boolean {
     if (ep.apiKey) return true;
     return isLocalOllamaEndpoint(ep.baseUrl);
   }
+  if (providerForModel(tab.currentModel) === "gemini") {
+    return !!readConfig().antigravityOAuth?.accessToken;
+  }
   return !!loadApiKey();
 }
 
@@ -1955,6 +2006,10 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     log.debug(
       `model ${tab.currentModel} → Ollama; endpoint ${ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL}`,
     );
+  } else if (provider === "gemini") {
+    log.debug(
+      `model ${tab.currentModel} → Gemini; endpoint ${ep.baseUrl ?? DEFAULT_GEMINI_CHAT_URL} (Antigravity quota)`,
+    );
   } else {
     log.debug(`model ${tab.currentModel} → DeepSeek; endpoint ${ep.baseUrl ?? "default"}`);
   }
@@ -1970,6 +2025,8 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     // Primary path: when OAuth creds exist, route through the ChatGPT Codex
     // backend so requests consume plan quota (free), not platform credits.
     transportResolver: isOpenAI ? () => resolveCodexTransport() : undefined,
+    // Gemini models authenticate via Google Antigravity OAuth (Starter quota).
+    geminiAuthResolver: provider === "gemini" ? () => resolveGeminiAuth() : undefined,
   });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = tab.currentReasoningEffort;
@@ -3822,6 +3879,69 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         .then(() => emitSettings(tab))
         .catch((err: Error) => {
           emit({ type: "$error", message: `oauth_signout failed: ${err.message}` }, tab.id);
+        });
+      return;
+    }
+    if (msg.cmd === "gemini_oauth_begin") {
+      antigravityOAuthGen++;
+      if (pendingAntigravityOAuth) pendingAntigravityOAuth.cancel();
+      const gen = antigravityOAuthGen;
+      void beginAntigravityOAuthFlow()
+        .then((flow) => {
+          pendingAntigravityOAuth = flow;
+          emit({ type: "gemini_oauth_begin_result", url: flow.url }, tab.id);
+          void flow.done
+            .then(async (creds) => {
+              if (gen !== antigravityOAuthGen) return; // superseded by a newer begin/signout
+              pendingAntigravityOAuth = null;
+              const account = (await antigravityAccount(creds.accessToken)) ?? creds.account;
+              const projectId = await onboardAntigravity(creds.accessToken);
+              saveAntigravityOAuth({ ...creds, account, projectId });
+              lastAntigravityOAuthError = null;
+              // Rebuild now-credentialed tabs so a fresh sign-in takes effect
+              // (and clears the needs-setup screen) without a model flip.
+              for (const t of tabs.values()) {
+                if (t.toolset && tabHasCredential(t)) {
+                  if (t.runtime) t.runtime = buildRuntimeFor(t);
+                  emit({ type: "$ready" }, t.id);
+                }
+              }
+              emitSettings(tab);
+            })
+            .catch((err: Error) => {
+              if (gen !== antigravityOAuthGen) return;
+              pendingAntigravityOAuth = null;
+              lastAntigravityOAuthError = err.message;
+              emit({ type: "$error", message: err.message }, tab.id);
+              emitSettings(tab);
+            });
+        })
+        .catch((err: Error) => {
+          lastAntigravityOAuthError = err.message;
+          emit({ type: "$error", message: `gemini_oauth_begin failed: ${err.message}` }, tab.id);
+          emitSettings(tab);
+        });
+      return;
+    }
+    if (msg.cmd === "gemini_oauth_cancel") {
+      antigravityOAuthGen++;
+      if (pendingAntigravityOAuth) {
+        pendingAntigravityOAuth.cancel();
+        pendingAntigravityOAuth = null;
+      }
+      return;
+    }
+    if (msg.cmd === "gemini_oauth_signout") {
+      antigravityOAuthGen++;
+      lastAntigravityOAuthError = null;
+      if (pendingAntigravityOAuth) {
+        pendingAntigravityOAuth.cancel();
+        pendingAntigravityOAuth = null;
+      }
+      void signOutAntigravity()
+        .then(() => emitSettings(tab))
+        .catch((err: Error) => {
+          emit({ type: "$error", message: `gemini_oauth_signout failed: ${err.message}` }, tab.id);
         });
       return;
     }

@@ -13,7 +13,7 @@ function renderBar(overrides: Partial<Parameters<typeof StatusBar>[0]> = {}) {
     balance: null,
     codexQuota: null,
     ollamaQuota: null,
-    usage: { totalCostUsd: 0 } as unknown as UsageStats,
+    usage: { totalCostUsd: 0, lastCallCostUsd: 0 } as unknown as UsageStats,
     busy: false,
     ready: true,
     currency: "USD",
@@ -50,12 +50,32 @@ describe("StatusBar quota display", () => {
   });
 
   it("keeps the balance and $ turn cost for DeepSeek tabs", () => {
-    renderBar();
+    renderBar({
+      usage: { totalCostUsd: 1.5, lastCallCostUsd: 0.25 } as unknown as UsageStats,
+    });
     expect(screen.getByText("balance")).toBeTruthy();
     expect(screen.getByText("this turn")).toBeTruthy();
-    expect(screen.getByText(/\$ 0\.0000/)).toBeTruthy();
+    // "this turn" reflects the latest model call's cost; the session total is
+    // a distinct chip — regression guard for the malformed-turn-cost bug.
+    expect(screen.getByText(/This session cost/)).toBeTruthy();
+    expect(screen.getByText(/\$ 0\.2500/)).toBeTruthy();
+    expect(screen.getByText(/\$ 1\.5000/)).toBeTruthy();
     expect(screen.queryByText("codex")).toBeNull();
     expect(screen.queryByText(/left/)).toBeNull();
+  });
+
+  it("hides the this-turn cost chip when statusBar.showTurnCost is off", () => {
+    renderBar({
+      settings: { model: "deepseek-v4-flash", statusBar: { showTurnCost: false } } as Settings,
+    });
+    expect(screen.queryByText("this turn")).toBeNull();
+  });
+
+  it("hides the session-cost chip when statusBar.showSessionCost is off", () => {
+    renderBar({
+      settings: { model: "deepseek-v4-flash", statusBar: { showSessionCost: false } } as Settings,
+    });
+    expect(screen.queryByText(/This session cost/)).toBeNull();
   });
 
   it("shows the current rate period (off-peak or peak) with its price multiplier", () => {

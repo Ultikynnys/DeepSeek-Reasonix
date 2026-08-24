@@ -1,0 +1,179 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  antigravityAccount,
+  buildAuthorizeUrl,
+  exchangeAntigravityCode,
+  onboardAntigravity,
+  refreshAntigravityToken,
+  resolveAntigravityToken,
+  signOutAntigravity,
+} from "../src/antigravity-oauth.js";
+import { readConfig, saveAntigravityOAuth } from "../src/config.js";
+
+const TEST_CLIENT_ID = "test-client-id";
+const TEST_CLIENT_SECRET = "test-client-secret";
+
+const ENV_KEYS = [
+  "ANTIGRAVITY_OAUTH_CLIENT_ID",
+  "ANTIGRAVITY_OAUTH_CLIENT_SECRET",
+  "ANTIGRAVITY_OAUTH_SCOPE",
+  "ANTIGRAVITY_OAUTH_REDIRECT_URI",
+  "ANTIGRAVITY_AUTH_URL",
+  "ANTIGRAVITY_TOKEN_URL",
+  "ANTIGRAVITY_USERINFO_URL",
+] as const;
+
+const originalEnv = new Map<string, string | undefined>(ENV_KEYS.map((k) => [k, process.env[k]]));
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+describe("antigravity-oauth", () => {
+  let dir: string;
+  let path: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "antigravity-oauth-"));
+    path = join(dir, "config.json");
+    for (const k of ENV_KEYS) delete process.env[k];
+    process.env.ANTIGRAVITY_OAUTH_CLIENT_ID = TEST_CLIENT_ID;
+    process.env.ANTIGRAVITY_OAUTH_CLIENT_SECRET = TEST_CLIENT_SECRET;
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    for (const [k, v] of originalEnv) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    vi.restoreAllMocks();
+  });
+
+  it("buildAuthorizeUrl carries client_id, offline access, and the redirect", () => {
+    const url = buildAuthorizeUrl({
+      clientId: TEST_CLIENT_ID,
+      redirectUri: "http://localhost:1234/oauth2callback",
+      state: "state-abc",
+    });
+    const parsed = new URL(url);
+    expect(parsed.origin + parsed.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
+    expect(parsed.searchParams.get("client_id")).toBe(TEST_CLIENT_ID);
+    expect(parsed.searchParams.get("redirect_uri")).toBe("http://localhost:1234/oauth2callback");
+    expect(parsed.searchParams.get("response_type")).toBe("code");
+    expect(parsed.searchParams.get("access_type")).toBe("offline");
+    expect(parsed.searchParams.get("state")).toBe("state-abc");
+    expect(parsed.searchParams.get("scope")).toContain("cloud-platform");
+  });
+
+  it("exchangeAntigravityCode posts the authorization_code grant and returns creds", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        jsonResponse({ access_token: "at", refresh_token: "rt", expires_in: 3600 }),
+      );
+    const creds = await exchangeAntigravityCode({
+      clientId: "cid",
+      clientSecret: "secret",
+      redirectUri: "http://localhost:1/oauth2callback",
+      code: "code-123",
+    });
+    expect(creds.accessToken).toBe("at");
+    expect(creds.refreshToken).toBe("rt");
+    expect(creds.expiresAt).toBeGreaterThan(Date.now());
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://oauth2.googleapis.com/token");
+    const body = new URLSearchParams(init?.body as string);
+    expect(body.get("grant_type")).toBe("authorization_code");
+    expect(body.get("client_secret")).toBe("secret");
+    expect(body.get("code")).toBe("code-123");
+  });
+
+  it("refreshAntigravityToken posts the refresh_token grant and keeps the refresh token", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ access_token: "at-new", expires_in: 3600 }),
+    );
+    const creds = await refreshAntigravityToken("rt-old", "cid", "secret");
+    expect(creds.accessToken).toBe("at-new");
+    expect(creds.refreshToken).toBe("rt-old");
+  });
+
+  it("resolveAntigravityToken returns a fresh token without any fetch", async () => {
+    saveAntigravityOAuth(
+      { accessToken: "at-fresh", refreshToken: "rt", expiresAt: Date.now() + 10 * 60_000 },
+      path,
+    );
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    expect(await resolveAntigravityToken(path)).toBe("at-fresh");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("resolveAntigravityToken refreshes an expired token and persists the new pair", async () => {
+    saveAntigravityOAuth(
+      { accessToken: "at-expired", refreshToken: "rt", expiresAt: Date.now() - 1000 },
+      path,
+    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ access_token: "at-new", expires_in: 3600 }),
+    );
+    expect(await resolveAntigravityToken(path)).toBe("at-new");
+    const stored = readConfig(path).antigravityOAuth;
+    expect(stored?.accessToken).toBe("at-new");
+    expect(stored?.refreshToken).toBe("rt");
+  });
+
+  it("resolveAntigravityToken returns undefined without creds", async () => {
+    expect(await resolveAntigravityToken(path)).toBeUndefined();
+  });
+
+  it("signOutAntigravity clears stored creds", async () => {
+    saveAntigravityOAuth(
+      { accessToken: "at", refreshToken: "rt", expiresAt: Date.now() + 60_000 },
+      path,
+    );
+    await signOutAntigravity(path);
+    expect(readConfig(path).antigravityOAuth).toBeUndefined();
+  });
+
+  it("antigravityAccount returns the userinfo email", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ email: "u@example.com" }));
+    expect(await antigravityAccount("at")).toBe("u@example.com");
+  });
+
+  it("onboardAntigravity resolves the default tier's project id", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        jsonResponse({
+          allowedTiers: [{ id: "starter", isDefault: true }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          done: true,
+          response: { cloudaicompanionProject: { id: "proj-123" } },
+        }),
+      );
+    const projectId = await onboardAntigravity("at");
+    expect(projectId).toBe("proj-123");
+    // First call is loadCodeAssist, second is onboardUser with the tier id.
+    const [loadUrl, loadInit] = fetchMock.mock.calls[0]!;
+    expect(loadUrl).toBe("https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist");
+    expect(loadInit?.headers).toMatchObject({ authorization: "Bearer at" });
+    const [onboardUrl, onboardInit] = fetchMock.mock.calls[1]!;
+    expect(onboardUrl).toBe("https://cloudcode-pa.googleapis.com/v1internal:onboardUser");
+    const onboardBody = JSON.parse(onboardInit?.body as string) as { tierId: string };
+    expect(onboardBody.tierId).toBe("starter");
+  });
+
+  it("onboardAntigravity returns undefined when no tiers are available", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ allowedTiers: [] }));
+    expect(await onboardAntigravity("at")).toBeUndefined();
+  });
+});

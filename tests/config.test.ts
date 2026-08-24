@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_MODEL,
   type DesktopOpenTab,
+  GEMINI_MODELS,
   SUPPORTED_MODELS,
   addProjectPathAllowed,
   addProjectShellAllowed,
   anyProviderConfigured,
+  clearAntigravityOAuth,
   clearOpenAIOAuth,
   clearProjectPathAllowed,
   clearProjectShellAllowed,
@@ -48,6 +50,7 @@ import {
   removeProjectShellAllowed,
   resolveSemanticEmbeddingConfig,
   resolveThemePreference,
+  saveAntigravityOAuth,
   saveApiKey,
   saveBaseUrl,
   saveContextTokens,
@@ -491,6 +494,48 @@ describe("config", () => {
       expect(readConfig(path).openaiOAuth).toBeUndefined();
       // Clearing leaves unrelated fields intact.
       expect(readConfig(path).openaiApiKey).toBe("sk-openai-manual");
+    });
+
+    it("saveAntigravityOAuth / clearAntigravityOAuth round-trip", () => {
+      saveAntigravityOAuth(
+        {
+          accessToken: "at",
+          refreshToken: "rt",
+          expiresAt: 123,
+          account: "u@example.com",
+          projectId: "proj-1",
+        },
+        path,
+      );
+      expect(readConfig(path).antigravityOAuth).toEqual({
+        accessToken: "at",
+        refreshToken: "rt",
+        expiresAt: 123,
+        account: "u@example.com",
+        projectId: "proj-1",
+      });
+      clearAntigravityOAuth(path);
+      expect(readConfig(path).antigravityOAuth).toBeUndefined();
+    });
+
+    it("gemini-* ids route to the gemini provider and the Cloud Code base URL", () => {
+      for (const id of GEMINI_MODELS) {
+        expect(providerForModel(id)).toBe("gemini");
+        expect(SUPPORTED_MODELS).toContain(id);
+      }
+      const ep = loadEndpointForModel("gemini-2.5-flash", path);
+      expect(ep.baseUrl).toBe("https://cloudcode-pa.googleapis.com");
+      expect(ep.apiKey).toBeUndefined();
+    });
+
+    it("anyProviderConfigured counts Antigravity OAuth", () => {
+      writeConfig({}, path);
+      expect(anyProviderConfigured(path)).toBe(false);
+      saveAntigravityOAuth(
+        { accessToken: "at", refreshToken: "rt", expiresAt: Date.now() + 60_000 },
+        path,
+      );
+      expect(anyProviderConfigured(path)).toBe(true);
     });
   });
 

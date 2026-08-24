@@ -63,6 +63,14 @@ export const HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_FRACTION = 0.15;
 export const HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_USD = 0.002;
 /** Summary + next-turn cold segment reserve used by fold economics. */
 export const HISTORY_FOLD_SUMMARY_RESERVE_TOKENS = 4096;
+/** Cap the token budget fed to the fold summarizer as a fraction of ctxMax — re-reading
+ *  the entire pruned head is the dominant compaction cost (up to ~240k tokens at 300k).
+ *  A fold only needs the *recent* essence, so older overflow is trimmed before summarizing. */
+export const HISTORY_FOLD_SUMMARY_HEAD_FRACTION = 0.2;
+/** Floor so small/unknown windows (e.g. the 131k fallback) don't collapse the budget. */
+export const HISTORY_FOLD_SUMMARY_MIN_HEAD_TOKENS = 12_000;
+/** Ceiling on synthesized summary length — bounds the output side of a fold call. */
+export const HISTORY_FOLD_SUMMARY_MAX_OUTPUT_TOKENS = 1500;
 /** Extra budget per head token — prefill roughly scales with input size. Bumped from 0.5ms after
  *  real sessions at ~240k-token heads measured 1-2+ min per fold — 0.5ms budgeted only ~2 min
  *  where prefill + queue jitter is worst, so legitimate folds timed out mid-compaction. */
@@ -90,6 +98,25 @@ export const HISTORY_FOLD_MARKER = COMPACTION_SUMMARY_MARKER;
 export const SKILL_PIN_MEMO_HEADER = "[Active skill memos — preserved verbatim across the fold:]";
 /** Matches the wrapper emitted by `run_skill` so the fold can lift bodies out before summarizing. */
 const SKILL_PIN_REGEX = /<skill-pin name="([^"]+)">\n[\s\S]*?\n<\/skill-pin>/g;
+
+/** Keep the most-recent messages that fit within `budgetTokens`, dropping the oldest
+ *  overflow. Always keeps at least one message so the summarizer never gets an empty
+ *  head. Returns the kept slice plus the dropped token count (for a transparency note). */
+function trimMessageWindow(
+  messages: ChatMessage[],
+  budgetTokens: number,
+): { messages: ChatMessage[]; droppedTokens: number } {
+  const kept: ChatMessage[] = [];
+  let used = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const tok = countMessageTokens(messages[i]!);
+    if (kept.length > 0 && used + tok > budgetTokens) break;
+    kept.unshift(messages[i]!);
+    used += tok;
+  }
+  const total = messages.reduce((acc, m) => acc + countMessageTokens(m), 0);
+  return { messages: kept, droppedTokens: Math.max(0, total - used) };
+}
 
 export interface ContextManagerDeps {
   client: DeepSeekClient;
@@ -499,10 +526,29 @@ export class ContextManager {
     // Deadline scales with what the summarizer actually ships — the pruned
     // head — not the original, so dead file bodies no longer inflate the
     // fold window.
-    const prunedHeadTokens = prunedHead.reduce((acc, m) => acc + countMessageTokens(m), 0);
+    // Bound the summarizer input. Re-reading the ENTIRE pruned head is the dominant
+    // compaction cost (up to ~240k tokens at a 300k window); a fold only needs the
+    // *recent* essence, so cap the head fed to the summarizer to a fraction of the
+    // window and drop the oldest overflow. Pinned skills/constraints are preserved
+    // verbatim below (memoTail / constraintTail), so nothing pinned is lost.
+    const summaryHeadBudget = Math.max(
+      HISTORY_FOLD_SUMMARY_MIN_HEAD_TOKENS,
+      Math.floor(ctxMax * HISTORY_FOLD_SUMMARY_HEAD_FRACTION),
+    );
+    const trimmedHead = trimMessageWindow(prunedHead, summaryHeadBudget);
+    const trimmedHeadTokens = trimmedHead.messages.reduce(
+      (acc, m) => acc + countMessageTokens(m),
+      0,
+    );
 
     const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(prunedHead);
-    const summary = await this.summarizeForFold(prunedHead, pinnedNames, prunedHeadTokens, model);
+    const summary = await this.summarizeForFold(
+      trimmedHead.messages,
+      pinnedNames,
+      trimmedHeadTokens,
+      model,
+      trimmedHead.droppedTokens,
+    );
     if (!summary.content) {
       // Summarizer failure — surface it so the loop can warn instead of the
       // "compacting history…" status silently no-opping. Turn aborts are
@@ -624,6 +670,7 @@ export class ContextManager {
     pinnedSkillNames: string[],
     headTokens: number,
     activeModel: string,
+    droppedTokens = 0,
   ): Promise<{ content: string; reasoningContent: string; error?: string }> {
     // Pick a cheap model valid for the current transport: the Codex backend
     // rejects DeepSeek model names; the DeepSeek endpoint rejects GPT names.
@@ -636,7 +683,10 @@ export class ContextManager {
     const agentSystem = this.deps.getSystemPrompt();
     const fewShots = this.deps.getFewShots?.() ?? [];
     const tools = this.deps.getToolSpecs?.() ?? [];
-    const instruction = buildFoldSummaryInstruction(pinnedSkillNames);
+    let instruction = buildFoldSummaryInstruction(pinnedSkillNames);
+    if (droppedTokens > 0) {
+      instruction += `\n\n(Note: the oldest ${droppedTokens} tokens of conversation were trimmed before summarization — summarize only the context shown.)`;
+    }
     // DeepSeek models reject OpenAI image content parts (400) — collapse them
     // to a text placeholder so a session with image attachments can still fold.
     // GPT models accept images natively, but the placeholder is harmless either way.
@@ -692,14 +742,11 @@ export class ContextManager {
                 tools: tools.length ? (tools as ToolSpec[]) : undefined,
                 signal: requestSignal,
                 thinking: "disabled",
+                maxTokens: HISTORY_FOLD_SUMMARY_MAX_OUTPUT_TOKENS,
               }),
               timeoutPromise,
             ]);
-            this.deps.stats.record(
-              this.deps.getCurrentTurn(),
-              summaryModel,
-              resp.usage ?? new Usage(),
-            );
+            this.deps.stats.recordCompaction(summaryModel, resp.usage ?? new Usage());
             return {
               content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
               reasoningContent: resp.reasoningContent ?? "",
@@ -769,7 +816,7 @@ export class ContextManager {
         }),
         deadlinePromise,
       ]);
-      this.deps.stats.record(this.deps.getCurrentTurn(), triageModel, resp.usage ?? new Usage());
+      this.deps.stats.recordCompaction(triageModel, resp.usage ?? new Usage());
       return parseFileTriage(resp.content, allPaths);
     } catch (err) {
       // Fail-open: relevance is advisory — the fold proceeds with no drops.

@@ -297,6 +297,9 @@ export type PendingRevision = {
 
 export type UsageStats = {
   totalCostUsd: number;
+  /** Cost of the most recent model call — the statusbar "this turn" figure for
+   *  pay-per-token providers (DeepSeek). Distinct from the cumulative session total. */
+  lastCallCostUsd: number;
   totalPromptTokens: number;
   totalCompletionTokens: number;
   cacheHitTokens: number;
@@ -356,12 +359,28 @@ export type Settings = {
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
+  /** Per-field visibility toggles for the bottom status row. Absent = all default to true. */
+  statusBar?: {
+    showBalance?: boolean;
+    showSessionCost?: boolean;
+    showTurnCost?: boolean;
+    showCacheHit?: boolean;
+    showCtxUsage?: boolean;
+    showVersion?: boolean;
+    showFeedbackHint?: boolean;
+  };
   /** Endpoint + auth state for the tab's current model — per tab, follows model switches. */
   modelEndpoint?: ModelEndpointInfo;
   openaiOAuth?: {
     signedIn: boolean;
     account?: string;
     /** Last OAuth flow failure (e.g. upstream invalid_client / timeout) — drives the status-bar auth chip until the next successful sign-in. */
+    flowError?: string;
+  };
+  antigravityOAuth?: {
+    signedIn: boolean;
+    account?: string;
+    /** Last OAuth flow failure — drives the status-bar Gemini auth chip until the next successful sign-in. */
     flowError?: string;
   };
   version: string;
@@ -442,6 +461,8 @@ type State = {
   retryNonce: number;
   /** True between oauth_begin_result and the flow's terminal state — settings card spinner. */
   oauthWaiting: boolean;
+  /** True between gemini_oauth_begin_result and the flow's terminal state — settings card spinner. */
+  antigravityOAuthWaiting: boolean;
   /** Current turn's activity status — shown as a live indicator below the streaming assistant message. */
   turnStatus: "thinking" | "reasoning" | "calling_tool" | "waiting_tool" | "responding" | null;
   /** Tool name currently being prepared/called — displayed in the turn status line. */
@@ -488,6 +509,7 @@ type Action =
   | { t: "shift_queued_send" }
   | { t: "settings_patch"; patch: SettingsPatch }
   | { t: "oauth_waiting"; waiting: boolean }
+  | { t: "antigravity_oauth_waiting"; waiting: boolean }
   | { t: "codex_quota_refreshing" }
   | { t: "ollama_quota_refreshing" }
   | { t: "push_status"; text: string };
@@ -600,6 +622,8 @@ export function reduce(state: State, action: Action): State {
         : state;
     case "oauth_waiting":
       return { ...state, oauthWaiting: action.waiting };
+    case "antigravity_oauth_waiting":
+      return { ...state, antigravityOAuthWaiting: action.waiting };
     case "codex_quota_refreshing":
       return { ...state, codexQuotaRefreshing: true };
     case "ollama_quota_refreshing":
@@ -978,6 +1002,7 @@ function deriveSessionFiles(loaded: ChatMessage[]): SessionFile[] {
 function zeroUsage(): UsageStats {
   return {
     totalCostUsd: 0,
+    lastCallCostUsd: 0,
     totalPromptTokens: 0,
     totalCompletionTokens: 0,
     cacheHitTokens: 0,
@@ -1275,11 +1300,16 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           webSearchApiKeys: ev.webSearchApiKeys,
           subagentModels: ev.subagentModels,
           showSystemEvents: ev.showSystemEvents,
+          statusBar: ev.statusBar,
           modelEndpoint: ev.modelEndpoint,
           openaiOAuth: ev.openaiOAuth,
+          antigravityOAuth: ev.antigravityOAuth,
           version: ev.version,
         },
         oauthWaiting: ev.openaiOAuth?.signedIn ? false : state.oauthWaiting,
+        antigravityOAuthWaiting: ev.antigravityOAuth?.signedIn
+          ? false
+          : state.antigravityOAuthWaiting,
         // Quota is only meaningful while a ChatGPT (gpt-*) model is active —
         // drop stale numbers the moment the model leaves the OpenAI family.
         codexQuota: ev.model.startsWith("gpt-") ? state.codexQuota : null,
@@ -1371,6 +1401,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     }
     case "oauth_begin_result":
       return { ...state, oauthWaiting: true };
+    case "gemini_oauth_begin_result":
+      return { ...state, antigravityOAuthWaiting: true };
     case "model.turn.started":
       if (state.messages.some((m) => m.kind === "assistant" && m.turn === ev.turn)) {
         return { ...state, model: ev.model, turnLastEventMs: Date.now() };
@@ -1411,6 +1443,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       const hasCall = promptTokens > 0 || callHit > 0 || callMiss > 0;
       const usage: UsageStats = {
         totalCostUsd: state.usage.totalCostUsd + (ev.costUsd ?? 0),
+        lastCallCostUsd: ev.costUsd ?? 0,
         totalPromptTokens: state.usage.totalPromptTokens + promptTokens,
         totalCompletionTokens: state.usage.totalCompletionTokens + (u?.completion_tokens ?? 0),
         cacheHitTokens: state.usage.cacheHitTokens + callHit,
@@ -1887,6 +1920,7 @@ function TabRuntime({
     queuedSends: [],
     retryNonce: 0,
     oauthWaiting: false,
+    antigravityOAuthWaiting: false,
     turnStatus: null,
     turnStatusTool: null,
     turnLastEventMs: 0,
@@ -3289,6 +3323,13 @@ function TabRuntime({
             }}
             onOAuthSignOut={() => sendRpc({ cmd: "oauth_signout" })}
             onSaveOpenAIApiKey={(key) => sendRpc({ cmd: "setup_save_openai_key", key })}
+            antigravityOAuthWaiting={state.antigravityOAuthWaiting}
+            onAntigravityOAuthBegin={() => sendRpc({ cmd: "gemini_oauth_begin" })}
+            onAntigravityOAuthCancel={() => {
+              dispatch({ t: "antigravity_oauth_waiting", waiting: false });
+              sendRpc({ cmd: "gemini_oauth_cancel" });
+            }}
+            onAntigravityOAuthSignOut={() => sendRpc({ cmd: "gemini_oauth_signout" })}
             onPickWorkspace={pickWorkspace}
             onAddMcpSpec={addMcpSpec}
             onRemoveMcpSpec={removeMcpSpec}

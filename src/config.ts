@@ -35,16 +35,32 @@ export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
  *  reasoning_effort none|low|medium|high|xhigh|max. */
 export const GPT56_MODELS: readonly string[] = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 
+/** Gemini models served through the Antigravity/Cloud Code API on the user's
+ *  Antigravity quota (Starter tier for free/Google AI Plus accounts). These
+ *  route to the `gemini` provider and authenticate via Google OAuth. */
+export const GEMINI_MODELS: readonly string[] = [
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-3.6-flash",
+  "gemini-3.7-flash",
+];
+
 /** Everything the default endpoints accept without a custom baseUrl, across providers. */
-export const SUPPORTED_MODELS: readonly string[] = [...SUPPORTED_OFFICIAL_MODELS, ...GPT56_MODELS];
+export const SUPPORTED_MODELS: readonly string[] = [
+  ...SUPPORTED_OFFICIAL_MODELS,
+  ...GPT56_MODELS,
+  ...GEMINI_MODELS,
+];
 
 /** Which provider a model id routes to. `gpt-` prefixed ids → OpenAI,
- *  `ollama/` prefixed ids → Ollama (local daemon or cloud), everything else → DeepSeek. */
-export type ModelProvider = "deepseek" | "openai" | "ollama";
+ *  `ollama/` prefixed ids → Ollama (local daemon or cloud), `gemini-` prefixed
+ *  ids → Google Antigravity (Cloud Code API), everything else → DeepSeek. */
+export type ModelProvider = "deepseek" | "openai" | "ollama" | "gemini";
 
 export function providerForModel(model: string | undefined | null): ModelProvider {
   if (typeof model === "string" && model.startsWith("gpt-")) return "openai";
   if (typeof model === "string" && model.startsWith("ollama/")) return "ollama";
+  if (typeof model === "string" && model.startsWith("gemini-")) return "gemini";
   return "deepseek";
 }
 
@@ -56,6 +72,9 @@ export { modelAcceptsImages } from "@reasonix/core-utils";
  *  endpoint is keyless when local (the daemon ignores Authorization), but the
  *  cloud service requires OLLAMA_API_KEY — so the key is resolved but optional. */
 export const DEFAULT_OLLAMA_CHAT_URL = "https://ollama.com/v1";
+
+/** Cloud Code API base for gemini-* models (Antigravity quota). */
+export const DEFAULT_GEMINI_CHAT_URL = "https://cloudcode-pa.googleapis.com";
 
 /** Native Ollama API origin: strip a trailing `/v1` — the `/api/*` endpoints
  *  live at that root (localhost:11434/v1 → localhost:11434). */
@@ -214,6 +233,19 @@ export interface OpenAIOAuthCreds {
   account?: string;
 }
 
+/** Google Antigravity OAuth tokens — powers gemini-* models on the Antigravity
+ *  quota. `projectId` is the Cloud Code companion project from onboarding. */
+export interface AntigravityOAuthCreds {
+  accessToken: string;
+  refreshToken: string;
+  /** ms epoch — Google access tokens are short-lived; refreshed from refreshToken when within 5 min of expiry. */
+  expiresAt: number;
+  /** Account email from userinfo — shown masked in settings, never shipped over the bridge. */
+  account?: string;
+  /** Cloud Code companion project id resolved via loadCodeAssist/onboardUser. */
+  projectId?: string;
+}
+
 export interface ReasonixConfig {
   apiKey?: string;
   baseUrl?: string;
@@ -221,6 +253,9 @@ export interface ReasonixConfig {
   openaiApiKey?: string;
   /** Set by the browser OAuth sign-in; auto-refreshed from refreshToken on expiry. */
   openaiOAuth?: OpenAIOAuthCreds;
+  /** Google Antigravity OAuth tokens — set by the "Sign in with Google" flow;
+   *  powers gemini-* models on the Antigravity quota. */
+  antigravityOAuth?: AntigravityOAuthCreds;
   /** Persisted DeepSeek model id — `/model <id>` and the dashboard model picker write through this. */
   model?: string;
   editMode?: EditMode;
@@ -839,6 +874,11 @@ export function loadEndpointForModel(
   if (providerForModel(model) === "ollama") {
     return loadOllamaEndpoint(path);
   }
+  if (providerForModel(model) === "gemini") {
+    // Gemini models always hit the Cloud Code API; auth is the Google OAuth
+    // token (resolved per request), never a static key. baseUrl is fixed.
+    return { baseUrl: DEFAULT_GEMINI_CHAT_URL, apiKey: undefined };
+  }
   return loadEndpoint(path);
 }
 
@@ -861,6 +901,7 @@ export function anyProviderConfigured(path: string = defaultConfigPath()): boole
   const cfg = readConfig(path);
   if (process.env.OPENAI_API_KEY || cfg.openaiApiKey || cfg.openaiOAuth?.accessToken) return true;
   if (process.env.OLLAMA_API_KEY || cfg.ollamaApiKey) return true;
+  if (cfg.antigravityOAuth?.accessToken) return true;
   return !!process.env.OLLAMA_BASE_URL || !!cfg.ollamaBaseUrl;
 }
 
@@ -1174,6 +1215,22 @@ export function clearOpenAIOAuth(path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
   if (!cfg.openaiOAuth) return;
   const { openaiOAuth: _drop, ...rest } = cfg;
+  writeConfig(rest, path);
+}
+
+export function saveAntigravityOAuth(
+  creds: AntigravityOAuthCreds,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.antigravityOAuth = creds;
+  writeConfig(cfg, path);
+}
+
+export function clearAntigravityOAuth(path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  if (!cfg.antigravityOAuth) return;
+  const { antigravityOAuth: _drop, ...rest } = cfg;
   writeConfig(rest, path);
 }
 

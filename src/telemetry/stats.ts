@@ -185,6 +185,15 @@ export interface SessionSummary {
   lastToolSchemaTokens: number;
   lastPrefixChanged: boolean;
   lastPrefixChangeReasons: CacheChurnReason[];
+  /** $ spent on internal context compaction (fold summarizer + triage calls),
+   *  kept separate from the agent loop's own per-turn cost. */
+  compactionCostUsd: number;
+  /** Number of compaction passes (fold summaries + triage) in this process. */
+  compactionCount: number;
+  /** Prompt (input) tokens consumed by compaction calls. */
+  compactionPromptTokens: number;
+  /** Completion (output) tokens consumed by compaction calls. */
+  compactionCompletionTokens: number;
 }
 
 export class SessionStats {
@@ -198,6 +207,13 @@ export class SessionStats {
   private _carryoverCompletion = 0;
   /** Last turn's promptTokens before exit — surfaced via summary() until the next live turn lands. */
   private _carryoverLastPromptTokens = 0;
+  /** $ spent on internal compaction — isolated from loop cost + cache accounting
+   *  because compaction is inherently cache-cold engineering work. */
+  private _compactionCost = 0;
+  private _compactionPromptTokens = 0;
+  private _compactionCompletionTokens = 0;
+  private _compactionCount = 0;
+
   /** Per-turn cache diagnostics stored as each turn completes, so the live
    *  cache-miss report can replay accurate prefix hashes per historical turn
    *  rather than computing them all from the current prefix. */
@@ -261,6 +277,10 @@ export class SessionStats {
     this._carryoverCacheMiss = 0;
     this._carryoverCompletion = 0;
     this._carryoverLastPromptTokens = 0;
+    this._compactionCost = 0;
+    this._compactionPromptTokens = 0;
+    this._compactionCompletionTokens = 0;
+    this._compactionCount = 0;
     this._cacheDiagnostics = [];
   }
 
@@ -305,6 +325,16 @@ export class SessionStats {
     this._carryoverCompletion += usage.completionTokens;
   }
 
+  /** Record an internal compaction call (fold summarizer/triage) into a dedicated
+   *  accumulator. No turn entry, so per-turn cost and the cache-hit ratio stay
+   *  clean; still reflected in totalCost so session spend stays honest. */
+  recordCompaction(model: string, usage: Usage): void {
+    this._compactionCost += costUsd(model, usage);
+    this._compactionPromptTokens += usage.promptTokens;
+    this._compactionCompletionTokens += usage.completionTokens;
+    this._compactionCount += 1;
+  }
+
   /** Drop oldest turns beyond MAX_TURNS, folding their costs into carryover so
    *  session totals remain accurate even after trimming. */
   private trimOldTurns(): void {
@@ -321,7 +351,9 @@ export class SessionStats {
   }
 
   get totalCost(): number {
-    return this._carryoverCost + this.turns.reduce((sum, t) => sum + t.cost, 0);
+    return (
+      this._carryoverCost + this.turns.reduce((sum, t) => sum + t.cost, 0) + this._compactionCost
+    );
   }
 
   get totalClaudeEquivalent(): number {
@@ -370,6 +402,10 @@ export class SessionStats {
       lastToolSchemaTokens: last?.cacheDiagnostics?.toolSchemaTokens ?? 0,
       lastPrefixChanged: last?.cacheDiagnostics?.prefixChanged ?? false,
       lastPrefixChangeReasons: last?.cacheDiagnostics?.prefixChangeReasons ?? [],
+      compactionCostUsd: round(this._compactionCost, 6),
+      compactionCount: this._compactionCount,
+      compactionPromptTokens: this._compactionPromptTokens,
+      compactionCompletionTokens: this._compactionCompletionTokens,
     };
   }
 }

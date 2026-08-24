@@ -59,6 +59,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     activePlan: null,
     usage: {
       totalCostUsd: 0,
+      lastCallCostUsd: 0,
       totalPromptTokens: 0,
       totalCompletionTokens: 0,
       cacheHitTokens: 0,
@@ -93,6 +94,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     queuedSends: [],
     retryNonce: 0,
     oauthWaiting: false,
+    antigravityOAuthWaiting: false,
     turnStatus: null,
     turnStatusTool: null,
     turnLastEventMs: 0,

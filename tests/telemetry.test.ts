@@ -418,3 +418,45 @@ describe("SessionStats.recordExternal (#2008)", () => {
     expect(summaryAfter).toBeGreaterThan(summaryBefore);
   });
 });
+
+describe("SessionStats.recordCompaction", () => {
+  it("adds cost to totalCost without creating a turn entry", () => {
+    const s = new SessionStats();
+    s.record(1, "deepseek-v4-pro", new Usage(10_000, 1000, 0, 8000, 2000));
+    const costBefore = s.totalCost;
+    const turnsBefore = s.summary().turns;
+
+    s.recordCompaction("deepseek-v4-flash", new Usage(50_000, 1000, 0, 1000, 4000));
+
+    expect(s.totalCost).toBeGreaterThan(costBefore);
+    // Compaction is not a turn, so the session turn count must not move.
+    expect(s.summary().turns).toBe(turnsBefore);
+  });
+
+  it("is excluded from cache-hit accounting (compaction is cache-cold)", () => {
+    const s = new SessionStats();
+    // Parent: 8000 hit, 2000 miss → 0.8
+    s.record(1, "deepseek-v4-pro", new Usage(10_000, 1000, 0, 8000, 2000));
+    const hitBefore = s.cumulativeCacheHitTokens;
+    const missBefore = s.cumulativeCacheMissTokens;
+    const ratioBefore = s.aggregateCacheHitRatio;
+
+    s.recordCompaction("deepseek-v4-flash", new Usage(50_000, 1000, 0, 1000, 4000));
+
+    expect(s.cumulativeCacheHitTokens).toBe(hitBefore);
+    expect(s.cumulativeCacheMissTokens).toBe(missBefore);
+    expect(s.aggregateCacheHitRatio).toBeCloseTo(ratioBefore, 4);
+  });
+
+  it("summary() surfaces the compaction cost + token counters", () => {
+    const s = new SessionStats();
+    s.recordCompaction("deepseek-v4-flash", new Usage(60_000, 1500, 0, 0, 60_000));
+    s.recordCompaction("deepseek-v4-flash", new Usage(30_000, 800, 0, 0, 30_000));
+
+    const summary = s.summary();
+    expect(summary.compactionCount).toBe(2);
+    expect(summary.compactionPromptTokens).toBe(90_000);
+    expect(summary.compactionCompletionTokens).toBe(2300);
+    expect(summary.compactionCostUsd).toBeGreaterThan(0);
+  });
+});

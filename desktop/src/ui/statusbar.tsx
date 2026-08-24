@@ -83,10 +83,22 @@ export function StatusBar({
   const cacheDenom = usage.cacheHitTokens + usage.cacheMissTokens;
   const cacheHitPct = cacheDenom > 0 ? Math.round((usage.cacheHitTokens / cacheDenom) * 100) : 0;
   const runningJobs = jobs.filter((j) => j.running).length;
-  const spent = formatMoney(usage.totalCostUsd, currency);
+  // "This turn" for pay-per-token providers is the latest model call's cost,
+  // NOT the cumulative session total (which feeds the settings session-cost card).
+  const turnCost = formatMoney(usage.lastCallCostUsd ?? 0, currency);
   // Dual-currency: keep the primary display currency and show the conversion
   // to the other one right next to it (¥ primary → $ conversion by default).
-  const spentOther = formatMoney(usage.totalCostUsd, currency === "CNY" ? "USD" : "CNY");
+  const turnCostOther = formatMoney(usage.lastCallCostUsd ?? 0, currency === "CNY" ? "USD" : "CNY");
+  // Per-field visibility toggles — each defaults to true when absent from config.
+  const showTurnCost = settings?.statusBar?.showTurnCost ?? true;
+  const showSessionCost = settings?.statusBar?.showSessionCost ?? true;
+  const showBalance = settings?.statusBar?.showBalance ?? true;
+  const showCacheHit = settings?.statusBar?.showCacheHit ?? true;
+  const showCtxUsage = settings?.statusBar?.showCtxUsage ?? true;
+  // Session-total cost (the settings card's figure) — a distinct chip from the
+  // per-turn "this turn" number, gated by showSessionCost.
+  const sessionCostDisplay = formatMoney(usage.totalCostUsd, currency);
+  const sessionCostOther = formatMoney(usage.totalCostUsd, currency === "CNY" ? "USD" : "CNY");
   const balanceLabel = balance
     ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
     : "—";
@@ -258,47 +270,64 @@ export function StatusBar({
           {!ready ? t("statusbar.offline") : busy ? t("statusbar.busy") : t("statusbar.online")}
         </span>
       </span>
-      <span className="seg" title={t("statusbar.cacheHit")}>
-        <I.zap size={11} style={{ color: "var(--accent)" }} />
-        <span>{t("statusbar.cache")}</span>
-        <span className="v acc">{cacheHitPct}%</span>
-      </span>
-      <span className="seg">
-        <I.cpu size={11} />
-        <span>{t("statusbar.tokens")}</span>
-        <span className="v">{tokenLabel(totalTokens)}</span>
-      </span>
-      <span
-        className="seg"
-        title={
-          quotaTurnPct != null
-            ? t("statusbar.thisTurnQuotaTitle", { pct: quotaTurnPct.toFixed(1) })
-            : ollamaTurnPct != null
-              ? t("statusbar.ollamaTurnQuotaTitle", { pct: ollamaTurnPct.toFixed(1) })
-              : undefined
-        }
-      >
-        <I.coin size={11} />
-        <span>{t("statusbar.thisTurn")}</span>
-        {openaiTab ? (
-          quotaTurnPct != null ? (
-            <span className="v ok">{quotaTurnPct.toFixed(1)}%</span>
+      {showCacheHit ? (
+        <span className="seg" title={t("statusbar.cacheHit")}>
+          <I.zap size={11} style={{ color: "var(--accent)" }} />
+          <span>{t("statusbar.cache")}</span>
+          <span className="v acc">{cacheHitPct}%</span>
+        </span>
+      ) : null}
+      {showCtxUsage ? (
+        <span className="seg">
+          <I.cpu size={11} />
+          <span>{t("statusbar.tokens")}</span>
+          <span className="v">{tokenLabel(totalTokens)}</span>
+        </span>
+      ) : null}
+      {showTurnCost ? (
+        <span
+          className="seg"
+          title={
+            quotaTurnPct != null
+              ? t("statusbar.thisTurnQuotaTitle", { pct: quotaTurnPct.toFixed(1) })
+              : ollamaTurnPct != null
+                ? t("statusbar.ollamaTurnQuotaTitle", { pct: ollamaTurnPct.toFixed(1) })
+                : undefined
+          }
+        >
+          <I.coin size={11} />
+          <span>{t("statusbar.thisTurn")}</span>
+          {openaiTab ? (
+            quotaTurnPct != null ? (
+              <span className="v ok">{quotaTurnPct.toFixed(1)}%</span>
+            ) : (
+              <span className="v ok">—</span>
+            )
+          ) : ollamaTab ? (
+            ollamaTurnPct != null ? (
+              <span className="v ok">{ollamaTurnPct.toFixed(1)}%</span>
+            ) : (
+              <span className="v ok">—</span>
+            )
           ) : (
-            <span className="v ok">—</span>
-          )
-        ) : ollamaTab ? (
-          ollamaTurnPct != null ? (
-            <span className="v ok">{ollamaTurnPct.toFixed(1)}%</span>
-          ) : (
-            <span className="v ok">—</span>
-          )
-        ) : (
+            <span className="v ok">
+              {turnCost}
+              <span className="conv">{`(${turnCostOther})`}</span>
+            </span>
+          )}
+        </span>
+      ) : null}
+
+      {showSessionCost && !openaiTab && !ollamaTab ? (
+        <span className="seg" title={t("settings.sessionCost")}>
+          <I.coin size={11} />
+          <span>{t("settings.sessionCost")}</span>
           <span className="v ok">
-            {spent}
-            <span className="conv">{`(${spentOther})`}</span>
+            {sessionCostDisplay}
+            <span className="conv">{`(${sessionCostOther})`}</span>
           </span>
-        )}
-      </span>
+        </span>
+      ) : null}
 
       <span className="seg" title={rateTitle}>
         <I.clock size={11} style={{ color: offPeak ? "var(--success)" : "var(--warning)" }} />
@@ -351,70 +380,74 @@ export function StatusBar({
         <span className="v vio">{settings?.model ?? "—"}</span>
         <span className="v">{settings?.reasoningEffort ?? "high"}</span>
       </span>
-      {openaiTab ? (
-        <span
-          className="seg"
-          title={quotaTitleWithReason}
-          style={onRefreshCodexQuota ? { cursor: "pointer" } : undefined}
-          onClick={onRefreshCodexQuota}
-          onKeyDown={onRefreshCodexQuota ? activationHandler(onRefreshCodexQuota) : undefined}
-        >
-          <I.coin size={11} style={{ color: "var(--accent)" }} />
-          <span>{t("statusbar.codexQuota")}</span>
-          {showQuota && quotaWeekly ? (
-            <>
-              <span className="v acc">
-                {quotaLeftPct}% {t("statusbar.codexLeft")}
-              </span>
-              <span className="conv">{quota?.plan ?? "ChatGPT"}</span>
-            </>
-          ) : codexQuotaRefreshing ? (
-            <span className="v acc">{t("statusbar.codexRefreshing")}</span>
-          ) : (
-            <span className="v acc">—</span>
-          )}
-        </span>
-      ) : ollamaTab ? (
-        <span
-          className="seg"
-          title={ollamaQuotaTitleWithReason}
-          style={onRefreshOllamaQuota ? { cursor: "pointer" } : undefined}
-          onClick={onRefreshOllamaQuota}
-          onKeyDown={onRefreshOllamaQuota ? activationHandler(onRefreshOllamaQuota) : undefined}
-        >
-          <I.coin size={11} style={{ color: "var(--accent)" }} />
-          <span>{t("statusbar.ollamaQuota")}</span>
-          {ollamaQuotaData && ollamaWeekly ? (
-            <>
-              <span className="v acc">
-                {Math.round(ollamaWeekly.remainingPct)}% {t("statusbar.codexLeft")}
-              </span>
-              <span className="conv">{ollamaPlan ?? "free"}</span>
-            </>
-          ) : ollamaQuotaRefreshing ? (
-            <span className="v acc">{t("statusbar.codexRefreshing")}</span>
-          ) : (
-            <span className="v acc">—</span>
-          )}
-        </span>
-      ) : (
-        <span
-          className="seg"
-          title={t("statusbar.switchCurrency")}
-          onClick={onToggleCurrency}
-          onKeyDown={activationHandler(onToggleCurrency)}
-        >
-          <I.coin size={11} />
-          <span>{t("statusbar.balance")}</span>
-          <span className="v ok">
-            {balance && balance.infos.length > 0
-              ? balance.infos
-                  .map((info) => `${info.currency === "USD" ? "$" : "¥"} ${info.total.toFixed(2)}`)
-                  .join(" / ")
-              : balanceLabel}
+      {showBalance ? (
+        openaiTab ? (
+          <span
+            className="seg"
+            title={quotaTitleWithReason}
+            style={onRefreshCodexQuota ? { cursor: "pointer" } : undefined}
+            onClick={onRefreshCodexQuota}
+            onKeyDown={onRefreshCodexQuota ? activationHandler(onRefreshCodexQuota) : undefined}
+          >
+            <I.coin size={11} style={{ color: "var(--accent)" }} />
+            <span>{t("statusbar.codexQuota")}</span>
+            {showQuota && quotaWeekly ? (
+              <>
+                <span className="v acc">
+                  {quotaLeftPct}% {t("statusbar.codexLeft")}
+                </span>
+                <span className="conv">{quota?.plan ?? "ChatGPT"}</span>
+              </>
+            ) : codexQuotaRefreshing ? (
+              <span className="v acc">{t("statusbar.codexRefreshing")}</span>
+            ) : (
+              <span className="v acc">—</span>
+            )}
           </span>
-        </span>
-      )}
+        ) : ollamaTab ? (
+          <span
+            className="seg"
+            title={ollamaQuotaTitleWithReason}
+            style={onRefreshOllamaQuota ? { cursor: "pointer" } : undefined}
+            onClick={onRefreshOllamaQuota}
+            onKeyDown={onRefreshOllamaQuota ? activationHandler(onRefreshOllamaQuota) : undefined}
+          >
+            <I.coin size={11} style={{ color: "var(--accent)" }} />
+            <span>{t("statusbar.ollamaQuota")}</span>
+            {ollamaQuotaData && ollamaWeekly ? (
+              <>
+                <span className="v acc">
+                  {Math.round(ollamaWeekly.remainingPct)}% {t("statusbar.codexLeft")}
+                </span>
+                <span className="conv">{ollamaPlan ?? "free"}</span>
+              </>
+            ) : ollamaQuotaRefreshing ? (
+              <span className="v acc">{t("statusbar.codexRefreshing")}</span>
+            ) : (
+              <span className="v acc">—</span>
+            )}
+          </span>
+        ) : (
+          <span
+            className="seg"
+            title={t("statusbar.switchCurrency")}
+            onClick={onToggleCurrency}
+            onKeyDown={activationHandler(onToggleCurrency)}
+          >
+            <I.coin size={11} />
+            <span>{t("statusbar.balance")}</span>
+            <span className="v ok">
+              {balance && balance.infos.length > 0
+                ? balance.infos
+                    .map(
+                      (info) => `${info.currency === "USD" ? "$" : "¥"} ${info.total.toFixed(2)}`,
+                    )
+                    .join(" / ")
+                : balanceLabel}
+            </span>
+          </span>
+        )
+      ) : null}
       <span
         ref={themeButtonRef}
         className={`seg theme-trigger ${themeOpen ? "active" : ""}`}
