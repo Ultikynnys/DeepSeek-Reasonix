@@ -280,6 +280,75 @@ describe("ollama native NDJSON stream", () => {
     expect(usage!.completionTokens).toBe(2);
     expect(usage!.promptEvalDurationMs).toBe(5);
   });
+
+  it("rejects a stream that EOFs without the done:true completion frame", async () => {
+    const truncated = [
+      { model: "qwen3:32b", message: { role: "assistant", content: "partial" }, done: false },
+    ];
+    const { fetch } = mockOllamaFetch(`${truncated.map((l) => JSON.stringify(l)).join("\n")}\n`);
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const consume = async () => {
+      for await (const _ of client.stream({
+        model: "ollama/qwen3:32b",
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        /* drain */
+      }
+    };
+    await expect(consume()).rejects.toMatchObject({
+      message: expect.stringContaining(
+        "Ollama stream terminated before the `done` completion frame",
+      ),
+      phase: "stream_body_read",
+    });
+  });
+
+  it("tags a mid-stream body read failure as stream_body_read", async () => {
+    const readErr = Object.assign(new Error("terminated"), { code: "UND_ERR_ABORTED" });
+    let callCount = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        callCount++;
+        if (callCount === 1) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              '{"model":"qwen3:32b","message":{"role":"assistant","content":"hi"},"done":false}\n',
+            ),
+          );
+          return;
+        }
+        controller.error(readErr);
+      },
+    });
+    const fetch = vi.fn(async () => {
+      return new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "application/x-ndjson" },
+      });
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const consume = async () => {
+      for await (const _ of client.stream({
+        model: "ollama/qwen3:32b",
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        /* drain */
+      }
+    };
+    await expect(consume()).rejects.toMatchObject({
+      message: expect.stringContaining("Ollama stream body read failed: terminated"),
+      phase: "stream_body_read",
+      code: "UND_ERR_ABORTED",
+    });
+  });
 });
 
 describe("ollama cache-hit inference", () => {

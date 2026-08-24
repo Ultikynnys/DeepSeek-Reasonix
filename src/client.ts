@@ -700,7 +700,7 @@ export class DeepSeekClient {
    *  SSE. Each line is a full object: content arrives as deltas, tool calls
    *  arrive complete, and the final `done: true` line carries the metrics. */
   private async *streamOllama(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
-    const { signal, timer } = this.withTimeout(opts.signal);
+    const { signal, timer, timedOut } = this.withTimeout(opts.signal);
     let resp: Response;
     try {
       ({ resp } = await this.prepareRequest(opts, true, signal));
@@ -717,6 +717,7 @@ export class DeepSeekClient {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let sawDone = false;
     const emitLine = (line: string): void => {
       if (!line.trim()) return;
       let json: any;
@@ -725,6 +726,7 @@ export class DeepSeekClient {
       } catch {
         return; // skip malformed frame
       }
+      if (json.done === true) sawDone = true;
       const chunk = this.parseNativeOllamaChunk(opts, json);
       if (chunk) queue.push(chunk);
     };
@@ -735,8 +737,20 @@ export class DeepSeekClient {
           yield queue.shift()!;
           continue;
         }
-        const { value, done } = await reader.read();
-        if (done) break;
+        let value: Uint8Array | undefined;
+        let streamDone: boolean;
+        try {
+          ({ value, done: streamDone } = await reader.read());
+        } catch (readErr) {
+          const cause = readErr instanceof Error ? readErr : new Error(String(readErr));
+          const code = "code" in cause && typeof cause.code === "string" ? cause.code : undefined;
+          throw Object.assign(new Error(`Ollama stream body read failed: ${cause.message}`), {
+            phase: "stream_body_read" as const,
+            code,
+            timedOut: timedOut(),
+          });
+        }
+        if (streamDone) break;
         buffer += decoder.decode(value, { stream: true });
         let newline = buffer.indexOf("\n");
         while (newline >= 0) {
@@ -749,6 +763,16 @@ export class DeepSeekClient {
       // A trailing frame without a final newline.
       if (buffer.trim()) emitLine(buffer);
       while (queue.length > 0) yield queue.shift()!;
+      // Ollama always terminates a complete stream with a `done: true` frame.
+      // Hitting EOF without it means the generation was cut short (connection
+      // dropped, runner killed mid-response) — surface it as a retryable error
+      // rather than silently returning a truncated answer.
+      if (!sawDone) {
+        throw Object.assign(
+          new Error("Ollama stream terminated before the `done` completion frame"),
+          { phase: "stream_body_read" as const, timedOut: timedOut() },
+        );
+      }
     } finally {
       clearTimeout(timer);
       reader.releaseLock();
