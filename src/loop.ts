@@ -218,6 +218,9 @@ export class CacheFirstLoop {
   /** Ollama length-truncation continuations allowed per turn — a model stuck
    *  regenerating a partial answer must not loop forever. */
   static readonly MAX_OLLAMA_CONTINUATIONS = 3;
+  /** Consecutive identical-reasoning iterations before the reasoning-loop guard
+   *  collapses the turn to a forced summary. */
+  static readonly REASONING_LOOP_LIMIT = 3;
   /** Files the model has read this session; gates edit_file / multi_edit so SEARCH text matches on-disk bytes. Cleared on fold / mechanical truncate (the model's byte-level view of the elided history is gone). In-memory only — naturally empty on resume. */
   readonly readTracker = new ReadTracker();
 
@@ -311,6 +314,12 @@ export class CacheFirstLoop {
   private _providerErrorRetried = false;
   /** Count of ollama length-truncation continuations this turn — caps the resume loop. */
   private _ollamaContinuations = 0;
+  /** Normalized reasoning text from the previous iteration — detects a model
+   *  re-thinking the identical thought (a reasoning-only loop) when tool args
+   *  drift so the storm breaker can't fire. */
+  private _lastReasoningSig: string | null = null;
+  /** Consecutive iterations with the same reasoning sig and no content. */
+  private _reasoningLoopCount = 0;
   private context!: ContextManager;
   /** Prefix-shape snapshot of the last sent request — next turn's churn is attributed against it. */
   private _lastCacheShape: CacheShapeSnapshot | null = null;
@@ -999,6 +1008,8 @@ export class CacheFirstLoop {
     this._emptyResponseRetried = false;
     this._providerErrorRetried = false;
     this._ollamaContinuations = 0;
+    this._lastReasoningSig = null;
+    this._reasoningLoopCount = 0;
     // Fresh controller for this turn: the prior step's signal has
     // already fired (or stayed clean); either way we don't want its
     // state to bleed into the new turn.
@@ -1461,6 +1472,36 @@ export class CacheFirstLoop {
 
       this.scratch.reasoning = reasoningContent || null;
 
+      // Reasoning-loop guard: if the model is stuck re-emitting the same
+      // thought iteration after iteration without producing an actual answer,
+      // collapse the turn to a forced summary. This catches the "thinks in
+      // circles" case that the storm breaker misses — e.g. re-reading a file
+      // while the tool ARGS drift, so no identical-args repeat ever trips the
+      // storm. Producing real assistant text resets the counter.
+      const reasoningSig = normalizeReasoning(reasoningContent);
+      const producedText = assistantContent.length > 0;
+      // Count consecutive iterations of the same reasoning (the first occurrence
+      // is count 1). Fire when the identical thought repeats REASONING_LOOP_LIMIT
+      // times. Producing real assistant text or a different thought resets.
+      if (reasoningSig !== "" && reasoningSig === this._lastReasoningSig && !producedText) {
+        this._reasoningLoopCount++;
+      } else {
+        this._reasoningLoopCount = reasoningSig === "" ? 0 : 1;
+      }
+      this._lastReasoningSig = reasoningSig || null;
+      if (this._reasoningLoopCount >= CacheFirstLoop.REASONING_LOOP_LIMIT) {
+        yield {
+          turn: this._turn,
+          role: "warning",
+          severity: "high",
+          content: t("loop.reasoningLoop"),
+        };
+        yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
+        restoreModelIfNeeded();
+        this._steerQueue.length = 0;
+        return;
+      }
+
       // Empty-completion guard: content, reasoning AND tool calls all empty is
       // never a legitimate model answer — the API glitched (empty stream,
       // truncated queue slot, provider hiccup). Ending the turn silently here
@@ -1852,4 +1893,15 @@ function parsePositiveIntEnv(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/** Collapse reasoning to a stable signature for repeat detection — trims,
+ *  normalizes internal whitespace, and drops punctuation/trailing filler so
+ *  re-worded but semantically identical thoughts still match. */
+function normalizeReasoning(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[.,;:!?]+$/g, "")
+    .toLowerCase();
 }

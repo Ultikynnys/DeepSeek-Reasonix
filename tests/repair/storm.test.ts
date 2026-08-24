@@ -80,13 +80,45 @@ describe("StormBreaker", () => {
   });
 
   describe("stormExempt", () => {
-    it("exempt tools never trip the storm guard", () => {
+    it("exempt tools tolerate repeats up to the window, then trip the storm", () => {
       const exempt = new Set(["read_file", "list_jobs"]);
       const sb = new StormBreaker(6, 3, undefined, (c) => exempt.has(c.function?.name ?? ""));
-      // 10 identical calls to read_file — normally would trip at 3
-      for (let i = 0; i < 10; i++) {
+      // Exempt tools get a longer rope (the window) before they're treated as
+      // a storm, so a few re-reads of the same file are fine…
+      for (let i = 0; i < 5; i++) {
         expect(sb.inspect(call("read_file", '{"path":"/foo"}')).suppress).toBe(false);
       }
+      // …but a stuck re-read loop filling the whole window still trips.
+      expect(sb.inspect(call("read_file", '{"path":"/foo"}')).suppress).toBe(true);
+    });
+
+    it("a different intervening call resets the exempt consecutive run", () => {
+      const exempt = new Set(["read_file"]);
+      const sb = new StormBreaker(6, 3, undefined, (c) => exempt.has(c.function?.name ?? ""));
+      // Sparse reads of the same file — a different file read between them must
+      // reset the consecutive run, so it never trips.
+      for (let i = 0; i < 10; i++) {
+        sb.inspect(call("read_file", '{"path":"/foo"}'));
+        sb.inspect(call("read_file", '{"path":"/bar"}'));
+      }
+      expect(sb.inspect(call("read_file", '{"path":"/foo"}')).suppress).toBe(false);
+    });
+
+    it("a mutating call resets the exempt run so a re-read after a write is fine", () => {
+      const mutators = new Set(["write_file"]);
+      const exempt = new Set(["read_file"]);
+      const sb = new StormBreaker(
+        6,
+        3,
+        (c) => mutators.has(c.function?.name ?? ""),
+        (c) => exempt.has(c.function?.name ?? ""),
+      );
+      for (let i = 0; i < 6; i++) {
+        expect(sb.inspect(call("read_file", '{"path":"/foo"}')).suppress).toBe(false);
+        expect(sb.inspect(call("write_file", `{"path":"/foo","v":${i}}`)).suppress).toBe(false);
+      }
+      // Never tripped: each write_file reset the read run.
+      expect(sb.inspect(call("read_file", '{"path":"/foo"}')).suppress).toBe(false);
     });
 
     it("non-exempt tools still trip after exempt reads", () => {

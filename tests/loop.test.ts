@@ -735,6 +735,110 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(summary?.content).toMatch(/stuck on a repeated tool call/);
   });
 
+  it("collapses a reasoning loop (identical thoughts, drifting tool args) to a forced summary", async () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    // Identical reasoning every iteration, but the tool ARGS drift so the
+    // storm breaker never trips — this is the "thinks in circles" case.
+    const reasoning = "I wonder whether the answer is right. Let me reconsider.";
+    const responses: FakeResponseShape[] = [
+      ...Array.from({ length: 4 }, (_, i) => ({
+        reasoning_content: reasoning,
+        content: "",
+        tool_calls: [
+          {
+            id: `c${i}`,
+            type: "function" as const,
+            function: { name: "probe", arguments: JSON.stringify({ i }) },
+          },
+        ],
+      })),
+      { content: "done." },
+    ];
+    const client = makeClient(responses);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 8,
+    });
+
+    const events: { role: string; forcedSummary?: boolean; content?: string }[] = [];
+    for await (const ev of loop.step("explore")) {
+      events.push({ role: ev.role, forcedSummary: ev.forcedSummary, content: ev.content });
+    }
+
+    expect(
+      events.some(
+        (e) => e.role === "warning" && /re-thinking the same point/i.test(e.content ?? ""),
+      ),
+    ).toBe(true);
+    const finals = events.filter((e) => e.role === "assistant_final");
+    expect(finals[finals.length - 1]?.forcedSummary).toBe(true);
+  });
+
+  it("does not collapse on only a couple of repeated thoughts (below the limit)", async () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    const reasoning = "I wonder whether the answer is right.";
+    const responses: FakeResponseShape[] = [
+      {
+        reasoning_content: reasoning,
+        content: "",
+        tool_calls: [
+          {
+            id: "c0",
+            type: "function" as const,
+            function: { name: "probe", arguments: JSON.stringify({ i: 0 }) },
+          },
+        ],
+      },
+      {
+        reasoning_content: reasoning,
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function" as const,
+            function: { name: "probe", arguments: JSON.stringify({ i: 1 }) },
+          },
+        ],
+      },
+      { content: "done." },
+    ];
+    const client = makeClient(responses);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 8,
+    });
+
+    const events: { role: string; forcedSummary?: boolean; content?: string }[] = [];
+    for await (const ev of loop.step("explore")) {
+      events.push({ role: ev.role, forcedSummary: ev.forcedSummary, content: ev.content });
+    }
+
+    expect(
+      events.some(
+        (e) => e.role === "warning" && /re-thinking the same point/i.test(e.content ?? ""),
+      ),
+    ).toBe(false);
+    expect(events.find((e) => e.role === "assistant_final" && e.forcedSummary)).toBeUndefined();
+  });
+
   it("context-guard diverts to summary when promptTokens > 80% of the window, tagging forcedSummary", async () => {
     const reg = new ToolRegistry();
     reg.register({

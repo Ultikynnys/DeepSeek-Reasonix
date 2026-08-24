@@ -294,6 +294,7 @@ export interface TranslationSchema {
     providerErrorRetry: string;
     ollamaTruncatedRetry: string;
     ollamaTruncatedGiveUp: string;
+    reasoningLoop: string;
     forcingSummary: string;
     iterLimitReached: string;
     iterLimitGrace: string;

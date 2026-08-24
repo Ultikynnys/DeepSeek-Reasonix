@@ -679,6 +679,8 @@ export const EN: TranslationSchema = {
       "The model hit its output-token limit mid-response — continuing generation from where it stopped.",
     ollamaTruncatedGiveUp:
       "The model kept hitting its output-token limit after {max} continuations — ending the turn with the partial response. Raise the per-turn output cap (/max-tokens) or switch model.",
+    reasoningLoop:
+      "The model is stuck re-thinking the same point without making progress — collapsing to a summary so you can redirect from a fresh recap.",
     forcingSummary:
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
     iterLimitReached:
