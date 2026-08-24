@@ -4681,6 +4681,10 @@ export function App() {
               void openUrl(ev.url).catch((err) => console.error("openUrl failed", err));
             }
 
+            if (ev.type === "gemini_oauth_begin_result") {
+              void openUrl(ev.url).catch((err) => console.error("openUrl failed", err));
+            }
+
             if (ev.type === "$jobs") {
               for (const id of dispatchersRef.current.keys()) {
                 deliverToTab(id, { t: "incoming", event: ev });
