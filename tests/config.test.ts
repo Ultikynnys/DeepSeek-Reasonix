@@ -52,6 +52,7 @@ import {
   resolveSemanticEmbeddingConfig,
   resolveThemePreference,
   saveAntigravityOAuth,
+  saveAntigravityOAuthClient,
   saveApiKey,
   saveBaseUrl,
   saveContextTokens,
@@ -536,6 +537,12 @@ describe("config", () => {
         clientId: undefined,
         clientSecret: undefined,
       });
+    });
+
+    it("saveAntigravityOAuthClient persists the client id/secret", () => {
+      saveAntigravityOAuthClient("  client-id  ", "client-secret", path);
+      expect(readConfig(path).antigravityOAuthClientId).toBe("client-id");
+      expect(readConfig(path).antigravityOAuthClientSecret).toBe("client-secret");
     });
 
     it("gemini-* ids route to the gemini provider and the Cloud Code base URL", () => {

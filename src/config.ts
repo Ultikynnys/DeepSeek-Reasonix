@@ -1252,6 +1252,18 @@ export function loadAntigravityOAuthClient(path: string = defaultConfigPath()): 
   };
 }
 
+/** Persist the Google OAuth client id/secret from the settings panel. */
+export function saveAntigravityOAuthClient(
+  clientId: string,
+  clientSecret: string,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.antigravityOAuthClientId = clientId.trim();
+  cfg.antigravityOAuthClientSecret = clientSecret.trim();
+  writeConfig(cfg, path);
+}
+
 /** Windows: case-insensitive — NTFS treats `F:\Foo` and `f:\foo` as one directory (#402). */
 function findProjectKey(cfg: ReasonixConfig, rootDir: string): string | undefined {
   const projects = cfg.projects;

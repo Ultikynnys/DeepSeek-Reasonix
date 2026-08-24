@@ -600,6 +600,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
   | { cmd: "setup_save_openai_key"; key: string }
+  | { cmd: "setup_save_antigravity_client"; clientId: string; clientSecret: string }
   | { cmd: "oauth_begin" }
   | { cmd: "oauth_cancel" }
   | { cmd: "oauth_signout" }

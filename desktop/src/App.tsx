@@ -3330,6 +3330,9 @@ function TabRuntime({
               sendRpc({ cmd: "gemini_oauth_cancel" });
             }}
             onAntigravityOAuthSignOut={() => sendRpc({ cmd: "gemini_oauth_signout" })}
+            onSaveAntigravityClient={(clientId, clientSecret) =>
+              sendRpc({ cmd: "setup_save_antigravity_client", clientId, clientSecret })
+            }
             onPickWorkspace={pickWorkspace}
             onAddMcpSpec={addMcpSpec}
             onRemoveMcpSpec={removeMcpSpec}

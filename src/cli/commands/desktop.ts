@@ -112,6 +112,7 @@ import {
   readConfig,
   webSearchEngine as readWebSearchEngine,
   saveAntigravityOAuth,
+  saveAntigravityOAuthClient,
   saveApiKey,
   saveBaseUrl,
   saveContextTokens,
@@ -3982,6 +3983,31 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       } catch (err) {
         emit(
           { type: "$error", message: `saveOpenAIApiKey failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
+    if (msg.cmd === "setup_save_antigravity_client") {
+      const clientId = msg.clientId.trim();
+      const clientSecret = msg.clientSecret.trim();
+      if (!clientId || !clientSecret) {
+        emit(
+          { type: "$error", message: "Both the client id and client secret are required." },
+          tab.id,
+        );
+        return;
+      }
+      try {
+        saveAntigravityOAuthClient(clientId, clientSecret);
+        lastAntigravityOAuthError = null;
+        emitSettings(tab);
+      } catch (err) {
+        emit(
+          {
+            type: "$error",
+            message: `saveAntigravityOAuthClient failed: ${(err as Error).message}`,
+          },
           tab.id,
         );
       }

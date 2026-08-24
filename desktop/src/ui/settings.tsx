@@ -97,6 +97,7 @@ export function SettingsModal({
   onAntigravityOAuthBegin,
   onAntigravityOAuthCancel,
   onAntigravityOAuthSignOut,
+  onSaveAntigravityClient,
   ollamaBaseUrl,
   ollamaModels,
   ollamaModelsError,
@@ -161,6 +162,7 @@ export function SettingsModal({
   onAntigravityOAuthBegin: () => void;
   onAntigravityOAuthCancel: () => void;
   onAntigravityOAuthSignOut: () => void;
+  onSaveAntigravityClient: (clientId: string, clientSecret: string) => void;
   onPickWorkspace: () => void;
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
@@ -281,6 +283,7 @@ export function SettingsModal({
                 onAntigravityBegin={onAntigravityOAuthBegin}
                 onAntigravityCancel={onAntigravityOAuthCancel}
                 onAntigravitySignOut={onAntigravityOAuthSignOut}
+                onSaveAntigravityClient={onSaveAntigravityClient}
               />
             )}
             {page === "mcp" && (
@@ -983,6 +986,7 @@ export function AntigravitySection({
   onBegin,
   onCancel,
   onSignOut,
+  onSaveClient,
 }: {
   signedIn: boolean;
   account?: string;
@@ -992,7 +996,10 @@ export function AntigravitySection({
   onBegin: () => void;
   onCancel: () => void;
   onSignOut: () => void;
+  onSaveClient: (clientId: string, clientSecret: string) => void;
 }) {
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
   return (
     <section className="section">
       <div className="stitle">{t("settings.antigravitySection")}</div>
@@ -1040,6 +1047,46 @@ export function AntigravitySection({
           </div>
         </div>
       ) : null}
+      <div className="setting-row">
+        <div className="l">
+          <div className="n">{t("settings.antigravityClientId")}</div>
+          <div className="h">{t("settings.antigravityClientIdHint")}</div>
+        </div>
+        <input
+          className="field mono"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          placeholder="…apps.googleusercontent.com"
+        />
+      </div>
+      <div className="setting-row">
+        <div className="l">
+          <div className="n">{t("settings.antigravityClientSecret")}</div>
+          <div className="h">{t("settings.antigravityClientSecretHint")}</div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            className="field mono"
+            type="password"
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+            placeholder="GOCSPX-…"
+          />
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!clientId.trim() || !clientSecret.trim()}
+            onClick={() => {
+              if (!clientId.trim() || !clientSecret.trim()) return;
+              onSaveClient(clientId.trim(), clientSecret.trim());
+              setClientId("");
+              setClientSecret("");
+            }}
+          >
+            {t("settings.apiKeySave")}
+          </button>
+        </div>
+      </div>
     </section>
   );
 }
@@ -1075,6 +1122,7 @@ function PageModels({
   onAntigravityBegin,
   onAntigravityCancel,
   onAntigravitySignOut,
+  onSaveAntigravityClient,
 }: {
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
@@ -1110,6 +1158,7 @@ function PageModels({
   onAntigravityBegin: () => void;
   onAntigravityCancel: () => void;
   onAntigravitySignOut: () => void;
+  onSaveAntigravityClient: (clientId: string, clientSecret: string) => void;
 }) {
   const [draft, setDraft] = useState(settings.model);
   useEffect(() => setDraft(settings.model), [settings.model]);
@@ -1279,6 +1328,7 @@ function PageModels({
         onBegin={onAntigravityBegin}
         onCancel={onAntigravityCancel}
         onSignOut={onAntigravitySignOut}
+        onSaveClient={onSaveAntigravityClient}
       />
     </>
   );
