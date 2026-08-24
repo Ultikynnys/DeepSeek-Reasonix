@@ -3,6 +3,12 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import {
+  GEMINI_MODELS,
+  GPT56_MODELS,
+  KNOWN_MODELS,
+  SUPPORTED_OFFICIAL_MODELS,
+} from "@reasonix/core-utils";
 import { z } from "zod";
 import { atomicWriteSync, tmpSiblingPath } from "./core/atomic-write.js";
 import {
@@ -22,35 +28,11 @@ import {
 
 export const DEFAULT_MODEL = "deepseek-v4-flash";
 
-/** Models the official api.deepseek.com endpoint currently accepts. v3-era
- *  `deepseek-chat`/`deepseek-reasoner` are gone — sending them produces a 400. */
-export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "deepseek-v4-flash-vision-exp",
-];
-
-/** GPT-5.6 family (Sol/Terra/Luna) — OpenAI's flagship series (2026-07 GA).
- *  The bare `gpt-5.6` alias is deliberately NOT offered. All tiers accept
- *  reasoning_effort none|low|medium|high|xhigh|max. */
-export const GPT56_MODELS: readonly string[] = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
-
-/** Gemini models served through the Antigravity/Cloud Code API on the user's
- *  Antigravity quota (Starter tier for free/Google AI Plus accounts). These
- *  route to the `gemini` provider and authenticate via Google OAuth. */
-export const GEMINI_MODELS: readonly string[] = [
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
-  "gemini-3.6-flash",
-  "gemini-3.7-flash",
-];
+/** Built-in model groups remain public from config for existing library consumers. */
+export { GEMINI_MODELS, GPT56_MODELS, SUPPORTED_OFFICIAL_MODELS };
 
 /** Everything the default endpoints accept without a custom baseUrl, across providers. */
-export const SUPPORTED_MODELS: readonly string[] = [
-  ...SUPPORTED_OFFICIAL_MODELS,
-  ...GPT56_MODELS,
-  ...GEMINI_MODELS,
-];
+export const SUPPORTED_MODELS: readonly string[] = KNOWN_MODELS;
 
 /** Which provider a model id routes to. `gpt-` prefixed ids → OpenAI,
  *  `ollama/` prefixed ids → Ollama (local daemon or cloud), `gemini-` prefixed

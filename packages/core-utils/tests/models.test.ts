@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { KNOWN_MODELS, modelAcceptsImages } from "../src/models.js";
+import {
+  GEMINI_MODELS,
+  GPT56_MODELS,
+  KNOWN_MODELS,
+  SUPPORTED_OFFICIAL_MODELS,
+  modelAcceptsImages,
+} from "../src/models.js";
 
 describe("modelAcceptsImages", () => {
   it("accepts the GPT-5.6 family", () => {
@@ -59,5 +65,18 @@ describe("KNOWN_MODELS", () => {
     expect(KNOWN_MODELS).toContain("gpt-5.6-sol");
     expect(KNOWN_MODELS).toContain("gpt-5.6-terra");
     expect(KNOWN_MODELS).toContain("gpt-5.6-luna");
+  });
+
+  it("offers every Gemini model available through Antigravity", () => {
+    expect(GEMINI_MODELS.length).toBeGreaterThan(0);
+    for (const model of GEMINI_MODELS) expect(KNOWN_MODELS).toContain(model);
+  });
+
+  it("is exactly the combined built-in provider catalog", () => {
+    expect(KNOWN_MODELS).toEqual([
+      ...SUPPORTED_OFFICIAL_MODELS,
+      ...GPT56_MODELS,
+      ...GEMINI_MODELS,
+    ]);
   });
 });

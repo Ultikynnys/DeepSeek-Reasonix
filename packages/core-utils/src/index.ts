@@ -28,7 +28,13 @@ export type { ImageMention } from "./image-attach.js";
 export { formatBytes } from "./format.js";
 export { messageOf } from "./error.js";
 export { DAY_MS } from "./time.js";
-export { KNOWN_MODELS, modelAcceptsImages } from "./models.js";
+export {
+  GEMINI_MODELS,
+  GPT56_MODELS,
+  KNOWN_MODELS,
+  SUPPORTED_OFFICIAL_MODELS,
+  modelAcceptsImages,
+} from "./models.js";
 export type {
   ConfirmationChoice,
   PlanVerdict,

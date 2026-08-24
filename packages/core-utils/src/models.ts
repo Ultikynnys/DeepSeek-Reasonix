@@ -1,16 +1,32 @@
-/** Model capability predicates — shared by the daemon (src/) and the desktop
- *  UI so the two sides can't drift on which model ids accept images. */
+/** Built-in model catalog and capability predicates shared by the daemon and desktop UI. */
 
-/** Model ids offered in the desktop model pickers (composer dropdown and
- *  Settings → Models): DeepSeek's official line plus the GPT-5.6 family.
- *  One list — picker surfaces must not drift on which ids are selectable. */
-export const KNOWN_MODELS: readonly string[] = [
+/** Models accepted by the official DeepSeek endpoint. */
+export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
   "deepseek-v4-flash",
   "deepseek-v4-pro",
   "deepseek-v4-flash-vision-exp",
+];
+
+/** GPT-5.6 models accepted by the OpenAI endpoint. */
+export const GPT56_MODELS: readonly string[] = [
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
+];
+
+/** Gemini models served through Google Antigravity OAuth and Cloud Code. */
+export const GEMINI_MODELS: readonly string[] = [
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-3.6-flash",
+  "gemini-3.7-flash",
+];
+
+/** Model ids offered by the default endpoints and desktop model pickers. */
+export const KNOWN_MODELS: readonly string[] = [
+  ...SUPPORTED_OFFICIAL_MODELS,
+  ...GPT56_MODELS,
+  ...GEMINI_MODELS,
 ];
 
 /** Model ids that accept image attachments in user messages — the GPT-5.6
