@@ -675,6 +675,10 @@ export const EN: TranslationSchema = {
       "The model returned an empty response twice in a row — ending the turn without an answer. Try again or /retry.",
     providerErrorRetry:
       "The model provider returned an error before producing a visible response — retrying automatically.",
+    ollamaTruncatedRetry:
+      "The model hit its output-token limit mid-response — continuing generation from where it stopped.",
+    ollamaTruncatedGiveUp:
+      "The model kept hitting its output-token limit after {max} continuations — ending the turn with the partial response. Raise the per-turn output cap (/max-tokens) or switch model.",
     forcingSummary:
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
     iterLimitReached:

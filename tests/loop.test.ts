@@ -3373,6 +3373,161 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
   });
 });
 
+describe("CacheFirstLoop — ollama length-truncation continuation", () => {
+  // Route /api/show (num_ctx probe) separately so it can't consume a chat
+  // frame. Chat frames: `first` then `cont`; when `truncateAll` is set, every
+  // chat call returns done_reason "length" to exercise the give-up cap.
+  const ollamaFetch = (
+    first: string,
+    cont: string,
+    truncateAll = false,
+  ): { fetch: typeof fetch; chatCalls: () => number } => {
+    let chatCalls = 0;
+    const fetch = vi.fn(async (url: unknown) => {
+      if (String(url).includes("/api/show")) {
+        return new Response(JSON.stringify({ model_info: { "qwen3.32b.context_length": 32768 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      chatCalls++;
+      const length = truncateAll || chatCalls === 1;
+      const done = length ? "length" : "stop";
+      const content = chatCalls === 1 ? first : cont;
+      const lines = [
+        JSON.stringify({
+          model: "qwen3:32b",
+          message: { role: "assistant", content },
+          done: false,
+        }),
+        JSON.stringify({
+          model: "qwen3:32b",
+          message: { role: "assistant", content: "" },
+          done: true,
+          done_reason: done,
+          prompt_eval_count: 5,
+          eval_count: 1,
+        }),
+      ];
+      return new Response(new TextEncoder().encode(`${lines.join("\n")}\n`), {
+        status: 200,
+        headers: { "Content-Type": "application/x-ndjson" },
+      });
+    }) as unknown as typeof fetch;
+    return { fetch, chatCalls: () => chatCalls };
+  };
+
+  it("continues an ollama stream that truncates at num_predict", async () => {
+    const { fetch, chatCalls } = ollamaFetch("Hel", "lo world");
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+      model: "ollama/qwen3:32b",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    expect(chatCalls()).toBe(2);
+    // The partial was streamed, then the loop re-requested and the
+    // continuation finalized the turn.
+    expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("lo world");
+    expect(
+      events
+        .filter((ev) => ev.role === "warning")
+        .some((ev) => ev.content?.includes("continuing generation")),
+    ).toBe(true);
+  });
+
+  it("gives up (does not loop forever) when the model keeps truncating", async () => {
+    const { fetch, chatCalls } = ollamaFetch("Hel", "lo", true);
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+      model: "ollama/qwen3:32b",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    // Cap of 3 continuations: initial + 3 continuations, then give up.
+    expect(chatCalls()).toBe(CacheFirstLoop.MAX_OLLAMA_CONTINUATIONS + 1);
+    expect(
+      events
+        .filter((ev) => ev.role === "warning")
+        .some((ev) => ev.content?.includes("after 3 continuations")),
+    ).toBe(true);
+  });
+
+  it("does not continue when a tool call was cut mid-stream", async () => {
+    // First call truncates carrying a partial tool call (no result) — the loop
+    // must NOT append a phantom tool_call and re-request; it ends the turn.
+    const fetch = vi.fn(async (url: unknown) => {
+      if (String(url).includes("/api/show")) {
+        return new Response(JSON.stringify({ model_info: { "qwen3.32b.context_length": 32768 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const lines = [
+        JSON.stringify({
+          model: "qwen3:32b",
+          message: {
+            role: "assistant",
+            tool_calls: [{ function: { name: "read_file", arguments: { path: "a.ts" } } }],
+          },
+          done: false,
+        }),
+        JSON.stringify({
+          model: "qwen3:32b",
+          message: { role: "assistant", content: "" },
+          done: true,
+          done_reason: "length",
+          prompt_eval_count: 5,
+          eval_count: 1,
+        }),
+      ];
+      return new Response(new TextEncoder().encode(`${lines.join("\n")}\n`), {
+        status: 200,
+        headers: { "Content-Type": "application/x-ndjson" },
+      });
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+      model: "ollama/qwen3:32b",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    // Only one chat call — no continuation, and no "continuing generation" warning.
+    expect(
+      events
+        .filter((ev) => ev.role === "warning")
+        .some((ev) => ev.content?.includes("continuing generation")),
+    ).toBe(false);
+  });
+});
+
 describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
   // Build a client that always returns a tool call — the loop would
   // run forever without the iteration cap. Use unique call IDs AND

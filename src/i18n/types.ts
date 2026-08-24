@@ -292,6 +292,8 @@ export interface TranslationSchema {
     emptyResponseRetry: string;
     emptyResponseGiveUp: string;
     providerErrorRetry: string;
+    ollamaTruncatedRetry: string;
+    ollamaTruncatedGiveUp: string;
     forcingSummary: string;
     iterLimitReached: string;
     iterLimitGrace: string;

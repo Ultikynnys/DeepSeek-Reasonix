@@ -22,6 +22,8 @@ export interface StreamModelResult {
   reasoningContent: string;
   toolCalls: ToolCall[];
   usage: Usage | null;
+  /** Last non-empty finish reason from the stream (e.g. ollama `done_reason`). */
+  finishReason?: string;
 }
 
 export async function* streamModelResponse(
@@ -31,6 +33,7 @@ export async function* streamModelResponse(
   let assistantContent = "";
   let reasoningContent = "";
   let usage: Usage | null = null;
+  let finishReason: string | undefined;
   const callBuf: Map<number, ToolCall> = new Map();
   const readyIndices = new Set<number>();
   let emittedOutput = false;
@@ -102,6 +105,7 @@ export async function* streamModelResponse(
         }
       }
       if (chunk.usage) usage = chunk.usage;
+      if (chunk.finishReason) finishReason = chunk.finishReason;
     }
   } catch (err) {
     // The loop may safely replay a body-read failure only when no assistant
@@ -118,5 +122,6 @@ export async function* streamModelResponse(
     reasoningContent,
     toolCalls: [...callBuf.values()],
     usage,
+    finishReason,
   };
 }

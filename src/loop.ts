@@ -1,6 +1,6 @@
 import { messageOf } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "./client.js";
-import type { EditMode, ReasoningEffort } from "./config.js";
+import { type EditMode, type ReasoningEffort, providerForModel } from "./config.js";
 import type { PauseGate } from "./core/pause-gate.js";
 import { pauseGate as defaultPauseGate } from "./core/pause-gate.js";
 import { type ResolvedHook, runHooks } from "./hooks.js";
@@ -215,6 +215,9 @@ export class CacheFirstLoop {
    *  burning unlimited API budget. The model gets one final force-summary
    *  call when the cap fires. Override via REASONIX_MAX_ITER env var. */
   static readonly DEFAULT_MAX_ITER_PER_TURN = 50;
+  /** Ollama length-truncation continuations allowed per turn — a model stuck
+   *  regenerating a partial answer must not loop forever. */
+  static readonly MAX_OLLAMA_CONTINUATIONS = 3;
   /** Files the model has read this session; gates edit_file / multi_edit so SEARCH text matches on-disk bytes. Cleared on fold / mechanical truncate (the model's byte-level view of the elided history is gone). In-memory only — naturally empty on resume. */
   readonly readTracker = new ReadTracker();
 
@@ -306,6 +309,8 @@ export class CacheFirstLoop {
   private _emptyResponseRetried = false;
   /** Latched once per turn — replay one provider failure before any output reached the UI. */
   private _providerErrorRetried = false;
+  /** Count of ollama length-truncation continuations this turn — caps the resume loop. */
+  private _ollamaContinuations = 0;
   private context!: ContextManager;
   /** Prefix-shape snapshot of the last sent request — next turn's churn is attributed against it. */
   private _lastCacheShape: CacheShapeSnapshot | null = null;
@@ -993,6 +998,7 @@ export class CacheFirstLoop {
     this._foldedThisTurn = false;
     this._emptyResponseRetried = false;
     this._providerErrorRetried = false;
+    this._ollamaContinuations = 0;
     // Fresh controller for this turn: the prior step's signal has
     // already fired (or stayed clean); either way we don't want its
     // state to bleed into the new turn.
@@ -1231,6 +1237,7 @@ export class CacheFirstLoop {
       let reasoningContent = "";
       let toolCalls: ToolCall[] = [];
       let usage: TurnStats["usage"] | null = null;
+      let finishReason: string | undefined;
       const callModel = this.model;
 
       // Snapshot prefix evidence from the same turn-start tool list sent to the
@@ -1253,6 +1260,7 @@ export class CacheFirstLoop {
           reasoningContent = result.reasoningContent;
           toolCalls = result.toolCalls;
           usage = result.usage;
+          finishReason = result.finishReason;
         } else {
           const resp = await this.client.chat({
             model: callModel,
@@ -1351,6 +1359,43 @@ export class CacheFirstLoop {
         this._steerQueue.length = 0;
         restoreModelIfNeeded();
         return;
+      }
+
+      // Ollama reports `done_reason: "length"` when generation is cut off at
+      // num_predict (the output-token cap). The partial answer is already
+      // rendered; append it to the log and re-request so the model continues
+      // from where it stopped, instead of ending the turn on a truncated
+      // answer. Bounded per turn so a model stuck regenerating can't loop.
+      // Only continue when there is real content to resume from AND no tool
+      // call was cut mid-stream — a truncated tool_call has no result to feed
+      // back, and appending it as a phantom would confuse the next request.
+      const ollamaTruncated =
+        this.stream && finishReason === "length" && providerForModel(callModel) === "ollama";
+      const partialHasContent = assistantContent.length > 0 || reasoningContent.length > 0;
+      if (ollamaTruncated && partialHasContent && toolCalls.length === 0) {
+        if (this._ollamaContinuations >= CacheFirstLoop.MAX_OLLAMA_CONTINUATIONS) {
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "high",
+            content: t("loop.ollamaTruncatedGiveUp", {
+              max: CacheFirstLoop.MAX_OLLAMA_CONTINUATIONS,
+            }),
+          };
+          // fall through and end the turn with the partial content
+        } else {
+          this._ollamaContinuations++;
+          this.appendAndPersist(
+            buildAssistantMessage(assistantContent, toolCalls, callModel, reasoningContent),
+          );
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "low",
+            content: t("loop.ollamaTruncatedRetry"),
+          };
+          continue;
+        }
       }
 
       if (parseNeedsProEscalation(assistantContent) && callModel !== "deepseek-v4-pro") {
