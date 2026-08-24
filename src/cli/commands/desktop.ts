@@ -77,10 +77,12 @@ import {
   DEFAULT_OLLAMA_CHAT_URL,
   anyProviderConfigured,
   bridgeEndpointEnv,
+  defaultConfigPath,
   deriveNativeOllamaOrigin,
   isOpenAIStandardEndpoint,
   isPlausibleKey,
   isReasoningEffort,
+  loadAntigravityOAuthClient,
   loadApiKey,
   loadBraveApiKey,
   loadContextTokens,
@@ -779,7 +781,8 @@ let lastAntigravityOAuthError: string | null = null;
  *  Onboards (loadCodeAssist/onboardUser) once when no project id is stored yet,
  *  persisting the resolved project. Returns null when not signed in. */
 async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId?: string } | null> {
-  const accessToken = await resolveAntigravityToken();
+  const { clientId, clientSecret } = loadAntigravityOAuthClient();
+  const accessToken = await resolveAntigravityToken(defaultConfigPath(), clientId, clientSecret);
   if (!accessToken) return null;
   const creds = readConfig().antigravityOAuth;
   let projectId = creds?.projectId;
@@ -3886,7 +3889,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       antigravityOAuthGen++;
       if (pendingAntigravityOAuth) pendingAntigravityOAuth.cancel();
       const gen = antigravityOAuthGen;
-      void beginAntigravityOAuthFlow()
+      const { clientId, clientSecret } = loadAntigravityOAuthClient();
+      if (!clientId || !clientSecret) {
+        lastAntigravityOAuthError =
+          "Antigravity OAuth client id/secret not configured — set them in config.json.";
+        emit({ type: "$error", message: lastAntigravityOAuthError }, tab.id);
+        emitSettings(tab);
+        return;
+      }
+      void beginAntigravityOAuthFlow({ clientId, clientSecret })
         .then((flow) => {
           pendingAntigravityOAuth = flow;
           emit({ type: "gemini_oauth_begin_result", url: flow.url }, tab.id);

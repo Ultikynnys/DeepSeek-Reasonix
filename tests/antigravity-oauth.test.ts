@@ -17,8 +17,6 @@ const TEST_CLIENT_ID = "test-client-id";
 const TEST_CLIENT_SECRET = "test-client-secret";
 
 const ENV_KEYS = [
-  "ANTIGRAVITY_OAUTH_CLIENT_ID",
-  "ANTIGRAVITY_OAUTH_CLIENT_SECRET",
   "ANTIGRAVITY_OAUTH_SCOPE",
   "ANTIGRAVITY_OAUTH_REDIRECT_URI",
   "ANTIGRAVITY_AUTH_URL",
@@ -43,8 +41,6 @@ describe("antigravity-oauth", () => {
     dir = mkdtempSync(join(tmpdir(), "antigravity-oauth-"));
     path = join(dir, "config.json");
     for (const k of ENV_KEYS) delete process.env[k];
-    process.env.ANTIGRAVITY_OAUTH_CLIENT_ID = TEST_CLIENT_ID;
-    process.env.ANTIGRAVITY_OAUTH_CLIENT_SECRET = TEST_CLIENT_SECRET;
   });
 
   afterEach(() => {
@@ -110,7 +106,9 @@ describe("antigravity-oauth", () => {
       path,
     );
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    expect(await resolveAntigravityToken(path)).toBe("at-fresh");
+    expect(await resolveAntigravityToken(path, TEST_CLIENT_ID, TEST_CLIENT_SECRET)).toBe(
+      "at-fresh",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -122,14 +120,14 @@ describe("antigravity-oauth", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ access_token: "at-new", expires_in: 3600 }),
     );
-    expect(await resolveAntigravityToken(path)).toBe("at-new");
+    expect(await resolveAntigravityToken(path, TEST_CLIENT_ID, TEST_CLIENT_SECRET)).toBe("at-new");
     const stored = readConfig(path).antigravityOAuth;
     expect(stored?.accessToken).toBe("at-new");
     expect(stored?.refreshToken).toBe("rt");
   });
 
   it("resolveAntigravityToken returns undefined without creds", async () => {
-    expect(await resolveAntigravityToken(path)).toBeUndefined();
+    expect(await resolveAntigravityToken(path, TEST_CLIENT_ID, TEST_CLIENT_SECRET)).toBeUndefined();
   });
 
   it("signOutAntigravity clears stored creds", async () => {

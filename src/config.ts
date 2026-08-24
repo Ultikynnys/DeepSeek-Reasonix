@@ -256,6 +256,11 @@ export interface ReasonixConfig {
   /** Google Antigravity OAuth tokens — set by the "Sign in with Google" flow;
    *  powers gemini-* models on the Antigravity quota. */
   antigravityOAuth?: AntigravityOAuthCreds;
+  /** Google OAuth client id for the Antigravity sign-in flow (the public Gemini
+   *  CLI client). Passed to the OAuth flow as an input parameter. */
+  antigravityOAuthClientId?: string;
+  /** Google OAuth client secret for the Antigravity sign-in flow. */
+  antigravityOAuthClientSecret?: string;
   /** Persisted DeepSeek model id — `/model <id>` and the dashboard model picker write through this. */
   model?: string;
   editMode?: EditMode;
@@ -1232,6 +1237,19 @@ export function clearAntigravityOAuth(path: string = defaultConfigPath()): void 
   if (!cfg.antigravityOAuth) return;
   const { antigravityOAuth: _drop, ...rest } = cfg;
   writeConfig(rest, path);
+}
+
+/** Google OAuth client id/secret for the Antigravity sign-in flow — read from
+ *  config and passed to the OAuth flow as input parameters. */
+export function loadAntigravityOAuthClient(path: string = defaultConfigPath()): {
+  clientId?: string;
+  clientSecret?: string;
+} {
+  const cfg = readConfig(path);
+  return {
+    clientId: cfg.antigravityOAuthClientId?.trim() || undefined,
+    clientSecret: cfg.antigravityOAuthClientSecret?.trim() || undefined,
+  };
 }
 
 /** Windows: case-insensitive — NTFS treats `F:\Foo` and `f:\foo` as one directory (#402). */

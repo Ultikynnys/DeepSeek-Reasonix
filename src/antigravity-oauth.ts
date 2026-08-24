@@ -11,8 +11,8 @@ import {
   saveAntigravityOAuth,
 } from "./config.js";
 
-/** OAuth client for the Antigravity/Gemini CLI flow — env-provided so the repo
- *  passes secret scanning (ANTIGRAVITY_OAUTH_CLIENT_ID / _CLIENT_SECRET). */
+/** OAuth client for the Antigravity/Gemini CLI flow — client id/secret are
+ *  passed in as input parameters (see loadAntigravityOAuthClient). */
 
 export const ANTIGRAVITY_DEFAULT_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const ANTIGRAVITY_DEFAULT_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -46,18 +46,6 @@ export function antigravityTokenUrl(): string {
 
 export function antigravityUserinfoUrl(): string {
   return envOr(ANTIGRAVITY_DEFAULT_USERINFO_URL, "ANTIGRAVITY_USERINFO_URL");
-}
-
-export function antigravityClientId(): string {
-  const v = process.env.ANTIGRAVITY_OAUTH_CLIENT_ID?.trim();
-  if (!v) throw new Error("ANTIGRAVITY_OAUTH_CLIENT_ID is required for Antigravity sign-in");
-  return v;
-}
-
-export function antigravityClientSecret(): string {
-  const v = process.env.ANTIGRAVITY_OAUTH_CLIENT_SECRET?.trim();
-  if (!v) throw new Error("ANTIGRAVITY_OAUTH_CLIENT_SECRET is required for Antigravity sign-in");
-  return v;
 }
 
 export function randomOAuthState(): string {
@@ -175,6 +163,8 @@ let refreshInFlight: Promise<string | undefined> | null = null;
  *  refresh fails (callers fall back to a static key or error). */
 export async function resolveAntigravityToken(
   path: string = defaultConfigPath(),
+  clientId?: string,
+  clientSecret?: string,
 ): Promise<string | undefined> {
   const creds = readConfig(path).antigravityOAuth;
   if (!creds?.accessToken) return undefined;
@@ -185,8 +175,8 @@ export async function resolveAntigravityToken(
     try {
       const next = await refreshAntigravityToken(
         creds.refreshToken,
-        antigravityClientId(),
-        antigravityClientSecret(),
+        clientId ?? "",
+        clientSecret ?? "",
       );
       saveAntigravityOAuth({ ...next, account: creds.account, projectId: creds.projectId }, path);
       return next.accessToken;
@@ -309,11 +299,11 @@ function errorPage(msg: string): string {
 
 /** Starts the browser OAuth dance: a one-shot localhost callback server and the
  *  authorize URL. `done` rejects on error, cancel, or the 10-minute timeout. */
-export async function beginAntigravityOAuthFlow(
-  opts: {
-    timeoutMs?: number;
-  } = {},
-): Promise<OAuthFlow> {
+export async function beginAntigravityOAuthFlow(opts: {
+  clientId: string;
+  clientSecret: string;
+  timeoutMs?: number;
+}): Promise<OAuthFlow> {
   const state = randomOAuthState();
   const timeoutMs = opts.timeoutMs ?? OAUTH_FLOW_TIMEOUT_MS;
   let settled = false;
@@ -359,8 +349,8 @@ export async function beginAntigravityOAuthFlow(
       return;
     }
     void exchangeAntigravityCode({
-      clientId: antigravityClientId(),
-      clientSecret: antigravityClientSecret(),
+      clientId: opts.clientId,
+      clientSecret: opts.clientSecret,
       redirectUri,
       code,
     })
@@ -403,7 +393,7 @@ export async function beginAntigravityOAuthFlow(
   if (!envRedirect) redirectUri = `http://localhost:${port}${OAUTH_CALLBACK_PATH}`;
 
   const url = buildAuthorizeUrl({
-    clientId: antigravityClientId(),
+    clientId: opts.clientId,
     redirectUri,
     state,
   });
