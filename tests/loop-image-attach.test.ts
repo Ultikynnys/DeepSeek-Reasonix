@@ -62,6 +62,29 @@ describe("CacheFirstLoop — image attachments (OpenAI vision parts)", () => {
     ]);
   });
 
+  it("surfaces attached image file paths so the agent can open/modify them", async () => {
+    const { client, captured } = makeFakeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: false,
+    });
+    await consume(loop, "edit this image", [{ url: DATA_URL, path: "C:\\assets\\logo.png" }]);
+
+    const userMsg = captured[0]!.messages.find((m) => m.role === "user");
+    const parts = userMsg?.content as Array<{
+      type: string;
+      text?: string;
+      image_url?: { url: string };
+    }>;
+    // The file path is surfaced as text so the agent knows where to open/modify it.
+    expect(parts.some((p) => p.type === "text" && p.text?.includes("C:\\assets\\logo.png"))).toBe(
+      true,
+    );
+    // The pixels are still attached for the vision model.
+    expect(parts.some((p) => p.type === "image_url" && p.image_url?.url === DATA_URL)).toBe(true);
+  });
+
   it("forwards the turn's attached images into tool dispatch (see_image)", async () => {
     const { client, captured } = makeFakeClient([
       {

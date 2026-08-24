@@ -66,7 +66,7 @@ import { countTokensBounded } from "./tokenizer.js";
 import { ToolRegistry, isReadOnlyTool } from "./tools.js";
 import { ReadTracker } from "./tools/read-tracker.js";
 import { USER_CANCEL_NOTE } from "./tools/shell.js";
-import type { ChatMessage, ToolCall, ToolSpec, UserContentPart } from "./types.js";
+import type { ChatMessage, ToolCall, ToolSpec, TurnImage, UserContentPart } from "./types.js";
 
 export const MID_TURN_STEER_WRAPPER =
   "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]";
@@ -79,18 +79,32 @@ function parseNeedsProEscalation(content: string): boolean {
   return /^\s*<<<NEEDS_PRO(?::\s*[^>\n]{1,150})?>>>/.test(content);
 }
 
+/** Coerce caller-supplied images (plain data URLs or richer descriptors) into
+ *  TurnImage descriptors. */
+function toTurnImages(images?: ReadonlyArray<string | TurnImage>): TurnImage[] {
+  if (!images) return [];
+  return images.map((d) => (typeof d === "string" ? { url: d } : d));
+}
+
 /** User content for the log/request: plain text when no images are attached
- *  (byte-identical to pre-vision behavior — keeps the prefix cache stable),
- *  OpenAI content parts when images are attached (detail:"low", 85 tokens). */
+ *  (prefix-cache stable); content parts when they are — image URLs for the
+ *  vision API plus source file paths so the agent can open/modify them. */
 function buildUserContent(
   text: string,
-  images?: ReadonlyArray<string>,
+  images?: ReadonlyArray<TurnImage>,
 ): string | UserContentPart[] {
   if (!images || images.length === 0) return text;
   const parts: UserContentPart[] = [];
   if (text.length > 0) parts.push({ type: "text", text });
-  for (const url of images) {
-    parts.push({ type: "image_url", image_url: { url, detail: "low" } });
+  const paths = images.filter((d) => d.path).map((d) => d.path as string);
+  if (paths.length > 0) {
+    parts.push({
+      type: "text",
+      text: `Attached image file(s) — you can open and modify these with your file tools:\n${paths.map((p) => `- ${p}`).join("\n")}`,
+    });
+  }
+  for (const d of images) {
+    parts.push({ type: "image_url", image_url: { url: d.url, detail: "low" } });
   }
   return parts;
 }
@@ -257,9 +271,10 @@ export class CacheFirstLoop {
   /** Set true when a steer was consumed this turn; cleared on next step() entry. */
   private _steerConsumed = false;
 
-  /** Data-URL images attached to the current user turn — forwarded into every
-   *  tool dispatch ctx so vision tools (see_image) can confirm attachments. */
-  private _turnImages: readonly string[] = [];
+  /** Turn images — data URLs for the vision API plus source file paths. URLs
+   *  reach see_image's ctx; paths are surfaced in the user message so the
+   *  agent can open/modify the source files. */
+  private _turnImages: readonly TurnImage[] = [];
 
   /** UI calls this to inject a mid-turn steer message without aborting the current turn.
    *  New text resets steerConsumed because a fresh steer is queued. */
@@ -639,7 +654,7 @@ export class CacheFirstLoop {
         confirmationGate: this.confirmationGate,
         readTracker: this.readTracker,
         rootDir: this.hookCwd,
-        images: this._turnImages,
+        images: this._turnImages.map((d) => d.url),
       });
 
       const postReport = await runHooks({
@@ -878,7 +893,10 @@ export class CacheFirstLoop {
     return userText;
   }
 
-  async *step(userInput: string, images?: ReadonlyArray<string>): AsyncGenerator<LoopEvent> {
+  async *step(
+    userInput: string,
+    images?: ReadonlyArray<string | TurnImage>,
+  ): AsyncGenerator<LoopEvent> {
     // Per-turn abort-state guarantee: whenever this generator completes —
     // normally, via an abort path, or because the consumer broke the
     // for-await (generator.return() delegates through `yield*`, so this
@@ -904,11 +922,11 @@ export class CacheFirstLoop {
 
   private async *stepTurn(
     userInput: string,
-    images?: ReadonlyArray<string>,
+    images?: ReadonlyArray<string | TurnImage>,
   ): AsyncGenerator<LoopEvent> {
     // Reset per-turn flags.
     this._steerConsumed = false;
-    this._turnImages = images ?? [];
+    this._turnImages = toTurnImages(images);
 
     // Budget gate runs FIRST, before any per-turn state mutation, so a
     // refusal leaves the loop unchanged and the user can correct the
@@ -1015,7 +1033,7 @@ export class CacheFirstLoop {
     // first round-trip still leaves the message in the log; the user can
     // /retry without re-typing.
     const turnStartLogIndex = this.log.length;
-    this.appendAndPersist({ role: "user", content: buildUserContent(userInput, images) });
+    this.appendAndPersist({ role: "user", content: buildUserContent(userInput, this._turnImages) });
     const toolSpecs = this.prefix.tools();
     const rateLimitState = { shown: false };
 
@@ -1773,7 +1791,7 @@ export class CacheFirstLoop {
   async run(
     userInput: string,
     onEvent?: (ev: LoopEvent) => void,
-    images?: ReadonlyArray<string>,
+    images?: ReadonlyArray<string | TurnImage>,
   ): Promise<string> {
     let final = "";
     for await (const ev of this.step(userInput, images)) {

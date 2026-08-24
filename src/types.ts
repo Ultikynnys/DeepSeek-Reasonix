@@ -37,6 +37,14 @@ export type UserContentPart =
 
 export type Role = "system" | "user" | "assistant" | "tool";
 
+/** A normalized image attached to a user turn — data URL for the vision API,
+ *  plus the original file path when available, so the agent can open/modify
+ *  the source with its file tools instead of only seeing the pixels. */
+export interface TurnImage {
+  url: string;
+  path?: string;
+}
+
 export interface ChatMessage {
   role: Role;
   content?: string | UserContentPart[] | null;

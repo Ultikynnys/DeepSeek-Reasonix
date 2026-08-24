@@ -195,7 +195,7 @@ import { SkillStore } from "../../skills.js";
 import { resolveContextTokens } from "../../telemetry/stats.js";
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
-import type { ChatMessage } from "../../types.js";
+import type { ChatMessage, TurnImage } from "../../types.js";
 import { VERSION } from "../../version.js";
 import { type McpRuntime, createMcpRuntime } from "./mcp-runtime.js";
 
@@ -606,8 +606,8 @@ function elideLoadedMessages(messages: LoadedMessage[]): LoadedMessage[] {
 /** Clipboard data URLs pass through; dropped files are read, sniffed and re-encoded. */
 async function resolveUserImages(
   attachments: ReadonlyArray<UserImageAttachment>,
-): Promise<string[]> {
-  const out: string[] = [];
+): Promise<TurnImage[]> {
+  const out: TurnImage[] = [];
   for (const att of attachments) {
     if (att.source === "clipboard") {
       if (!att.dataUrl.startsWith("data:image/")) {
@@ -620,7 +620,7 @@ async function resolveUserImages(
       const b64 = comma >= 0 ? att.dataUrl.slice(comma + 1) : "";
       const normalized = await normalizeImageToDataUrl(Buffer.from(b64, "base64"));
       if (!normalized.ok) throw new Error(normalized.message);
-      out.push(normalized.dataUrl);
+      out.push({ url: normalized.dataUrl });
       continue;
     }
     const stat = statSync(att.path);
@@ -633,7 +633,9 @@ async function resolveUserImages(
     if (!normalized.ok) {
       throw new Error(normalized.message);
     }
-    out.push(normalized.dataUrl);
+    // Keep the source path so the agent can open/modify the actual file, not
+    // just see the pixels.
+    out.push({ url: normalized.dataUrl, path: att.path });
   }
   return out;
 }
@@ -2423,7 +2425,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emit({ type: "$tab_closed" }, tab.id);
   }
 
-  async function runTurn(tab: Tab, text: string, images?: string[]): Promise<void> {
+  async function runTurn(tab: Tab, text: string, images?: TurnImage[]): Promise<void> {
     emitTabDiagnostic(
       tab,
       "turn.start.requested",
@@ -4196,7 +4198,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             attachments = [...attachments, ...converted.attachments];
           }
         }
-        let images: string[] | undefined;
+        let images: TurnImage[] | undefined;
         if (attachments.length > 0) {
           try {
             images = await resolveUserImages(attachments);
