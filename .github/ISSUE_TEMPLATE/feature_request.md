@@ -17,4 +17,4 @@ alternative.
 
 **Scope check**
 - [ ] This belongs in core reasonix (not better as a separate npm package)
-- [ ] I've read CLAUDE.md and CONTRIBUTING.md
+- [ ] I've read CLAUDE.md

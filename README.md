@@ -12,11 +12,13 @@
 <p align="center">Token costs stay low across long sessions, so it is a tool you can leave running.</p>
 
 > [!NOTE]
-> **This is a fork.** This repository is a personal, desktop-only line of
-> [esengine/DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix): the Ink TUI and the
-> interactive CLI chat modes are gone, the only product surface is the Tauri 2 Windows app backed by
-> a headless JSON-RPC daemon, and the cache-first loop from the v1 line was ported forward. The
-> concrete differences are listed in [Divergence from upstream](#divergence-from-upstream).
+> **This is a standalone project.** It began as a fork of
+> [esengine/DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), but it has diverged
+> enough to stand on its own: the Ink TUI and the interactive CLI chat modes are gone, the only
+> product surface is the Tauri 2 Windows app backed by a headless JSON-RPC daemon, and the
+> cache-first loop from the v1 line was ported forward. It is maintained here only and is never
+> intended to be pushed or merged back upstream; treat the two codebases as unrelated. The concrete
+> differences are listed in [Divergence from upstream](#divergence-from-upstream).
 
 > [!TIP]
 > **Cache stability is not a feature you turn on; it is an invariant the loop is designed around.**
@@ -162,13 +164,15 @@ Requires Node >= 22 and npm.
 
 - [Architecture](docs/ARCHITECTURE.md): the three pillars, cache-first loop, tool-call repair,
   and cost control
-- [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security
-  policy](SECURITY.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md)
 - [Installer signing](desktop/SIGNING.md)
 
 ## Divergence from upstream
 
-The fork keeps the MIT license and the cache-first core, and removes or changes the rest:
+This project is standalone: it keeps the MIT license and the cache-first core from the original
+line, but it is not a candidate for merging back into
+[esengine/DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), and no PRs or pushes
+are aimed at it. Treat the two as unrelated. Everything else upstream was removed or changed:
 
 - **Removed**: the Ink TUI and the interactive CLI commands (`code`, `replay`, `diff`); the
   embedded web dashboard server (config helpers remain, but nothing serves it); the QQ channel
