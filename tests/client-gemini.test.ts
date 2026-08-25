@@ -111,6 +111,75 @@ describe("gemini payload", () => {
     expect(res.usage.completionTokens).toBe(5);
   });
 
+  it("wraps string and text-part tool outputs in structured function responses", async () => {
+    const bodies: Array<{
+      request: {
+        contents: Array<{
+          role: string;
+          parts: Array<{
+            functionResponse?: {
+              name: string;
+              response: unknown;
+            };
+          }>;
+        }>;
+      };
+    }> = [];
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(init?.body as string));
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-2.5-flash",
+      messages: [{ role: "tool", name: "list_directory", content: "a/\nb.txt" }],
+    });
+    await client.chat({
+      model: "gemini-2.5-flash",
+      messages: [
+        {
+          role: "tool",
+          name: "read_file",
+          content: [
+            { type: "text", text: "first" },
+            { type: "text", text: "second" },
+          ],
+        },
+      ],
+    });
+
+    expect(bodies[0]?.request.contents).toEqual([
+      {
+        role: "function",
+        parts: [
+          {
+            functionResponse: {
+              name: "list_directory",
+              response: { result: "a/\nb.txt" },
+            },
+          },
+        ],
+      },
+    ]);
+    expect(bodies[1]?.request.contents).toEqual([
+      {
+        role: "function",
+        parts: [
+          {
+            functionResponse: {
+              name: "read_file",
+              response: { result: "first\nsecond" },
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
   it("surfaces daily endpoint failures without gateway fallback", async () => {
     const fetch = vi
       .fn()

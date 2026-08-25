@@ -163,16 +163,18 @@ function parseDataUrl(url: string): { mimeType: string; data: string } {
   return { mimeType: "application/octet-stream", data: url };
 }
 
-/** Tool result body for a Cloud Code functionResponse — plain text. */
-function toolResultContent(content: ChatMessage["content"]): unknown {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((p) => p.type === "text")
-      .map((p) => (p as { text: string }).text)
-      .join("\n");
-  }
-  return "";
+/** Tool result body for a Cloud Code functionResponse, whose response must be a JSON object. */
+function toolResultContent(content: ChatMessage["content"]): Record<string, unknown> {
+  const result =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter((part) => part.type === "text")
+            .map((part) => (part as { text: string }).text)
+            .join("\n")
+        : "";
+  return { result };
 }
 
 /** Byte-stable equality for the cache-prefix overlap check — key order is
