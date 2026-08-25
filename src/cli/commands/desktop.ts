@@ -3854,11 +3854,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               saveOpenAIOAuth({ ...creds, account });
               lastOAuthError = null;
               // The runtime snapshots the credential source at build time —
-              // rebuild now-credentialed tabs so a fresh sign-in takes effect
-              // (and clears the needs-setup screen) without a model flip.
+              // build (or rebuild) now-credentialed tabs so a fresh sign-in
+              // takes effect (and clears the needs-setup screen) without a
+              // model flip. A tab that booted un-credentialed has a null
+              // runtime — it must be built here, not just rebuilt.
               for (const t of tabs.values()) {
                 if (t.toolset && tabHasCredential(t)) {
-                  if (t.runtime) t.runtime = buildRuntimeFor(t);
+                  t.runtime = buildRuntimeFor(t);
                   emit({ type: "$ready" }, t.id);
                 }
               }
@@ -3922,11 +3924,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
                 projectId,
               });
               lastAntigravityOAuthError = null;
-              // Rebuild now-credentialed tabs so a fresh sign-in takes effect
-              // (and clears the needs-setup screen) without a model flip.
+              // Build (or rebuild) now-credentialed tabs so a fresh sign-in
+              // takes effect (and clears the needs-setup screen) without a
+              // model flip. A tab that booted un-credentialed has a null
+              // runtime — it must be built here, not just rebuilt.
               for (const t of tabs.values()) {
                 if (t.toolset && tabHasCredential(t)) {
-                  if (t.runtime) t.runtime = buildRuntimeFor(t);
+                  t.runtime = buildRuntimeFor(t);
                   emit({ type: "$ready" }, t.id);
                 }
               }
@@ -3984,10 +3988,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         saveOpenAIApiKey(key);
         // A fresh OpenAI key also unblocks ChatGPT-only installs whose tab still
-        // defaults to a DeepSeek model — flip every now-credentialed tab ready.
+        // defaults to a DeepSeek model — build (or rebuild) every now-credentialed
+        // tab ready. A tab that booted un-credentialed has a null runtime — it
+        // must be built here, not just rebuilt.
         for (const t of tabs.values()) {
           if (t.toolset && tabHasCredential(t)) {
-            if (t.runtime) t.runtime = buildRuntimeFor(t);
+            t.runtime = buildRuntimeFor(t);
             emit({ type: "$ready" }, t.id);
           }
         }

@@ -18,6 +18,12 @@ describe("modelAcceptsImages", () => {
     expect(modelAcceptsImages("deepseek-v4-flash-vision-exp")).toBe(true);
   });
 
+  it("accepts every Gemini model (natively multimodal)", () => {
+    for (const model of GEMINI_MODELS) {
+      expect(modelAcceptsImages(model)).toBe(true);
+    }
+  });
+
   it("rejects plain DeepSeek, Ollama, and unknown ids", () => {
     expect(modelAcceptsImages("deepseek-v4-flash")).toBe(false);
     expect(modelAcceptsImages("deepseek-v4-pro")).toBe(false);

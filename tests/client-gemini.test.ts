@@ -150,6 +150,43 @@ describe("gemini payload", () => {
     ]);
   });
 
+  it("serializes image_url parts to inlineData for the vision API", async () => {
+    let captured: { body: unknown } | null = null;
+    const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      captured = { body: JSON.parse(init?.body as string) };
+      return new Response(JSON.stringify(wrappedResponse([{ text: "seen" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const res = await client.chat({
+      model: "gemini-2.5-flash",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this?" },
+            {
+              type: "image_url",
+              image_url: { url: "data:image/png;base64,AAAA", detail: "low" },
+            },
+          ],
+        },
+      ],
+    });
+
+    const body = captured?.body as {
+      request: { contents: Array<{ role: string; parts: unknown[] }> };
+    };
+    expect(body.request.contents[0]?.parts).toEqual([
+      { text: "what is this?" },
+      { inlineData: { mimeType: "image/png", data: "AAAA" } },
+    ]);
+    expect(res.content).toBe("seen");
+  });
+
   it("throws a clear error when not signed in", async () => {
     const client = new DeepSeekClient({
       baseUrl: "https://cloudcode-pa.googleapis.com",

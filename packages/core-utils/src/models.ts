@@ -30,8 +30,9 @@ export const KNOWN_MODELS: readonly string[] = [
 ];
 
 /** Model ids that accept image attachments in user messages — the GPT-5.6
- *  family plus DeepSeek's vision line. Drives the composer's paste/drop
- *  affordance, the daemon's @-mention conversion, and the images hard gate.
+ *  family, DeepSeek's vision line, and every Gemini model (natively
+ *  multimodal). Drives the composer's paste/drop affordance, the daemon's
+ *  @-mention conversion, and the images hard gate.
  *
  *  `ollamaVision` is the set of `ollama/`-prefixed ids confirmed vision-capable
  *  by runtime probing (see the daemon's `$ollama_models.visionModels`). When
@@ -45,6 +46,7 @@ export function modelAcceptsImages(
   if (typeof model !== "string") return false;
   if (model.startsWith("gpt-")) return true;
   if (model === "deepseek-v4-flash-vision-exp") return true;
+  if (model.startsWith("gemini-")) return true;
   if (model.startsWith("ollama/") && ollamaVision && ollamaVision.has(model)) return true;
   return false;
 }

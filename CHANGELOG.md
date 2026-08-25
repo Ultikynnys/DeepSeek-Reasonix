@@ -5,6 +5,14 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed — a fresh sign-in / API key now takes effect without restarting.**
+
+- Signing in to Google Antigravity, signing in to ChatGPT, or pasting an OpenAI key only *rebuilt* a tab's runtime when one already existed (`if (t.runtime) t.runtime = buildRuntimeFor(t)`). A tab that booted in the "needs setup" state has a null runtime, so the sign-in emitted `$ready` but never built it — the tab looked ready yet `runTurn` still bailed on `!tab.runtime` until a restart. The three credential handlers now build the runtime unconditionally (guarded only on the toolset), so a fresh sign-in works immediately.
+
+**Fixed — Gemini models are now tagged as vision-capable.**
+
+- `modelAcceptsImages` only returned true for the gpt-5.6 family, `deepseek-v4-flash-vision-exp`, and probed Ollama models — every Gemini model (natively multimodal) was treated as non-vision. The composer's paste/drop affordance, the daemon's `@path` → image conversion, and the images hard gate all skipped Gemini. The shared predicate now accepts `gemini-*` ids, so the pickers show the `vision` badge and image attachments work on Gemini tabs.
+
 **Changed — Ollama default endpoint.**
 
 - Empty `Ollama base URL` now defaults to Ollama cloud (`https://ollama.com/v1`, requires `ollamaApiKey`/`OLLAMA_API_KEY`) instead of the local daemon. Set `http://localhost:11434/v1` explicitly to use a local, keyless daemon.
