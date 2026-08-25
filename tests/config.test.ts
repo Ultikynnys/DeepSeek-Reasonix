@@ -417,6 +417,27 @@ describe("config", () => {
       expect(() => saveModel("deepseek-made-up", path)).toThrow(/Unsupported model/);
     });
 
+    it("saveModel and loadModel accept models the Antigravity account discovered", () => {
+      // Models reported by retrieveUserQuota are legitimately usable even though
+      // they are not in the static built-in catalog.
+      saveAntigravityOAuth(
+        {
+          accessToken: "at",
+          refreshToken: "rt",
+          expiresAt: Date.now() + 60_000,
+          models: ["gemini-3.5-flash-low", "chat_20706", "tab_flash_lite_preview"],
+        },
+        path,
+      );
+      saveModel("gemini-3.5-flash-low", path);
+      expect(loadModel(path)).toBe("gemini-3.5-flash-low");
+      saveModel("chat_20706", path);
+      expect(loadModel(path)).toBe("chat_20706");
+      expect(readConfig(path).model).toBe("chat_20706");
+      // An unsupported id still rejects even with a signed-in Antigravity account.
+      expect(() => saveModel("gpt-4o-mini", path)).toThrow(/Unsupported model/);
+    });
+
     it("loadModel keeps gpt-5.6 ids on the official endpoints", () => {
       writeConfig({ model: "gpt-5.6-sol" }, path);
       expect(loadModel(path)).toBe("gpt-5.6-sol");

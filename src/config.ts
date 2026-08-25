@@ -1522,6 +1522,7 @@ export function loadModel(path: string = defaultConfigPath()): string {
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
   if (customEndpoint) return trimmed;
   if (providerForModel(trimmed) === "ollama") return trimmed;
+  if (isDiscoveredAntigravityModel(cfg, trimmed)) return trimmed;
   return SUPPORTED_MODELS.includes(trimmed) ? trimmed : DEFAULT_MODEL;
 }
 
@@ -1532,7 +1533,10 @@ export function saveModel(model: string, path: string = defaultConfigPath()): vo
   // Custom-endpoint owners set their own namespace — validation is on them.
   const cfg = readConfig(path);
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
-  const accepted = SUPPORTED_MODELS.includes(trimmed) || providerForModel(trimmed) === "ollama";
+  const accepted =
+    SUPPORTED_MODELS.includes(trimmed) ||
+    providerForModel(trimmed) === "ollama" ||
+    isDiscoveredAntigravityModel(cfg, trimmed);
   if (!customEndpoint && !accepted) {
     throw new Error(
       `Unsupported model "${trimmed}". Official endpoints only accept: ${SUPPORTED_MODELS.join(", ")}. Set a custom baseUrl to use other models.`,
@@ -1540,6 +1544,13 @@ export function saveModel(model: string, path: string = defaultConfigPath()): vo
   }
   cfg.model = trimmed;
   writeConfig(cfg, path);
+}
+
+/** True when the model was reported by the signed-in Antigravity account's
+ *  quota buckets (`retrieveUserQuota`), i.e. it is genuinely usable even though
+ *  it is not in the static built-in catalog. */
+function isDiscoveredAntigravityModel(cfg: ReasonixConfig, model: string): boolean {
+  return Boolean(cfg.antigravityOAuth?.models?.includes(model));
 }
 
 export function loadWorkspaceDir(path: string = defaultConfigPath()): string | undefined {
