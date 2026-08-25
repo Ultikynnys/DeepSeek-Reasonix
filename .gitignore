@@ -20,13 +20,9 @@ sessions/
 .turbo/
 # Local-only Claude Code settings — personal overrides, never committed.
 .claude/settings.local.json
-# Per-user Reasonix state under .reasonix/ — committable team-level
-# files (settings.json, skills/) stay tracked, but the user-private
-# bits (semantic index, sessions, opt-out markers) never should.
-.reasonix/semantic/
-.reasonix/sessions/
-.reasonix/semantic-skip
-.reasonix/truncated-results/
+# Per-user Reasonix state under .reasonix/ — fully ignored (see the blanket
+# `.reasonix/` rule at the bottom). Force-add settings.json / skills/ if you
+# ever want them tracked.
 # Personal bun lockfile — project uses npm officially.
 bun.lock
 
@@ -44,3 +40,8 @@ desktop/src-tauri/binaries/
 *.cpuprofile
 
 .probe-snapshots/
+
+# Local per-user Reasonix state (logs, truncated results, scratch). Note: this
+# also hides team-level .reasonix/settings.json and .reasonix/skills/ — if you
+# want those tracked, force-add them (git add -f) or add explicit !-renegades.
+.reasonix/
