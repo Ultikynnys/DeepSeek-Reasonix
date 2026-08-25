@@ -130,6 +130,21 @@ describe("gemini payload", () => {
       client.chat({ model: "gemini-2.5-flash", messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toThrow(/Not signed in to Google Antigravity/);
   });
+
+  it("does not send a request without a companion project", async () => {
+    const fetch = vi.fn() as unknown as typeof globalThis.fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "https://cloudcode-pa.googleapis.com",
+      allowMissingKey: true,
+      geminiAuthResolver: async () => ({ accessToken: "google-token" }),
+      fetch,
+    });
+
+    await expect(
+      client.chat({ model: "gemini-2.5-flash", messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/did not provide a companion project/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
 
 describe("gemini streaming", () => {

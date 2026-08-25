@@ -781,7 +781,7 @@ let lastAntigravityOAuthError: string | null = null;
 /** Resolve the Google OAuth token + Cloud Code project id for gemini requests.
  *  Onboards (loadCodeAssist/onboardUser) once when no project id is stored yet,
  *  persisting the resolved project. Returns null when not signed in. */
-async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId?: string } | null> {
+async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId: string } | null> {
   const { clientId, clientSecret } = loadAntigravityOAuthClient();
   const accessToken = await resolveAntigravityToken(defaultConfigPath(), clientId, clientSecret);
   if (!accessToken) return null;
@@ -789,7 +789,7 @@ async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId?: s
   let projectId = creds?.projectId;
   if (!projectId) {
     projectId = await onboardAntigravity(accessToken);
-    if (projectId && creds) saveAntigravityOAuth({ ...creds, projectId });
+    if (creds) saveAntigravityOAuth({ ...creds, projectId });
   }
   return { accessToken, projectId };
 }

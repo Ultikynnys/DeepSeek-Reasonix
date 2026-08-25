@@ -707,7 +707,7 @@ export class DeepSeekClient {
 
   /** Resolve the Google OAuth token + Cloud Code project id for a gemini
    *  request. Throws a clear error when the user isn't signed in. */
-  private async resolveGeminiAuth(): Promise<{ accessToken: string; projectId?: string }> {
+  private async resolveGeminiAuth(): Promise<{ accessToken: string; projectId: string }> {
     if (!this.geminiAuthResolver) {
       throw new Error("Gemini models require Antigravity sign-in — no auth resolver configured.");
     }
@@ -717,7 +717,12 @@ export class DeepSeekClient {
         "Not signed in to Google Antigravity — sign in from settings to use gemini models.",
       );
     }
-    return auth;
+    if (!auth.projectId) {
+      throw new Error(
+        "Google Antigravity did not provide a companion project for Gemini quota. Sign out and sign in again.",
+      );
+    }
+    return { accessToken: auth.accessToken, projectId: auth.projectId };
   }
 
   /** Cloud Code non-streaming response — unwraps the `{response:{candidates,

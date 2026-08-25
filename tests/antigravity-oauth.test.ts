@@ -144,34 +144,87 @@ describe("antigravity-oauth", () => {
     expect(await antigravityAccount("at")).toBe("u@example.com");
   });
 
-  it("onboardAntigravity resolves the default tier's project id", async () => {
+  it("onboardAntigravity returns an existing companion project", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        currentTier: { id: "free-tier" },
+        cloudaicompanionProject: "existing-project",
+      }),
+    );
+
+    await expect(onboardAntigravity("at")).resolves.toBe("existing-project");
+  });
+
+  it("onboardAntigravity polls a pending operation for the managed project", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         jsonResponse({
-          allowedTiers: [{ id: "starter", isDefault: true }],
+          allowedTiers: [{ id: "free-tier", isDefault: true }],
         }),
       )
+      .mockResolvedValueOnce(jsonResponse({ name: "operations/onboard-1", done: false }))
       .mockResolvedValueOnce(
         jsonResponse({
+          name: "operations/onboard-1",
           done: true,
           response: { cloudaicompanionProject: { id: "proj-123" } },
         }),
       );
-    const projectId = await onboardAntigravity("at");
-    expect(projectId).toBe("proj-123");
-    // First call is loadCodeAssist, second is onboardUser with the tier id.
+
+    await expect(onboardAntigravity("at")).resolves.toBe("proj-123");
     const [loadUrl, loadInit] = fetchMock.mock.calls[0]!;
     expect(loadUrl).toBe("https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist");
     expect(loadInit?.headers).toMatchObject({ authorization: "Bearer at" });
+    expect(JSON.parse(loadInit?.body as string)).toEqual({
+      metadata: expect.objectContaining({ pluginType: "GEMINI" }),
+    });
     const [onboardUrl, onboardInit] = fetchMock.mock.calls[1]!;
     expect(onboardUrl).toBe("https://cloudcode-pa.googleapis.com/v1internal:onboardUser");
-    const onboardBody = JSON.parse(onboardInit?.body as string) as { tierId: string };
-    expect(onboardBody.tierId).toBe("starter");
+    expect(JSON.parse(onboardInit?.body as string)).toEqual({
+      tierId: "free-tier",
+      metadata: expect.objectContaining({ pluginType: "GEMINI" }),
+    });
+    const [operationUrl, operationInit] = fetchMock.mock.calls[2]!;
+    expect(operationUrl).toBe(
+      "https://cloudcode-pa.googleapis.com/v1internal/operations/onboard-1",
+    );
+    expect(operationInit?.method).toBeUndefined();
   });
 
-  it("onboardAntigravity returns undefined when no tiers are available", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ allowedTiers: [] }));
-    expect(await onboardAntigravity("at")).toBeUndefined();
+  it("onboardAntigravity surfaces account ineligibility", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        allowedTiers: [],
+        ineligibleTiers: [{ reasonMessage: "Personal account required" }],
+      }),
+    );
+
+    await expect(onboardAntigravity("at")).rejects.toThrow(
+      "Antigravity account is not eligible: Personal account required",
+    );
+  });
+
+  it("onboardAntigravity rejects a failed operation", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ allowedTiers: [{ id: "free-tier", isDefault: true }] }))
+      .mockResolvedValueOnce(
+        jsonResponse({ done: true, error: { code: 403, message: "License unavailable" } }),
+      );
+
+    await expect(onboardAntigravity("at")).rejects.toThrow(
+      "Antigravity onboarding failed (403): License unavailable",
+    );
+  });
+
+  it("onboardAntigravity rejects a pending poll response without an operation name", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ allowedTiers: [{ id: "free-tier", isDefault: true }] }))
+      .mockResolvedValueOnce(jsonResponse({ name: "operations/onboard-1", done: false }))
+      .mockResolvedValueOnce(jsonResponse({ done: false }));
+
+    await expect(onboardAntigravity("at")).rejects.toThrow(
+      "Antigravity onboarding returned an incomplete operation without a name",
+    );
   });
 });

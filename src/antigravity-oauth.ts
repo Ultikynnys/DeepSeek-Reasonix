@@ -201,10 +201,12 @@ interface ClientMetadata {
 interface LoadCodeAssistResponse {
   currentTier?: { id?: string } | null;
   allowedTiers?: Array<{ id?: string; isDefault?: boolean }> | null;
+  ineligibleTiers?: Array<{ reasonMessage?: string }> | null;
   cloudaicompanionProject?: string | null;
 }
 
 interface OnboardUserResponse {
+  name?: string;
   done?: boolean;
   response?: { cloudaicompanionProject?: { id?: string } };
   error?: { code?: number; message?: string };
@@ -223,15 +225,7 @@ function clientMetadata(): ClientMetadata {
   return { ideType: "IDE_UNSPECIFIED", platform: platformName(), pluginType: "GEMINI" };
 }
 
-async function cloudCodePost<T>(accessToken: string, method: string, body: unknown): Promise<T> {
-  const res = await fetch(`${ANTIGRAVITY_CLOUD_CODE_URL}/v1internal:${method}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(body),
-  });
+async function parseCloudCodeResponse<T>(res: Response, method: string): Promise<T> {
   const text = await res.text();
   let parsed: T;
   try {
@@ -245,31 +239,91 @@ async function cloudCodePost<T>(accessToken: string, method: string, body: unkno
   return parsed;
 }
 
-/** Resolve the Cloud Code companion project id for the user's Antigravity tier
- *  (Starter for free / Google AI Plus). Returns undefined on any failure so
- *  callers can degrade to a request without a project. */
-export async function onboardAntigravity(accessToken: string): Promise<string | undefined> {
-  try {
-    const load = await cloudCodePost<LoadCodeAssistResponse>(accessToken, "loadCodeAssist", {
-      metadata: clientMetadata(),
-    });
-    const tiers = load.allowedTiers ?? [];
-    const tier = tiers.find((t) => t.isDefault) ?? tiers[0];
-    if (!tier?.id) return load.cloudaicompanionProject ?? undefined;
+async function cloudCodePost<T>(accessToken: string, method: string, body: unknown): Promise<T> {
+  const res = await fetch(`${ANTIGRAVITY_CLOUD_CODE_URL}/v1internal:${method}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+  return parseCloudCodeResponse<T>(res, method);
+}
 
-    const op = await cloudCodePost<OnboardUserResponse>(accessToken, "onboardUser", {
-      tierId: tier.id,
-      metadata: clientMetadata(),
-    });
-    if (op.error) {
-      console.warn(`reasonix: Antigravity onboarding failed — ${op.error.message}`);
-      return undefined;
-    }
-    return op.response?.cloudaicompanionProject?.id ?? load.cloudaicompanionProject ?? undefined;
-  } catch (err) {
-    console.warn(`reasonix: Antigravity onboarding error — ${(err as Error).message}`);
-    return undefined;
+async function cloudCodeGetOperation<T>(accessToken: string, name: string): Promise<T> {
+  const res = await fetch(`${ANTIGRAVITY_CLOUD_CODE_URL}/v1internal/${name}`, {
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${accessToken}`,
+    },
+  });
+  return parseCloudCodeResponse<T>(res, "getOperation");
+}
+
+const ONBOARD_POLL_INTERVAL_MS = 5_000;
+const ONBOARD_MAX_POLLS = 60;
+
+function onboardingProject(op: OnboardUserResponse): string | undefined {
+  if (op.error) {
+    throw new Error(
+      `Antigravity onboarding failed${op.error.code ? ` (${op.error.code})` : ""}: ${op.error.message ?? "unknown error"}`,
+    );
   }
+  return op.response?.cloudaicompanionProject?.id;
+}
+
+/** Resolve the managed Cloud Code companion project used for Gemini quota. */
+export async function onboardAntigravity(accessToken: string): Promise<string> {
+  const metadata = clientMetadata();
+  const load = await cloudCodePost<LoadCodeAssistResponse>(accessToken, "loadCodeAssist", {
+    cloudaicompanionProject: undefined,
+    metadata,
+  });
+
+  if (load.currentTier) {
+    if (load.cloudaicompanionProject) return load.cloudaicompanionProject;
+    throw new Error("Antigravity account is onboarded but has no companion project");
+  }
+
+  const tiers = load.allowedTiers ?? [];
+  const tier = tiers.find((candidate) => candidate.isDefault) ?? tiers[0];
+  if (!tier?.id) {
+    const reasons = (load.ineligibleTiers ?? [])
+      .map((candidate) => candidate.reasonMessage)
+      .filter((reason): reason is string => Boolean(reason));
+    throw new Error(
+      reasons.length > 0
+        ? `Antigravity account is not eligible: ${reasons.join(", ")}`
+        : "Antigravity account has no eligible Gemini tier",
+    );
+  }
+
+  let op = await cloudCodePost<OnboardUserResponse>(accessToken, "onboardUser", {
+    tierId: tier.id,
+    cloudaicompanionProject: undefined,
+    metadata,
+  });
+  let projectId = onboardingProject(op);
+  if (projectId) return projectId;
+  if (!op.done && !op.name) {
+    throw new Error("Antigravity onboarding returned an incomplete operation without a name");
+  }
+
+  for (let poll = 0; !op.done && poll < ONBOARD_MAX_POLLS; poll++) {
+    if (!op.name) {
+      throw new Error("Antigravity onboarding returned an incomplete operation without a name");
+    }
+    if (poll > 0) {
+      await new Promise((resolve) => setTimeout(resolve, ONBOARD_POLL_INTERVAL_MS));
+    }
+    op = await cloudCodeGetOperation<OnboardUserResponse>(accessToken, op.name);
+    projectId = onboardingProject(op);
+    if (projectId) return projectId;
+  }
+
+  if (!op.done) throw new Error("Antigravity onboarding timed out");
+  throw new Error("Antigravity onboarding completed without a companion project");
 }
 
 // ── Browser OAuth flow ─────────────────────────────────────────────────────
