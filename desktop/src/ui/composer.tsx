@@ -923,128 +923,134 @@ function ModelEffortMenu({
         bottom: "calc(100% + 6px)",
         left: "auto",
         right: 0,
-        width: 280,
+        width: 560,
         position: "absolute",
       }}
     >
       <div className="ph">
         <span className="tok">M</span>
         <span>{t("composer.switchModel")}</span>
-      </div>
-      {/* Scrollable — the Ollama group alone can run to hundreds of ids. */}
-      <div className="popup-list model-menu-list">
-        {KNOWN_MODELS.map((m) => (
-          <div
-            key={m}
-            className="popup-item"
-            data-active={m === modelLabel}
-            onClick={() => onPickModel(m)}
-            onKeyDown={activationHandler(() => onPickModel(m))}
-          >
-            <span className="ico">
-              <I.brain size={12} />
-            </span>
-            <div className="nm">
-              <span className="cmd">{m}</span>
-            </div>
-            {modelAcceptsImages(m, ollamaVisionModels) ? (
-              <span className="badge">vision</span>
-            ) : null}
-          </div>
-        ))}
-        {ollamaGroup || ollamaModelsError ? (
-          <>
-            <div className="model-menu-group">
-              <span className="grow">{t("composer.modelOllamaGroup")}</span>
-              {ollamaHiddenCount && ollamaHiddenCount > 0 ? (
-                <span className="model-menu-note">
-                  {t("composer.modelOllamaHidden", { count: ollamaHiddenCount })}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                className="mini-btn"
-                title={t("composer.modelOllamaRefresh")}
-                onClick={() => onRefreshOllamaModels?.(true)}
-              >
-                <I.refresh size={10} />
-              </button>
-            </div>
-            {/* The error only matters when the tab's model IS an Ollama model —
-                a DeepSeek/OpenAI tab with a down local daemon would otherwise
-                show a spurious "Ollama unreachable" line. The Models settings
-                page surfaces it unconditionally. */}
-            {ollamaModelsError && !ollamaGroup && modelLabel.startsWith("ollama/") ? (
-              <div className="model-menu-error">
-                {t("composer.modelOllamaError", { error: ollamaModelsError })}
-              </div>
-            ) : null}
-            {ollamaModels && ollamaModels.length > 0
-              ? ollamaModels.map((id) => {
-                  const full = `ollama/${id}`;
-                  return (
-                    <div
-                      key={full}
-                      className="popup-item"
-                      data-active={full === modelLabel}
-                      onClick={() => onPickModel(full)}
-                      onKeyDown={activationHandler(() => onPickModel(full))}
-                    >
-                      <span className="ico">
-                        <I.bot size={12} />
-                      </span>
-                      <div className="nm">
-                        <span className="cmd">{full}</span>
-                      </div>
-                      {modelAcceptsImages(full, ollamaVisionModels) ? (
-                        <span className="badge">vision</span>
-                      ) : null}
-                    </div>
-                  );
-                })
-              : null}
-          </>
-        ) : null}
-        <div style={{ padding: "6px 8px", display: "flex", gap: 6 }}>
-          <input
-            className="field mono"
-            style={{ flex: 1 }}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="custom model id"
-          />
-          <button
-            type="button"
-            className="btn"
-            disabled={!draft.trim() || draft.trim() === modelLabel}
-            onClick={() => onPickModel(draft.trim())}
-          >
-            {t("composer.confirm")}
-          </button>
-        </div>
-      </div>
-      <div className="ph" style={{ marginTop: 4 }}>
+        <span className="grow" />
         <span className="tok">E</span>
         <span>{t("composer.switchEffort")}</span>
       </div>
-      <div className="popup-list">
-        {EFFORTS.map((e) => (
-          <div
-            key={e}
-            className="popup-item"
-            data-active={e === currentEffort}
-            onClick={() => onPickEffort(e)}
-            onKeyDown={activationHandler(() => onPickEffort(e))}
-          >
-            <span className="ico">
-              <I.cpu size={12} />
-            </span>
-            <div className="nm">
-              <span className="cmd">{e}</span>
-              <div className="desc">{t(`effort.${e}Desc` as TKey)}</div>
+      <div className="model-menu-cols">
+        {/* Models column — the Ollama group alone can run to hundreds of ids. */}
+        <div className="model-menu-col">
+          <div className="popup-list model-menu-list">
+            {KNOWN_MODELS.map((m) => (
+              <div
+                key={m}
+                className="popup-item"
+                data-active={m === modelLabel}
+                onClick={() => onPickModel(m)}
+                onKeyDown={activationHandler(() => onPickModel(m))}
+              >
+                <span className="ico">
+                  <I.brain size={12} />
+                </span>
+                <div className="nm">
+                  <span className="cmd">{m}</span>
+                </div>
+                {modelAcceptsImages(m, ollamaVisionModels) ? (
+                  <span className="badge">vision</span>
+                ) : null}
+              </div>
+            ))}
+            {ollamaGroup || ollamaModelsError ? (
+              <>
+                <div className="model-menu-group">
+                  <span className="grow">{t("composer.modelOllamaGroup")}</span>
+                  {ollamaHiddenCount && ollamaHiddenCount > 0 ? (
+                    <span className="model-menu-note">
+                      {t("composer.modelOllamaHidden", { count: ollamaHiddenCount })}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    title={t("composer.modelOllamaRefresh")}
+                    onClick={() => onRefreshOllamaModels?.(true)}
+                  >
+                    <I.refresh size={10} />
+                  </button>
+                </div>
+                {/* The error only matters when the tab's model IS an Ollama model —
+                    a DeepSeek/OpenAI tab with a down local daemon would otherwise
+                    show a spurious "Ollama unreachable" line. The Models settings
+                    page surfaces it unconditionally. */}
+                {ollamaModelsError && !ollamaGroup && modelLabel.startsWith("ollama/") ? (
+                  <div className="model-menu-error">
+                    {t("composer.modelOllamaError", { error: ollamaModelsError })}
+                  </div>
+                ) : null}
+                {ollamaModels && ollamaModels.length > 0
+                  ? ollamaModels.map((id) => {
+                      const full = `ollama/${id}`;
+                      return (
+                        <div
+                          key={full}
+                          className="popup-item"
+                          data-active={full === modelLabel}
+                          onClick={() => onPickModel(full)}
+                          onKeyDown={activationHandler(() => onPickModel(full))}
+                        >
+                          <span className="ico">
+                            <I.bot size={12} />
+                          </span>
+                          <div className="nm">
+                            <span className="cmd">{full}</span>
+                          </div>
+                          {modelAcceptsImages(full, ollamaVisionModels) ? (
+                            <span className="badge">vision</span>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  : null}
+              </>
+            ) : null}
+            <div style={{ padding: "6px 8px", display: "flex", gap: 6 }}>
+              <input
+                className="field mono"
+                style={{ flex: 1 }}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="custom model id"
+              />
+              <button
+                type="button"
+                className="btn"
+                disabled={!draft.trim() || draft.trim() === modelLabel}
+                onClick={() => onPickModel(draft.trim())}
+              >
+                {t("composer.confirm")}
+              </button>
             </div>
           </div>
-        ))}
+        </div>
+        {/* Reasoning effort column */}
+        <div className="model-menu-col">
+          <div className="popup-list">
+            {EFFORTS.map((e) => (
+              <div
+                key={e}
+                className="popup-item"
+                data-active={e === currentEffort}
+                onClick={() => onPickEffort(e)}
+                onKeyDown={activationHandler(() => onPickEffort(e))}
+              >
+                <span className="ico">
+                  <I.cpu size={12} />
+                </span>
+                <div className="nm">
+                  <span className="cmd">{e}</span>
+                  <div className="desc">{t(`effort.${e}Desc` as TKey)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

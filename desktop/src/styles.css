@@ -3962,7 +3962,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   bottom: calc(100% + 8px);
   left: 0;
   width: min(720px, calc(100vw - 32px));
-  max-height: 320px;
+  max-height: 480px;
   background: var(--card);
   border: 1px solid var(--border-strong);
   border-radius: 10px;
@@ -3996,10 +3996,45 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   overflow-x: auto;
   padding: 4px;
 }
+/* Dropdown scrollbars (chat popup, model picker) are too thin at the global
+   4px — give them a wider, more grabbable thumb. */
+.popup-list::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.popup-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.popup-list::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
 /* model picker — the Ollama group alone can run to hundreds of ids, so the
    menu list gets a bounded height and scrolls instead of overflowing. */
 .model-menu-list {
-  max-height: 300px;
+  max-height: 460px;
+}
+.model-menu-cols {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+}
+.model-menu-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.model-menu-col + .model-menu-col {
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+}
+.model-menu-col .popup-list {
+  max-height: 460px;
 }
 .model-menu-group {
   display: flex;
