@@ -55,20 +55,20 @@ describe("antigravity-oauth", () => {
   it("buildAuthorizeUrl carries client_id, offline access, and the redirect", () => {
     const url = buildAuthorizeUrl({
       clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
-      redirectUri: "http://localhost:51121/oauth-callback",
+      redirectUri: "http://localhost:50510/auth/callback",
       state: "state-abc",
       codeChallenge: "challenge-abc",
     });
     const parsed = new URL(url);
     expect(parsed.origin + parsed.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(parsed.searchParams.get("client_id")).toBe(ANTIGRAVITY_OAUTH_CLIENT_ID);
-    expect(parsed.searchParams.get("redirect_uri")).toBe("http://localhost:51121/oauth-callback");
+    expect(parsed.searchParams.get("redirect_uri")).toBe("http://localhost:50510/auth/callback");
     expect(parsed.searchParams.get("response_type")).toBe("code");
     expect(parsed.searchParams.get("access_type")).toBe("offline");
     expect(parsed.searchParams.get("state")).toBe("state-abc");
     expect(parsed.searchParams.get("scope")).toContain("cloud-platform");
-    expect(parsed.searchParams.get("scope")).toContain("cclog");
-    expect(parsed.searchParams.get("scope")).toContain("experimentsandconfigs");
+    expect(parsed.searchParams.get("scope")).toContain("userinfo.email");
+    expect(parsed.searchParams.get("scope")).toContain("aicode");
     expect(parsed.searchParams.get("code_challenge")).toBe("challenge-abc");
     expect(parsed.searchParams.get("code_challenge_method")).toBe("S256");
   });
@@ -80,12 +80,12 @@ describe("antigravity-oauth", () => {
         jsonResponse({ access_token: "at", refresh_token: "rt", expires_in: 3600 }),
       );
     const creds = await exchangeAntigravityCode({
-      redirectUri: "http://localhost:51121/oauth-callback",
+      redirectUri: "http://localhost:50510/auth/callback",
       code: "code-123",
       codeVerifier: "verifier-123",
     });
     expect(ANTIGRAVITY_OAUTH_CLIENT_ID).toBe(
-      "it1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+      "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
     );
     expect(creds.accessToken).toBe("at");
     expect(creds.refreshToken).toBe("rt");

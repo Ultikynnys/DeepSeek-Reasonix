@@ -1,5 +1,4 @@
-/** Google Antigravity OAuth (client-secret flow) — browser sign-in powers
- *  gemini-* models through the Cloud Code API on the Antigravity quota. */
+/** Antigravity browser OAuth: same client, redirect, and callback the app uses. */
 
 import { createHash, randomBytes } from "node:crypto";
 import { type Server, createServer } from "node:http";
@@ -11,9 +10,9 @@ import {
   saveAntigravityOAuth,
 } from "./config.js";
 
-/** Published installed-app OAuth identity used by Google Antigravity. */
+/** Published installed-app OAuth identity used by Antigravity's browser flow. */
 export const ANTIGRAVITY_OAUTH_CLIENT_ID =
-  "it1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+  "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
 export const ANTIGRAVITY_OAUTH_CLIENT_SECRET = "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";
 
 export const ANTIGRAVITY_DEFAULT_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -22,21 +21,23 @@ export const ANTIGRAVITY_DEFAULT_USERINFO_URL = "https://www.googleapis.com/oaut
 export const ANTIGRAVITY_CLOUD_CODE_URL = "https://daily-cloudcode-pa.googleapis.com";
 export const ANTIGRAVITY_CLOUD_CODE_API = `${ANTIGRAVITY_CLOUD_CODE_URL}/v1internal`;
 
+/** Scopes Antigravity's login requests; this client is allowlisted for these. */
 const DEFAULT_SCOPE = [
   "https://www.googleapis.com/auth/cloud-platform",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
   "https://www.googleapis.com/auth/cclog",
   "https://www.googleapis.com/auth/experimentsandconfigs",
+  "https://www.googleapis.com/auth/aicode",
 ].join(" ");
 
 const REFRESH_SLACK_MS = 5 * 60_000;
 const OAUTH_FLOW_TIMEOUT_MS = 10 * 60_000;
 const ONBOARD_TIMEOUT_MS = 10 * 60_000;
 const ONBOARD_POLL_INTERVAL_MS = 5_000;
-/** Registered callback used by the Antigravity installed application. */
-const OAUTH_CALLBACK_PATH = "/oauth-callback";
-const OAUTH_CALLBACK_PORT = 51121;
+/** Registered callback the Antigravity client accepts. */
+const OAUTH_CALLBACK_PATH = "/auth/callback";
+const OAUTH_CALLBACK_PORT = 50510;
 export const ANTIGRAVITY_REDIRECT_URI = `http://localhost:${OAUTH_CALLBACK_PORT}${OAUTH_CALLBACK_PATH}`;
 
 function envOr(def: string, name: string): string {

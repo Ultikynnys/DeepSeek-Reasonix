@@ -778,8 +778,9 @@ let pendingAntigravityOAuth: OAuthFlow | null = null;
  *  auth chip until the next successful sign-in clears it. */
 let lastAntigravityOAuthError: string | null = null;
 
-/** Resolve the Google OAuth token and managed Code Assist project for Gemini requests.
- *  The first request completes eligibility/onboarding and persists the account catalog. */
+/** Resolve the Google OAuth token and managed Code Assist project for Gemini
+ *  requests. The first request completes eligibility/onboarding and persists
+ *  the account catalog. */
 async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId: string } | null> {
   const accessToken = await resolveAntigravityToken(defaultConfigPath());
   if (!accessToken) return null;
