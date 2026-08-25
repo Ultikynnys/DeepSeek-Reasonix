@@ -273,13 +273,20 @@ function onboardingProject(op: OnboardUserResponse): string | undefined {
   return op.response?.cloudaicompanionProject?.id;
 }
 
-/** Resolve the managed Cloud Code companion project used for Gemini quota. */
-export async function onboardAntigravity(accessToken: string): Promise<string> {
-  const metadata = clientMetadata();
-  const load = await cloudCodePost<LoadCodeAssistResponse>(accessToken, "loadCodeAssist", {
+async function loadCodeAssist(
+  accessToken: string,
+  metadata: ClientMetadata,
+): Promise<LoadCodeAssistResponse> {
+  return cloudCodePost<LoadCodeAssistResponse>(accessToken, "loadCodeAssist", {
     cloudaicompanionProject: undefined,
     metadata,
   });
+}
+
+/** Resolve the managed Cloud Code companion project used for Gemini quota. */
+export async function onboardAntigravity(accessToken: string): Promise<string> {
+  const metadata = clientMetadata();
+  const load = await loadCodeAssist(accessToken, metadata);
 
   if (load.currentTier) {
     if (load.cloudaicompanionProject) return load.cloudaicompanionProject;
@@ -323,6 +330,9 @@ export async function onboardAntigravity(accessToken: string): Promise<string> {
   }
 
   if (!op.done) throw new Error("Antigravity onboarding timed out");
+
+  const reloaded = await loadCodeAssist(accessToken, metadata);
+  if (reloaded.cloudaicompanionProject) return reloaded.cloudaicompanionProject;
   throw new Error("Antigravity onboarding completed without a companion project");
 }
 

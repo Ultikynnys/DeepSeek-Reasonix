@@ -192,6 +192,24 @@ describe("antigravity-oauth", () => {
     expect(operationInit?.method).toBeUndefined();
   });
 
+  it("onboardAntigravity reloads the project when the completed operation omits it", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ allowedTiers: [{ id: "free-tier", isDefault: true }] }))
+      .mockResolvedValueOnce(jsonResponse({ done: true, response: {} }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          currentTier: { id: "free-tier" },
+          cloudaicompanionProject: "reloaded-project",
+        }),
+      );
+
+    await expect(onboardAntigravity("at")).resolves.toBe("reloaded-project");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+    );
+  });
+
   it("onboardAntigravity surfaces account ineligibility", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({
