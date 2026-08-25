@@ -1936,6 +1936,22 @@ function syncVisionTool(tab: Tab): void {
   }
 }
 
+/** Provider-specific "not configured yet" message for a model id — keeps a
+ *  gemini tab from being told to paste a DeepSeek key. Shared by the
+ *  user_input and skill_run setup gates (deepseek is the fallback provider). */
+function notConfiguredMessage(model: string): string {
+  switch (providerForModel(model)) {
+    case "openai":
+      return "Not configured yet — add an OpenAI key or sign in with ChatGPT (Settings → OpenAI) first.";
+    case "ollama":
+      return "Not configured yet — set an Ollama base URL / key and pick an Ollama model (Settings → Models).";
+    case "gemini":
+      return "Not configured yet — sign in to Google Antigravity (Settings → Google) to use Gemini models.";
+    default:
+      return "Not configured yet — paste your DeepSeek API key first.";
+  }
+}
+
 /** Whether the tab's CURRENT model can be run now — the strict per-turn gate.
  *  gpt needs an OpenAI key/OAuth; deepseek needs its key; local Ollama is
  *  keyless but cloud Ollama needs ollamaApiKey. */
@@ -2507,19 +2523,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (!tabCurrentModelUsable(tab)) {
       emitTabDiagnostic(tab, "turn.start.rejected", { reason: "credential-unavailable" }, "error");
-      const openai = providerForModel(tab.currentModel) === "openai";
-      const ollama = providerForModel(tab.currentModel) === "ollama";
-      emit(
-        {
-          type: "$error",
-          message: openai
-            ? `No OpenAI credential for ${tab.currentModel} — add an OpenAI key or sign in with ChatGPT (Settings → OpenAI).`
-            : ollama
-              ? `No Ollama endpoint configured for ${tab.currentModel} — set a base URL / key (Settings → Models → Ollama).`
-              : "No API key configured — paste your DeepSeek API key first.",
-        },
-        tab.id,
-      );
+      const provider = providerForModel(tab.currentModel);
+      const message =
+        provider === "openai"
+          ? `No OpenAI credential for ${tab.currentModel} — add an OpenAI key or sign in with ChatGPT (Settings → OpenAI).`
+          : provider === "ollama"
+            ? `No Ollama endpoint configured for ${tab.currentModel} — set a base URL / key (Settings → Models → Ollama).`
+            : provider === "gemini"
+              ? "Not signed in to Google Antigravity — sign in from Settings to use Gemini models."
+              : "No API key configured — paste your DeepSeek API key first.";
+      emit({ type: "$error", message }, tab.id);
       return;
     }
     const rt = tab.runtime;
@@ -3598,10 +3611,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "skill_run") {
       if (!tab.runtime) {
-        emit(
-          { type: "$error", message: "Not configured yet — paste your DeepSeek API key first." },
-          tab.id,
-        );
+        emit({ type: "$error", message: notConfiguredMessage(tab.currentModel) }, tab.id);
         return;
       }
       try {
@@ -4303,19 +4313,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "user_input") {
       if (!tab.runtime) {
-        const openai = providerForModel(tab.currentModel) === "openai";
-        const ollama = providerForModel(tab.currentModel) === "ollama";
-        emit(
-          {
-            type: "$error",
-            message: openai
-              ? "Not configured yet — add an OpenAI key or sign in with ChatGPT (Settings → OpenAI) first."
-              : ollama
-                ? "Not configured yet — set an Ollama base URL / key and pick an Ollama model (Settings → Models)."
-                : "Not configured yet — paste your DeepSeek API key first.",
-          },
-          tab.id,
-        );
+        emit({ type: "$error", message: notConfiguredMessage(tab.currentModel) }, tab.id);
         return;
       }
       void (async () => {
