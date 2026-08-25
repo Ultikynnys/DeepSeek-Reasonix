@@ -29,10 +29,12 @@ export { formatBytes } from "./format.js";
 export { messageOf } from "./error.js";
 export { DAY_MS } from "./time.js";
 export {
+  ANTIGRAVITY_MODELS,
   GEMINI_MODELS,
   GPT56_MODELS,
   KNOWN_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
+  isAntigravityModel,
   modelAcceptsImages,
 } from "./models.js";
 export type {

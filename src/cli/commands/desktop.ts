@@ -147,6 +147,7 @@ import {
   ANTIGRAVITY_OAUTH_CLIENT_ID,
   antigravityAccount,
   beginAntigravityOAuthFlow,
+  fetchAntigravityModels,
   onboardAntigravity,
   resolveAntigravityToken,
   signOutAntigravity,
@@ -784,10 +785,13 @@ async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId: st
   const accessToken = await resolveAntigravityToken(defaultConfigPath());
   if (!accessToken) return null;
   const creds = readConfig().antigravityOAuth;
-  let projectId = creds?.projectId;
+  let projectId = creds?.projectId === "rising-fact-p41fc" ? undefined : creds?.projectId;
   if (!projectId) {
     projectId = await onboardAntigravity(accessToken);
-    if (creds) saveAntigravityOAuth({ ...creds, projectId });
+  }
+  if (creds && (!creds.projectId || !creds.models?.length)) {
+    const models = (await fetchAntigravityModels(accessToken, projectId)).map(({ id }) => id);
+    saveAntigravityOAuth({ ...creds, projectId, models });
   }
   return { accessToken, projectId };
 }
@@ -868,6 +872,7 @@ function emitSettings(tab: Tab): void {
           !!antigravityOAuth?.accessToken &&
           antigravityOAuth.clientId === ANTIGRAVITY_OAUTH_CLIENT_ID,
         account: antigravityOAuth?.account,
+        models: antigravityOAuth?.models,
         flowError:
           lastAntigravityOAuthError ??
           (antigravityOAuth?.accessToken &&
@@ -3917,12 +3922,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               pendingAntigravityOAuth = null;
               const account = (await antigravityAccount(creds.accessToken)) ?? creds.account;
               const projectId = await onboardAntigravity(creds.accessToken);
-              saveAntigravityOAuth({
+              const onboarded = {
                 ...creds,
                 clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
                 account,
                 projectId,
-              });
+              };
+              saveAntigravityOAuth(onboarded);
+              const models = (await fetchAntigravityModels(creds.accessToken, projectId)).map(
+                ({ id }) => id,
+              );
+              saveAntigravityOAuth({ ...onboarded, models });
               lastAntigravityOAuthError = null;
               // Build (or rebuild) now-credentialed tabs so a fresh sign-in
               // takes effect (and clears the needs-setup screen) without a

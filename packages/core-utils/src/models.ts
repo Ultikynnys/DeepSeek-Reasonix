@@ -14,19 +14,38 @@ export const GPT56_MODELS: readonly string[] = [
   "gpt-5.6-luna",
 ];
 
-/** Gemini models served through Google Antigravity OAuth and Cloud Code. */
-export const GEMINI_MODELS: readonly string[] = [
+/** Unified models served through Google Antigravity OAuth and Cloud Code. */
+export const ANTIGRAVITY_MODELS: readonly string[] = [
   "gemini-2.5-flash",
   "gemini-2.5-pro",
+  "gemini-3.1-flash-fast",
+  "gemini-3.1-flash-high",
+  "gemini-3.1-pro-low",
+  "gemini-3.1-pro-high",
   "gemini-3.6-flash",
   "gemini-3.7-flash",
+  "claude-sonnet-4-6-thinking",
+  "claude-opus-4-6-thinking",
+  "gpt-oss-120b-medium",
 ];
+
+/** Compatibility export for existing consumers. */
+export const GEMINI_MODELS = ANTIGRAVITY_MODELS;
+
+export function isAntigravityModel(model: string | undefined | null): boolean {
+  return (
+    typeof model === "string" &&
+    (model.startsWith("gemini-") ||
+      model.startsWith("claude-") ||
+      model.startsWith("gpt-oss-"))
+  );
+}
 
 /** Model ids offered by the default endpoints and desktop model pickers. */
 export const KNOWN_MODELS: readonly string[] = [
   ...SUPPORTED_OFFICIAL_MODELS,
   ...GPT56_MODELS,
-  ...GEMINI_MODELS,
+  ...ANTIGRAVITY_MODELS,
 ];
 
 /** Model ids that accept image attachments in user messages — the GPT-5.6
@@ -46,7 +65,7 @@ export function modelAcceptsImages(
   if (typeof model !== "string") return false;
   if (model.startsWith("gpt-")) return true;
   if (model === "deepseek-v4-flash-vision-exp") return true;
-  if (model.startsWith("gemini-")) return true;
+  if (isAntigravityModel(model)) return true;
   if (model.startsWith("ollama/") && ollamaVision && ollamaVision.has(model)) return true;
   return false;
 }

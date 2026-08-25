@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANTIGRAVITY_MODELS,
   GEMINI_MODELS,
   GPT56_MODELS,
   KNOWN_MODELS,
@@ -18,8 +19,8 @@ describe("modelAcceptsImages", () => {
     expect(modelAcceptsImages("deepseek-v4-flash-vision-exp")).toBe(true);
   });
 
-  it("accepts every Gemini model (natively multimodal)", () => {
-    for (const model of GEMINI_MODELS) {
+  it("accepts every Antigravity model exposed by the unified gateway", () => {
+    for (const model of ANTIGRAVITY_MODELS) {
       expect(modelAcceptsImages(model)).toBe(true);
     }
   });
@@ -82,7 +83,7 @@ describe("KNOWN_MODELS", () => {
     expect(KNOWN_MODELS).toEqual([
       ...SUPPORTED_OFFICIAL_MODELS,
       ...GPT56_MODELS,
-      ...GEMINI_MODELS,
+      ...ANTIGRAVITY_MODELS,
     ]);
   });
 });

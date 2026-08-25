@@ -19,18 +19,19 @@ export const ANTIGRAVITY_OAUTH_CLIENT_SECRET = "GOCSPX-K58FWR486LdLJ1mLB8sXC4z6q
 export const ANTIGRAVITY_DEFAULT_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const ANTIGRAVITY_DEFAULT_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const ANTIGRAVITY_DEFAULT_USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo";
-/** Antigravity gateway endpoints, in generation-request fallback order. */
-export const ANTIGRAVITY_CLOUD_CODE_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com";
+/** Current Antigravity gateways, in the maintained client's fallback order. */
+export const ANTIGRAVITY_CLOUD_CODE_URL = "https://cloudcode-pa.googleapis.com";
 export const ANTIGRAVITY_CLOUD_CODE_ENDPOINTS = [
   ANTIGRAVITY_CLOUD_CODE_URL,
-  "https://autopush-cloudcode-pa.sandbox.googleapis.com",
-  "https://cloudcode-pa.googleapis.com",
+  "https://daily-cloudcode-pa.googleapis.com",
+  "https://daily-cloudcode-pa.sandbox.googleapis.com",
 ] as const;
-const ANTIGRAVITY_PROJECT_ENDPOINTS = [
-  "https://cloudcode-pa.googleapis.com",
-  ...ANTIGRAVITY_CLOUD_CODE_ENDPOINTS,
-] as const;
-export const ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
+const ANTIGRAVITY_HUB_MANIFEST_URL =
+  "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml";
+const ANTIGRAVITY_VERSION_FLOOR = "2.9.1";
+const ANTIGRAVITY_VERSION_TTL_MS = 6 * 60 * 60_000;
+let cachedAntigravityVersion = ANTIGRAVITY_VERSION_FLOOR;
+let antigravityVersionExpiresAt = 0;
 
 const DEFAULT_SCOPE = [
   "https://www.googleapis.com/auth/cloud-platform",
@@ -195,7 +196,10 @@ export async function resolveAntigravityToken(
   refreshInFlight = (async () => {
     try {
       const next = await refreshAntigravityToken(creds.refreshToken);
-      saveAntigravityOAuth({ ...next, account: creds.account, projectId: creds.projectId }, path);
+      saveAntigravityOAuth(
+        { ...next, account: creds.account, projectId: creds.projectId, models: creds.models },
+        path,
+      );
       return next.accessToken;
     } catch (err) {
       console.warn(`reasonix: Antigravity OAuth refresh failed — ${(err as Error).message}`);
@@ -213,17 +217,71 @@ interface LoadCodeAssistResponse {
   cloudaicompanionProject?: string | { id?: string } | null;
 }
 
+export interface AntigravityModel {
+  id: string;
+  displayName: string;
+  maxTokens?: number;
+  maxOutputTokens?: number;
+}
+
+interface AvailableModelsResponse {
+  models?: Record<
+    string,
+    { displayName?: string; maxTokens?: number; maxOutputTokens?: number } | null
+  >;
+}
+
 class AntigravityProjectAuthError extends Error {}
 
 export function antigravityPlatform(): string {
   return process.platform === "win32" ? "WINDOWS" : "MACOS";
 }
 
-export function antigravityHeaders(accessToken: string): Record<string, string> {
+function antigravityRuntimePlatform(): string {
+  if (process.platform === "win32") return "windows/amd64";
+  if (process.platform === "darwin" && process.arch === "x64") return "darwin/amd64";
+  if (process.platform === "linux") return `linux/${process.arch === "arm64" ? "arm64" : "amd64"}`;
+  return "darwin/arm64";
+}
+
+function validAntigravityVersion(version: string): boolean {
+  return /^\d+\.\d+\.\d+$/.test(version);
+}
+
+/** Resolve the current Hub version. A stale client is rejected by newer models. */
+export async function antigravityVersion(): Promise<string> {
+  const configured = process.env.ANTIGRAVITY_VERSION?.trim();
+  if (configured) {
+    if (!validAntigravityVersion(configured)) {
+      throw new Error("ANTIGRAVITY_VERSION must be a semantic version such as 2.9.1");
+    }
+    return configured;
+  }
+  if (Date.now() < antigravityVersionExpiresAt) return cachedAntigravityVersion;
+  const res = await fetch(ANTIGRAVITY_HUB_MANIFEST_URL, {
+    headers: { "cache-control": "no-cache", "user-agent": "electron-builder" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    throw new Error(`Antigravity version discovery failed (${res.status})`);
+  }
+  const manifest = await res.text();
+  const match = /^version:\s*["']?([^\s"']+)/m.exec(manifest);
+  const version = match?.[1]?.trim();
+  if (!version || !validAntigravityVersion(version)) {
+    throw new Error("Antigravity version discovery returned an invalid manifest");
+  }
+  cachedAntigravityVersion = version;
+  antigravityVersionExpiresAt = Date.now() + ANTIGRAVITY_VERSION_TTL_MS;
+  return version;
+}
+
+export async function antigravityHeaders(accessToken: string): Promise<Record<string, string>> {
+  const version = await antigravityVersion();
   return {
     "content-type": "application/json",
     authorization: `Bearer ${accessToken}`,
-    "user-agent": `antigravity/1.18.3 ${process.platform === "win32" ? "windows/amd64" : "darwin/arm64"}`,
+    "user-agent": `antigravity/hub/${version} ${antigravityRuntimePlatform()}`,
     "x-goog-api-client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
     "client-metadata": JSON.stringify({
       ideType: "ANTIGRAVITY",
@@ -240,14 +298,14 @@ function projectFromLoad(data: LoadCodeAssistResponse): string | undefined {
   return data.cloudaicompanionProject?.id || undefined;
 }
 
-/** Resolve Antigravity's project, falling back to its observed shared project. */
+/** Resolve the account's companion project. Never substitute another account's project. */
 export async function onboardAntigravity(accessToken: string): Promise<string> {
   const errors: string[] = [];
-  for (const endpoint of new Set(ANTIGRAVITY_PROJECT_ENDPOINTS)) {
+  for (const endpoint of ANTIGRAVITY_CLOUD_CODE_ENDPOINTS) {
     try {
       const res = await fetch(`${endpoint}/v1internal:loadCodeAssist`, {
         method: "POST",
-        headers: antigravityHeaders(accessToken),
+        headers: await antigravityHeaders(accessToken),
         body: JSON.stringify({
           metadata: {
             ideType: "ANTIGRAVITY",
@@ -274,10 +332,61 @@ export async function onboardAntigravity(accessToken: string): Promise<string> {
       errors.push(`${endpoint}: ${(err as Error).message}`);
     }
   }
-  console.warn(
-    `reasonix: Antigravity project discovery returned no project; using the observed Antigravity fallback ${ANTIGRAVITY_DEFAULT_PROJECT_ID} — ${errors.join("; ")}`,
+  throw new Error(
+    `Antigravity did not return a companion project for this account: ${errors.join("; ")}`,
   );
-  return ANTIGRAVITY_DEFAULT_PROJECT_ID;
+}
+
+/** Fetch the exact unified model catalog enabled for this Antigravity account. */
+export async function fetchAntigravityModels(
+  accessToken: string,
+  projectId: string,
+): Promise<AntigravityModel[]> {
+  const errors: string[] = [];
+  for (const endpoint of ANTIGRAVITY_CLOUD_CODE_ENDPOINTS) {
+    try {
+      const res = await fetch(`${endpoint}/v1internal:fetchAvailableModels`, {
+        method: "POST",
+        headers: await antigravityHeaders(accessToken),
+        body: JSON.stringify({ project: projectId }),
+      });
+      if (!res.ok) {
+        const detail = await res.text();
+        if (res.status === 403 && detail.includes("SUBSCRIPTION_REQUIRED")) {
+          throw new AntigravityProjectAuthError(
+            "Google classified Antigravity model discovery as licensed Gemini Code Assist access (#3501). Update Reasonix, then sign out and sign in again to refresh the client identity and account project.",
+          );
+        }
+        errors.push(`${endpoint}: ${res.status} ${detail}`);
+        continue;
+      }
+      const data = (await res.json()) as AvailableModelsResponse;
+      if (!data.models || typeof data.models !== "object") {
+        errors.push(`${endpoint}: response contained no model catalog`);
+        continue;
+      }
+      const models = Object.entries(data.models).flatMap(([id, model]) => {
+        const normalized = id.trim();
+        if (!normalized || !model) return [];
+        return [
+          {
+            id: normalized,
+            displayName: model.displayName?.trim() || normalized,
+            ...(Number.isFinite(model.maxTokens) ? { maxTokens: model.maxTokens } : {}),
+            ...(Number.isFinite(model.maxOutputTokens)
+              ? { maxOutputTokens: model.maxOutputTokens }
+              : {}),
+          },
+        ];
+      });
+      if (models.length > 0) return models;
+      errors.push(`${endpoint}: model catalog was empty`);
+    } catch (err) {
+      if (err instanceof AntigravityProjectAuthError) throw err;
+      errors.push(`${endpoint}: ${(err as Error).message}`);
+    }
+  }
+  throw new Error(`Antigravity model discovery failed: ${errors.join("; ")}`);
 }
 
 // ── Browser OAuth flow ─────────────────────────────────────────────────────

@@ -137,6 +137,7 @@ export function Composer({
   ollamaHiddenCount,
   ollamaVisionModels,
   onRefreshOllamaModels,
+  antigravityModels,
   textareaRef,
   slashCommands,
   onMentionQuery,
@@ -179,6 +180,8 @@ export function Composer({
   onRefreshOllamaModels?: (force?: boolean) => void;
   /** Prefixed vision-capable Ollama ids (`ollama/llava`) — shown as a badge. */
   ollamaVisionModels?: ReadonlySet<string>;
+  /** Exact model ids returned by the signed-in Antigravity account. */
+  antigravityModels?: string[];
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   slashCommands: SlashCmd[];
   onMentionQuery?: (q: string, nonce: number) => void;
@@ -730,6 +733,7 @@ export function Composer({
                   ollamaModelsError={ollamaModelsError}
                   ollamaHiddenCount={ollamaHiddenCount}
                   ollamaVisionModels={ollamaVisionModels}
+                  antigravityModels={antigravityModels}
                   onRefreshOllamaModels={onRefreshOllamaModels}
                   onPickModel={(m) => {
                     onModelChange(m);
@@ -902,6 +906,7 @@ function ModelEffortMenu({
   ollamaModelsError,
   ollamaHiddenCount,
   ollamaVisionModels,
+  antigravityModels,
   onRefreshOllamaModels,
 }: {
   modelLabel: string;
@@ -912,9 +917,17 @@ function ModelEffortMenu({
   ollamaModelsError?: string;
   ollamaHiddenCount?: number;
   ollamaVisionModels?: ReadonlySet<string>;
+  antigravityModels?: string[];
   onRefreshOllamaModels?: (force?: boolean) => void;
 }) {
   const [draft, setDraft] = useState(modelLabel);
+  const knownModels = KNOWN_MODELS.filter(
+    (model) =>
+      !model.startsWith("gemini-") &&
+      !model.startsWith("claude-") &&
+      !model.startsWith("gpt-oss-"),
+  );
+  const availableModels = [...knownModels, ...(antigravityModels ?? [])];
   const ollamaGroup = ollamaModels && ollamaModels.length > 0;
   return (
     <div
@@ -938,7 +951,7 @@ function ModelEffortMenu({
         {/* Models column — the Ollama group alone can run to hundreds of ids. */}
         <div className="model-menu-col">
           <div className="popup-list model-menu-list">
-            {KNOWN_MODELS.map((m) => (
+            {availableModels.map((m) => (
               <div
                 key={m}
                 className="popup-item"

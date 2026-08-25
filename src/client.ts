@@ -769,7 +769,7 @@ export class DeepSeekClient {
       try {
         const response = await this._fetch(`${endpoint}${path}`, {
           ...init,
-          headers: { ...antigravityHeaders(accessToken), ...init.headers },
+          headers: { ...(await antigravityHeaders(accessToken)), ...init.headers },
         });
         if (response.status !== 404 && response.status < 500) return response;
         lastError = new Error(`Antigravity endpoint ${endpoint} returned ${response.status}`);
@@ -778,6 +778,16 @@ export class DeepSeekClient {
       }
     }
     throw lastError ?? new Error("No Antigravity endpoint was available");
+  }
+
+  private async antigravityUpstreamError(resp: Response): Promise<Error> {
+    const body = await resp.text().catch(() => "");
+    if (resp.status === 403 && body.includes("SUBSCRIPTION_REQUIRED")) {
+      return new Error(
+        "Google Antigravity rejected this request as licensed Gemini Code Assist access (#3501). Sign out and sign in again so Reasonix can refresh the current Antigravity client identity, companion project, and account model catalog. The selected model was not downgraded or retried.",
+      );
+    }
+    return new Error(`Upstream ${resp.status}: ${body}`);
   }
 
   /** Cloud Code non-streaming request — `POST /v1internal:generateContent`. */
@@ -791,7 +801,7 @@ export class DeepSeekClient {
         signal,
       });
       if (!resp.ok) {
-        throw new Error(`Upstream ${resp.status}: ${await resp.text()}`);
+        throw await this.antigravityUpstreamError(resp);
       }
       return this.parseAntigravityResponse(await resp.json());
     } finally {
@@ -822,7 +832,7 @@ export class DeepSeekClient {
     }
     if (!resp.ok || !resp.body) {
       clearTimeout(timer);
-      throw new Error(`Upstream ${resp.status}: ${await resp.text().catch(() => "")}`);
+      throw await this.antigravityUpstreamError(resp);
     }
     const queue: StreamChunk[] = [];
     let done = false;

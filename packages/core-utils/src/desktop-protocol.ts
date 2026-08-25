@@ -389,6 +389,8 @@ export interface SettingsEvent {
   antigravityOAuth?: {
     signedIn: boolean;
     account?: string;
+    /** Exact model ids returned by Antigravity for this account. */
+    models?: string[];
     /** Last OAuth flow failure — drives the status-bar Gemini auth chip until the next successful sign-in. */
     flowError?: string;
   };

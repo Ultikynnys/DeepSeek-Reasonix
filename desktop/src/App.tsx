@@ -380,6 +380,8 @@ export type Settings = {
   antigravityOAuth?: {
     signedIn: boolean;
     account?: string;
+    /** Exact model ids returned by Antigravity for this account. */
+    models?: string[];
     /** Last OAuth flow failure — drives the status-bar Gemini auth chip until the next successful sign-in. */
     flowError?: string;
   };
@@ -3175,6 +3177,7 @@ function TabRuntime({
                 ollamaModelsError={ollamaModelsError ?? undefined}
                 ollamaHiddenCount={ollamaHiddenCount}
                 ollamaVisionModels={ollamaVisionModels}
+                antigravityModels={state.settings?.antigravityOAuth?.models}
                 onRefreshOllamaModels={onRefreshOllamaModels}
                 onModelChange={(model) => {
                   applySettingsPatch({ model });

@@ -355,9 +355,12 @@ describe("config", () => {
       }
     });
 
-    it("providerForModel routes gpt-* ids to openai, everything else to deepseek", () => {
+    it("providerForModel keeps OpenAI GPT ids separate from unified Antigravity ids", () => {
       expect(providerForModel("gpt-5.6-sol")).toBe("openai");
       expect(providerForModel("gpt-5.6")).toBe("openai");
+      expect(providerForModel("gpt-oss-120b-medium")).toBe("gemini");
+      expect(providerForModel("claude-sonnet-4-6-thinking")).toBe("gemini");
+      expect(providerForModel("gemini-3.1-pro-high")).toBe("gemini");
       expect(providerForModel("deepseek-v4-flash")).toBe("deepseek");
       expect(providerForModel(undefined)).toBe("deepseek");
     });
@@ -504,6 +507,7 @@ describe("config", () => {
           expiresAt: 123,
           account: "u@example.com",
           projectId: "proj-1",
+          models: ["gemini-3.1-pro-high", "claude-sonnet-4-6-thinking"],
         },
         path,
       );
@@ -513,18 +517,19 @@ describe("config", () => {
         expiresAt: 123,
         account: "u@example.com",
         projectId: "proj-1",
+        models: ["gemini-3.1-pro-high", "claude-sonnet-4-6-thinking"],
       });
       clearAntigravityOAuth(path);
       expect(readConfig(path).antigravityOAuth).toBeUndefined();
     });
 
-    it("gemini-* ids route to the gemini provider and the Cloud Code base URL", () => {
+    it("unified Antigravity ids route to the Cloud Code base URL", () => {
       for (const id of GEMINI_MODELS) {
         expect(providerForModel(id)).toBe("gemini");
         expect(SUPPORTED_MODELS).toContain(id);
       }
-      const ep = loadEndpointForModel("gemini-2.5-flash", path);
-      expect(ep.baseUrl).toBe("https://daily-cloudcode-pa.sandbox.googleapis.com");
+      const ep = loadEndpointForModel("claude-sonnet-4-6-thinking", path);
+      expect(ep.baseUrl).toBe("https://cloudcode-pa.googleapis.com");
       expect(ep.apiKey).toBeUndefined();
     });
 

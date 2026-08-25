@@ -8,6 +8,7 @@ import {
   GPT56_MODELS,
   KNOWN_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
+  isAntigravityModel,
 } from "@reasonix/core-utils";
 import { z } from "zod";
 import { atomicWriteSync, tmpSiblingPath } from "./core/atomic-write.js";
@@ -40,9 +41,9 @@ export const SUPPORTED_MODELS: readonly string[] = KNOWN_MODELS;
 export type ModelProvider = "deepseek" | "openai" | "ollama" | "gemini";
 
 export function providerForModel(model: string | undefined | null): ModelProvider {
+  if (isAntigravityModel(model)) return "gemini";
   if (typeof model === "string" && model.startsWith("gpt-")) return "openai";
   if (typeof model === "string" && model.startsWith("ollama/")) return "ollama";
-  if (typeof model === "string" && model.startsWith("gemini-")) return "gemini";
   return "deepseek";
 }
 
@@ -56,7 +57,7 @@ export { modelAcceptsImages } from "@reasonix/core-utils";
 export const DEFAULT_OLLAMA_CHAT_URL = "https://ollama.com/v1";
 
 /** Antigravity daily gateway used for gemini-* models. */
-export const DEFAULT_GEMINI_CHAT_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com";
+export const DEFAULT_GEMINI_CHAT_URL = "https://cloudcode-pa.googleapis.com";
 
 /** Native Ollama API origin: strip a trailing `/v1` — the `/api/*` endpoints
  *  live at that root (localhost:11434/v1 → localhost:11434). */
@@ -226,8 +227,10 @@ export interface AntigravityOAuthCreds {
   expiresAt: number;
   /** Account email from userinfo — shown masked in settings, never shipped over the bridge. */
   account?: string;
-  /** Cloud Code companion project id resolved via loadCodeAssist/onboardUser. */
+  /** Cloud Code companion project id resolved for this account. */
   projectId?: string;
+  /** Model ids returned by fetchAvailableModels for this account. */
+  models?: string[];
 }
 
 export interface ReasonixConfig {

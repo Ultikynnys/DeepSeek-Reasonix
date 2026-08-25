@@ -1113,13 +1113,23 @@ function PageModels({
 }) {
   const [draft, setDraft] = useState(settings.model);
   useEffect(() => setDraft(settings.model), [settings.model]);
-  const isKnown = KNOWN_MODELS.includes(settings.model);
+  const knownModels = KNOWN_MODELS.filter(
+    (model) =>
+      !model.startsWith("gemini-") &&
+      !model.startsWith("claude-") &&
+      !model.startsWith("gpt-oss-"),
+  );
+  const availableModels = [
+    ...knownModels,
+    ...(settings.antigravityOAuth?.models ?? []),
+  ];
+  const isKnown = availableModels.includes(settings.model);
   return (
     <>
       <section className="section">
         <div className="stitle">{t("settings.defaultModelCurrent", { model: settings.model })}</div>
         <div className="model-grid">
-          {KNOWN_MODELS.map((id) => (
+          {availableModels.map((id) => (
             <div
               key={id}
               className="mcard"

@@ -1,7 +1,7 @@
 /** Gemini provider (Antigravity/Cloud Code API): payload shape, wrapped
  *  response parsing, and SSE streaming. */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 
 const auth = { accessToken: "google-token", projectId: "proj-123" };
@@ -28,7 +28,12 @@ function wrappedResponse(parts: unknown[], usage?: unknown): unknown {
   };
 }
 
+beforeEach(() => {
+  process.env.ANTIGRAVITY_VERSION = "2.9.1";
+});
+
 afterEach(() => {
+  process.env.ANTIGRAVITY_VERSION = undefined;
   vi.restoreAllMocks();
 });
 
@@ -66,9 +71,7 @@ describe("gemini payload", () => {
       ],
     });
 
-    expect(captured?.url).toBe(
-      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent",
-    );
+    expect(captured?.url).toBe("https://cloudcode-pa.googleapis.com/v1internal:generateContent");
     expect(captured?.headers.authorization).toBe("Bearer google-token");
     expect(captured?.headers["x-goog-api-client"]).toBe(
       "google-cloud-sdk vscode_cloudshelleditor/0.1",
@@ -128,7 +131,7 @@ describe("gemini payload", () => {
       client.chat({ model: "gemini-2.5-flash", messages: [{ role: "user", content: "hi" }] }),
     ).resolves.toMatchObject({ content: "fallback" });
     expect(vi.mocked(fetch).mock.calls[2]?.[0]).toBe(
-      "https://cloudcode-pa.googleapis.com/v1internal:generateContent",
+      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent",
     );
   });
 
@@ -198,6 +201,32 @@ describe("gemini payload", () => {
     ).rejects.toThrow(/Not signed in to Google Antigravity/);
   });
 
+  it("surfaces SUBSCRIPTION_REQUIRED without retrying or downgrading the model", async () => {
+    const fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: 403,
+            status: "PERMISSION_DENIED",
+            details: [{ reason: "SUBSCRIPTION_REQUIRED" }],
+          },
+        }),
+        { status: 403 },
+      );
+    }) as unknown as typeof globalThis.fetch;
+    const client = geminiClient(fetch);
+
+    await expect(
+      client.chat({
+        model: "claude-sonnet-4-6-thinking",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    ).rejects.toThrow(/licensed Gemini Code Assist access.*not downgraded or retried/i);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0]?.[1]?.body as string);
+    expect(body.model).toBe("claude-sonnet-4-6-thinking");
+  });
+
   it("does not send a request without a companion project", async () => {
     const fetch = vi.fn() as unknown as typeof globalThis.fetch;
     const client = new DeepSeekClient({
@@ -228,7 +257,7 @@ describe("gemini streaming", () => {
 
     const fetch = vi.fn(async (url: unknown) => {
       expect(String(url)).toBe(
-        "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+        "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
       );
       return new Response(sse, {
         status: 200,

@@ -41,6 +41,19 @@ function renderComposer(props?: Partial<React.ComponentProps<typeof Composer>>) 
   return { ...utils, textareaRef, onMentionQuery };
 }
 
+describe("desktop Composer model catalog", () => {
+  it("shows only the signed-in account's discovered Antigravity models", () => {
+    const { container } = renderComposer({
+      antigravityModels: ["gemini-account-model", "claude-account-model"],
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+    const text = container.querySelector(".model-menu-list")?.textContent ?? "";
+    expect(text).toContain("gemini-account-model");
+    expect(text).toContain("claude-account-model");
+    expect(text).not.toContain("gemini-2.5-pro");
+  });
+});
+
 describe("desktop Composer @ popup", () => {
   it("keeps the active mention row when async results shrink", async () => {
     const { container, rerender, onMentionQuery } = renderComposer();
