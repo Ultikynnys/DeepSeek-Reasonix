@@ -958,6 +958,62 @@ describe("Desktop App reducer — compaction file triage", () => {
   });
 });
 
+describe("Desktop App reducer — $session_loaded resync echo", () => {
+  function loaded(session: string, resync: boolean): Parameters<typeof reduce>[1] {
+    return {
+      t: "incoming",
+      event: {
+        type: "$session_loaded",
+        name: session,
+        resync,
+        messages: [
+          { kind: "user", text: "q1" },
+          {
+            kind: "assistant",
+            turn: 1,
+            segments: [{ kind: "text", text: "a1" }],
+            pending: false,
+          },
+        ],
+        carryover: {
+          totalCostUsd: 0,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          totalCompletionTokens: 0,
+        },
+      },
+    };
+  }
+
+  it("skips a resync echo of the already-loaded session, even when idle", () => {
+    const base = {
+      ...initialState(),
+      busy: false,
+      currentSession: "sess-1",
+      messages: [{ kind: "user" as const, text: "live", clientId: "c", turn: 1 }],
+    };
+    // Cold-start double-emit: bootstrap $session_loaded already applied, then
+    // desktop_resync echoes the same session. Must NOT wipe the transcript.
+    const next = reduce(base, loaded("sess-1", true));
+    expect(next.messages).toEqual([{ kind: "user", text: "live", clientId: "c", turn: 1 }]);
+    expect(next.currentSession).toBe("sess-1");
+  });
+
+  it("applies a resync echo when the session differs (genuine reload)", () => {
+    const base = { ...initialState(), currentSession: "sess-1" };
+    const next = reduce(base, loaded("sess-2", true));
+    expect(next.currentSession).toBe("sess-2");
+    expect(next.messages).toHaveLength(2);
+  });
+
+  it("applies a non-resync session load (user-initiated switch)", () => {
+    const base = { ...initialState(), currentSession: "sess-1" };
+    const next = reduce(base, loaded("sess-2", false));
+    expect(next.currentSession).toBe("sess-2");
+    expect(next.messages).toHaveLength(2);
+  });
+});
+
 describe("Desktop App reducer — model.final content", () => {
   const turnStarted: ModelTurnStartedEvent = {
     type: "model.turn.started",

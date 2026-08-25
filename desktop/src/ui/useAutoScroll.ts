@@ -17,6 +17,10 @@ export function useAutoScroll(
   busy: boolean,
   /** Optional boot-time restore: the offset the transcript should open at. */
   getRestoreScrollTop?: () => number | null,
+  /** True when this tab is the visible one. Inactive tabs render no thread
+   *  content (see TabRuntime), so the boot restore / pin-to-bottom must be
+   *  re-applied the moment a tab becomes active and its content mounts. */
+  active?: boolean,
 ) {
   const [showJumpButton, setShowJumpButton] = useState(false);
   const isPinnedRef = useRef(true);
@@ -145,9 +149,14 @@ export function useAutoScroll(
     };
   }, [containerRef, contentRef, refreshJumpButton]);
 
-  // Initial scroll when the hook mounts (e.g. session loaded). Restores the
-  // saved offset if there is one (#1244), otherwise pins to the bottom.
+  // Initial scroll when the hook mounts or the tab becomes active (e.g.
+  // session loaded, or an inactive tab's content mounts on first activation).
+  // Restores the saved offset if there is one (#1244), otherwise pins to the
+  // bottom. Inactive tabs render no thread content, so their container height
+  // is ~0 until activated — deferring this to the active edge prevents a
+  // pointless pin-to-bottom against empty content.
   useEffect(() => {
+    if (active === false) return;
     const el = containerRef.current;
     if (!el) return;
     const id = setTimeout(() => {
@@ -165,7 +174,7 @@ export function useAutoScroll(
       }
     }, 60);
     return () => clearTimeout(id);
-  }, [containerRef, getRestoreScrollTop, refreshJumpButton]);
+  }, [containerRef, getRestoreScrollTop, refreshJumpButton, active]);
 
   return { showJumpButton, scrollToBottom };
 }

@@ -1318,13 +1318,15 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     }
     case "$session_loaded": {
-      // A resync echo of the session we're ALREADY streaming must not
-      // clobber the live transcript — the on-disk snapshot is behind the
-      // deltas the backend keeps sending, and busy=false here would let
-      // the user send a second message into a running turn. Genuine
-      // `session_load` RPCs are never marked `resync`, so a real switch
-      // (different session, or same session while idle) still applies.
-      if (ev.resync && state.busy && ev.name === state.currentSession) return state;
+      // A resync echo of the session we've ALREADY loaded must not clobber
+      // the live transcript — the on-disk snapshot is behind the deltas the
+      // backend keeps sending, and busy flags can't be trusted mid-stream.
+      // This also covers the common cold-start double-emit: bootstrapTab
+      // sends $session_loaded once, then desktop_resync echoes it again for
+      // the SAME session, which would otherwise re-render the whole
+      // transcript. Genuine `session_load` RPCs are never marked `resync`,
+      // so a real switch (different session) still applies.
+      if (ev.resync && ev.name === state.currentSession) return state;
       const sessionName = ev.name;
       const loaded = mapLoadedMessages(ev.messages);
       const sessionFiles = deriveSessionFiles(loaded);
@@ -2508,6 +2510,7 @@ function TabRuntime({
     threadInnerRef,
     state.busy,
     restoreScrollTop,
+    active,
   );
 
   // Persist the transcript scroll offset per session so a restart reopens
@@ -2941,6 +2944,8 @@ function TabRuntime({
               />
               <div className="thread" ref={threadRef}>
                 <div className="thread-inner" ref={threadInnerRef}>
+                  {active ? (
+                    <>
                   {state.activePlan ? (
                     <>
                       <PlanBanner
@@ -3120,6 +3125,8 @@ function TabRuntime({
                     >
                       {t("app.connecting")}
                     </div>
+                  ) : null}
+                    </>
                   ) : null}
                 </div>
                 {showJumpButton ? (
