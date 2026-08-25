@@ -1,6 +1,6 @@
 {
   "name": "reasonix",
-  "version": "0.53.110",
+  "version": "0.53.111",
   "description": "Reasonix desktop app — DeepSeek-native coding agent with a cache-first loop, flash-first cost control, and tool-call repair.",
   "type": "module",
   "workspaces": [
