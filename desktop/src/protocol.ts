@@ -263,6 +263,7 @@ export type SubagentProgressEvent = {
   phase?: "exploring" | "summarising";
   iter?: number;
   elapsedMs?: number;
+  contextTokens?: number;
   outputChars?: number;
   reasoningChars?: number;
   toolReadChars?: number;
@@ -273,6 +274,8 @@ export type SubagentProgressEvent = {
   error?: string;
   turns?: number;
   costUsd?: number;
+  billingKind?: "usd" | "quota" | "none";
+  quotaUsedPct?: number;
   maxToolIters?: number;
   maxElapsedMs?: number;
   budgetExhausted?: "tool-iters" | "elapsed";

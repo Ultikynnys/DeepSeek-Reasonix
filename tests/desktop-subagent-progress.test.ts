@@ -22,6 +22,7 @@ describe("desktop subagent progress projection", () => {
         task: "review changes",
         iter: 3,
         elapsedMs: 1200,
+        contextTokens: 12_345,
         outputChars: 40,
         reasoningChars: 80,
         toolReadChars: 160,
@@ -31,6 +32,7 @@ describe("desktop subagent progress projection", () => {
       runId: "sub-1",
       iter: 3,
       elapsedMs: 1200,
+      contextTokens: 12_345,
       outputChars: 40,
       reasoningChars: 80,
       toolReadChars: 160,
@@ -53,6 +55,31 @@ describe("desktop subagent progress projection", () => {
       maxElapsedMs: 90_000,
       budgetExhausted: "tool-iters",
     });
+  });
+
+  it("projects the billing metric for token-priced and quota runs", () => {
+    expect(
+      projectSubagentEvent({
+        kind: "end",
+        runId: "sub-1",
+        task: "explore",
+        model: "deepseek-v4-flash",
+        costUsd: 0.0123,
+        billingKind: "usd",
+      }),
+    ).toMatchObject({ action: "end", costUsd: 0.0123, billingKind: "usd" });
+
+    expect(
+      projectSubagentEvent({
+        kind: "end",
+        runId: "sub-2",
+        task: "explore",
+        model: "gpt-5.6-sol",
+        costUsd: 0,
+        billingKind: "quota",
+        quotaUsedPct: 2.5,
+      }),
+    ).toMatchObject({ action: "end", billingKind: "quota", quotaUsedPct: 2.5 });
   });
 
   it("exposes redacted tool intent but never child reasoning or result bodies", () => {

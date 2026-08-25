@@ -177,6 +177,47 @@ function toolResultContent(content: ChatMessage["content"]): Record<string, unkn
   return { result };
 }
 
+/** JSON-Schema keywords Gemini's OpenAPI-3.0 function-declaration subset
+ *  rejects. Bridged MCP schemas routinely carry these; forwarding them can
+ *  trigger a 400 INVALID_ARGUMENT, so they are stripped before upload. */
+const GEMINI_UNSUPPORTED_SCHEMA_KEYS = new Set([
+  "$schema",
+  "$ref",
+  "$defs",
+  "definitions",
+  "additionalProperties",
+  "patternProperties",
+  "anyOf",
+  "oneOf",
+  "allOf",
+  "not",
+]);
+
+/** Recursively whitelist a tool `parameters` schema to the Gemini-safe subset,
+ *  preserving nesting structure while dropping unsupported keywords. */
+function sanitizeGeminiSchema(params: unknown): unknown {
+  if (!params || typeof params !== "object") return params;
+  if (Array.isArray(params)) return params;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
+    if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
+    if (key === "properties" && value && typeof value === "object") {
+      const props: Record<string, unknown> = {};
+      for (const [pk, pv] of Object.entries(value as Record<string, unknown>)) {
+        props[pk] = sanitizeGeminiSchema(pv);
+      }
+      out.properties = props;
+      continue;
+    }
+    if (key === "items" && value && typeof value === "object") {
+      out.items = sanitizeGeminiSchema(value);
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 /** Byte-stable equality for the cache-prefix overlap check — key order is
  *  deterministic because both sides serialize the same source objects. */
 function sameMessage(a: ChatMessage, b: ChatMessage): boolean {
@@ -212,7 +253,14 @@ export interface ChatResponse {
 export interface StreamChunk {
   contentDelta?: string;
   reasoningDelta?: string;
-  toolCallDelta?: { index: number; id?: string; name?: string; argumentsDelta?: string };
+  toolCallDelta?: {
+    index: number;
+    id?: string;
+    name?: string;
+    argumentsDelta?: string;
+    /** Gemini 3.x function-call thought signature, forwarded verbatim. */
+    thoughtSignature?: string;
+  };
   usage?: Usage;
   finishReason?: string;
   raw: any;
@@ -901,6 +949,9 @@ export class DeepSeekClient {
           index: 0,
           name: part.functionCall.name,
           argumentsDelta: JSON.stringify(part.functionCall.args ?? {}),
+          // Gemini 3.x requires the model's thoughtSignature to be echoed back
+          // unchanged on the next request, or the tool continuation 400s.
+          thoughtSignature: part.functionCall.thoughtSignature,
         };
       }
     }
@@ -923,6 +974,16 @@ export class DeepSeekClient {
   ): Record<string, unknown> {
     const contents: Array<Record<string, unknown>> = [];
     let systemInstruction: string | undefined;
+    // Consecutive tool messages (results of one parallel assistant turn) must
+    // be coalesced into a single `user` content with one functionResponse per
+    // result. Gemini rejects a `role: "function"` content and rejects duplicate
+    // consecutive roles; Google's own client emits one combined user turn.
+    let pendingFunctionResponses: Array<Record<string, unknown>> = [];
+    const flushFunctionResponses = (): void => {
+      if (pendingFunctionResponses.length === 0) return;
+      contents.push({ role: "user", parts: pendingFunctionResponses });
+      pendingFunctionResponses = [];
+    };
     for (const msg of opts.messages) {
       switch (msg.role) {
         case "system": {
@@ -931,6 +992,7 @@ export class DeepSeekClient {
           break;
         }
         case "user": {
+          flushFunctionResponses();
           const parts: Array<Record<string, unknown>> = [];
           if (typeof msg.content === "string") {
             if (msg.content.length > 0) parts.push({ text: msg.content });
@@ -943,10 +1005,12 @@ export class DeepSeekClient {
               }
             }
           }
-          contents.push({ role: "user", parts });
+          // Gemini rejects contents with zero parts; drop them defensively.
+          if (parts.length > 0) contents.push({ role: "user", parts });
           break;
         }
         case "assistant": {
+          flushFunctionResponses();
           const parts: Array<Record<string, unknown>> = [];
           if (typeof msg.content === "string") {
             if (msg.content.length > 0) parts.push({ text: msg.content });
@@ -956,32 +1020,32 @@ export class DeepSeekClient {
             }
           }
           for (const tc of msg.tool_calls ?? []) {
-            parts.push({
-              functionCall: {
-                name: tc.function.name,
-                args: parseToolCallArguments(tc.function.arguments),
-              },
-            });
+            const call: Record<string, unknown> = {
+              name: tc.function.name,
+              args: parseToolCallArguments(tc.function.arguments),
+            };
+            // Echo the model's thought signature back unchanged, or Gemini 3.x
+            // rejects the tool continuation with a 400 INVALID_ARGUMENT.
+            if (tc.thoughtSignature) call.thoughtSignature = tc.thoughtSignature;
+            parts.push({ functionCall: call });
           }
           if (parts.length > 0) contents.push({ role: "model", parts });
           break;
         }
         case "tool": {
-          contents.push({
-            role: "function",
-            parts: [
-              {
-                functionResponse: {
-                  name: msg.name ?? "",
-                  response: toolResultContent(msg.content),
-                },
-              },
-            ],
+          // Healing guarantees every tool message pairs with a preceding call,
+          // so name is present; skip nameless results defensively (Gemini 400s
+          // on an empty functionResponse name).
+          const name = msg.name ?? "";
+          if (name.length === 0) break;
+          pendingFunctionResponses.push({
+            functionResponse: { name, response: toolResultContent(msg.content) },
           });
           break;
         }
       }
     }
+    flushFunctionResponses();
     const request: Record<string, unknown> = {
       contents,
       generationConfig: {
@@ -996,24 +1060,11 @@ export class DeepSeekClient {
     if (opts.tools?.length) {
       request.tools = [
         {
-          functionDeclarations: opts.tools.map((t) => {
-            const params = t.function.parameters;
-            if (params && typeof params === "object" && "$schema" in params) {
-              const { $schema: _drop, ...clean } = params as Record<string, unknown> & {
-                $schema?: unknown;
-              };
-              return {
-                name: t.function.name,
-                description: t.function.description,
-                parameters: clean,
-              };
-            }
-            return {
-              name: t.function.name,
-              description: t.function.description,
-              parameters: params,
-            };
-          }),
+          functionDeclarations: opts.tools.map((t) => ({
+            name: t.function.name,
+            description: t.function.description,
+            parameters: sanitizeGeminiSchema(t.function.parameters),
+          })),
         },
       ];
       request.toolConfig = { functionCallingConfig: { mode: "AUTO" } };

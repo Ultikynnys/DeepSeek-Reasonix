@@ -1335,7 +1335,13 @@ export class CacheFirstLoop {
           !this._providerErrorRetried &&
           !partialDelivered &&
           !signal.aborted &&
-          cause.name !== "AbortError";
+          cause.name !== "AbortError" &&
+          // A genuine HTTP 4xx is a malformed request (e.g. Gemini's
+          // deterministic INVALID_ARGUMENT 400), not a transient failure —
+          // replaying the identical payload is pointless and hides the real
+          // error. The OpenAI `response.failed` synthetic 400 (phase
+          // "stream_body_read") is retryable by design and stays eligible.
+          (!is4xxError(cause) || phase === "stream_body_read");
         if (providerErrorRetryable) {
           this._providerErrorRetried = true;
           yield {

@@ -6,6 +6,12 @@ import { Shortcut } from "./shortcut";
 
 type Tone = "default" | "success" | "warning" | "danger" | "accent" | "violet";
 
+function tokenLabel(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return tokens.toLocaleString();
+}
+
 /** Pull a file ref (path + optional line) out of a tool's JSON args, mirroring the TUI ToolCard ↗ link. */
 function extractToolFileRef(args?: string): { path: string; line?: number } | null {
   if (!args) return null;
@@ -837,11 +843,36 @@ export function SubagentCard({
 }) {
   useLang();
   const done = runs.filter((run) => run.status === "done").length;
+  const models = [...new Set(runs.flatMap((run) => (run.model ? [run.model] : [])))];
+  const contexts = runs.flatMap((run) =>
+    run.contextTokens !== undefined ? [tokenLabel(run.contextTokens)] : [],
+  );
   const status = runs.some((run) => run.status === "running")
     ? "running"
     : runs.some((run) => run.status === "failed")
       ? "failed"
       : "done";
+  const settled = status !== "running";
+  // Token-priced runs: sum the real USD cost once every run has settled.
+  const settledCostUsd =
+    settled && runs.every((run) => run.costUsd !== undefined)
+      ? runs.reduce((total, run) => total + (run.costUsd ?? 0), 0)
+      : null;
+  // Plan-based runs: sum the consumed provider-window % for runs that produced
+  // a measurable quota delta. A `$` figure would be invented for these models.
+  const quotaRuns = runs.filter(
+    (run) => run.billingKind === "quota" && run.quotaUsedPct !== undefined,
+  );
+  const settledQuotaPct =
+    settled && quotaRuns.length > 0
+      ? quotaRuns.reduce((total, run) => total + (run.quotaUsedPct ?? 0), 0)
+      : null;
+  const billingMeta =
+    settledQuotaPct !== null
+      ? `${settledQuotaPct.toFixed(2)}%`
+      : settledCostUsd !== null && settledCostUsd > 0
+        ? `$${settledCostUsd.toFixed(4)}`
+        : null;
   return (
     <Card
       tone="violet"
@@ -850,6 +881,9 @@ export function SubagentCard({
       name={name}
       meta={
         <>
+          {models.length > 0 ? <span className="meta-model">{models.join(" + ")}</span> : null}
+          {contexts.length > 0 ? <span className="meta-context">ctx {contexts.join(" / ")}</span> : null}
+          {billingMeta ? <span className="meta-cost">{billingMeta}</span> : null}
           <span>
             {done} / {runs.length} {t("cards.subagentDoneProgress")}
           </span>

@@ -31,11 +31,19 @@ export interface SubagentEvent {
   error?: string;
   turns?: number;
   costUsd?: number;
+  /** How this run bills: "usd" = token-priced API cost (costUsd is meaningful),
+   *  "quota" = provider plan window % consumed (see quotaUsedPct), "none" = not measurable. */
+  billingKind?: "usd" | "quota" | "none";
+  /** Percent points of the provider plan window consumed by this run, when
+   *  billingKind === "quota" and a valid before/after delta was measurable. */
+  quotaUsedPct?: number;
   usage?: Usage;
   /** When kind === "inner": the raw child loop event. Parent UI translates to a child summary. */
   inner?: import("../loop.js").LoopEvent;
   /** When kind === "phase": coarse status verb for the activity row. */
   phase?: "exploring" | "summarising";
+  /** Latest prompt size reported by the child model call. Updates after every child turn. */
+  contextTokens?: number;
   /** When kind === "stream-progress": monotonic char counters across the whole spawn, throttled. Lets the UI prove bytes are flowing during the long gaps between tool calls. `toolReadChars` is the sum of tool-result string lengths — the bytes pulled INTO the subagent from its reads/searches. */
   outputChars?: number;
   reasoningChars?: number;
@@ -79,6 +87,13 @@ export interface SpawnSubagentOptions {
   maxElapsedMs?: number;
   /** Continue an earlier session instead of starting fresh — loads the prior messages from disk; `task` is treated as a continuation nudge. */
   resumeSession?: string;
+  /** How this run bills — drives the card's cost unit. "usd" = token-priced
+   *  (costUsd is meaningful), "quota" = provider plan window %, "none" = unmeasurable. */
+  billingKind?: "usd" | "quota" | "none";
+  /** Returns the provider plan-window used % (0..100) for this run's model.
+   *  Snapshotted before and after the run to compute the consumed quota delta.
+   *  Only consulted when billingKind === "quota". */
+  measureQuota?: () => Promise<number | null>;
 }
 
 export interface SubagentResult {
@@ -89,6 +104,10 @@ export interface SubagentResult {
   toolIters: number;
   elapsedMs: number;
   costUsd: number;
+  /** See SubagentEvent.billingKind. */
+  billingKind?: "usd" | "quota" | "none";
+  /** Percent points of the provider plan window consumed by this run, when measurable. */
+  quotaUsedPct?: number;
   model: string;
   skillName?: string;
   /** Zero-filled when no API calls landed so consumers always see a valid shape. */
@@ -215,6 +234,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         error: errorMessage,
         turns: 0,
         costUsd: 0,
+        billingKind: opts.billingKind ?? "usd",
         usage: new Usage(),
       });
       return {
@@ -225,6 +245,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         toolIters: 0,
         elapsedMs: Date.now() - startedAt,
         costUsd: 0,
+        billingKind: opts.billingKind ?? "usd",
         model,
         skillName,
         usage: new Usage(),
@@ -254,6 +275,12 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       dispatchedTools++;
       return undefined;
     });
+  }
+  // Quota-billed runs snapshot the provider plan window before the child does
+  // any work; the after-snapshot (post-loop) yields this run's consumed delta.
+  let quotaBaseline: number | null = null;
+  if (opts.billingKind === "quota" && opts.measureQuota) {
+    quotaBaseline = await opts.measureQuota().catch(() => null);
   }
   const childPrefix = new ImmutablePrefix({
     system: opts.system,
@@ -310,6 +337,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   let streamedContent = "";
   let reasoningChars = 0;
   let toolReadChars = 0;
+  let contextTokens = 0;
   let lastStreamEmitAt = 0;
   let charsSinceLastEmit = 0;
   // Throttle gates — 200ms or 400 chars between emits, whichever first.
@@ -336,6 +364,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       model,
       iter: toolIter,
       elapsedMs: now - startedAt,
+      contextTokens,
       outputChars,
       reasoningChars,
       toolReadChars,
@@ -397,6 +426,10 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         });
       }
       if (ev.role === "assistant_final") {
+        if (ev.stats) {
+          contextTokens = ev.stats.usage.promptTokens;
+          maybeEmitStreamProgress(Date.now(), true);
+        }
         if (ev.forcedSummary) {
           // Two paths emit forcedSummary: user-abort (loop.ts ~670) carries a
           // UX placeholder ("aborted by user (Esc)…") that's useless to a
@@ -448,6 +481,17 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   const turns = childLoop.stats.turns.length;
   const costUsd = childLoop.stats.totalCost;
   const usage = aggregateChildUsage(childLoop);
+  const billingKind = opts.billingKind ?? "usd";
+  // After-snapshot the provider window for quota-billed runs. Only a non-negative
+  // delta under 100pp (no window reset / no overlap double-count) is trustworthy.
+  let quotaUsedPct: number | undefined;
+  if (billingKind === "quota" && opts.measureQuota && quotaBaseline !== null) {
+    const after = await opts.measureQuota().catch(() => null);
+    const delta = after !== null ? after - quotaBaseline : null;
+    if (delta !== null && Number.isFinite(delta) && delta >= 0 && delta < 100) {
+      quotaUsedPct = delta;
+    }
+  }
 
   const truncated =
     final.length > maxResultChars
@@ -466,7 +510,10 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     error: errorMessage,
     turns,
     costUsd,
+    billingKind,
+    ...(quotaUsedPct !== undefined ? { quotaUsedPct } : {}),
     usage,
+    contextTokens,
     maxToolIters,
     maxElapsedMs,
     budgetExhausted,
@@ -480,6 +527,8 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     toolIters: toolIter,
     elapsedMs,
     costUsd,
+    billingKind,
+    ...(quotaUsedPct !== undefined ? { quotaUsedPct } : {}),
     model,
     skillName,
     usage,

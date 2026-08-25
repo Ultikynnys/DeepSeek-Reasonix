@@ -360,6 +360,7 @@ export function projectSubagentEvent(ev: SubagentEvent): SubagentProgressPayload
     ...(ev.model ? { model: redactDesktopDiagnosticMessage(ev.model, 80) } : {}),
     ...(ev.iter !== undefined ? { iter: ev.iter } : {}),
     ...(ev.elapsedMs !== undefined ? { elapsedMs: ev.elapsedMs } : {}),
+    ...(ev.contextTokens !== undefined ? { contextTokens: ev.contextTokens } : {}),
     ...(ev.maxToolIters !== undefined ? { maxToolIters: ev.maxToolIters } : {}),
     ...(ev.maxElapsedMs !== undefined ? { maxElapsedMs: ev.maxElapsedMs } : {}),
     ...(ev.budgetExhausted ? { budgetExhausted: ev.budgetExhausted } : {}),
@@ -386,6 +387,8 @@ export function projectSubagentEvent(ev: SubagentEvent): SubagentProgressPayload
         ...(ev.error ? { error: redactDesktopDiagnosticMessage(ev.error, 500) } : {}),
         ...(ev.turns !== undefined ? { turns: ev.turns } : {}),
         ...(ev.costUsd !== undefined ? { costUsd: ev.costUsd } : {}),
+        ...(ev.billingKind !== undefined ? { billingKind: ev.billingKind } : {}),
+        ...(ev.quotaUsedPct !== undefined ? { quotaUsedPct: ev.quotaUsedPct } : {}),
       };
     case "inner": {
       const inner = ev.inner;
@@ -1551,6 +1554,58 @@ async function emitAntigravityQuota(tab: Tab): Promise<void> {
   emit({ type: "$antigravity_quota", quota: { ...quota, turnUsedPct } }, tab.id);
 }
 
+/** How a subagent model bills, for the desktop. Plan-based providers (Codex
+ *  OAuth, cloud Ollama, Antigravity) show the consumed plan-window % rather
+ *  than an invented dollar figure; DeepSeek/OpenAI show the real USD cost. */
+function subagentBillingFor(model: string): import("../../code/setup.js").SubagentBilling {
+  switch (providerForModel(model)) {
+    case "openai":
+      return {
+        kind: "quota",
+        measureQuota: async () => {
+          const r = await fetchCodexQuotaViaOAuth(8000).catch(() => ({
+            quota: null,
+            reason: "quota fetch failed",
+          }));
+          const used = r.quota?.fiveHour?.usedPercent ?? r.quota?.weekly?.usedPercent;
+          return typeof used === "number" ? used : null;
+        },
+      };
+    case "ollama": {
+      const ep = loadOllamaEndpoint();
+      const baseUrl = ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL;
+      const apiKey = ep.apiKey;
+      if (!apiKey) return { kind: "none" };
+      return {
+        kind: "quota",
+        measureQuota: async () => {
+          const usage = await fetchOllamaUsage(baseUrl, apiKey, 8000);
+          return usage?.session !== undefined ? usage.session * 100 : null;
+        },
+      };
+    }
+    case "gemini":
+      return {
+        kind: "quota",
+        measureQuota: async () => {
+          const auth = await resolveGeminiAuth().catch(() => null);
+          if (!auth) return null;
+          const quota = await fetchAntigravityQuota(auth.accessToken, auth.projectId).catch(
+            () => null,
+          );
+          if (!quota) return null;
+          const active =
+            quota.windows.find((w) => w.modelId === model) ??
+            [...quota.windows].sort((a, b) => b.usedFraction - a.usedFraction)[0] ??
+            null;
+          return active ? active.usedFraction * 100 : null;
+        },
+      };
+    default:
+      return { kind: "usd" };
+  }
+}
+
 function emitSessions(tab: Tab): void {
   emitTabDiagnostic(tab, "sessions.list.started");
   try {
@@ -2370,6 +2425,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       onSkillInstalled: () => emitSkills(tab),
       onJobsChanged: () => emitJobs(),
       subagentSink: subagentSinkFor(tab),
+      subagentBilling: (m) => subagentBillingFor(m),
       visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.toolset = toolset;
@@ -2879,6 +2935,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       onSkillInstalled: () => emitSkills(tab),
       onJobsChanged: () => emitJobs(),
       subagentSink: subagentSinkFor(tab),
+      subagentBilling: (m) => subagentBillingFor(m),
       visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.system = codeSystemPrompt(target, {

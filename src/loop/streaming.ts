@@ -81,6 +81,7 @@ export async function* streamModelResponse(
         if (d.name) cur.function.name = (cur.function.name ?? "") + d.name;
         if (d.argumentsDelta)
           cur.function.arguments = (cur.function.arguments ?? "") + d.argumentsDelta;
+        if (d.thoughtSignature) cur.thoughtSignature = d.thoughtSignature;
         callBuf.set(d.index, cur);
 
         if (

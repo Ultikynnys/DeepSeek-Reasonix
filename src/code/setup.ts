@@ -39,6 +39,17 @@ import {
 import { registerTodoTool } from "../tools/todo.js";
 import { registerWebTools } from "../tools/web.js";
 
+/** How a subagent model is billed, for display purposes only. "usd" = a token-priced
+ *  API cost is meaningful; "quota" = the provider's plan window % is the real unit
+ *  (no monetary cost is exposed); "none" = no cost metric should be shown. */
+export interface SubagentBilling {
+  kind: "usd" | "quota" | "none";
+  /** Returns the provider plan-window used % (0..100) for the model. Snapshotted
+   *  before and after the run to compute the consumed quota delta. Only consulted
+   *  when kind === "quota". */
+  measureQuota?: () => Promise<number | null>;
+}
+
 export interface CodeToolsetOpts {
   rootDir: string;
   /** Override the default `~/.reasonix/config.json` lookup — primarily for tests that pin a tmp config. */
@@ -51,6 +62,10 @@ export interface CodeToolsetOpts {
   subagentSink?: SubagentSink;
   /** True when the tab's model accepts image content parts (gpt-*, deepseek-v4-flash-vision-exp, confirmed Ollama vision models). Registers the `see_image` tool so the model's toolset matches its vision capability. */
   visionEnabled?: boolean;
+  /** Declares how a subagent model bills, per resolved model id. Omitted → "usd"
+   *  (token-priced cost). Desktop supplies this so plan-based providers show a
+   *  quota % instead of an invented dollar figure. */
+  subagentBilling?: (model: string) => SubagentBilling | undefined;
 }
 
 export interface CodeToolset {
@@ -138,13 +153,16 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
         });
         subagentClients.set(model, subagentClient);
       }
+      const billing = opts.subagentBilling?.(model);
       const result = await spawnSubagent({
         client: subagentClient,
         parentRegistry: tools,
         parentSignal: signal,
         system: skill.body,
         task,
-        model: skill.model,
+        model,
+        billingKind: billing?.kind ?? "usd",
+        measureQuota: billing?.kind === "quota" ? billing.measureQuota : undefined,
         allowedTools: skill.allowedTools,
         skillName: skill.name,
         parentCallId,

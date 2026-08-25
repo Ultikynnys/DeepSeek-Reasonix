@@ -138,6 +138,8 @@ export interface SubagentProgressEvent extends EventBase {
   phase?: "exploring" | "summarising";
   iter?: number;
   elapsedMs?: number;
+  /** Latest prompt size reported by the child model call. */
+  contextTokens?: number;
   outputChars?: number;
   reasoningChars?: number;
   toolReadChars?: number;
@@ -149,6 +151,10 @@ export interface SubagentProgressEvent extends EventBase {
   error?: string;
   turns?: number;
   costUsd?: number;
+  /** "usd" = token-priced cost, "quota" = provider plan window %, "none" = unmeasurable. */
+  billingKind?: "usd" | "quota" | "none";
+  /** Percent points of the provider plan window consumed by this run, when measurable. */
+  quotaUsedPct?: number;
   maxToolIters?: number;
   maxElapsedMs?: number;
   budgetExhausted?: "tool-iters" | "elapsed";

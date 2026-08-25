@@ -160,11 +160,14 @@ export type SubagentRunProgress = {
   status: "running" | "done" | "failed";
   iter?: number;
   elapsedMs?: number;
+  contextTokens?: number;
   outputChars?: number;
   reasoningChars?: number;
   toolReadChars?: number;
   turns?: number;
   costUsd?: number;
+  billingKind?: "usd" | "quota" | "none";
+  quotaUsedPct?: number;
   maxToolIters?: number;
   maxElapsedMs?: number;
   budgetExhausted?: "tool-iters" | "elapsed";
@@ -1620,11 +1623,14 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
               ev.action === "end" ? (ev.error ? "failed" : "done") : (previous?.status ?? "running"),
             iter: ev.iter ?? previous?.iter,
             elapsedMs: ev.elapsedMs ?? previous?.elapsedMs,
+            contextTokens: ev.contextTokens ?? previous?.contextTokens,
             outputChars: ev.outputChars ?? previous?.outputChars,
             reasoningChars: ev.reasoningChars ?? previous?.reasoningChars,
             toolReadChars: ev.toolReadChars ?? previous?.toolReadChars,
             turns: ev.turns ?? previous?.turns,
             costUsd: ev.costUsd ?? previous?.costUsd,
+            billingKind: ev.billingKind ?? previous?.billingKind,
+            quotaUsedPct: ev.quotaUsedPct ?? previous?.quotaUsedPct,
             maxToolIters: ev.maxToolIters ?? previous?.maxToolIters,
             maxElapsedMs: ev.maxElapsedMs ?? previous?.maxElapsedMs,
             budgetExhausted: ev.budgetExhausted ?? previous?.budgetExhausted,

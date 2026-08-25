@@ -3205,6 +3205,41 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("recovered");
   });
 
+  it("does not auto-retry a genuine Gemini 400 (invalid argument)", async () => {
+    let calls = 0;
+    const fetch = vi.fn(async () => {
+      calls++;
+      return new Response(
+        JSON.stringify({ error: { message: "Request contains an invalid argument." } }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "https://cloudcode-pa.googleapis.com",
+      allowMissingKey: true,
+      geminiAuthResolver: async () => ({ accessToken: "t", projectId: "p" }),
+      fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: true,
+      model: "gemini-3.1-flash-high",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    // A deterministic 400 must not be replayed once — it surfaces immediately.
+    expect(calls).toBe(1);
+    expect(events.filter((ev) => ev.role === "warning").map((ev) => ev.content)).not.toContain(
+      "The model provider returned an error before producing a visible response — retrying automatically.",
+    );
+    const err = events.find((ev) => ev.role === "error");
+    expect(err).toBeDefined();
+    expect(String(err?.error)).toContain("invalid argument");
+  });
+
   it("automatically retries an OpenAI response.failed event before visible output", async () => {
     const transport: ResolvedTransport = {
       endpoint: "https://chatgpt.com/backend-api/codex/responses",

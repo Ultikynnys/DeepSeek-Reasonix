@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openPath: vi.fn(), openUrl: vi.fn() }));
 
 import { WorkspaceProvider } from "../Markdown";
-import { DiffCard, ToolCard } from "./cards";
+import { DiffCard, SubagentCard, ToolCard } from "./cards";
 
 beforeAll(() => {
   Object.defineProperty(navigator, "clipboard", {
@@ -102,6 +102,113 @@ describe("ToolCard — open-in-editor button", () => {
     );
     expect(screen.queryByRole("button", { name: /npm test/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^src\// })).toBeNull();
+  });
+});
+
+describe("SubagentCard — model visibility", () => {
+  const run = {
+    runId: "run-1",
+    task: "Inspect quota rendering",
+    skillName: "explore",
+    model: "deepseek-v4-flash",
+    status: "done" as const,
+    contextTokens: 12_345,
+    costUsd: 0.0123,
+    tools: [],
+  };
+
+  it("shows the child model in the card header", () => {
+    render(<SubagentCard name="explore" runs={[run]} />);
+
+    const header = screen.getByRole("button", { name: /explore/ });
+    expect(header.textContent).toContain("deepseek-v4-flash");
+    expect(header.textContent).toContain("ctx 12.3k");
+    expect(header.textContent).toContain("$0.0123");
+  });
+
+  it("updates context while running and hides cost until completion", () => {
+    const { rerender } = render(
+      <SubagentCard
+        name="explore"
+        runs={[{ ...run, status: "running", contextTokens: 8_000, costUsd: undefined }]}
+      />,
+    );
+
+    let header = screen.getByRole("button", { name: /explore/ });
+    expect(header.textContent).toContain("ctx 8.0k");
+    expect(header.textContent).not.toContain("$");
+
+    rerender(<SubagentCard name="explore" runs={[run]} />);
+    header = screen.getByRole("button", { name: /explore/ });
+    expect(header.textContent).toContain("ctx 12.3k");
+    expect(header.textContent).toContain("$0.0123");
+  });
+
+  it("shows a provider quota % instead of a dollar figure for plan-billed runs", () => {
+    render(
+      <SubagentCard
+        name="explore"
+        runs={[
+          {
+            ...run,
+            costUsd: 0,
+            billingKind: "quota",
+            quotaUsedPct: 2.5,
+          },
+        ]}
+      />,
+    );
+
+    const header = screen.getByRole("button", { name: /explore/ });
+    expect(header.textContent).toContain("2.50%");
+    expect(header.textContent).not.toContain("$");
+  });
+
+  it("shows no cost metric when the run has no measurable billing", () => {
+    render(
+      <SubagentCard
+        name="explore"
+        runs={[{ ...run, costUsd: 0, billingKind: "none" }]}
+      />,
+    );
+    const header = screen.getByRole("button", { name: /explore/ });
+    expect(header.textContent).not.toContain("$");
+    expect(header.textContent).not.toContain("%");
+  });
+
+  it("shows no cost metric when a quota run produced no measurable delta", () => {
+    render(
+      <SubagentCard
+        name="explore"
+        runs={[{ ...run, costUsd: 0, billingKind: "quota", quotaUsedPct: undefined }]}
+      />,
+    );
+    const header = screen.getByRole("button", { name: /explore/ });
+    expect(header.textContent).not.toContain("$");
+    expect(header.textContent).not.toContain("%");
+  });
+
+  it("shows every distinct model for mixed-model fan-out", () => {
+    render(
+      <SubagentCard
+        name="explore"
+        runs={[
+          run,
+          {
+            ...run,
+            runId: "run-2",
+            model: "deepseek-v4-pro",
+            contextTokens: 24_680,
+            costUsd: 0.02,
+          },
+        ]}
+      />,
+    );
+
+    const header = screen.getByRole("button", { name: /explore/ });
+    expect(header.textContent).toContain("deepseek-v4-flash + deepseek-v4-pro");
+    expect(header.textContent).toContain("ctx 12.3k / 24.7k");
+    expect(header.textContent).toContain("$0.0323");
   });
 });
 

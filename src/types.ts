@@ -26,6 +26,10 @@ export interface ToolCall {
     name: string;
     arguments: string;
   };
+  /** Gemini 3.x: a function call's thoughtSignature must be echoed back
+   *  unchanged in the next request or the tool-loop continuation 400s. Set by
+   *  the Gemini provider; ignored by other providers. */
+  thoughtSignature?: string;
 }
 
 /** OpenAI multimodal content part — ChatGPT-family models accept these in
