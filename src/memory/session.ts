@@ -13,6 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
 import { DAY_MS, messageOf, sanitizeFilename } from "@reasonix/core-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
@@ -189,6 +190,31 @@ function readSessionMessages(
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+  return { messages: parseJsonl(raw, isChatMessage), hadContent: raw.trim().length > 0 };
+}
+
+/** Async variant of `loadSessionMessages` — used at launch so a multi-tab
+ *  restore can read every session's jsonl concurrently instead of blocking
+ *  the event loop one file at a time. */
+export async function loadSessionMessagesAsync(name: string): Promise<ChatMessage[]> {
+  const path = sessionPath(name);
+  if (!existsSync(path)) return [];
+  const live = await readSessionMessagesAsync(path);
+  if (live && (live.messages.length > 0 || !live.hadContent)) return live.messages;
+
+  const backup = await readSessionMessagesAsync(sessionBackupPath(path));
+  return backup?.messages ?? live?.messages ?? [];
+}
+
+async function readSessionMessagesAsync(
+  path: string,
+): Promise<{ messages: ChatMessage[]; hadContent: boolean } | null> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
   } catch {
     return null;
   }

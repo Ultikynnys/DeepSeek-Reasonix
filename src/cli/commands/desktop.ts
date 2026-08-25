@@ -171,6 +171,7 @@ import {
   deleteSession,
   listSessionsForWorkspace,
   loadSessionMessages,
+  loadSessionMessagesAsync,
   loadSessionMeta,
   patchSessionMeta,
   patchSessionWorkspaceIfMissing,
@@ -3251,78 +3252,93 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       },
       "info",
     );
-    // Reopen the conversation the tab had, if its jsonl is still readable.
-    let restoredMessages: LoadedMessage[] | undefined;
-    if (restore?.session) {
-      try {
-        if (existsSync(sessionPath(restore.session))) {
-          const msgs = buildLoadedMessages(loadSessionMessages(restore.session));
-          if (msgs.length > 0) {
-            tab.currentSession = restore.session;
-            // Restore the conversation's stored model/effort so the system
-            // prompt + runtime (built by initTabToolset) use them.
-            restoreSessionModelPrefs(tab, loadSessionMeta(tab.currentSession));
-            restoredMessages = msgs;
-          }
-        }
-      } catch (err) {
-        // unreadable jsonl — fall back to the freshly minted session, but LOG
-        emitDiagnosticError("session.restore.failed", err, {
-          tabId: tab.id,
-          details: { requestedSession: restore.session, ...tabDiagnosticState(tab) },
-        });
-        process.stderr.write(`reasonix: session load for resync failed — ${messageOf(err)}\n`);
-      }
-    }
-    emitTabDiagnostic(tab, "tab.bootstrap.session-state", {
-      restored: restoredMessages !== undefined,
-      restoredMessages: restoredMessages?.length ?? 0,
-    });
+    // Emit $tab_opened FIRST so the UI shell mounts every tab immediately.
+    // The conversation load below is async and must not gate the next tab's
+    // $tab_opened — otherwise a multi-tab restore opens tabs one at a time,
+    // each blocked behind the previous tab's full session jsonl read+parse.
     emit({ type: "$tab_opened", workspaceDir: tab.rootDir, active: restore?.active }, tab.id);
-    emitSessions(tab);
     emitSettings(tab);
     emitMcpSpecs(tab);
     emitSkills(tab);
-    emitMemory(tab);
-    if (restoredMessages) {
-      const meta = loadSessionMeta(tab.currentSession);
-      emit(
-        {
-          type: "$session_loaded",
-          name: tab.currentSession,
-          messages: restoredMessages,
-          carryover: {
-            totalCostUsd: meta.totalCostUsd ?? 0,
-            cacheHitTokens: meta.cacheHitTokens ?? 0,
-            cacheMissTokens: meta.cacheMissTokens ?? 0,
-            totalCompletionTokens: meta.totalCompletionTokens ?? 0,
-          },
-        },
-        tab.id,
-      );
-    }
-    if (!tabHasCredential(tab)) {
-      emitTabDiagnostic(tab, "tab.setup.required", { reason: "credential-unavailable" }, "warn");
-      emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
-    }
-    void emitBalance(tab);
-    void initTabToolset(tab)
-      .then(() => {
-        if (tabHasCredential(tab)) {
-          emitTabDiagnostic(tab, "tab.ready", undefined, "info");
-          emit({ type: "$ready" }, tab.id);
-        } else {
-          emitTabDiagnostic(tab, "tab.ready.skipped", { reason: "credential-unavailable" }, "warn");
+    // Defer the heavy per-tab work (session jsonl read+parse, sessions/memory
+    // scans, toolset build) so all tabs open before any of it runs. Session
+    // reads use the async loader so they overlap across tabs instead of
+    // serializing on the event loop.
+    void (async () => {
+      // Reopen the conversation the tab had, if its jsonl is still readable.
+      let restoredMessages: LoadedMessage[] | undefined;
+      if (restore?.session) {
+        try {
+          if (existsSync(sessionPath(restore.session))) {
+            const msgs = buildLoadedMessages(await loadSessionMessagesAsync(restore.session));
+            if (msgs.length > 0) {
+              tab.currentSession = restore.session;
+              // Restore the conversation's stored model/effort so the system
+              // prompt + runtime (built by initTabToolset) use them.
+              restoreSessionModelPrefs(tab, loadSessionMeta(tab.currentSession));
+              restoredMessages = msgs;
+            }
+          }
+        } catch (err) {
+          // unreadable jsonl — fall back to the freshly minted session, but LOG
+          emitDiagnosticError("session.restore.failed", err, {
+            tabId: tab.id,
+            details: { requestedSession: restore.session, ...tabDiagnosticState(tab) },
+          });
+          process.stderr.write(`reasonix: session load for resync failed — ${messageOf(err)}\n`);
         }
-        emitCtxBreakdown(tab);
-      })
-      .catch((err) => {
-        emitDiagnosticError("tab.bootstrap.failed", err, {
-          tabId: tab.id,
-          details: tabDiagnosticState(tab),
-        });
-        emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, tab.id);
+      }
+      emitTabDiagnostic(tab, "tab.bootstrap.session-state", {
+        restored: restoredMessages !== undefined,
+        restoredMessages: restoredMessages?.length ?? 0,
       });
+      emitSessions(tab);
+      emitMemory(tab);
+      if (restoredMessages) {
+        const meta = loadSessionMeta(tab.currentSession);
+        emit(
+          {
+            type: "$session_loaded",
+            name: tab.currentSession,
+            messages: restoredMessages,
+            carryover: {
+              totalCostUsd: meta.totalCostUsd ?? 0,
+              cacheHitTokens: meta.cacheHitTokens ?? 0,
+              cacheMissTokens: meta.cacheMissTokens ?? 0,
+              totalCompletionTokens: meta.totalCompletionTokens ?? 0,
+            },
+          },
+          tab.id,
+        );
+      }
+      if (!tabHasCredential(tab)) {
+        emitTabDiagnostic(tab, "tab.setup.required", { reason: "credential-unavailable" }, "warn");
+        emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
+      }
+      void emitBalance(tab);
+      void initTabToolset(tab)
+        .then(() => {
+          if (tabHasCredential(tab)) {
+            emitTabDiagnostic(tab, "tab.ready", undefined, "info");
+            emit({ type: "$ready" }, tab.id);
+          } else {
+            emitTabDiagnostic(
+              tab,
+              "tab.ready.skipped",
+              { reason: "credential-unavailable" },
+              "warn",
+            );
+          }
+          emitCtxBreakdown(tab);
+        })
+        .catch((err) => {
+          emitDiagnosticError("tab.bootstrap.failed", err, {
+            tabId: tab.id,
+            details: tabDiagnosticState(tab),
+          });
+          emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, tab.id);
+        });
+    })();
     return tab;
   }
 
