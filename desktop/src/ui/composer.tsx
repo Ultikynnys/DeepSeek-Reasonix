@@ -1010,17 +1010,16 @@ function ModelEffortMenu({
                   : null}
               </>
             ) : null}
-            <div style={{ padding: "6px 8px", display: "flex", gap: 6 }}>
+            <div className="model-menu-custom">
               <input
-                className="field mono"
-                style={{ flex: 1 }}
+                className="field mono model-menu-custom-input"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder="custom model id"
               />
               <button
                 type="button"
-                className="btn"
+                className="btn model-menu-custom-confirm"
                 disabled={!draft.trim() || draft.trim() === modelLabel}
                 onClick={() => onPickModel(draft.trim())}
               >
@@ -1031,7 +1030,7 @@ function ModelEffortMenu({
         </div>
         {/* Reasoning effort column */}
         <div className="model-menu-col">
-          <div className="popup-list">
+          <div className="popup-list effort-menu-list">
             {EFFORTS.map((e) => (
               <div
                 key={e}

@@ -4018,6 +4018,24 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .model-menu-list {
   max-height: 460px;
 }
+.model-menu-custom {
+  display: flex;
+  gap: clamp(3px, 1vw, 6px);
+  padding: 6px 8px;
+}
+.model-menu-custom-input.field {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+  padding-inline: clamp(4px, 1vw, 8px);
+  font-size: clamp(10px, 1.7vw, 14px);
+}
+.model-menu-custom-confirm.btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding-inline: clamp(6px, 1.5vw, 12px);
+  font-size: clamp(10px, 1.7vw, 14px);
+}
 .model-menu-cols {
   display: flex;
   gap: 8px;
@@ -4035,6 +4053,21 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .model-menu-col .popup-list {
   max-height: 460px;
+}
+.effort-menu-list {
+  overflow-x: hidden;
+}
+.effort-menu-list .popup-item {
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  font-size: clamp(11px, 2vw, 14px);
+}
+.effort-menu-list .nm {
+  min-width: 0;
+}
+.effort-menu-list .desc {
+  font-size: clamp(10px, 1.7vw, 12px);
+  overflow-wrap: anywhere;
 }
 .model-menu-group {
   display: flex;
