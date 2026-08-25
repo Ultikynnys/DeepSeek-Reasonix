@@ -194,6 +194,7 @@ export function StatusBar({
     null;
   const agRemainingPct =
     agActive && agActive.usedFraction < 1 ? Math.round((1 - agActive.usedFraction) * 100) : null;
+  const agTurnPct = antigravityQuotaData?.turnUsedPct ?? null;
   const antigravityQuotaTitle =
     antigravityQuotaData && agActive
       ? t("statusbar.antigravityQuotaTitle", {
@@ -337,7 +338,9 @@ export function StatusBar({
               ? t("statusbar.thisTurnQuotaTitle", { pct: quotaTurnPct.toFixed(1) })
               : ollamaTurnPct != null
                 ? t("statusbar.ollamaTurnQuotaTitle", { pct: ollamaTurnPct.toFixed(1) })
-                : undefined
+                : agTurnPct != null
+                  ? t("statusbar.antigravityTurnQuotaTitle", { pct: agTurnPct.toFixed(1) })
+                  : undefined
           }
         >
           <I.coin size={11} />
@@ -354,6 +357,12 @@ export function StatusBar({
             ) : (
               <span className="v ok">—</span>
             )
+          ) : geminiTab ? (
+            agTurnPct != null ? (
+              <span className="v ok">{agTurnPct.toFixed(1)}%</span>
+            ) : (
+              <span className="v ok">—</span>
+            )
           ) : (
             <span className="v ok">
               {turnCost}
@@ -363,7 +372,7 @@ export function StatusBar({
         </span>
       ) : null}
 
-      {showSessionCost && !openaiTab && !ollamaTab ? (
+      {showSessionCost && !openaiTab && !ollamaTab && !geminiTab ? (
         <span className="seg" title={t("settings.sessionCost")}>
           <I.coin size={11} />
           <span>{t("settings.sessionCost")}</span>

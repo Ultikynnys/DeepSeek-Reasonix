@@ -645,6 +645,7 @@ export const en = {
     antigravityQuota: "plan usage",
     antigravityQuotaTitle:
       "Antigravity plan {plan} · {left}% left · resets in {resets} · click to refresh",
+    antigravityTurnQuotaTitle: "This turn used {pct}% of the Antigravity quota",
     antigravityNoData:
       "Antigravity usage · no data — sign in to Google Antigravity (Settings → Gemini) to see plan usage · click to retry",
     offPeak: "off-peak",

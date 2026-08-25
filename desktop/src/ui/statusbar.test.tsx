@@ -48,6 +48,7 @@ const OLLAMA_QUOTA: OllamaQuota = {
 const ANTIGRAVITY_QUOTA: AntigravityQuota = {
   plan: { tierId: "free-tier", name: "Antigravity" },
   windows: [{ modelId: "gemini-2.5-pro", usedFraction: 0.1, resetTime: "2026-09-01T13:37:06Z" }],
+  turnUsedPct: 0.4,
   fetchedAt: 0,
 };
 
@@ -240,14 +241,18 @@ describe("StatusBar quota display", () => {
     expect(screen.getByTitle(/usage-unavailable/)).toBeTruthy();
   });
 
-  it("shows the Antigravity plan + remaining for a gemini tab", () => {
+  it("shows only quota percentages for an Antigravity tab", () => {
     renderBar({
       settings: { model: "gemini-2.5-pro" } as Settings,
       antigravityQuota: ANTIGRAVITY_QUOTA,
+      usage: { totalCostUsd: 1.5, lastCallCostUsd: 0.25 } as unknown as UsageStats,
     });
     expect(screen.getByText(/90%\s*left/)).toBeTruthy();
     expect(screen.getByText("Antigravity")).toBeTruthy();
+    expect(screen.getByText(/0\.4%/)).toBeTruthy();
     expect(screen.queryByText("balance")).toBeNull();
+    expect(screen.queryByText(/This session cost/)).toBeNull();
+    expect(screen.queryByText(/\$ 0\./)).toBeNull();
   });
 
   it("shows an em dash for the Antigravity chip when no quota data exists", () => {
@@ -256,7 +261,7 @@ describe("StatusBar quota display", () => {
       antigravityQuota: null,
     });
     expect(screen.getByText("plan usage")).toBeTruthy();
-    expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTitle(/sign in to Google Antigravity/)).toBeTruthy();
     expect(screen.queryByText("balance")).toBeNull();
   });
