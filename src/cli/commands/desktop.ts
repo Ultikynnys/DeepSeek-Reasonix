@@ -778,14 +778,13 @@ let pendingAntigravityOAuth: OAuthFlow | null = null;
  *  auth chip until the next successful sign-in clears it. */
 let lastAntigravityOAuthError: string | null = null;
 
-/** Resolve the Google OAuth token + Cloud Code project id for gemini requests.
- *  Onboards (loadCodeAssist/onboardUser) once when no project id is stored yet,
- *  persisting the resolved project. Returns null when not signed in. */
+/** Resolve the Google OAuth token and managed Code Assist project for Gemini requests.
+ *  The first request completes eligibility/onboarding and persists the account catalog. */
 async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId: string } | null> {
   const accessToken = await resolveAntigravityToken(defaultConfigPath());
   if (!accessToken) return null;
   const creds = readConfig().antigravityOAuth;
-  let projectId = creds?.projectId === "rising-fact-p41fc" ? undefined : creds?.projectId;
+  let projectId = creds?.projectId;
   if (!projectId) {
     projectId = await onboardAntigravity(accessToken);
   }
@@ -794,6 +793,26 @@ async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId: st
     saveAntigravityOAuth({ ...creds, projectId, models });
   }
   return { accessToken, projectId };
+}
+
+async function refreshAntigravityModels(tab: Tab): Promise<void> {
+  try {
+    const auth = await resolveGeminiAuth();
+    if (!auth) throw new Error("Sign in to Google Antigravity before refreshing models");
+    const creds = readConfig().antigravityOAuth;
+    if (!creds) throw new Error("Antigravity credentials disappeared during model refresh");
+    const models = (await fetchAntigravityModels(auth.accessToken, auth.projectId)).map(
+      ({ id }) => id,
+    );
+    saveAntigravityOAuth({ ...creds, projectId: auth.projectId, models });
+    lastAntigravityOAuthError = null;
+    emitSettings(tab);
+  } catch (err) {
+    const message = `Antigravity model refresh failed: ${(err as Error).message}`;
+    lastAntigravityOAuthError = message;
+    emit({ type: "$error", message }, tab.id);
+    emitSettings(tab);
+  }
 }
 
 /** Endpoint + auth state for a model id — drives the status bar's API chip.
@@ -4033,6 +4052,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // app-global cache within its TTL so tab effects don't hammer the
       // endpoint. The broadcast is tabId-less — every tab shares the result.
       void refreshOllamaModels(!!msg.force, tab);
+      return;
+    }
+    if (msg.cmd === "antigravity_models_refresh") {
+      void refreshAntigravityModels(tab);
       return;
     }
     if (msg.cmd === "settings_save") {

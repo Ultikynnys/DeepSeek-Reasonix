@@ -57,7 +57,7 @@ export { modelAcceptsImages } from "@reasonix/core-utils";
 export const DEFAULT_OLLAMA_CHAT_URL = "https://ollama.com/v1";
 
 /** Antigravity daily gateway used for gemini-* models. */
-export const DEFAULT_GEMINI_CHAT_URL = "https://cloudcode-pa.googleapis.com";
+export const DEFAULT_GEMINI_CHAT_URL = "https://daily-cloudcode-pa.googleapis.com";
 
 /** Native Ollama API origin: strip a trailing `/v1` — the `/api/*` endpoints
  *  live at that root (localhost:11434/v1 → localhost:11434). */

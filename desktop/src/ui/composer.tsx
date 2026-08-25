@@ -138,6 +138,8 @@ export function Composer({
   ollamaVisionModels,
   onRefreshOllamaModels,
   antigravityModels,
+  antigravityModelsError,
+  onRefreshAntigravityModels,
   textareaRef,
   slashCommands,
   onMentionQuery,
@@ -182,6 +184,10 @@ export function Composer({
   ollamaVisionModels?: ReadonlySet<string>;
   /** Exact model ids returned by the signed-in Antigravity account. */
   antigravityModels?: string[];
+  /** Why the latest Antigravity auth or model refresh failed. */
+  antigravityModelsError?: string;
+  /** Re-fetch the signed-in account's Antigravity model ids. */
+  onRefreshAntigravityModels?: () => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   slashCommands: SlashCmd[];
   onMentionQuery?: (q: string, nonce: number) => void;
@@ -734,7 +740,9 @@ export function Composer({
                   ollamaHiddenCount={ollamaHiddenCount}
                   ollamaVisionModels={ollamaVisionModels}
                   antigravityModels={antigravityModels}
+                  antigravityModelsError={antigravityModelsError}
                   onRefreshOllamaModels={onRefreshOllamaModels}
+                  onRefreshAntigravityModels={onRefreshAntigravityModels}
                   onPickModel={(m) => {
                     onModelChange(m);
                     setModelMenuOpen(false);
@@ -907,7 +915,9 @@ function ModelEffortMenu({
   ollamaHiddenCount,
   ollamaVisionModels,
   antigravityModels,
+  antigravityModelsError,
   onRefreshOllamaModels,
+  onRefreshAntigravityModels,
 }: {
   modelLabel: string;
   currentEffort: ReasoningEffort;
@@ -918,7 +928,9 @@ function ModelEffortMenu({
   ollamaHiddenCount?: number;
   ollamaVisionModels?: ReadonlySet<string>;
   antigravityModels?: string[];
+  antigravityModelsError?: string;
   onRefreshOllamaModels?: (force?: boolean) => void;
+  onRefreshAntigravityModels?: () => void;
 }) {
   const [draft, setDraft] = useState(modelLabel);
   const knownModels = KNOWN_MODELS.filter(
@@ -927,7 +939,8 @@ function ModelEffortMenu({
       !model.startsWith("claude-") &&
       !model.startsWith("gpt-oss-"),
   );
-  const availableModels = [...knownModels, ...(antigravityModels ?? [])];
+  const availableModels = knownModels;
+  const antigravityGroup = antigravityModels && antigravityModels.length > 0;
   const ollamaGroup = ollamaModels && ollamaModels.length > 0;
   return (
     <div
@@ -970,6 +983,45 @@ function ModelEffortMenu({
                 ) : null}
               </div>
             ))}
+            {antigravityGroup || antigravityModelsError ? (
+              <>
+                <div className="model-menu-group">
+                  <span className="grow">{t("composer.modelAntigravityGroup")}</span>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    title={t("composer.modelAntigravityRefresh")}
+                    onClick={() => onRefreshAntigravityModels?.()}
+                  >
+                    <I.refresh size={10} />
+                  </button>
+                </div>
+                {antigravityModelsError ? (
+                  <div className="model-menu-error">
+                    {t("composer.modelAntigravityError", { error: antigravityModelsError })}
+                  </div>
+                ) : null}
+                {antigravityModels?.map((model) => (
+                  <div
+                    key={model}
+                    className="popup-item"
+                    data-active={model === modelLabel}
+                    onClick={() => onPickModel(model)}
+                    onKeyDown={activationHandler(() => onPickModel(model))}
+                  >
+                    <span className="ico">
+                      <I.brain size={12} />
+                    </span>
+                    <div className="nm">
+                      <span className="cmd">{model}</span>
+                    </div>
+                    {modelAcceptsImages(model, ollamaVisionModels) ? (
+                      <span className="badge">vision</span>
+                    ) : null}
+                  </div>
+                ))}
+              </>
+            ) : null}
             {ollamaGroup || ollamaModelsError ? (
               <>
                 <div className="model-menu-group">

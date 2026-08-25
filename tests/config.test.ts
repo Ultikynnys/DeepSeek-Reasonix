@@ -529,7 +529,7 @@ describe("config", () => {
         expect(SUPPORTED_MODELS).toContain(id);
       }
       const ep = loadEndpointForModel("claude-sonnet-4-6-thinking", path);
-      expect(ep.baseUrl).toBe("https://cloudcode-pa.googleapis.com");
+      expect(ep.baseUrl).toBe("https://daily-cloudcode-pa.googleapis.com");
       expect(ep.apiKey).toBeUndefined();
     });
 

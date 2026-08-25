@@ -6,7 +6,6 @@ import {
   ANTIGRAVITY_OAUTH_CLIENT_ID,
   ANTIGRAVITY_OAUTH_CLIENT_SECRET,
   antigravityAccount,
-  antigravityVersion,
   buildAuthorizeUrl,
   exchangeAntigravityCode,
   fetchAntigravityModels,
@@ -23,7 +22,6 @@ const ENV_KEYS = [
   "ANTIGRAVITY_AUTH_URL",
   "ANTIGRAVITY_TOKEN_URL",
   "ANTIGRAVITY_USERINFO_URL",
-  "ANTIGRAVITY_VERSION",
 ] as const;
 
 const originalEnv = new Map<string, string | undefined>(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -43,7 +41,6 @@ describe("antigravity-oauth", () => {
     dir = mkdtempSync(join(tmpdir(), "antigravity-oauth-"));
     path = join(dir, "config.json");
     for (const k of ENV_KEYS) delete process.env[k];
-    process.env.ANTIGRAVITY_VERSION = "2.9.1";
   });
 
   afterEach(() => {
@@ -53,11 +50,6 @@ describe("antigravity-oauth", () => {
       else process.env[k] = v;
     }
     vi.restoreAllMocks();
-  });
-
-  it("antigravityVersion validates an explicit version override", async () => {
-    process.env.ANTIGRAVITY_VERSION = "not-a-version";
-    await expect(antigravityVersion()).rejects.toThrow("must be a semantic version");
   });
 
   it("buildAuthorizeUrl carries client_id, offline access, and the redirect", () => {
@@ -92,6 +84,9 @@ describe("antigravity-oauth", () => {
       code: "code-123",
       codeVerifier: "verifier-123",
     });
+    expect(ANTIGRAVITY_OAUTH_CLIENT_ID).toBe(
+      "it1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+    );
     expect(creds.accessToken).toBe("at");
     expect(creds.refreshToken).toBe("rt");
     expect(creds.expiresAt).toBeGreaterThan(Date.now());
@@ -148,14 +143,33 @@ describe("antigravity-oauth", () => {
     expect(stored?.refreshToken).toBe("rt");
   });
 
-  it("resolveAntigravityToken clears legacy custom-client credentials", async () => {
+  it("resolveAntigravityToken clears obsolete credentials and requires sign-in", async () => {
     saveAntigravityOAuth(
       { accessToken: "legacy", refreshToken: "rt", expiresAt: Date.now() + 60_000 },
       path,
     );
 
-    await expect(resolveAntigravityToken(path)).resolves.toBeUndefined();
+    await expect(resolveAntigravityToken(path)).rejects.toThrow("obsolete client");
     expect(readConfig(path).antigravityOAuth).toBeUndefined();
+  });
+
+  it("resolveAntigravityToken surfaces refresh failures", async () => {
+    saveAntigravityOAuth(
+      {
+        accessToken: "expired",
+        refreshToken: "revoked",
+        clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
+        expiresAt: Date.now() - 1,
+      },
+      path,
+    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ error: "invalid_grant", error_description: "Token revoked" }, 400),
+    );
+
+    await expect(resolveAntigravityToken(path)).rejects.toThrow(
+      "Antigravity OAuth refresh failed: OAuth token exchange failed (400): Token revoked",
+    );
   });
 
   it("resolveAntigravityToken returns undefined without creds", async () => {
@@ -176,21 +190,26 @@ describe("antigravity-oauth", () => {
     expect(await antigravityAccount("at")).toBe("u@example.com");
   });
 
-  it("onboardAntigravity discovers the project with Antigravity metadata", async () => {
+  it("onboardAntigravity discovers an existing project with exact client metadata", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ cloudaicompanionProject: "project-123" }));
 
     await expect(onboardAntigravity("at")).resolves.toBe("project-123");
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist");
+    expect(url).toBe("https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist");
     expect(init?.headers).toMatchObject({
       authorization: "Bearer at",
-      "user-agent": expect.stringContaining("antigravity/hub/2.9.1"),
-      "x-goog-api-client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+      "user-agent": "antigravity",
     });
     expect(JSON.parse(init?.body as string)).toEqual({
-      metadata: expect.objectContaining({ ideType: "ANTIGRAVITY", pluginType: "GEMINI" }),
+      metadata: {
+        ideType: "IDE_UNSPECIFIED",
+        platform: "WINDOWS_AMD64",
+        pluginType: "GEMINI",
+        ideName: "antigravity",
+      },
+      mode: "FULL_ELIGIBILITY_CHECK",
     });
   });
 
@@ -202,63 +221,89 @@ describe("antigravity-oauth", () => {
     await expect(onboardAntigravity("at")).resolves.toBe("object-project");
   });
 
-  it("onboardAntigravity rejects discovery misses instead of borrowing a shared project", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({}));
+  it("onboardAntigravity provisions and polls the default free tier", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ allowedTiers: [{ id: "free-tier", isDefault: true }] }))
+      .mockResolvedValueOnce(jsonResponse({ name: "operations/setup-1" }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          done: true,
+          response: { cloudaicompanionProject: { id: "managed-project" } },
+        }),
+      );
+    vi.useFakeTimers();
 
-    await expect(onboardAntigravity("at")).rejects.toThrow(
-      "did not return a companion project for this account",
+    const projectPromise = onboardAntigravity("at");
+    await vi.runAllTimersAsync();
+    await expect(projectPromise).resolves.toBe("managed-project");
+    vi.useRealTimers();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:onboardUser",
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).toEqual({
+      tierId: "free-tier",
+      metadata: {
+        ideType: "IDE_UNSPECIFIED",
+        platform: "WINDOWS_AMD64",
+        pluginType: "GEMINI",
+        ideName: "antigravity",
+      },
+    });
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      "https://daily-cloudcode-pa.googleapis.com/v1internal/operations/setup-1",
     );
   });
 
-  it("fetchAntigravityModels returns the account model catalog", async () => {
+  it("onboardAntigravity rejects invalid operation names", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ allowedTiers: [{ id: "free-tier", isDefault: true }] }))
+      .mockResolvedValueOnce(jsonResponse({ name: "operations/../secrets" }));
+    vi.useFakeTimers();
+
+    const rejection = expect(onboardAntigravity("at")).rejects.toThrow("invalid operation name");
+    await vi.runAllTimersAsync();
+    await rejection;
+    vi.useRealTimers();
+  });
+
+  it("onboardAntigravity reports ineligibility reasons", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ ineligibleTiers: [{ reasonMessage: "Account is not eligible" }] }),
+    );
+
+    await expect(onboardAntigravity("at")).rejects.toThrow("Account is not eligible");
+  });
+
+  it("fetchAntigravityModels returns unique model ids from quota buckets", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({
-        models: {
-          "gemini-3.1-pro-high": {
-            displayName: "Gemini 3.1 Pro High",
-            maxTokens: 1_000_000,
-            maxOutputTokens: 65_536,
-          },
-          "claude-sonnet-4-6-thinking": { displayName: "Claude Sonnet 4.6 (Thinking)" },
-        },
+        buckets: [
+          { modelId: "gemini-3.1-pro-high" },
+          { modelId: "claude-sonnet-4-6-thinking" },
+          { modelId: "gemini-3.1-pro-high" },
+        ],
       }),
     );
 
     await expect(fetchAntigravityModels("at", "project-123")).resolves.toEqual([
-      {
-        id: "gemini-3.1-pro-high",
-        displayName: "Gemini 3.1 Pro High",
-        maxTokens: 1_000_000,
-        maxOutputTokens: 65_536,
-      },
-      {
-        id: "claude-sonnet-4-6-thinking",
-        displayName: "Claude Sonnet 4.6 (Thinking)",
-      },
+      { id: "claude-sonnet-4-6-thinking", displayName: "claude-sonnet-4-6-thinking" },
+      { id: "gemini-3.1-pro-high", displayName: "gemini-3.1-pro-high" },
     ]);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
     );
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
       project: "project-123",
     });
   });
 
-  it("fetchAntigravityModels surfaces the Code Assist license classification", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      jsonResponse({ error: { details: [{ reason: "SUBSCRIPTION_REQUIRED" }] } }, 403),
-    );
+  it("onboardAntigravity surfaces authorization failures without endpoint fallback", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse({ error: "denied" }, 403));
 
-    await expect(fetchAntigravityModels("at", "project-123")).rejects.toThrow(
-      /licensed Gemini Code Assist access.*#3501/i,
-    );
-  });
-
-  it("onboardAntigravity surfaces authorization failures instead of using fallback", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "denied" }, 403));
-
-    await expect(onboardAntigravity("at")).rejects.toThrow(
-      "Antigravity project discovery failed (403)",
-    );
+    await expect(onboardAntigravity("at")).rejects.toThrow("loadCodeAssist failed (403)");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

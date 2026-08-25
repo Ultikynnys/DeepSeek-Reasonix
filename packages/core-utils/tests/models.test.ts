@@ -25,6 +25,12 @@ describe("modelAcceptsImages", () => {
     }
   });
 
+  it("recognizes live Antigravity chat and tab model ids", async () => {
+    const { isAntigravityModel } = await import("../src/models.js");
+    expect(isAntigravityModel("chat_20706")).toBe(true);
+    expect(isAntigravityModel("tab_flash_lite_preview")).toBe(true);
+  });
+
   it("rejects plain DeepSeek, Ollama, and unknown ids", () => {
     expect(modelAcceptsImages("deepseek-v4-flash")).toBe(false);
     expect(modelAcceptsImages("deepseek-v4-pro")).toBe(false);

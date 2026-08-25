@@ -44,13 +44,32 @@ function renderComposer(props?: Partial<React.ComponentProps<typeof Composer>>) 
 describe("desktop Composer model catalog", () => {
   it("shows only the signed-in account's discovered Antigravity models", () => {
     const { container } = renderComposer({
-      antigravityModels: ["gemini-account-model", "claude-account-model"],
+      antigravityModels: ["gemini-account-model", "claude-account-model", "chat_20706"],
     });
     fireEvent.click(container.querySelector(".model-pill")!);
     const text = container.querySelector(".model-menu-list")?.textContent ?? "";
+    expect(text).toContain("Google Antigravity");
     expect(text).toContain("gemini-account-model");
     expect(text).toContain("claude-account-model");
+    expect(text).toContain("chat_20706");
     expect(text).not.toContain("gemini-2.5-pro");
+  });
+
+  it("refreshes Antigravity models and surfaces refresh errors", () => {
+    const onRefreshAntigravityModels = vi.fn();
+    const { container } = renderComposer({
+      antigravityModels: ["gemini-account-model"],
+      antigravityModelsError: "quota unavailable",
+      onRefreshAntigravityModels,
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+    expect(container.querySelector(".model-menu-list")?.textContent).toContain("quota unavailable");
+    const refresh = container.querySelector(
+      'button[title="Refresh"]',
+    ) as HTMLButtonElement | null;
+    expect(refresh).not.toBeNull();
+    fireEvent.click(refresh!);
+    expect(onRefreshAntigravityModels).toHaveBeenCalledOnce();
   });
 });
 

@@ -13,25 +13,14 @@ import {
 
 /** Published installed-app OAuth identity used by Google Antigravity. */
 export const ANTIGRAVITY_OAUTH_CLIENT_ID =
-  "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+  "it1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
 export const ANTIGRAVITY_OAUTH_CLIENT_SECRET = "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";
 
 export const ANTIGRAVITY_DEFAULT_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const ANTIGRAVITY_DEFAULT_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const ANTIGRAVITY_DEFAULT_USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo";
-/** Current Antigravity gateways, in the maintained client's fallback order. */
-export const ANTIGRAVITY_CLOUD_CODE_URL = "https://cloudcode-pa.googleapis.com";
-export const ANTIGRAVITY_CLOUD_CODE_ENDPOINTS = [
-  ANTIGRAVITY_CLOUD_CODE_URL,
-  "https://daily-cloudcode-pa.googleapis.com",
-  "https://daily-cloudcode-pa.sandbox.googleapis.com",
-] as const;
-const ANTIGRAVITY_HUB_MANIFEST_URL =
-  "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml";
-const ANTIGRAVITY_VERSION_FLOOR = "2.9.1";
-const ANTIGRAVITY_VERSION_TTL_MS = 6 * 60 * 60_000;
-let cachedAntigravityVersion = ANTIGRAVITY_VERSION_FLOOR;
-let antigravityVersionExpiresAt = 0;
+export const ANTIGRAVITY_CLOUD_CODE_URL = "https://daily-cloudcode-pa.googleapis.com";
+export const ANTIGRAVITY_CLOUD_CODE_API = `${ANTIGRAVITY_CLOUD_CODE_URL}/v1internal`;
 
 const DEFAULT_SCOPE = [
   "https://www.googleapis.com/auth/cloud-platform",
@@ -43,6 +32,8 @@ const DEFAULT_SCOPE = [
 
 const REFRESH_SLACK_MS = 5 * 60_000;
 const OAUTH_FLOW_TIMEOUT_MS = 10 * 60_000;
+const ONBOARD_TIMEOUT_MS = 10 * 60_000;
+const ONBOARD_POLL_INTERVAL_MS = 5_000;
 /** Registered callback used by the Antigravity installed application. */
 const OAUTH_CALLBACK_PATH = "/oauth-callback";
 const OAUTH_CALLBACK_PORT = 51121;
@@ -178,9 +169,8 @@ export async function antigravityAccount(accessToken: string): Promise<string | 
 
 let refreshInFlight: Promise<string | undefined> | null = null;
 
-/** A usable Google access token — refreshes from the stored refresh token when
- *  expired or within 5 min of expiry. Undefined when no OAuth creds exist or
- *  refresh fails (callers fall back to a static key or error). */
+/** A usable Google access token. Refresh failures are surfaced to the caller so
+ *  an invalid or revoked credential is never misreported as a missing sign-in. */
 export async function resolveAntigravityToken(
   path: string = defaultConfigPath(),
 ): Promise<string | undefined> {
@@ -188,7 +178,7 @@ export async function resolveAntigravityToken(
   if (!creds?.accessToken) return undefined;
   if (creds.clientId !== ANTIGRAVITY_OAUTH_CLIENT_ID) {
     clearAntigravityOAuth(path);
-    return undefined;
+    throw new Error("Stored Antigravity OAuth credentials use an obsolete client; sign in again");
   }
   if (!creds.refreshToken || creds.expiresAt - Date.now() > REFRESH_SLACK_MS)
     return creds.accessToken;
@@ -202,8 +192,9 @@ export async function resolveAntigravityToken(
       );
       return next.accessToken;
     } catch (err) {
-      console.warn(`reasonix: Antigravity OAuth refresh failed — ${(err as Error).message}`);
-      return undefined;
+      throw new Error(`Antigravity OAuth refresh failed: ${(err as Error).message}`, {
+        cause: err,
+      });
     } finally {
       refreshInFlight = null;
     }
@@ -213,8 +204,23 @@ export async function resolveAntigravityToken(
 
 // ── Antigravity project discovery ──────────────────────────────────────────
 
+interface AntigravityTier {
+  id?: string;
+  isDefault?: boolean;
+}
+
 interface LoadCodeAssistResponse {
   cloudaicompanionProject?: string | { id?: string } | null;
+  currentTier?: AntigravityTier | null;
+  allowedTiers?: AntigravityTier[] | null;
+  ineligibleTiers?: Array<{ reasonCode?: string; reasonMessage?: string }> | null;
+}
+
+interface OnboardOperation {
+  name?: string;
+  done?: boolean;
+  error?: { message?: string };
+  response?: { cloudaicompanionProject?: { id?: string } };
 }
 
 export interface AntigravityModel {
@@ -224,71 +230,42 @@ export interface AntigravityModel {
   maxOutputTokens?: number;
 }
 
-interface AvailableModelsResponse {
-  models?: Record<
-    string,
-    { displayName?: string; maxTokens?: number; maxOutputTokens?: number } | null
-  >;
+interface UserQuotaResponse {
+  buckets?: Array<{ modelId?: string }> | null;
 }
 
-class AntigravityProjectAuthError extends Error {}
+/** Static metadata expected by the Antigravity Code Assist flow. It intentionally
+ *  matches the maintained Windows client even when Reasonix runs elsewhere. */
+const CLIENT_METADATA = {
+  ideType: "IDE_UNSPECIFIED",
+  platform: "WINDOWS_AMD64",
+  pluginType: "GEMINI",
+  ideName: "antigravity",
+} as const;
 
-export function antigravityPlatform(): string {
-  return process.platform === "win32" ? "WINDOWS" : "MACOS";
-}
-
-function antigravityRuntimePlatform(): string {
-  if (process.platform === "win32") return "windows/amd64";
-  if (process.platform === "darwin" && process.arch === "x64") return "darwin/amd64";
-  if (process.platform === "linux") return `linux/${process.arch === "arm64" ? "arm64" : "amd64"}`;
-  return "darwin/arm64";
-}
-
-function validAntigravityVersion(version: string): boolean {
-  return /^\d+\.\d+\.\d+$/.test(version);
-}
-
-/** Resolve the current Hub version. A stale client is rejected by newer models. */
-export async function antigravityVersion(): Promise<string> {
-  const configured = process.env.ANTIGRAVITY_VERSION?.trim();
-  if (configured) {
-    if (!validAntigravityVersion(configured)) {
-      throw new Error("ANTIGRAVITY_VERSION must be a semantic version such as 2.9.1");
-    }
-    return configured;
-  }
-  if (Date.now() < antigravityVersionExpiresAt) return cachedAntigravityVersion;
-  const res = await fetch(ANTIGRAVITY_HUB_MANIFEST_URL, {
-    headers: { "cache-control": "no-cache", "user-agent": "electron-builder" },
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) {
-    throw new Error(`Antigravity version discovery failed (${res.status})`);
-  }
-  const manifest = await res.text();
-  const match = /^version:\s*["']?([^\s"']+)/m.exec(manifest);
-  const version = match?.[1]?.trim();
-  if (!version || !validAntigravityVersion(version)) {
-    throw new Error("Antigravity version discovery returned an invalid manifest");
-  }
-  cachedAntigravityVersion = version;
-  antigravityVersionExpiresAt = Date.now() + ANTIGRAVITY_VERSION_TTL_MS;
-  return version;
-}
-
-export async function antigravityHeaders(accessToken: string): Promise<Record<string, string>> {
-  const version = await antigravityVersion();
+export function antigravityHeaders(accessToken: string): Record<string, string> {
   return {
     "content-type": "application/json",
     authorization: `Bearer ${accessToken}`,
-    "user-agent": `antigravity/hub/${version} ${antigravityRuntimePlatform()}`,
-    "x-goog-api-client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-    "client-metadata": JSON.stringify({
-      ideType: "ANTIGRAVITY",
-      platform: antigravityPlatform(),
-      pluginType: "GEMINI",
-    }),
+    "user-agent": "antigravity",
   };
+}
+
+async function antigravityPost<T>(
+  accessToken: string,
+  method: string,
+  payload: unknown,
+): Promise<T> {
+  const res = await fetch(`${ANTIGRAVITY_CLOUD_CODE_API}:${method}`, {
+    method: "POST",
+    headers: antigravityHeaders(accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`${method} failed (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as T;
 }
 
 function projectFromLoad(data: LoadCodeAssistResponse): string | undefined {
@@ -298,95 +275,78 @@ function projectFromLoad(data: LoadCodeAssistResponse): string | undefined {
   return data.cloudaicompanionProject?.id || undefined;
 }
 
-/** Resolve the account's companion project. Never substitute another account's project. */
+/** Resolve the account's managed project, provisioning the eligible free tier when needed. */
 export async function onboardAntigravity(accessToken: string): Promise<string> {
-  const errors: string[] = [];
-  for (const endpoint of ANTIGRAVITY_CLOUD_CODE_ENDPOINTS) {
-    try {
-      const res = await fetch(`${endpoint}/v1internal:loadCodeAssist`, {
-        method: "POST",
-        headers: await antigravityHeaders(accessToken),
-        body: JSON.stringify({
-          metadata: {
-            ideType: "ANTIGRAVITY",
-            platform: antigravityPlatform(),
-            pluginType: "GEMINI",
-          },
-        }),
-      });
-      if (!res.ok) {
-        const detail = await res.text();
-        if (res.status === 401 || res.status === 403) {
-          throw new AntigravityProjectAuthError(
-            `Antigravity project discovery failed (${res.status}): ${detail}`,
-          );
-        }
-        errors.push(`${endpoint}: ${res.status} ${detail}`);
-        continue;
-      }
-      const projectId = projectFromLoad((await res.json()) as LoadCodeAssistResponse);
-      if (projectId) return projectId;
-      errors.push(`${endpoint}: no project id`);
-    } catch (err) {
-      if (err instanceof AntigravityProjectAuthError) throw err;
-      errors.push(`${endpoint}: ${(err as Error).message}`);
-    }
+  const load = await antigravityPost<LoadCodeAssistResponse>(accessToken, "loadCodeAssist", {
+    metadata: CLIENT_METADATA,
+    mode: "FULL_ELIGIBILITY_CHECK",
+  });
+  const existingProject = projectFromLoad(load);
+  if (existingProject) return existingProject;
+  if (load.currentTier) {
+    throw new Error("Code Assist reports an existing tier but did not return its managed project");
   }
-  throw new Error(
-    `Antigravity did not return a companion project for this account: ${errors.join("; ")}`,
-  );
+  const tier = (load.allowedTiers ?? []).find((candidate) => candidate.isDefault);
+  if (!tier) {
+    const reasons = (load.ineligibleTiers ?? []).map(
+      (item) => item.reasonMessage ?? item.reasonCode ?? "unknown reason",
+    );
+    throw new Error(
+      `No eligible default Code Assist tier was returned${reasons.length ? `: ${reasons.join("; ")}` : ""}`,
+    );
+  }
+  if (tier.id !== "free-tier") {
+    throw new Error(`Default Code Assist tier is ${JSON.stringify(tier.id)}, not the free tier`);
+  }
+
+  let operation = await antigravityPost<OnboardOperation>(accessToken, "onboardUser", {
+    tierId: tier.id,
+    metadata: CLIENT_METADATA,
+  });
+  const deadline = Date.now() + ONBOARD_TIMEOUT_MS;
+  while (!operation.done && operation.name) {
+    if (Date.now() >= deadline) throw new Error("Code Assist onboarding timed out");
+    await new Promise((resolve) => setTimeout(resolve, ONBOARD_POLL_INTERVAL_MS));
+    const segments = operation.name.split("/");
+    if (segments.some((segment) => !segment || segment === "." || segment === "..")) {
+      throw new Error("Code Assist onboarding returned an invalid operation name");
+    }
+    const name = segments.map((segment) => encodeURIComponent(segment)).join("/");
+    const res = await fetch(`${ANTIGRAVITY_CLOUD_CODE_API}/${name}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      throw new Error(`Code Assist onboarding poll failed (${res.status}): ${await res.text()}`);
+    }
+    operation = (await res.json()) as OnboardOperation;
+  }
+  if (operation.error) {
+    throw new Error(
+      `Code Assist onboarding failed: ${operation.error.message ?? JSON.stringify(operation.error)}`,
+    );
+  }
+  const projectId = operation.response?.cloudaicompanionProject?.id;
+  if (!projectId) throw new Error("Onboarding completed without a managed project ID");
+  return projectId;
 }
 
-/** Fetch the exact unified model catalog enabled for this Antigravity account. */
+/** Fetch the exact model ids advertised by the account's quota buckets. */
 export async function fetchAntigravityModels(
   accessToken: string,
   projectId: string,
 ): Promise<AntigravityModel[]> {
-  const errors: string[] = [];
-  for (const endpoint of ANTIGRAVITY_CLOUD_CODE_ENDPOINTS) {
-    try {
-      const res = await fetch(`${endpoint}/v1internal:fetchAvailableModels`, {
-        method: "POST",
-        headers: await antigravityHeaders(accessToken),
-        body: JSON.stringify({ project: projectId }),
-      });
-      if (!res.ok) {
-        const detail = await res.text();
-        if (res.status === 403 && detail.includes("SUBSCRIPTION_REQUIRED")) {
-          throw new AntigravityProjectAuthError(
-            "Google classified Antigravity model discovery as licensed Gemini Code Assist access (#3501). Update Reasonix, then sign out and sign in again to refresh the client identity and account project.",
-          );
-        }
-        errors.push(`${endpoint}: ${res.status} ${detail}`);
-        continue;
-      }
-      const data = (await res.json()) as AvailableModelsResponse;
-      if (!data.models || typeof data.models !== "object") {
-        errors.push(`${endpoint}: response contained no model catalog`);
-        continue;
-      }
-      const models = Object.entries(data.models).flatMap(([id, model]) => {
-        const normalized = id.trim();
-        if (!normalized || !model) return [];
-        return [
-          {
-            id: normalized,
-            displayName: model.displayName?.trim() || normalized,
-            ...(Number.isFinite(model.maxTokens) ? { maxTokens: model.maxTokens } : {}),
-            ...(Number.isFinite(model.maxOutputTokens)
-              ? { maxOutputTokens: model.maxOutputTokens }
-              : {}),
-          },
-        ];
-      });
-      if (models.length > 0) return models;
-      errors.push(`${endpoint}: model catalog was empty`);
-    } catch (err) {
-      if (err instanceof AntigravityProjectAuthError) throw err;
-      errors.push(`${endpoint}: ${(err as Error).message}`);
-    }
-  }
-  throw new Error(`Antigravity model discovery failed: ${errors.join("; ")}`);
+  const quota = await antigravityPost<UserQuotaResponse>(accessToken, "retrieveUserQuota", {
+    project: projectId,
+  });
+  const ids = new Set(
+    (quota.buckets ?? []).flatMap((bucket) => {
+      const id = bucket.modelId?.trim();
+      return id ? [id] : [];
+    }),
+  );
+  if (ids.size === 0) throw new Error("Antigravity quota returned no model ids");
+  return [...ids].sort().map((id) => ({ id, displayName: id }));
 }
 
 // ── Browser OAuth flow ─────────────────────────────────────────────────────

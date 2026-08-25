@@ -37,7 +37,9 @@ export function isAntigravityModel(model: string | undefined | null): boolean {
     typeof model === "string" &&
     (model.startsWith("gemini-") ||
       model.startsWith("claude-") ||
-      model.startsWith("gpt-oss-"))
+      model.startsWith("gpt-oss-") ||
+      model.startsWith("chat_") ||
+      model.startsWith("tab_"))
   );
 }
 

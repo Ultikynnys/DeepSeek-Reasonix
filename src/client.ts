@@ -1,5 +1,5 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
-import { ANTIGRAVITY_CLOUD_CODE_ENDPOINTS, antigravityHeaders } from "./antigravity-oauth.js";
+import { ANTIGRAVITY_CLOUD_CODE_URL, antigravityHeaders } from "./antigravity-oauth.js";
 import {
   deriveNativeOllamaOrigin,
   loadOllamaKeepAlive,
@@ -764,20 +764,10 @@ export class DeepSeekClient {
     accessToken: string,
     init: RequestInit,
   ): Promise<Response> {
-    let lastError: Error | undefined;
-    for (const endpoint of ANTIGRAVITY_CLOUD_CODE_ENDPOINTS) {
-      try {
-        const response = await this._fetch(`${endpoint}${path}`, {
-          ...init,
-          headers: { ...(await antigravityHeaders(accessToken)), ...init.headers },
-        });
-        if (response.status !== 404 && response.status < 500) return response;
-        lastError = new Error(`Antigravity endpoint ${endpoint} returned ${response.status}`);
-      } catch (err) {
-        lastError = err as Error;
-      }
-    }
-    throw lastError ?? new Error("No Antigravity endpoint was available");
+    return this._fetch(`${ANTIGRAVITY_CLOUD_CODE_URL}${path}`, {
+      ...init,
+      headers: { ...antigravityHeaders(accessToken), ...init.headers },
+    });
   }
 
   private async antigravityUpstreamError(resp: Response): Promise<Error> {
@@ -1029,9 +1019,8 @@ export class DeepSeekClient {
     return {
       model: opts.model,
       project: projectId,
+      user_prompt_id: globalThis.crypto.randomUUID(),
       request,
-      userAgent: "antigravity",
-      requestId: `reasonix-${globalThis.crypto.randomUUID()}`,
     };
   }
 

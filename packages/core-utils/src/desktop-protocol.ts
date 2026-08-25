@@ -608,6 +608,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "gemini_oauth_begin" }
   | { cmd: "gemini_oauth_cancel" }
   | { cmd: "gemini_oauth_signout" }
+  | { cmd: "antigravity_models_refresh" }
   | { cmd: "settings_get" }
   | ({ cmd: "settings_save" } & SettingsPatch)
   | { cmd: "codex_quota_get" }

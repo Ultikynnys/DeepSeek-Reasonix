@@ -29,11 +29,10 @@ function wrappedResponse(parts: unknown[], usage?: unknown): unknown {
 }
 
 beforeEach(() => {
-  process.env.ANTIGRAVITY_VERSION = "2.9.1";
+  vi.restoreAllMocks();
 });
 
 afterEach(() => {
-  process.env.ANTIGRAVITY_VERSION = undefined;
   vi.restoreAllMocks();
 });
 
@@ -71,16 +70,15 @@ describe("gemini payload", () => {
       ],
     });
 
-    expect(captured?.url).toBe("https://cloudcode-pa.googleapis.com/v1internal:generateContent");
-    expect(captured?.headers.authorization).toBe("Bearer google-token");
-    expect(captured?.headers["x-goog-api-client"]).toBe(
-      "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    expect(captured?.url).toBe(
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent",
     );
+    expect(captured?.headers.authorization).toBe("Bearer google-token");
+    expect(captured?.headers["user-agent"]).toBe("antigravity");
     const body = captured?.body as {
       model: string;
       project: string;
-      userAgent: string;
-      requestId: string;
+      user_prompt_id: string;
       request: {
         contents: unknown[];
         systemInstruction: unknown;
@@ -90,8 +88,7 @@ describe("gemini payload", () => {
     };
     expect(body.model).toBe("gemini-2.5-flash");
     expect(body.project).toBe("proj-123");
-    expect(body.userAgent).toBe("antigravity");
-    expect(body.requestId).toMatch(/^reasonix-/);
+    expect(body.user_prompt_id).toMatch(/^[0-9a-f-]{36}$/);
     expect(body.request.contents).toEqual([{ role: "user", parts: [{ text: "hello" }] }]);
     expect(body.request.systemInstruction).toEqual({
       role: "user",
@@ -114,24 +111,20 @@ describe("gemini payload", () => {
     expect(res.usage.completionTokens).toBe(5);
   });
 
-  it("falls back to production when sandbox endpoints are unavailable", async () => {
+  it("surfaces daily endpoint failures without gateway fallback", async () => {
     const fetch = vi
       .fn()
-      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
-      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(wrappedResponse([{ text: "fallback" }])), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
+      .mockResolvedValue(
+        new Response("unavailable", { status: 503 }),
       ) as unknown as typeof globalThis.fetch;
     const client = geminiClient(fetch);
 
     await expect(
       client.chat({ model: "gemini-2.5-flash", messages: [{ role: "user", content: "hi" }] }),
-    ).resolves.toMatchObject({ content: "fallback" });
-    expect(vi.mocked(fetch).mock.calls[2]?.[0]).toBe(
-      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent",
+    ).rejects.toThrow("Upstream 503: unavailable");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent",
     );
   });
 
@@ -257,7 +250,7 @@ describe("gemini streaming", () => {
 
     const fetch = vi.fn(async (url: unknown) => {
       expect(String(url)).toBe(
-        "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+        "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
       );
       return new Response(sse, {
         status: 200,

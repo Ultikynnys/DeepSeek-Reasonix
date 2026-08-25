@@ -1842,6 +1842,8 @@ interface TabRuntimeProps {
   ollamaVisionModels: ReadonlySet<string>;
   /** Re-fetch the app-global Ollama catalog (`force` bypasses the cache). */
   onRefreshOllamaModels: (force?: boolean) => void;
+  /** Re-fetch the signed-in account's Antigravity quota model ids. */
+  onRefreshAntigravityModels: () => void;
   tabsList: { id: string; workspaceDir?: string }[];
   activeTabId: string;
   setActiveTabId: (id: string) => void;
@@ -1882,6 +1884,7 @@ function TabRuntime({
   ollamaHiddenCount,
   ollamaVisionModels,
   onRefreshOllamaModels,
+  onRefreshAntigravityModels,
   tabsList,
   activeTabId,
   setActiveTabId,
@@ -3178,7 +3181,9 @@ function TabRuntime({
                 ollamaHiddenCount={ollamaHiddenCount}
                 ollamaVisionModels={ollamaVisionModels}
                 antigravityModels={state.settings?.antigravityOAuth?.models}
+                antigravityModelsError={state.settings?.antigravityOAuth?.flowError}
                 onRefreshOllamaModels={onRefreshOllamaModels}
+                onRefreshAntigravityModels={onRefreshAntigravityModels}
                 onModelChange={(model) => {
                   applySettingsPatch({ model });
                   flashToast(t("app.toast.modelSwitched", { model }));
@@ -4329,6 +4334,13 @@ export function App() {
     [],
   );
 
+  const requestAntigravityModels = useCallback(() => {
+    rpcSend({
+      tabId: activeTabIdRef.current,
+      cmd: "antigravity_models_refresh",
+    }).catch((err) => console.error("antigravity_models_refresh failed", err));
+  }, []);
+
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "installing" | "error">("idle");
   const [updateProgress, setUpdateProgress] = useState<{
@@ -4958,6 +4970,7 @@ export function App() {
           ollamaHiddenCount={ollamaCatalog.hiddenCount}
           ollamaVisionModels={ollamaCatalog.visionModels}
           onRefreshOllamaModels={requestOllamaModels}
+          onRefreshAntigravityModels={requestAntigravityModels}
           tabsList={tabs}
           activeTabId={activeTabId}
           setActiveTabId={setActiveTabId}
