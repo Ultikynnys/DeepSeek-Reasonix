@@ -220,6 +220,8 @@ export interface OpenAIOAuthCreds {
 export interface AntigravityOAuthCreds {
   accessToken: string;
   refreshToken: string;
+  /** OAuth client that issued these tokens. Missing on legacy custom-client credentials. */
+  clientId?: string;
   /** ms epoch — Google access tokens are short-lived; refreshed from refreshToken when within 5 min of expiry. */
   expiresAt: number;
   /** Account email from userinfo — shown masked in settings, never shipped over the bridge. */
@@ -238,11 +240,6 @@ export interface ReasonixConfig {
   /** Google Antigravity OAuth tokens — set by the "Sign in with Google" flow;
    *  powers gemini-* models on the Antigravity quota. */
   antigravityOAuth?: AntigravityOAuthCreds;
-  /** Google OAuth client id for the Antigravity sign-in flow (the public Gemini
-   *  CLI client). Passed to the OAuth flow as an input parameter. */
-  antigravityOAuthClientId?: string;
-  /** Google OAuth client secret for the Antigravity sign-in flow. */
-  antigravityOAuthClientSecret?: string;
   /** Persisted DeepSeek model id — `/model <id>` and the dashboard model picker write through this. */
   model?: string;
   editMode?: EditMode;
@@ -1219,31 +1216,6 @@ export function clearAntigravityOAuth(path: string = defaultConfigPath()): void 
   if (!cfg.antigravityOAuth) return;
   const { antigravityOAuth: _drop, ...rest } = cfg;
   writeConfig(rest, path);
-}
-
-/** Google OAuth client id/secret for the Antigravity sign-in flow — read from
- *  config and passed to the OAuth flow as input parameters. */
-export function loadAntigravityOAuthClient(path: string = defaultConfigPath()): {
-  clientId?: string;
-  clientSecret?: string;
-} {
-  const cfg = readConfig(path);
-  return {
-    clientId: cfg.antigravityOAuthClientId?.trim() || undefined,
-    clientSecret: cfg.antigravityOAuthClientSecret?.trim() || undefined,
-  };
-}
-
-/** Persist the Google OAuth client id/secret from the settings panel. */
-export function saveAntigravityOAuthClient(
-  clientId: string,
-  clientSecret: string,
-  path: string = defaultConfigPath(),
-): void {
-  const cfg = readConfig(path);
-  cfg.antigravityOAuthClientId = clientId.trim();
-  cfg.antigravityOAuthClientSecret = clientSecret.trim();
-  writeConfig(cfg, path);
 }
 
 /** Windows: case-insensitive — NTFS treats `F:\Foo` and `f:\foo` as one directory (#402). */

@@ -16,7 +16,6 @@ import {
   clearProjectShellAllowed,
   editModeHintShown,
   isPlausibleKey,
-  loadAntigravityOAuthClient,
   loadApiKey,
   loadBaiduApiKey,
   loadBaseUrl,
@@ -52,7 +51,6 @@ import {
   resolveSemanticEmbeddingConfig,
   resolveThemePreference,
   saveAntigravityOAuth,
-  saveAntigravityOAuthClient,
   saveApiKey,
   saveBaseUrl,
   saveContextTokens,
@@ -518,31 +516,6 @@ describe("config", () => {
       });
       clearAntigravityOAuth(path);
       expect(readConfig(path).antigravityOAuth).toBeUndefined();
-    });
-
-    it("loadAntigravityOAuthClient reads the client id/secret from config", () => {
-      writeConfig(
-        {
-          antigravityOAuthClientId: "  client-id  ",
-          antigravityOAuthClientSecret: "client-secret",
-        },
-        path,
-      );
-      expect(loadAntigravityOAuthClient(path)).toEqual({
-        clientId: "client-id",
-        clientSecret: "client-secret",
-      });
-      writeConfig({}, path);
-      expect(loadAntigravityOAuthClient(path)).toEqual({
-        clientId: undefined,
-        clientSecret: undefined,
-      });
-    });
-
-    it("saveAntigravityOAuthClient persists the client id/secret", () => {
-      saveAntigravityOAuthClient("  client-id  ", "client-secret", path);
-      expect(readConfig(path).antigravityOAuthClientId).toBe("client-id");
-      expect(readConfig(path).antigravityOAuthClientSecret).toBe("client-secret");
     });
 
     it("gemini-* ids route to the gemini provider and the Cloud Code base URL", () => {

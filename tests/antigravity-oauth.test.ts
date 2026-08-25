@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ANTIGRAVITY_OAUTH_CLIENT_ID,
+  ANTIGRAVITY_OAUTH_CLIENT_SECRET,
   antigravityAccount,
   buildAuthorizeUrl,
   exchangeAntigravityCode,
@@ -12,9 +14,6 @@ import {
   signOutAntigravity,
 } from "../src/antigravity-oauth.js";
 import { readConfig, saveAntigravityOAuth } from "../src/config.js";
-
-const TEST_CLIENT_ID = "test-client-id";
-const TEST_CLIENT_SECRET = "test-client-secret";
 
 const ENV_KEYS = [
   "ANTIGRAVITY_OAUTH_SCOPE",
@@ -54,13 +53,13 @@ describe("antigravity-oauth", () => {
 
   it("buildAuthorizeUrl carries client_id, offline access, and the redirect", () => {
     const url = buildAuthorizeUrl({
-      clientId: TEST_CLIENT_ID,
+      clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
       redirectUri: "http://localhost:1234/oauth2callback",
       state: "state-abc",
     });
     const parsed = new URL(url);
     expect(parsed.origin + parsed.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
-    expect(parsed.searchParams.get("client_id")).toBe(TEST_CLIENT_ID);
+    expect(parsed.searchParams.get("client_id")).toBe(ANTIGRAVITY_OAUTH_CLIENT_ID);
     expect(parsed.searchParams.get("redirect_uri")).toBe("http://localhost:1234/oauth2callback");
     expect(parsed.searchParams.get("response_type")).toBe("code");
     expect(parsed.searchParams.get("access_type")).toBe("offline");
@@ -75,8 +74,6 @@ describe("antigravity-oauth", () => {
         jsonResponse({ access_token: "at", refresh_token: "rt", expires_in: 3600 }),
       );
     const creds = await exchangeAntigravityCode({
-      clientId: "cid",
-      clientSecret: "secret",
       redirectUri: "http://localhost:1/oauth2callback",
       code: "code-123",
     });
@@ -87,7 +84,8 @@ describe("antigravity-oauth", () => {
     expect(url).toBe("https://oauth2.googleapis.com/token");
     const body = new URLSearchParams(init?.body as string);
     expect(body.get("grant_type")).toBe("authorization_code");
-    expect(body.get("client_secret")).toBe("secret");
+    expect(body.get("client_id")).toBe(ANTIGRAVITY_OAUTH_CLIENT_ID);
+    expect(body.get("client_secret")).toBe(ANTIGRAVITY_OAUTH_CLIENT_SECRET);
     expect(body.get("code")).toBe("code-123");
   });
 
@@ -95,39 +93,57 @@ describe("antigravity-oauth", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ access_token: "at-new", expires_in: 3600 }),
     );
-    const creds = await refreshAntigravityToken("rt-old", "cid", "secret");
+    const creds = await refreshAntigravityToken("rt-old");
     expect(creds.accessToken).toBe("at-new");
     expect(creds.refreshToken).toBe("rt-old");
   });
 
   it("resolveAntigravityToken returns a fresh token without any fetch", async () => {
     saveAntigravityOAuth(
-      { accessToken: "at-fresh", refreshToken: "rt", expiresAt: Date.now() + 10 * 60_000 },
+      {
+        accessToken: "at-fresh",
+        refreshToken: "rt",
+        clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
+        expiresAt: Date.now() + 10 * 60_000,
+      },
       path,
     );
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    expect(await resolveAntigravityToken(path, TEST_CLIENT_ID, TEST_CLIENT_SECRET)).toBe(
-      "at-fresh",
-    );
+    expect(await resolveAntigravityToken(path)).toBe("at-fresh");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("resolveAntigravityToken refreshes an expired token and persists the new pair", async () => {
     saveAntigravityOAuth(
-      { accessToken: "at-expired", refreshToken: "rt", expiresAt: Date.now() - 1000 },
+      {
+        accessToken: "at-expired",
+        refreshToken: "rt",
+        clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
+        expiresAt: Date.now() - 1000,
+      },
       path,
     );
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ access_token: "at-new", expires_in: 3600 }),
     );
-    expect(await resolveAntigravityToken(path, TEST_CLIENT_ID, TEST_CLIENT_SECRET)).toBe("at-new");
+    expect(await resolveAntigravityToken(path)).toBe("at-new");
     const stored = readConfig(path).antigravityOAuth;
     expect(stored?.accessToken).toBe("at-new");
     expect(stored?.refreshToken).toBe("rt");
   });
 
+  it("resolveAntigravityToken clears legacy custom-client credentials", async () => {
+    saveAntigravityOAuth(
+      { accessToken: "legacy", refreshToken: "rt", expiresAt: Date.now() + 60_000 },
+      path,
+    );
+
+    await expect(resolveAntigravityToken(path)).resolves.toBeUndefined();
+    expect(readConfig(path).antigravityOAuth).toBeUndefined();
+  });
+
   it("resolveAntigravityToken returns undefined without creds", async () => {
-    expect(await resolveAntigravityToken(path, TEST_CLIENT_ID, TEST_CLIENT_SECRET)).toBeUndefined();
+    expect(await resolveAntigravityToken(path)).toBeUndefined();
   });
 
   it("signOutAntigravity clears stored creds", async () => {

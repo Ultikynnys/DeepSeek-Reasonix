@@ -82,7 +82,6 @@ import {
   isOpenAIStandardEndpoint,
   isPlausibleKey,
   isReasoningEffort,
-  loadAntigravityOAuthClient,
   loadApiKey,
   loadBraveApiKey,
   loadContextTokens,
@@ -112,7 +111,6 @@ import {
   readConfig,
   webSearchEngine as readWebSearchEngine,
   saveAntigravityOAuth,
-  saveAntigravityOAuthClient,
   saveApiKey,
   saveBaseUrl,
   saveContextTokens,
@@ -146,6 +144,7 @@ import {
 import { normalizeImageToDataUrl } from "../../image-format.js";
 
 import {
+  ANTIGRAVITY_OAUTH_CLIENT_ID,
   antigravityAccount,
   beginAntigravityOAuthFlow,
   onboardAntigravity,
@@ -782,8 +781,7 @@ let lastAntigravityOAuthError: string | null = null;
  *  Onboards (loadCodeAssist/onboardUser) once when no project id is stored yet,
  *  persisting the resolved project. Returns null when not signed in. */
 async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId: string } | null> {
-  const { clientId, clientSecret } = loadAntigravityOAuthClient();
-  const accessToken = await resolveAntigravityToken(defaultConfigPath(), clientId, clientSecret);
+  const accessToken = await resolveAntigravityToken(defaultConfigPath());
   if (!accessToken) return null;
   const creds = readConfig().antigravityOAuth;
   let projectId = creds?.projectId;
@@ -866,9 +864,16 @@ function emitSettings(tab: Tab): void {
         flowError: lastOAuthError ?? undefined,
       },
       antigravityOAuth: {
-        signedIn: !!antigravityOAuth?.accessToken,
+        signedIn:
+          !!antigravityOAuth?.accessToken &&
+          antigravityOAuth.clientId === ANTIGRAVITY_OAUTH_CLIENT_ID,
         account: antigravityOAuth?.account,
-        flowError: lastAntigravityOAuthError ?? undefined,
+        flowError:
+          lastAntigravityOAuthError ??
+          (antigravityOAuth?.accessToken &&
+          antigravityOAuth.clientId !== ANTIGRAVITY_OAUTH_CLIENT_ID
+            ? "Google authentication changed. Sign in again to enable Gemini free-tier quota."
+            : undefined),
       },
       version: VERSION,
     },
@@ -3890,15 +3895,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       antigravityOAuthGen++;
       if (pendingAntigravityOAuth) pendingAntigravityOAuth.cancel();
       const gen = antigravityOAuthGen;
-      const { clientId, clientSecret } = loadAntigravityOAuthClient();
-      if (!clientId || !clientSecret) {
-        lastAntigravityOAuthError =
-          "Antigravity OAuth client id/secret not configured — set them in config.json.";
-        emit({ type: "$error", message: lastAntigravityOAuthError }, tab.id);
-        emitSettings(tab);
-        return;
-      }
-      void beginAntigravityOAuthFlow({ clientId, clientSecret })
+      void beginAntigravityOAuthFlow()
         .then((flow) => {
           pendingAntigravityOAuth = flow;
           emit({ type: "gemini_oauth_begin_result", url: flow.url }, tab.id);
@@ -3908,7 +3905,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               pendingAntigravityOAuth = null;
               const account = (await antigravityAccount(creds.accessToken)) ?? creds.account;
               const projectId = await onboardAntigravity(creds.accessToken);
-              saveAntigravityOAuth({ ...creds, account, projectId });
+              saveAntigravityOAuth({
+                ...creds,
+                clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
+                account,
+                projectId,
+              });
               lastAntigravityOAuthError = null;
               // Rebuild now-credentialed tabs so a fresh sign-in takes effect
               // (and clears the needs-setup screen) without a model flip.
@@ -3983,31 +3985,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       } catch (err) {
         emit(
           { type: "$error", message: `saveOpenAIApiKey failed: ${(err as Error).message}` },
-          tab.id,
-        );
-      }
-      return;
-    }
-    if (msg.cmd === "setup_save_antigravity_client") {
-      const clientId = msg.clientId.trim();
-      const clientSecret = msg.clientSecret.trim();
-      if (!clientId || !clientSecret) {
-        emit(
-          { type: "$error", message: "Both the client id and client secret are required." },
-          tab.id,
-        );
-        return;
-      }
-      try {
-        saveAntigravityOAuthClient(clientId, clientSecret);
-        lastAntigravityOAuthError = null;
-        emitSettings(tab);
-      } catch (err) {
-        emit(
-          {
-            type: "$error",
-            message: `saveAntigravityOAuthClient failed: ${(err as Error).message}`,
-          },
           tab.id,
         );
       }
