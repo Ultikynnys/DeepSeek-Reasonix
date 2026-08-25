@@ -333,6 +333,29 @@ describe("healLoadedMessages", () => {
     expect(healed[1]!.content).toBe("trailing note");
   });
 
+  it("keeps id-less Gemini tool_calls paired by function name", () => {
+    // Antigravity (Gemini Code Assist) emits tool_calls without `id`, so the
+    // tool result arrives with tool_call_id:"" and a `name`. Gemini pairs by
+    // function name; the pairing pass must fall back to name so the exchange
+    // survives and the model actually sees the tool result.
+    const messages: ChatMessage[] = [
+      { role: "user", content: "list it" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          { type: "function", function: { name: "directory_tree", arguments: '{"depth":1}' } },
+        ],
+      },
+      { role: "tool", tool_call_id: "", name: "directory_tree", content: '["a"]' },
+      { role: "assistant", content: "done" },
+    ];
+    const { messages: healed, healedCount } = healLoadedMessages(messages, 32_000);
+    expect(healedCount).toBe(0);
+    expect(healed.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant"]);
+    expect(healed[2]).toEqual(messages[2]);
+  });
+
   it("strips a dangling assistant-with-tool_calls tail (pre-0.4.12 session files)", () => {
     const messages: ChatMessage[] = [
       { role: "user", content: "analyze" },

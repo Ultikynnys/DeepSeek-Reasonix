@@ -31,16 +31,34 @@ export function fixToolCallPairing(messages: ChatMessage[]): {
       for (const call of calls) {
         if (call.id) needed.add(call.id);
       }
+      // Gemini (Antigravity Code Assist) pairs tool results by function NAME,
+      // not id: its client emits id-less tool_calls, so the tool message's
+      // tool_call_id is "" while `name` carries the function name. Fall back to
+      // name→stamped-id lookup so that exchange survives the pairing pass.
+      const nameToId = new Map<string, string>();
+      for (const call of calls) {
+        if (call.id && call.function?.name) nameToId.set(call.function.name, call.id);
+      }
       const candidates: ChatMessage[] = [];
       let j = i + 1;
       while (j < messages.length && needed.size > 0) {
         const nxt = messages[j]!;
         if (nxt.role !== "tool") break;
         const id = nxt.tool_call_id ?? "";
-        if (!needed.has(id)) break;
-        needed.delete(id);
-        candidates.push(nxt);
-        j++;
+        if (needed.has(id)) {
+          needed.delete(id);
+          candidates.push(nxt);
+          j++;
+          continue;
+        }
+        const matchedId = nameToId.get(nxt.name ?? "");
+        if (matchedId && needed.has(matchedId)) {
+          needed.delete(matchedId);
+          candidates.push(nxt);
+          j++;
+          continue;
+        }
+        break;
       }
       if (needed.size === 0) {
         out.push({ ...msg, tool_calls: calls });
