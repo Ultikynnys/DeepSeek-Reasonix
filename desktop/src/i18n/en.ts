@@ -642,6 +642,11 @@ export const en = {
     ollamaTurnQuotaTitle: "This turn used {pct}% of the session usage",
     ollamaNoData:
       "Ollama usage · no data — set an API key in Settings → Models to see plan usage · click to retry",
+    antigravityQuota: "plan usage",
+    antigravityQuotaTitle:
+      "Antigravity plan {plan} · {left}% left · resets in {resets} · click to refresh",
+    antigravityNoData:
+      "Antigravity usage · no data — sign in to Google Antigravity (Settings → Gemini) to see plan usage · click to retry",
     offPeak: "off-peak",
     peak: "peak",
     offPeakTitle:

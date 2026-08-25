@@ -3,6 +3,7 @@ import {
   clipText,
   extractPathsFromArgs,
   flattenText,
+  isAntigravityModel,
   isFilePathTool,
   messageOf,
   modelAcceptsImages,
@@ -37,6 +38,7 @@ import {
   shouldShowCompletionToast,
 } from "./notifications";
 import {
+  type AntigravityQuota,
   type CheckpointVerdict,
   type ChoiceVerdict,
   type CodexQuota,
@@ -440,6 +442,12 @@ type State = {
   ollamaQuotaRefreshing: boolean;
   /** Why the last Ollama usage fetch produced no data — shown in the chip tooltip. */
   ollamaQuotaReason: string | null;
+  /** Google Antigravity (Gemini Code Assist) plan + per-model usage. */
+  antigravityQuota: AntigravityQuota | null;
+  /** True between a statusbar chip click and the $antigravity_quota reply. */
+  antigravityQuotaRefreshing: boolean;
+  /** Why the last Antigravity quota fetch produced no data — shown in the chip tooltip. */
+  antigravityQuotaReason: string | null;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
   mcpSpecs: McpSpecInfo[];
@@ -514,6 +522,7 @@ type Action =
   | { t: "antigravity_oauth_waiting"; waiting: boolean }
   | { t: "codex_quota_refreshing" }
   | { t: "ollama_quota_refreshing" }
+  | { t: "antigravity_quota_refreshing" }
   | { t: "push_status"; text: string };
 
 function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
@@ -630,6 +639,8 @@ export function reduce(state: State, action: Action): State {
       return { ...state, codexQuotaRefreshing: true };
     case "ollama_quota_refreshing":
       return { ...state, ollamaQuotaRefreshing: true };
+    case "antigravity_quota_refreshing":
+      return { ...state, antigravityQuotaRefreshing: true };
     case "batch_delta": {
       const collapsed: DeltaBatchItem[] = [];
       for (const item of action.items) {
@@ -1269,6 +1280,13 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ollamaQuotaReason: ev.reason ?? null,
         ollamaQuotaRefreshing: false,
       };
+    case "$antigravity_quota":
+      return {
+        ...state,
+        antigravityQuota: ev.quota,
+        antigravityQuotaReason: ev.reason ?? null,
+        antigravityQuotaRefreshing: false,
+      };
     case "$settings": {
       const prevWs = state.settings?.workspaceDir;
       const wsChanged = prevWs !== undefined && prevWs !== ev.workspaceDir;
@@ -1317,6 +1335,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         codexQuota: ev.model.startsWith("gpt-") ? state.codexQuota : null,
         // Same for Ollama usage — only meaningful while an ollama/ model is active.
         ollamaQuota: ev.model.startsWith("ollama/") ? state.ollamaQuota : null,
+        // Same for Antigravity — only meaningful while an Antigravity model is active.
+        antigravityQuota: isAntigravityModel(ev.model) ? state.antigravityQuota : null,
       };
     }
     case "$session_loaded": {
@@ -1912,6 +1932,9 @@ function TabRuntime({
     ollamaQuota: null,
     ollamaQuotaRefreshing: false,
     ollamaQuotaReason: null,
+    antigravityQuota: null,
+    antigravityQuotaRefreshing: false,
+    antigravityQuotaReason: null,
     mentionResults: null,
     mentionPreview: null,
     mcpSpecs: [],
@@ -2022,6 +2045,10 @@ function TabRuntime({
   const refreshOllamaQuota = useCallback(() => {
     dispatch({ t: "ollama_quota_refreshing" });
     sendRpc({ cmd: "ollama_quota_get" });
+  }, [sendRpc]);
+  const refreshAntigravityQuota = useCallback(() => {
+    dispatch({ t: "antigravity_quota_refreshing" });
+    sendRpc({ cmd: "antigravity_quota_get" });
   }, [sendRpc]);
   // Fetch the Ollama catalog whenever the tab's model is an Ollama model — the
   // composer menu and the Models settings page render the fetched list. The
@@ -3258,6 +3285,10 @@ function TabRuntime({
           ollamaQuotaRefreshing={state.ollamaQuotaRefreshing}
           ollamaQuotaReason={state.ollamaQuotaReason}
           onRefreshOllamaQuota={refreshOllamaQuota}
+          antigravityQuota={state.antigravityQuota}
+          antigravityQuotaRefreshing={state.antigravityQuotaRefreshing}
+          antigravityQuotaReason={state.antigravityQuotaReason}
+          onRefreshAntigravityQuota={refreshAntigravityQuota}
           usage={state.usage}
           busy={state.busy}
           ready={state.ready}

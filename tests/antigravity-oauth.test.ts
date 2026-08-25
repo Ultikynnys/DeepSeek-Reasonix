@@ -9,7 +9,9 @@ import {
   buildAuthorizeUrl,
   exchangeAntigravityCode,
   fetchAntigravityModels,
+  fetchAntigravityQuota,
   onboardAntigravity,
+  parseAntigravityPlan,
   refreshAntigravityToken,
   resolveAntigravityToken,
   signOutAntigravity,
@@ -305,5 +307,66 @@ describe("antigravity-oauth", () => {
 
     await expect(onboardAntigravity("at")).rejects.toThrow("loadCodeAssist failed (403)");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("parseAntigravityPlan maps currentTier to a displayable plan", () => {
+    expect(parseAntigravityPlan(null)).toBeNull();
+    expect(parseAntigravityPlan({ id: "free-tier", name: "Antigravity" })).toEqual({
+      tierId: "free-tier",
+      name: "Antigravity",
+    });
+    expect(
+      parseAntigravityPlan({
+        id: "free-tier",
+        name: "Antigravity",
+        upgradeSubscriptionText: "Upgrade to get 1,500/day",
+        upgradeSubscriptionType: "GOOGLE_ONE",
+        upgradeSubscriptionUri: "https://one.google.com/ai",
+      }),
+    ).toEqual({
+      tierId: "free-tier",
+      name: "Antigravity",
+      upgradeText: "Upgrade to get 1,500/day",
+      upgradeType: "GOOGLE_ONE",
+      upgradeUri: "https://one.google.com/ai",
+    });
+  });
+
+  it("fetchAntigravityQuota returns plan + per-model usedFraction, dropping vertex buckets", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        jsonResponse({ currentTier: { id: "free-tier", name: "Antigravity" } }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          buckets: [
+            {
+              modelId: "gemini-2.5-pro",
+              remainingFraction: 0.8,
+              resetTime: "2026-09-01T13:37:06Z",
+            },
+            { modelId: "gemini-2.5-pro_vertex", remainingFraction: 0.8 },
+            { modelId: "chat_20706", remainingFraction: 1 },
+          ],
+        }),
+      );
+
+    const quota = await fetchAntigravityQuota("at", "project-123");
+    expect(quota.plan).toEqual({ tierId: "free-tier", name: "Antigravity" });
+    expect(quota.windows).toEqual([
+      {
+        modelId: "gemini-2.5-pro",
+        usedFraction: 0.2,
+        resetTime: "2026-09-01T13:37:06Z",
+      },
+      { modelId: "chat_20706", usedFraction: 0 },
+    ]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
+    );
   });
 });

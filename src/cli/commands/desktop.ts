@@ -15,6 +15,7 @@ import {
   toApprovalPrompt,
 } from "@reasonix/core-utils";
 import type {
+  AntigravityQuotaEvent,
   BalanceEvent,
   BtwResultEvent,
   CheckpointRequiredEvent,
@@ -148,6 +149,7 @@ import {
   antigravityAccount,
   beginAntigravityOAuthFlow,
   fetchAntigravityModels,
+  fetchAntigravityQuota,
   onboardAntigravity,
   resolveAntigravityToken,
   signOutAntigravity,
@@ -280,6 +282,7 @@ type EmittableEvent =
   | CodexQuotaEvent
   | OllamaQuotaEvent
   | OllamaModelsEvent
+  | AntigravityQuotaEvent
   | MentionResultsEvent
   | MentionPreviewEvent
   | RetryResultEvent
@@ -914,6 +917,7 @@ function emitSettings(tab: Tab): void {
   });
   void emitCodexQuota(tab);
   void emitOllamaQuota(tab);
+  void emitAntigravityQuota(tab);
 }
 
 /** Account plan for a cloud Ollama endpoint — `POST {origin}/api/me` with the
@@ -1445,7 +1449,10 @@ export async function fetchOllamaUsage(
  *  the percent points of the session window consumed since (each
  *  $turn_complete refetches; the window resets every 5 h). */
 let lastOllamaSessionUsagePct: number | null = null;
-
+/** Last Antigravity active-model used fraction (0..1) — the delta to the next
+ *  fetch is the fraction of the window consumed since (each $turn_complete
+ *  refetches; windows reset periodically). */
+let lastAntigravityUsedFraction: number | null = null;
 /** Cloud Ollama usage for the signed-in account — Ollama-provider tabs with a
  *  key only. Local daemons have no usage endpoint; the fetch mirrors the
  *  Codex quota fetch and scales the API's fraction to percent. */
@@ -1496,6 +1503,51 @@ async function emitOllamaQuota(tab: Tab): Promise<void> {
     },
     tab.id,
   );
+}
+
+/** Antigravity (Gemini Code Assist) plan + quota for the signed-in account —
+ *  Gemini-provider tabs only. Uses the undocumented Code Assist `v1internal`
+ *  API: loadCodeAssist for the plan, retrieveUserQuota for per-model windows. */
+async function emitAntigravityQuota(tab: Tab): Promise<void> {
+  if (providerForModel(tab.currentModel) !== "gemini") {
+    emitTabDiagnostic(tab, "quota.skipped", { reason: "non-gemini-provider" });
+    return;
+  }
+  emitTabDiagnostic(tab, "quota.fetch.started");
+  const auth = await resolveGeminiAuth();
+  if (!auth) {
+    emitTabDiagnostic(tab, "quota.fetch.failed", { reason: "antigravity-not-signed-in" }, "error");
+    emit({ type: "$antigravity_quota", quota: null, reason: "not-signed-in" }, tab.id);
+    return;
+  }
+  const quota = await fetchAntigravityQuota(auth.accessToken, auth.projectId).catch((err) => {
+    emitTabDiagnostic(tab, "quota.fetch.failed", { reason: (err as Error).message }, "error");
+    emit({ type: "$antigravity_quota", quota: null, reason: (err as Error).message }, tab.id);
+    return null;
+  });
+  if (!quota) return;
+
+  // The active model's window, else the most-consumed window as a proxy.
+  const active =
+    quota.windows.find((w) => w.modelId === tab.currentModel) ??
+    [...quota.windows].sort((a, b) => b.usedFraction - a.usedFraction)[0] ??
+    null;
+  let turnUsedPct: number | null = null;
+  const usedFraction = active?.usedFraction ?? null;
+  if (usedFraction !== null) {
+    const usedPct = usedFraction * 100;
+    if (lastAntigravityUsedFraction !== null && usedPct >= lastAntigravityUsedFraction * 100) {
+      turnUsedPct = usedPct - lastAntigravityUsedFraction * 100;
+    }
+    lastAntigravityUsedFraction = usedFraction;
+  }
+  emitTabDiagnostic(tab, "quota.fetch.succeeded", {
+    plan: quota.plan?.tierId,
+    windows: quota.windows.length,
+    activeModel: active?.modelId,
+    turnUsedPct,
+  });
+  emit({ type: "$antigravity_quota", quota: { ...quota, turnUsedPct } }, tab.id);
 }
 
 function emitSessions(tab: Tab): void {
@@ -2758,6 +2810,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           void emitBalance(tab);
           void emitCodexQuota(tab);
           void emitOllamaQuota(tab);
+          void emitAntigravityQuota(tab);
           if (tab.hooks.some((h) => h.event === "Stop")) {
             const stopReport = await runHooks({
               hooks: tab.hooks,
@@ -3318,7 +3371,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     emitTabDiagnostic(tab, "quota.poll.started", { intervalMs: 60_000 });
     quotaPolling = true;
-    void Promise.allSettled([emitCodexQuota(tab), emitOllamaQuota(tab)]).finally(() => {
+    void Promise.allSettled([
+      emitCodexQuota(tab),
+      emitOllamaQuota(tab),
+      emitAntigravityQuota(tab),
+    ]).finally(() => {
       quotaPolling = false;
       emitTabDiagnostic(tab, "quota.poll.completed");
     });
@@ -3370,6 +3427,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         // the statusbar must show the current quota the moment it's shown.
         void emitCodexQuota(activated);
         void emitOllamaQuota(activated);
+        void emitAntigravityQuota(activated);
       } else {
         emitDiagnostic(
           "tab.activate.failed",
@@ -4046,6 +4104,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "ollama_quota_get") {
       void emitOllamaQuota(tab);
+      return;
+    }
+    if (msg.cmd === "antigravity_quota_get") {
+      void emitAntigravityQuota(tab);
       return;
     }
     if (msg.cmd === "ollama_models_list") {

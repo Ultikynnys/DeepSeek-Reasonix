@@ -232,7 +232,104 @@ export interface AntigravityModel {
 }
 
 interface UserQuotaResponse {
-  buckets?: Array<{ modelId?: string }> | null;
+  buckets?: Array<{
+    modelId?: string;
+    tokenType?: string;
+    remainingFraction?: number;
+    resetTime?: string;
+  }> | null;
+}
+
+/** The account's Code Assist plan, from loadCodeAssist.currentTier. */
+export interface AntigravityPlan {
+  tierId: string;
+  name: string;
+  upgradeText?: string;
+  upgradeType?: string;
+  upgradeUri?: string;
+}
+
+/** Per-model quota window from retrieveUserQuota. */
+export interface AntigravityQuotaWindow {
+  modelId: string;
+  /** Fraction of the quota already consumed this window, 0..1. */
+  usedFraction: number;
+  /** ISO timestamp when the window resets; absent when not a limited bucket. */
+  resetTime?: string;
+}
+
+/** Plan + per-model usage for the signed-in account. */
+export interface AntigravityQuota {
+  plan: AntigravityPlan | null;
+  windows: AntigravityQuotaWindow[];
+  fetchedAt: number;
+}
+
+/** Normalize a currentTier response into a displayable plan. */
+export function parseAntigravityPlan(currentTier: unknown): AntigravityPlan | null {
+  const tier = currentTier as
+    | {
+        id?: string;
+        name?: string;
+        upgradeSubscriptionText?: string;
+        upgradeSubscriptionType?: string;
+        upgradeSubscriptionUri?: string;
+      }
+    | null
+    | undefined;
+  if (!tier?.id) return null;
+  return {
+    tierId: tier.id,
+    name: tier.name ?? tier.id,
+    upgradeText: tier.upgradeSubscriptionText,
+    upgradeType: tier.upgradeSubscriptionType,
+    upgradeUri: tier.upgradeSubscriptionUri,
+  };
+}
+
+/** Map a retrieveUserQuota bucket into a quota window. `_vertex`-suffixed
+ *  buckets share the same quota as their non-vertex twin; drop them so the
+ *  active model's number is not double-counted. */
+function parseQuotaWindow(
+  bucket: NonNullable<UserQuotaResponse["buckets"]>[number],
+): AntigravityQuotaWindow | null {
+  const modelId = bucket.modelId?.trim();
+  if (!modelId || modelId.endsWith("_vertex")) return null;
+  const fraction = bucket.remainingFraction;
+  if (typeof fraction !== "number" || !Number.isFinite(fraction)) {
+    return { modelId, usedFraction: 0 };
+  }
+  const window: AntigravityQuotaWindow = {
+    modelId,
+    usedFraction: Math.round(Math.min(1, Math.max(0, 1 - fraction)) * 10_000) / 10_000,
+  };
+  if (bucket.resetTime) window.resetTime = bucket.resetTime;
+  return window;
+}
+
+/** Fetch the account's plan (loadCodeAssist → currentTier). */
+export async function fetchAntigravityPlan(accessToken: string): Promise<AntigravityPlan | null> {
+  const load = await antigravityPost<LoadCodeAssistResponse>(accessToken, "loadCodeAssist", {
+    metadata: CLIENT_METADATA,
+    mode: "FULL_ELIGIBILITY_CHECK",
+  });
+  return parseAntigravityPlan(load.currentTier);
+}
+
+/** Fetch the account's plan + per-model quota usage. */
+export async function fetchAntigravityQuota(
+  accessToken: string,
+  projectId: string,
+): Promise<AntigravityQuota> {
+  const [plan, quota] = await Promise.all([
+    fetchAntigravityPlan(accessToken),
+    antigravityPost<UserQuotaResponse>(accessToken, "retrieveUserQuota", { project: projectId }),
+  ]);
+  const windows = (quota.buckets ?? []).flatMap((bucket) => {
+    const window = parseQuotaWindow(bucket);
+    return window ? [window] : [];
+  });
+  return { plan, windows, fetchedAt: Date.now() };
 }
 
 /** Static metadata expected by the Antigravity Code Assist flow. It intentionally

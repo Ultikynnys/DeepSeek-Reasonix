@@ -6,6 +6,8 @@
  *  and stay declared here until the kernel Event union itself moves into
  *  core-utils. */
 import type {
+  AntigravityQuota,
+  AntigravityQuotaEvent,
   BalanceEvent,
   BtwResultEvent,
   CheckpointRequiredEvent,
@@ -78,7 +80,12 @@ import type {
 } from "@reasonix/core-utils";
 import { invoke } from "@tauri-apps/api/core";
 
+/** Re-export so UI components can identify Antigravity-routed model ids. */
+export { isAntigravityModel } from "@reasonix/core-utils";
+
 export type {
+  AntigravityQuota,
+  AntigravityQuotaEvent,
   BalanceEvent,
   BtwResultEvent,
   DesktopDiagnosticEvent,
@@ -359,6 +366,7 @@ export type IncomingEvent = { tabId?: string } & (
   | CodexQuotaEvent
   | OllamaQuotaEvent
   | OllamaModelsEvent
+  | AntigravityQuotaEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent
   | StepCompletedEvent

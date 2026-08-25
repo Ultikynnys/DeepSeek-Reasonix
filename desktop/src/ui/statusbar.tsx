@@ -3,7 +3,8 @@ import type { Balance, Settings, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
 import { isOffPeak, minutesUntilRateChange } from "../peak-hours";
-import type { CodexQuota, JobInfo, OllamaQuota } from "../protocol";
+import type { AntigravityQuota, CodexQuota, JobInfo, OllamaQuota } from "../protocol";
+import { isAntigravityModel } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { activationHandler } from "./keyboard";
 import { localizeShortcutText } from "./shortcut";
@@ -21,6 +22,17 @@ function tokenLabel(n: number): string {
   return `${n}`;
 }
 
+/** "in 2h 15m" relative time until a quota window resets. */
+function formatReset(d: Date): string {
+  const diffMs = d.getTime() - Date.now();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return "—";
+  const mins = Math.ceil(diffMs / 60_000);
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
 export function StatusBar({
   settings,
   balance,
@@ -33,6 +45,10 @@ export function StatusBar({
   ollamaQuotaRefreshing,
   ollamaQuotaReason,
   ollamaPlan,
+  antigravityQuota,
+  onRefreshAntigravityQuota,
+  antigravityQuotaRefreshing,
+  antigravityQuotaReason,
   usage,
   busy,
   ready,
@@ -62,6 +78,11 @@ export function StatusBar({
   ollamaQuotaReason?: string | null;
   /** The account's Ollama plan (e.g. `free`) — labels the usage chip. */
   ollamaPlan?: string | null;
+  /** Google Antigravity (Gemini Code Assist) plan + per-model usage. */
+  antigravityQuota: AntigravityQuota | null;
+  onRefreshAntigravityQuota?: () => void;
+  antigravityQuotaRefreshing?: boolean;
+  antigravityQuotaReason?: string | null;
   usage: UsageStats;
   busy: boolean;
   ready: boolean;
@@ -164,6 +185,30 @@ export function StatusBar({
           session: ollamaSession ? Math.round(ollamaSession.remainingPct) : "—",
         })
       : t("statusbar.ollamaNoData");
+  // Antigravity (Gemini Code Assist): plan + the active model's used fraction.
+  const geminiTab = isAntigravityModel(settings?.model);
+  const antigravityQuotaData = antigravityQuota && geminiTab ? antigravityQuota : null;
+  const agActive =
+    antigravityQuotaData?.windows.find((w) => w.modelId === settings?.model) ??
+    antigravityQuotaData?.windows[0] ??
+    null;
+  const agRemainingPct =
+    agActive && agActive.usedFraction < 1 ? Math.round((1 - agActive.usedFraction) * 100) : null;
+  const antigravityQuotaTitle =
+    antigravityQuotaData && agActive
+      ? t("statusbar.antigravityQuotaTitle", {
+          left: agRemainingPct ?? 0,
+          plan:
+            antigravityQuotaData.plan?.name ??
+            antigravityQuotaData.plan?.tierId ??
+            "Antigravity",
+          resets: agActive.resetTime ? formatReset(new Date(agActive.resetTime)) : "—",
+        })
+      : t("statusbar.antigravityNoData");
+  const antigravityQuotaTitleWithReason =
+    !antigravityQuotaData && antigravityQuotaReason
+      ? `${antigravityQuotaTitle}\n${t("statusbar.codexReason", { reason: antigravityQuotaReason })}`
+      : antigravityQuotaTitle;
   // A failed fetch stays diagnosable: append the reason to the tooltip.
   const ollamaQuotaTitleWithReason =
     !ollamaQuotaData && ollamaQuotaReason
@@ -399,6 +444,35 @@ export function StatusBar({
                 <span className="conv">{quota?.plan ?? "ChatGPT"}</span>
               </>
             ) : codexQuotaRefreshing ? (
+              <span className="v acc">{t("statusbar.codexRefreshing")}</span>
+            ) : (
+              <span className="v acc">—</span>
+            )}
+          </span>
+        ) : geminiTab ? (
+          <span
+            className="seg"
+            title={antigravityQuotaTitleWithReason}
+            style={onRefreshAntigravityQuota ? { cursor: "pointer" } : undefined}
+            onClick={onRefreshAntigravityQuota}
+            onKeyDown={
+              onRefreshAntigravityQuota ? activationHandler(onRefreshAntigravityQuota) : undefined
+            }
+          >
+            <I.coin size={11} style={{ color: "var(--accent)" }} />
+            <span>{t("statusbar.antigravityQuota")}</span>
+            {antigravityQuotaData && agActive ? (
+              <>
+                <span className="v acc">
+                  {agRemainingPct ?? 0}% {t("statusbar.codexLeft")}
+                </span>
+                <span className="conv">
+                  {antigravityQuotaData.plan?.name ??
+                    antigravityQuotaData.plan?.tierId ??
+                    "Antigravity"}
+                </span>
+              </>
+            ) : antigravityQuotaRefreshing ? (
               <span className="v acc">{t("statusbar.codexRefreshing")}</span>
             ) : (
               <span className="v acc">—</span>

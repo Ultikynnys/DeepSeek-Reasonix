@@ -3,7 +3,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Settings, UsageStats } from "../App";
-import type { CodexQuota, OllamaQuota } from "../protocol";
+import type { AntigravityQuota, CodexQuota, OllamaQuota } from "../protocol";
 import { THEME, THEME_STYLES } from "../theme";
 import { StatusBar } from "./statusbar";
 
@@ -13,6 +13,7 @@ function renderBar(overrides: Partial<Parameters<typeof StatusBar>[0]> = {}) {
     balance: null,
     codexQuota: null,
     ollamaQuota: null,
+    antigravityQuota: null,
     usage: { totalCostUsd: 0, lastCallCostUsd: 0 } as unknown as UsageStats,
     busy: false,
     ready: true,
@@ -41,6 +42,12 @@ const OLLAMA_QUOTA: OllamaQuota = {
   session: { usagePct: 25, remainingPct: 75 },
   weekly: { usagePct: 12.5, remainingPct: 87.5 },
   turnUsedPct: 0.1,
+  fetchedAt: 0,
+};
+
+const ANTIGRAVITY_QUOTA: AntigravityQuota = {
+  plan: { tierId: "free-tier", name: "Antigravity" },
+  windows: [{ modelId: "gemini-2.5-pro", usedFraction: 0.1, resetTime: "2026-09-01T13:37:06Z" }],
   fetchedAt: 0,
 };
 
@@ -231,5 +238,26 @@ describe("StatusBar quota display", () => {
       ollamaQuotaReason: "usage-unavailable",
     });
     expect(screen.getByTitle(/usage-unavailable/)).toBeTruthy();
+  });
+
+  it("shows the Antigravity plan + remaining for a gemini tab", () => {
+    renderBar({
+      settings: { model: "gemini-2.5-pro" } as Settings,
+      antigravityQuota: ANTIGRAVITY_QUOTA,
+    });
+    expect(screen.getByText(/90%\s*left/)).toBeTruthy();
+    expect(screen.getByText("Antigravity")).toBeTruthy();
+    expect(screen.queryByText("balance")).toBeNull();
+  });
+
+  it("shows an em dash for the Antigravity chip when no quota data exists", () => {
+    renderBar({
+      settings: { model: "chat_20706" } as Settings,
+      antigravityQuota: null,
+    });
+    expect(screen.getByText("plan usage")).toBeTruthy();
+    expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.getByTitle(/sign in to Google Antigravity/)).toBeTruthy();
+    expect(screen.queryByText("balance")).toBeNull();
   });
 });

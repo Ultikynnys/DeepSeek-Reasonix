@@ -501,6 +501,47 @@ export interface OllamaQuotaEvent {
   reason?: string;
 }
 
+/** The account's Google Antigravity (Gemini Code Assist) plan, from
+ *  loadCodeAssist.currentTier. */
+export interface AntigravityPlan {
+  tierId: string;
+  name: string;
+  upgradeText?: string;
+  upgradeType?: string;
+  upgradeUri?: string;
+}
+
+/** One per-model quota window from retrieveUserQuota.buckets. */
+export interface AntigravityQuotaWindow {
+  modelId: string;
+  /** Fraction of the window already consumed, 0..1. */
+  usedFraction: number;
+  /** ISO timestamp when the window resets; absent when not a limited bucket. */
+  resetTime?: string;
+}
+
+/** Google Antigravity usage for the signed-in account (daemon source: the
+ *  undocumented Code Assist `v1internal` API — loadCodeAssist for the plan,
+ *  retrieveUserQuota for per-model windows). `null` payload means "no data" —
+ *  not signed in or fetch failure — the UI degrades to no chip. */
+export interface AntigravityQuota {
+  plan: AntigravityPlan | null;
+  /** Per-model usage windows (already vertex-deduped, daemon-side). */
+  windows: AntigravityQuotaWindow[];
+  /** Percentage points of the active model's window consumed since the previous
+   *  fetch (fetches fire on every $turn_complete). Null until a second
+   *  measurement exists. */
+  turnUsedPct?: number | null;
+  fetchedAt: number;
+}
+
+export interface AntigravityQuotaEvent {
+  type: "$antigravity_quota";
+  quota: AntigravityQuota | null;
+  /** Why quota is null — surfaced in the statusbar tooltip. */
+  reason?: string;
+}
+
 /** Dynamically fetched model list for the Ollama provider — driven by the
  *  picker's "Ollama" section so the hundreds of available models don't need
  *  hardcoding. `error` replaces the list when the endpoint is unreachable,
@@ -613,6 +654,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | ({ cmd: "settings_save" } & SettingsPatch)
   | { cmd: "codex_quota_get" }
   | { cmd: "ollama_quota_get" }
+  | { cmd: "antigravity_quota_get" }
   | { cmd: "ollama_models_list"; force?: boolean }
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
