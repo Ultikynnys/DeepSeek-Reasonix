@@ -55,8 +55,8 @@ export { modelAcceptsImages } from "@reasonix/core-utils";
  *  cloud service requires OLLAMA_API_KEY — so the key is resolved but optional. */
 export const DEFAULT_OLLAMA_CHAT_URL = "https://ollama.com/v1";
 
-/** Cloud Code API base for gemini-* models (Antigravity quota). */
-export const DEFAULT_GEMINI_CHAT_URL = "https://cloudcode-pa.googleapis.com";
+/** Antigravity daily gateway used for gemini-* models. */
+export const DEFAULT_GEMINI_CHAT_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com";
 
 /** Native Ollama API origin: strip a trailing `/v1` — the `/api/*` endpoints
  *  live at that root (localhost:11434/v1 → localhost:11434). */

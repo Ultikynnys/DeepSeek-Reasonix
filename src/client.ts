@@ -1,6 +1,6 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
+import { ANTIGRAVITY_CLOUD_CODE_ENDPOINTS, antigravityHeaders } from "./antigravity-oauth.js";
 import {
-  DEFAULT_GEMINI_CHAT_URL,
   deriveNativeOllamaOrigin,
   loadOllamaKeepAlive,
   loadOllamaNumCtx,
@@ -759,17 +759,34 @@ export class DeepSeekClient {
     };
   }
 
+  private async fetchAntigravity(
+    path: string,
+    accessToken: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    let lastError: Error | undefined;
+    for (const endpoint of ANTIGRAVITY_CLOUD_CODE_ENDPOINTS) {
+      try {
+        const response = await this._fetch(`${endpoint}${path}`, {
+          ...init,
+          headers: { ...antigravityHeaders(accessToken), ...init.headers },
+        });
+        if (response.status !== 404 && response.status < 500) return response;
+        lastError = new Error(`Antigravity endpoint ${endpoint} returned ${response.status}`);
+      } catch (err) {
+        lastError = err as Error;
+      }
+    }
+    throw lastError ?? new Error("No Antigravity endpoint was available");
+  }
+
   /** Cloud Code non-streaming request — `POST /v1internal:generateContent`. */
   private async chatGemini(opts: ChatRequestOptions): Promise<ChatResponse> {
     const auth = await this.resolveGeminiAuth();
     const { signal, timer } = this.withTimeout(opts.signal);
     try {
-      const resp = await this._fetch(`${DEFAULT_GEMINI_CHAT_URL}/v1internal:generateContent`, {
+      const resp = await this.fetchAntigravity("/v1internal:generateContent", auth.accessToken, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${auth.accessToken}`,
-        },
         body: stringifyJsonTransport(this.buildAntigravityPayload(opts, auth.projectId)),
         signal,
       });
@@ -789,14 +806,12 @@ export class DeepSeekClient {
     const { signal, timer, timedOut } = this.withTimeout(opts.signal);
     let resp: Response;
     try {
-      resp = await this._fetch(
-        `${DEFAULT_GEMINI_CHAT_URL}/v1internal:streamGenerateContent?alt=sse`,
+      resp = await this.fetchAntigravity(
+        "/v1internal:streamGenerateContent?alt=sse",
+        auth.accessToken,
         {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${auth.accessToken}`,
-          },
+          headers: { accept: "text/event-stream" },
           body: stringifyJsonTransport(this.buildAntigravityPayload(opts, auth.projectId)),
           signal,
         },
@@ -1001,7 +1016,13 @@ export class DeepSeekClient {
       ];
       request.toolConfig = { functionCallingConfig: { mode: "AUTO" } };
     }
-    return { model: opts.model, project: projectId, request };
+    return {
+      model: opts.model,
+      project: projectId,
+      request,
+      userAgent: "antigravity",
+      requestId: `reasonix-${globalThis.crypto.randomUUID()}`,
+    };
   }
 
   /** Collect a streaming response into a single ChatResponse — used when the

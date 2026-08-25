@@ -66,11 +66,18 @@ describe("gemini payload", () => {
       ],
     });
 
-    expect(captured?.url).toBe("https://cloudcode-pa.googleapis.com/v1internal:generateContent");
+    expect(captured?.url).toBe(
+      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent",
+    );
     expect(captured?.headers.authorization).toBe("Bearer google-token");
+    expect(captured?.headers["x-goog-api-client"]).toBe(
+      "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    );
     const body = captured?.body as {
       model: string;
       project: string;
+      userAgent: string;
+      requestId: string;
       request: {
         contents: unknown[];
         systemInstruction: unknown;
@@ -80,6 +87,8 @@ describe("gemini payload", () => {
     };
     expect(body.model).toBe("gemini-2.5-flash");
     expect(body.project).toBe("proj-123");
+    expect(body.userAgent).toBe("antigravity");
+    expect(body.requestId).toMatch(/^reasonix-/);
     expect(body.request.contents).toEqual([{ role: "user", parts: [{ text: "hello" }] }]);
     expect(body.request.systemInstruction).toEqual({
       role: "user",
@@ -100,6 +109,27 @@ describe("gemini payload", () => {
     expect(res.content).toBe("hi");
     expect(res.usage.promptTokens).toBe(10);
     expect(res.usage.completionTokens).toBe(5);
+  });
+
+  it("falls back to production when sandbox endpoints are unavailable", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(wrappedResponse([{ text: "fallback" }])), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ) as unknown as typeof globalThis.fetch;
+    const client = geminiClient(fetch);
+
+    await expect(
+      client.chat({ model: "gemini-2.5-flash", messages: [{ role: "user", content: "hi" }] }),
+    ).resolves.toMatchObject({ content: "fallback" });
+    expect(vi.mocked(fetch).mock.calls[2]?.[0]).toBe(
+      "https://cloudcode-pa.googleapis.com/v1internal:generateContent",
+    );
   });
 
   it("maps functionCall parts to ToolCall with JSON-stringified args", async () => {
@@ -161,7 +191,7 @@ describe("gemini streaming", () => {
 
     const fetch = vi.fn(async (url: unknown) => {
       expect(String(url)).toBe(
-        "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+        "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse",
       );
       return new Response(sse, {
         status: 200,

@@ -1,7 +1,7 @@
 /** Google Antigravity OAuth (client-secret flow) — browser sign-in powers
  *  gemini-* models through the Cloud Code API on the Antigravity quota. */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { type Server, createServer } from "node:http";
 import {
   type AntigravityOAuthCreds,
@@ -11,27 +11,41 @@ import {
   saveAntigravityOAuth,
 } from "./config.js";
 
-/** Published installed-app OAuth identity used by the official Gemini CLI. */
+/** Published installed-app OAuth identity used by Google Antigravity. */
 export const ANTIGRAVITY_OAUTH_CLIENT_ID =
-  "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
-export const ANTIGRAVITY_OAUTH_CLIENT_SECRET = "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";
+  "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+export const ANTIGRAVITY_OAUTH_CLIENT_SECRET = "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";
 
 export const ANTIGRAVITY_DEFAULT_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const ANTIGRAVITY_DEFAULT_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const ANTIGRAVITY_DEFAULT_USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo";
-/** Cloud Code API — onboarding (tier/project resolution) and model calls. */
-export const ANTIGRAVITY_CLOUD_CODE_URL = "https://cloudcode-pa.googleapis.com";
+/** Antigravity gateway endpoints, in generation-request fallback order. */
+export const ANTIGRAVITY_CLOUD_CODE_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com";
+export const ANTIGRAVITY_CLOUD_CODE_ENDPOINTS = [
+  ANTIGRAVITY_CLOUD_CODE_URL,
+  "https://autopush-cloudcode-pa.sandbox.googleapis.com",
+  "https://cloudcode-pa.googleapis.com",
+] as const;
+const ANTIGRAVITY_PROJECT_ENDPOINTS = [
+  "https://cloudcode-pa.googleapis.com",
+  ...ANTIGRAVITY_CLOUD_CODE_ENDPOINTS,
+] as const;
+export const ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
 
 const DEFAULT_SCOPE = [
   "https://www.googleapis.com/auth/cloud-platform",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
+  "https://www.googleapis.com/auth/cclog",
+  "https://www.googleapis.com/auth/experimentsandconfigs",
 ].join(" ");
 
 const REFRESH_SLACK_MS = 5 * 60_000;
 const OAUTH_FLOW_TIMEOUT_MS = 10 * 60_000;
-/** Callback path the Google OAuth client allowlists. */
-const OAUTH_CALLBACK_PATH = "/oauth2callback";
+/** Registered callback used by the Antigravity installed application. */
+const OAUTH_CALLBACK_PATH = "/oauth-callback";
+const OAUTH_CALLBACK_PORT = 51121;
+export const ANTIGRAVITY_REDIRECT_URI = `http://localhost:${OAUTH_CALLBACK_PORT}${OAUTH_CALLBACK_PATH}`;
 
 function envOr(def: string, name: string): string {
   const v = process.env[name]?.trim();
@@ -59,6 +73,7 @@ export interface AuthorizeParams {
   redirectUri: string;
   state: string;
   scope?: string;
+  codeChallenge?: string;
 }
 
 export function buildAuthorizeUrl(p: AuthorizeParams): string {
@@ -68,10 +83,13 @@ export function buildAuthorizeUrl(p: AuthorizeParams): string {
     response_type: "code",
     scope: p.scope ?? envOr(DEFAULT_SCOPE, "ANTIGRAVITY_OAUTH_SCOPE"),
     state: p.state,
-    // Offline access yields a refresh_token so the session survives expiry.
     access_type: "offline",
     prompt: "consent",
   });
+  if (p.codeChallenge) {
+    q.set("code_challenge", p.codeChallenge);
+    q.set("code_challenge_method", "S256");
+  }
   return `${antigravityAuthorizeUrl()}?${q.toString()}`;
 }
 
@@ -118,6 +136,7 @@ function toCreds(parsed: TokenResponse, fallbackRefresh: string): AntigravityOAu
 export async function exchangeAntigravityCode(opts: {
   redirectUri: string;
   code: string;
+  codeVerifier: string;
 }): Promise<AntigravityOAuthCreds> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -125,6 +144,7 @@ export async function exchangeAntigravityCode(opts: {
     client_secret: ANTIGRAVITY_OAUTH_CLIENT_SECRET,
     code: opts.code,
     redirect_uri: opts.redirectUri,
+    code_verifier: opts.codeVerifier,
   });
   return toCreds(await postTokenForm(antigravityTokenUrl(), body), "");
 }
@@ -187,150 +207,77 @@ export async function resolveAntigravityToken(
   return refreshInFlight;
 }
 
-// ── Cloud Code onboarding (Starter tier + project id) ─────────────────────
-
-interface ClientMetadata {
-  ideType?: string;
-  platform?: string;
-  pluginType?: string;
-}
+// ── Antigravity project discovery ──────────────────────────────────────────
 
 interface LoadCodeAssistResponse {
-  currentTier?: { id?: string } | null;
-  allowedTiers?: Array<{ id?: string; isDefault?: boolean }> | null;
-  ineligibleTiers?: Array<{ reasonMessage?: string }> | null;
-  cloudaicompanionProject?: string | null;
+  cloudaicompanionProject?: string | { id?: string } | null;
 }
 
-interface OnboardUserResponse {
-  name?: string;
-  done?: boolean;
-  response?: { cloudaicompanionProject?: { id?: string } };
-  error?: { code?: number; message?: string };
+class AntigravityProjectAuthError extends Error {}
+
+export function antigravityPlatform(): string {
+  return process.platform === "win32" ? "WINDOWS" : "MACOS";
 }
 
-function platformName(): string {
-  const p = process.platform;
-  const a = process.arch;
-  if (p === "darwin") return a === "arm64" ? "DARWIN_ARM64" : "DARWIN_AMD64";
-  if (p === "linux") return a === "arm64" ? "LINUX_ARM64" : "LINUX_AMD64";
-  if (p === "win32") return "WINDOWS_AMD64";
-  return "PLATFORM_UNSPECIFIED";
+export function antigravityHeaders(accessToken: string): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    authorization: `Bearer ${accessToken}`,
+    "user-agent": `antigravity/1.18.3 ${process.platform === "win32" ? "windows/amd64" : "darwin/arm64"}`,
+    "x-goog-api-client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    "client-metadata": JSON.stringify({
+      ideType: "ANTIGRAVITY",
+      platform: antigravityPlatform(),
+      pluginType: "GEMINI",
+    }),
+  };
 }
 
-function clientMetadata(): ClientMetadata {
-  return { ideType: "IDE_UNSPECIFIED", platform: platformName(), pluginType: "GEMINI" };
-}
-
-async function parseCloudCodeResponse<T>(res: Response, method: string): Promise<T> {
-  const text = await res.text();
-  let parsed: T;
-  try {
-    parsed = JSON.parse(text) as T;
-  } catch {
-    throw new Error(`Cloud Code ${method} returned ${res.status}: ${text.slice(0, 200)}`);
+function projectFromLoad(data: LoadCodeAssistResponse): string | undefined {
+  if (typeof data.cloudaicompanionProject === "string") {
+    return data.cloudaicompanionProject || undefined;
   }
-  if (!res.ok) {
-    throw new Error(`Cloud Code ${method} failed (${res.status}): ${text.slice(0, 200)}`);
-  }
-  return parsed;
+  return data.cloudaicompanionProject?.id || undefined;
 }
 
-async function cloudCodePost<T>(accessToken: string, method: string, body: unknown): Promise<T> {
-  const res = await fetch(`${ANTIGRAVITY_CLOUD_CODE_URL}/v1internal:${method}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(body),
-  });
-  return parseCloudCodeResponse<T>(res, method);
-}
-
-async function cloudCodeGetOperation<T>(accessToken: string, name: string): Promise<T> {
-  const res = await fetch(`${ANTIGRAVITY_CLOUD_CODE_URL}/v1internal/${name}`, {
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${accessToken}`,
-    },
-  });
-  return parseCloudCodeResponse<T>(res, "getOperation");
-}
-
-const ONBOARD_POLL_INTERVAL_MS = 5_000;
-const ONBOARD_MAX_POLLS = 60;
-
-function onboardingProject(op: OnboardUserResponse): string | undefined {
-  if (op.error) {
-    throw new Error(
-      `Antigravity onboarding failed${op.error.code ? ` (${op.error.code})` : ""}: ${op.error.message ?? "unknown error"}`,
-    );
-  }
-  return op.response?.cloudaicompanionProject?.id;
-}
-
-async function loadCodeAssist(
-  accessToken: string,
-  metadata: ClientMetadata,
-): Promise<LoadCodeAssistResponse> {
-  return cloudCodePost<LoadCodeAssistResponse>(accessToken, "loadCodeAssist", {
-    cloudaicompanionProject: undefined,
-    metadata,
-  });
-}
-
-/** Resolve the managed Cloud Code companion project used for Gemini quota. */
+/** Resolve Antigravity's project, falling back to its observed shared project. */
 export async function onboardAntigravity(accessToken: string): Promise<string> {
-  const metadata = clientMetadata();
-  const load = await loadCodeAssist(accessToken, metadata);
-
-  if (load.currentTier) {
-    if (load.cloudaicompanionProject) return load.cloudaicompanionProject;
-    throw new Error("Antigravity account is onboarded but has no companion project");
-  }
-
-  const tiers = load.allowedTiers ?? [];
-  const tier = tiers.find((candidate) => candidate.isDefault) ?? tiers[0];
-  if (!tier?.id) {
-    const reasons = (load.ineligibleTiers ?? [])
-      .map((candidate) => candidate.reasonMessage)
-      .filter((reason): reason is string => Boolean(reason));
-    throw new Error(
-      reasons.length > 0
-        ? `Antigravity account is not eligible: ${reasons.join(", ")}`
-        : "Antigravity account has no eligible Gemini tier",
-    );
-  }
-
-  let op = await cloudCodePost<OnboardUserResponse>(accessToken, "onboardUser", {
-    tierId: tier.id,
-    cloudaicompanionProject: undefined,
-    metadata,
-  });
-  let projectId = onboardingProject(op);
-  if (projectId) return projectId;
-  if (!op.done && !op.name) {
-    throw new Error("Antigravity onboarding returned an incomplete operation without a name");
-  }
-
-  for (let poll = 0; !op.done && poll < ONBOARD_MAX_POLLS; poll++) {
-    if (!op.name) {
-      throw new Error("Antigravity onboarding returned an incomplete operation without a name");
+  const errors: string[] = [];
+  for (const endpoint of new Set(ANTIGRAVITY_PROJECT_ENDPOINTS)) {
+    try {
+      const res = await fetch(`${endpoint}/v1internal:loadCodeAssist`, {
+        method: "POST",
+        headers: antigravityHeaders(accessToken),
+        body: JSON.stringify({
+          metadata: {
+            ideType: "ANTIGRAVITY",
+            platform: antigravityPlatform(),
+            pluginType: "GEMINI",
+          },
+        }),
+      });
+      if (!res.ok) {
+        const detail = await res.text();
+        if (res.status === 401 || res.status === 403) {
+          throw new AntigravityProjectAuthError(
+            `Antigravity project discovery failed (${res.status}): ${detail}`,
+          );
+        }
+        errors.push(`${endpoint}: ${res.status} ${detail}`);
+        continue;
+      }
+      const projectId = projectFromLoad((await res.json()) as LoadCodeAssistResponse);
+      if (projectId) return projectId;
+      errors.push(`${endpoint}: no project id`);
+    } catch (err) {
+      if (err instanceof AntigravityProjectAuthError) throw err;
+      errors.push(`${endpoint}: ${(err as Error).message}`);
     }
-    if (poll > 0) {
-      await new Promise((resolve) => setTimeout(resolve, ONBOARD_POLL_INTERVAL_MS));
-    }
-    op = await cloudCodeGetOperation<OnboardUserResponse>(accessToken, op.name);
-    projectId = onboardingProject(op);
-    if (projectId) return projectId;
   }
-
-  if (!op.done) throw new Error("Antigravity onboarding timed out");
-
-  const reloaded = await loadCodeAssist(accessToken, metadata);
-  if (reloaded.cloudaicompanionProject) return reloaded.cloudaicompanionProject;
-  throw new Error("Antigravity onboarding completed without a companion project");
+  console.warn(
+    `reasonix: Antigravity project discovery returned no project; using the observed Antigravity fallback ${ANTIGRAVITY_DEFAULT_PROJECT_ID} — ${errors.join("; ")}`,
+  );
+  return ANTIGRAVITY_DEFAULT_PROJECT_ID;
 }
 
 // ── Browser OAuth flow ─────────────────────────────────────────────────────
@@ -366,6 +313,8 @@ export async function beginAntigravityOAuthFlow(
   } = {},
 ): Promise<OAuthFlow> {
   const state = randomOAuthState();
+  const codeVerifier = randomBytes(32).toString("base64url");
+  const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
   const timeoutMs = opts.timeoutMs ?? OAUTH_FLOW_TIMEOUT_MS;
   let settled = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -376,8 +325,8 @@ export async function beginAntigravityOAuthFlow(
     rejectDone = reject;
   });
 
-  const envRedirect = process.env.ANTIGRAVITY_OAUTH_REDIRECT_URI?.trim();
-  let redirectUri = envRedirect ?? `http://localhost:0${OAUTH_CALLBACK_PATH}`;
+  const redirectUri =
+    process.env.ANTIGRAVITY_OAUTH_REDIRECT_URI?.trim() || ANTIGRAVITY_REDIRECT_URI;
 
   const settle = (fn: () => void) => {
     if (settled) return;
@@ -409,7 +358,7 @@ export async function beginAntigravityOAuthFlow(
       settle(() => rejectDone(new Error("OAuth state mismatch")));
       return;
     }
-    void exchangeAntigravityCode({ redirectUri, code })
+    void exchangeAntigravityCode({ redirectUri, code, codeVerifier })
       .then((creds) => {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(SUCCESS_PAGE);
@@ -434,24 +383,24 @@ export async function beginAntigravityOAuthFlow(
         server.removeListener("error", onError);
         resolve();
       });
-      server.listen(port);
+      server.listen(port, "localhost");
     });
 
-  let port = 0;
-  try {
-    await listen(port);
-  } catch {
-    throw new Error("Antigravity OAuth callback server failed to bind");
+  const callbackPort = Number(new URL(redirectUri).port);
+  if (!Number.isInteger(callbackPort) || callbackPort <= 0) {
+    throw new Error("Antigravity OAuth redirect URI must include a valid callback port");
   }
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("OAuth callback server failed to bind");
-  port = addr.port;
-  if (!envRedirect) redirectUri = `http://localhost:${port}${OAUTH_CALLBACK_PATH}`;
+  try {
+    await listen(callbackPort);
+  } catch {
+    throw new Error(`Antigravity OAuth callback server failed to bind port ${callbackPort}`);
+  }
 
   const url = buildAuthorizeUrl({
     clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
     redirectUri,
     state,
+    codeChallenge,
   });
 
   timer = setTimeout(() => {

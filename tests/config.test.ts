@@ -524,7 +524,7 @@ describe("config", () => {
         expect(SUPPORTED_MODELS).toContain(id);
       }
       const ep = loadEndpointForModel("gemini-2.5-flash", path);
-      expect(ep.baseUrl).toBe("https://cloudcode-pa.googleapis.com");
+      expect(ep.baseUrl).toBe("https://daily-cloudcode-pa.sandbox.googleapis.com");
       expect(ep.apiKey).toBeUndefined();
     });
 

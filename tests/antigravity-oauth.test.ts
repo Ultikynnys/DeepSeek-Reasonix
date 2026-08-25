@@ -54,17 +54,22 @@ describe("antigravity-oauth", () => {
   it("buildAuthorizeUrl carries client_id, offline access, and the redirect", () => {
     const url = buildAuthorizeUrl({
       clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
-      redirectUri: "http://localhost:1234/oauth2callback",
+      redirectUri: "http://localhost:51121/oauth-callback",
       state: "state-abc",
+      codeChallenge: "challenge-abc",
     });
     const parsed = new URL(url);
     expect(parsed.origin + parsed.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(parsed.searchParams.get("client_id")).toBe(ANTIGRAVITY_OAUTH_CLIENT_ID);
-    expect(parsed.searchParams.get("redirect_uri")).toBe("http://localhost:1234/oauth2callback");
+    expect(parsed.searchParams.get("redirect_uri")).toBe("http://localhost:51121/oauth-callback");
     expect(parsed.searchParams.get("response_type")).toBe("code");
     expect(parsed.searchParams.get("access_type")).toBe("offline");
     expect(parsed.searchParams.get("state")).toBe("state-abc");
     expect(parsed.searchParams.get("scope")).toContain("cloud-platform");
+    expect(parsed.searchParams.get("scope")).toContain("cclog");
+    expect(parsed.searchParams.get("scope")).toContain("experimentsandconfigs");
+    expect(parsed.searchParams.get("code_challenge")).toBe("challenge-abc");
+    expect(parsed.searchParams.get("code_challenge_method")).toBe("S256");
   });
 
   it("exchangeAntigravityCode posts the authorization_code grant and returns creds", async () => {
@@ -74,8 +79,9 @@ describe("antigravity-oauth", () => {
         jsonResponse({ access_token: "at", refresh_token: "rt", expires_in: 3600 }),
       );
     const creds = await exchangeAntigravityCode({
-      redirectUri: "http://localhost:1/oauth2callback",
+      redirectUri: "http://localhost:51121/oauth-callback",
       code: "code-123",
+      codeVerifier: "verifier-123",
     });
     expect(creds.accessToken).toBe("at");
     expect(creds.refreshToken).toBe("rt");
@@ -87,6 +93,7 @@ describe("antigravity-oauth", () => {
     expect(body.get("client_id")).toBe(ANTIGRAVITY_OAUTH_CLIENT_ID);
     expect(body.get("client_secret")).toBe(ANTIGRAVITY_OAUTH_CLIENT_SECRET);
     expect(body.get("code")).toBe("code-123");
+    expect(body.get("code_verifier")).toBe("verifier-123");
   });
 
   it("refreshAntigravityToken posts the refresh_token grant and keeps the refresh token", async () => {
@@ -160,105 +167,42 @@ describe("antigravity-oauth", () => {
     expect(await antigravityAccount("at")).toBe("u@example.com");
   });
 
-  it("onboardAntigravity returns an existing companion project", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      jsonResponse({
-        currentTier: { id: "free-tier" },
-        cloudaicompanionProject: "existing-project",
-      }),
-    );
-
-    await expect(onboardAntigravity("at")).resolves.toBe("existing-project");
-  });
-
-  it("onboardAntigravity polls a pending operation for the managed project", async () => {
+  it("onboardAntigravity discovers the project with Antigravity metadata", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        jsonResponse({
-          allowedTiers: [{ id: "free-tier", isDefault: true }],
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ name: "operations/onboard-1", done: false }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          name: "operations/onboard-1",
-          done: true,
-          response: { cloudaicompanionProject: { id: "proj-123" } },
-        }),
-      );
+      .mockResolvedValue(jsonResponse({ cloudaicompanionProject: "project-123" }));
 
-    await expect(onboardAntigravity("at")).resolves.toBe("proj-123");
-    const [loadUrl, loadInit] = fetchMock.mock.calls[0]!;
-    expect(loadUrl).toBe("https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist");
-    expect(loadInit?.headers).toMatchObject({ authorization: "Bearer at" });
-    expect(JSON.parse(loadInit?.body as string)).toEqual({
-      metadata: expect.objectContaining({ pluginType: "GEMINI" }),
+    await expect(onboardAntigravity("at")).resolves.toBe("project-123");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist");
+    expect(init?.headers).toMatchObject({
+      authorization: "Bearer at",
+      "x-goog-api-client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
     });
-    const [onboardUrl, onboardInit] = fetchMock.mock.calls[1]!;
-    expect(onboardUrl).toBe("https://cloudcode-pa.googleapis.com/v1internal:onboardUser");
-    expect(JSON.parse(onboardInit?.body as string)).toEqual({
-      tierId: "free-tier",
-      metadata: expect.objectContaining({ pluginType: "GEMINI" }),
+    expect(JSON.parse(init?.body as string)).toEqual({
+      metadata: expect.objectContaining({ ideType: "ANTIGRAVITY", pluginType: "GEMINI" }),
     });
-    const [operationUrl, operationInit] = fetchMock.mock.calls[2]!;
-    expect(operationUrl).toBe(
-      "https://cloudcode-pa.googleapis.com/v1internal/operations/onboard-1",
-    );
-    expect(operationInit?.method).toBeUndefined();
   });
 
-  it("onboardAntigravity reloads the project when the completed operation omits it", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(jsonResponse({ allowedTiers: [{ id: "free-tier", isDefault: true }] }))
-      .mockResolvedValueOnce(jsonResponse({ done: true, response: {} }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          currentTier: { id: "free-tier" },
-          cloudaicompanionProject: "reloaded-project",
-        }),
-      );
-
-    await expect(onboardAntigravity("at")).resolves.toBe("reloaded-project");
-    expect(fetchMock.mock.calls[2]?.[0]).toBe(
-      "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-    );
-  });
-
-  it("onboardAntigravity surfaces account ineligibility", async () => {
+  it("onboardAntigravity accepts the object project response shape", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      jsonResponse({
-        allowedTiers: [],
-        ineligibleTiers: [{ reasonMessage: "Personal account required" }],
-      }),
+      jsonResponse({ cloudaicompanionProject: { id: "object-project" } }),
     );
 
-    await expect(onboardAntigravity("at")).rejects.toThrow(
-      "Antigravity account is not eligible: Personal account required",
-    );
+    await expect(onboardAntigravity("at")).resolves.toBe("object-project");
   });
 
-  it("onboardAntigravity rejects a failed operation", async () => {
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(jsonResponse({ allowedTiers: [{ id: "free-tier", isDefault: true }] }))
-      .mockResolvedValueOnce(
-        jsonResponse({ done: true, error: { code: 403, message: "License unavailable" } }),
-      );
+  it("onboardAntigravity uses the explicit fallback after discovery misses", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({}));
 
-    await expect(onboardAntigravity("at")).rejects.toThrow(
-      "Antigravity onboarding failed (403): License unavailable",
-    );
+    await expect(onboardAntigravity("at")).resolves.toBe("rising-fact-p41fc");
   });
 
-  it("onboardAntigravity rejects a pending poll response without an operation name", async () => {
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(jsonResponse({ allowedTiers: [{ id: "free-tier", isDefault: true }] }))
-      .mockResolvedValueOnce(jsonResponse({ name: "operations/onboard-1", done: false }))
-      .mockResolvedValueOnce(jsonResponse({ done: false }));
+  it("onboardAntigravity surfaces authorization failures instead of using fallback", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "denied" }, 403));
 
     await expect(onboardAntigravity("at")).rejects.toThrow(
-      "Antigravity onboarding returned an incomplete operation without a name",
+      "Antigravity project discovery failed (403)",
     );
   });
 });
