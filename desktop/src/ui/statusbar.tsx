@@ -187,6 +187,14 @@ export function StatusBar({
       : t("statusbar.ollamaNoData");
   // Antigravity (Gemini Code Assist): plan + the active model's used fraction.
   const geminiTab = isAntigravityModel(settings?.model);
+  // Peak / off-peak pricing only applies to the DeepSeek API — the chip is
+  // hidden on gpt / ollama / gemini tabs. `ep.provider` is authoritative
+  // ("deepseek" for standard DeepSeek models and any custom DeepSeek-proxy id);
+  // when endpoint info is absent, fall back to the model not being a gpt /
+  // ollama / gemini id.
+  const deepseekTab = ep
+    ? ep.provider === "deepseek"
+    : !openaiTab && !ollamaTab && !geminiTab;
   const antigravityQuotaData = antigravityQuota && geminiTab ? antigravityQuota : null;
   const agActive =
     antigravityQuotaData?.windows.find((w) => w.modelId === settings?.model) ??
@@ -383,13 +391,15 @@ export function StatusBar({
         </span>
       ) : null}
 
-      <span className="seg" title={rateTitle}>
-        <I.clock size={11} style={{ color: offPeak ? "var(--success)" : "var(--warning)" }} />
-        <span className={`v ${offPeak ? "ok" : "warn"}`}>
-          {offPeak ? t("statusbar.offPeak") : t("statusbar.peak")}
-          <span className="conv">{offPeak ? "1x" : "2x"}</span>
+      {deepseekTab ? (
+        <span className="seg" title={rateTitle}>
+          <I.clock size={11} style={{ color: offPeak ? "var(--success)" : "var(--warning)" }} />
+          <span className={`v ${offPeak ? "ok" : "warn"}`}>
+            {offPeak ? t("statusbar.offPeak") : t("statusbar.peak")}
+            <span className="conv">{offPeak ? "1x" : "2x"}</span>
+          </span>
         </span>
-      </span>
+      ) : null}
 
       <span className="grow" />
 

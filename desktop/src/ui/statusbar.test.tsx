@@ -93,6 +93,24 @@ describe("StatusBar quota display", () => {
     expect(screen.getByText(/1x|2x/)).toBeTruthy();
   });
 
+  it("hides the peak/off-peak chip on OpenAI (gpt-*) tabs — it only applies to DeepSeek", () => {
+    renderBar({ settings: { model: "gpt-5.6-sol" } as Settings });
+    expect(screen.queryByText(/off-peak|peak/)).toBeNull();
+    expect(screen.queryByText(/1x|2x/)).toBeNull();
+  });
+
+  it("hides the peak/off-peak chip on Ollama tabs", () => {
+    renderBar({ settings: { model: "ollama/llama3.1:latest" } as Settings });
+    expect(screen.queryByText(/off-peak|peak/)).toBeNull();
+    expect(screen.queryByText(/1x|2x/)).toBeNull();
+  });
+
+  it("hides the peak/off-peak chip on Antigravity (Gemini) tabs", () => {
+    renderBar({ settings: { model: "gemini-2.5-pro" } as Settings });
+    expect(screen.queryByText(/off-peak|peak/)).toBeNull();
+    expect(screen.queryByText(/1x|2x/)).toBeNull();
+  });
+
   it("shows weekly quota % left + plan and this-turn % for gpt-5.6 tabs", () => {
     renderBar({
       settings: { model: "gpt-5.6-sol" } as Settings,
