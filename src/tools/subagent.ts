@@ -553,6 +553,15 @@ function aggregateChildUsage(loop: CacheFirstLoop): Usage {
 }
 
 export function formatSubagentResult(r: SubagentResult): string {
+  // Model + billing metadata ride in the result envelope so the UI can render
+  // model name / cost / quota even when the live `subagent.progress` event
+  // stream (which normally carries them) was never attached — e.g. after a
+  // session reload, where `subagentRuns` is not persisted.
+  const meta = {
+    ...(r.model ? { model: r.model } : {}),
+    ...(r.billingKind ? { billing_kind: r.billingKind } : {}),
+    ...(r.quotaUsedPct !== undefined ? { quota_used_pct: r.quotaUsedPct } : {}),
+  };
   if (r.budgetExhausted) {
     return JSON.stringify({
       success: false,
@@ -566,6 +575,7 @@ export function formatSubagentResult(r: SubagentResult): string {
       tool_iters: r.toolIters,
       elapsed_ms: r.elapsedMs,
       cost_usd: r.costUsd,
+      ...meta,
       note: "Subagent stopped at its enforced work budget. Treat any output as partial findings; follow up directly only on a specific unresolved risk.",
     });
   }
@@ -578,6 +588,7 @@ export function formatSubagentResult(r: SubagentResult): string {
       tool_iters: r.toolIters,
       elapsed_ms: r.elapsedMs,
       cost_usd: r.costUsd,
+      ...meta,
       note: "Subagent was force-summarized (storm-breaker or context-guard fired). `output` carries the partial synthesis the model produced before being stopped — useful but not a complete answer. Decide whether to accept the partial, narrow the task and re-spawn, or fall back to direct tools.",
     });
   }
@@ -588,6 +599,7 @@ export function formatSubagentResult(r: SubagentResult): string {
       turns: r.turns,
       tool_iters: r.toolIters,
       elapsed_ms: r.elapsedMs,
+      ...meta,
     });
   }
   return JSON.stringify({
@@ -597,6 +609,7 @@ export function formatSubagentResult(r: SubagentResult): string {
     tool_iters: r.toolIters,
     elapsed_ms: r.elapsedMs,
     cost_usd: r.costUsd,
+    ...meta,
   });
 }
 

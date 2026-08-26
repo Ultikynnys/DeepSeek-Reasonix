@@ -884,6 +884,38 @@ export function extractSubagentDetails(
   return { task: task || name, skillName, model };
 }
 
+export type SubagentResultMeta = {
+  costUsd?: number;
+  billingKind?: "usd" | "quota" | "none";
+  quotaUsedPct?: number;
+  model?: string;
+  elapsedMs?: number;
+  turns?: number;
+};
+
+/** Recover model / cost / billing from the subagent's persisted result envelope. The
+ *  live `subagent.progress` stream carries these on `subagentRuns`, but after a session
+ *  reload `subagentRuns` is not persisted — the result JSON is the reliable source. */
+export function extractSubagentResultMeta(result?: string): SubagentResultMeta {
+  if (!result) return {};
+  try {
+    const parsed = JSON.parse(result) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: SubagentResultMeta = {};
+    if (typeof parsed.cost_usd === "number") out.costUsd = parsed.cost_usd;
+    if (typeof parsed.model === "string") out.model = parsed.model;
+    if (parsed.billing_kind === "usd" || parsed.billing_kind === "quota" || parsed.billing_kind === "none") {
+      out.billingKind = parsed.billing_kind;
+    }
+    if (typeof parsed.quota_used_pct === "number") out.quotaUsedPct = parsed.quota_used_pct;
+    if (typeof parsed.elapsed_ms === "number") out.elapsedMs = parsed.elapsed_ms;
+    if (typeof parsed.turns === "number") out.turns = parsed.turns;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export function SubagentCard({
   name,
   runs,

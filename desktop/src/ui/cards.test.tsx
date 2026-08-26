@@ -9,7 +9,13 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openPath: vi.fn(), openUrl: vi.fn() }));
 
 import { WorkspaceProvider } from "../Markdown";
-import { DiffCard, SubagentCard, ToolCard, isSubagentTool } from "./cards";
+import {
+  DiffCard,
+  SubagentCard,
+  ToolCard,
+  extractSubagentResultMeta,
+  isSubagentTool,
+} from "./cards";
 
 beforeAll(() => {
   Object.defineProperty(navigator, "clipboard", {
@@ -239,6 +245,62 @@ describe("SubagentCard — model visibility", () => {
     expect(isSubagentTool("run_skill", JSON.stringify({ name: "explore" }))).toBe(true);
     expect(isSubagentTool("read_file")).toBe(false);
     expect(isSubagentTool("run_command")).toBe(false);
+  });
+
+  it("recovers model and cost from the persisted result envelope", () => {
+    expect(
+      extractSubagentResultMeta(
+        JSON.stringify({
+          success: true,
+          output: "…",
+          turns: 6,
+          elapsed_ms: 25223,
+          cost_usd: 0.0062,
+          model: "deepseek-v4-flash",
+          billing_kind: "usd",
+        }),
+      ),
+    ).toEqual({
+      costUsd: 0.0062,
+      model: "deepseek-v4-flash",
+      billingKind: "usd",
+      elapsedMs: 25223,
+      turns: 6,
+    });
+
+    // quota-billed run
+    expect(
+      extractSubagentResultMeta(
+        JSON.stringify({ cost_usd: 0, billing_kind: "quota", quota_used_pct: 2.5 }),
+      ),
+    ).toEqual({ costUsd: 0, billingKind: "quota", quotaUsedPct: 2.5 });
+
+    expect(extractSubagentResultMeta("not json")).toEqual({});
+    expect(extractSubagentResultMeta(undefined)).toEqual({});
+  });
+
+  it("shows model and cost on a result-only run (no subagentRuns after reload)", () => {
+    render(
+      <SubagentCard
+        name="explore"
+        runs={[
+          {
+            runId: "run-1",
+            task: "Inspect quota rendering",
+            skillName: "explore",
+            model: "deepseek-v4-flash",
+            status: "done",
+            costUsd: 0.0422,
+            billingKind: "usd",
+            tools: [],
+          },
+        ]}
+      />,
+    );
+
+    const header = screen.getByRole("button", { name: /explore/ });
+    expect(header.textContent).toContain("deepseek-v4-flash");
+    expect(header.textContent).toContain("$0.0422");
   });
 });
 

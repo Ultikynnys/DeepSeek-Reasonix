@@ -27,6 +27,7 @@ import {
   SubagentCard,
   ToolCard,
   extractSubagentDetails,
+  extractSubagentResultMeta,
   isSubagentTool,
   parseEditResult,
 } from "./cards";
@@ -237,6 +238,7 @@ export const AssistantMsg = memo(function AssistantMsg({
             const { task, skillName, model } = extractSubagentDetails(s.name, s.args);
             const status: "running" | "done" | "failed" =
               s.result !== undefined ? (s.ok === false ? "failed" : "done") : "running";
+            const resultMeta = extractSubagentResultMeta(s.result);
             const runs =
               s.subagentRuns && s.subagentRuns.length > 0
                 ? s.subagentRuns
@@ -245,8 +247,13 @@ export const AssistantMsg = memo(function AssistantMsg({
                       runId: s.callId,
                       task,
                       skillName,
-                      model,
+                      model: resultMeta.model ?? model,
                       status,
+                      elapsedMs: resultMeta.elapsedMs,
+                      turns: resultMeta.turns,
+                      costUsd: resultMeta.costUsd,
+                      billingKind: resultMeta.billingKind,
+                      quotaUsedPct: resultMeta.quotaUsedPct,
                       tools: [],
                     },
                   ];
