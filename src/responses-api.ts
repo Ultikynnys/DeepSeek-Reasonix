@@ -27,7 +27,7 @@ function contentParts(content: ChatMessage["content"]): string | ResponsesInputI
   for (const part of content) {
     if (part.type === "text") {
       if (part.text) parts.push({ type: "input_text", text: part.text });
-    } else {
+    } else if (part.type === "image_url") {
       // Responses input_image takes the URL as a bare string (chat
       // completions wraps it in { url, detail }).
       parts.push({
@@ -36,6 +36,8 @@ function contentParts(content: ChatMessage["content"]): string | ResponsesInputI
         ...(part.image_url.detail ? { detail: part.image_url.detail } : {}),
       });
     }
+    // Generated-image parts (type === "image") are output-side only and are
+    // not re-sent as input in the Responses API path.
   }
   return parts;
 }

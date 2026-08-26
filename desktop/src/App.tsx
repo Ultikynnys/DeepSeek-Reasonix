@@ -212,7 +212,8 @@ export type AssistantSegment =
       prunedTokens?: number;
       /** File paths the fold's triage step classified as no longer relevant. */
       droppedFiles?: string[];
-    };
+    }
+  | { kind: "image"; dataUrl: string; mimeType: string };
 
 export type SkillOrigin = {
   name: string;
@@ -1491,10 +1492,16 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           // Skip when text already streamed (would duplicate) or the content
           // belongs to a forced summary (the compaction card renders it).
           const hasText = m.segments.some((s) => s.kind === "text");
-          const segments =
+          let segments =
             !ev.forcedSummary && !hasText && ev.content
               ? appendTextSegment(m.segments, "text", ev.content)
               : m.segments;
+          if (ev.image) {
+            segments = [
+              ...segments,
+              { kind: "image", dataUrl: ev.image.dataUrl, mimeType: ev.image.mimeType },
+            ];
+          }
           return { ...m, segments, pending: false };
         }),
       };

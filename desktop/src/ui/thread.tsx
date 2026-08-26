@@ -30,6 +30,37 @@ import {
 } from "./cards";
 import { ApprovalCard, TaskCard, type TaskStepView } from "./extra-cards";
 
+function downloadImage(dataUrl: string, mimeType: string): void {
+  const ext = mimeType.split("/")[1] || "png";
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = `generated.${ext}`;
+  a.click();
+}
+
+const AssistantImage = memo(function AssistantImage({
+  dataUrl,
+  mimeType,
+}: {
+  dataUrl: string;
+  mimeType: string;
+}) {
+  useLang();
+  return (
+    <div className="msg-image-wrap">
+      <img className="msg-image" src={dataUrl} alt="" loading="lazy" />
+      <button
+        type="button"
+        className="copy-btn"
+        onClick={() => downloadImage(dataUrl, mimeType)}
+        title={t("thread.downloadImage")}
+      >
+        <I.download size={12} />
+      </button>
+    </div>
+  );
+});
+
 export function TurnDivider({ label }: { label: string }) {
   return (
     <div className="turn-divider">
@@ -184,6 +215,12 @@ export const AssistantMsg = memo(function AssistantMsg({
                 summary={s.summary}
                 error={s.error}
               />
+            );
+          }
+          if (s.kind === "image") {
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
+              <AssistantImage key={i} dataUrl={s.dataUrl} mimeType={s.mimeType} />
             );
           }
           // tool segment

@@ -434,6 +434,7 @@ export class Eventizer {
       costUsd,
     };
     if (ev.forcedSummary) out.forcedSummary = true;
+    if (ev.image) out.image = ev.image;
     return out;
   }
 

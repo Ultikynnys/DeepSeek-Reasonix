@@ -1249,6 +1249,7 @@ export class CacheFirstLoop {
       let toolCalls: ToolCall[] = [];
       let usage: TurnStats["usage"] | null = null;
       let finishReason: string | undefined;
+      let image: { dataUrl: string; mimeType: string } | undefined;
       const callModel = this.model;
 
       // Snapshot prefix evidence from the same turn-start tool list sent to the
@@ -1272,6 +1273,7 @@ export class CacheFirstLoop {
           toolCalls = result.toolCalls;
           usage = result.usage;
           finishReason = result.finishReason;
+          image = result.image;
         } else {
           const resp = await this.client.chat({
             model: callModel,
@@ -1286,6 +1288,7 @@ export class CacheFirstLoop {
           reasoningContent = resp.reasoningContent ?? "";
           toolCalls = resp.toolCalls;
           usage = resp.usage;
+          image = resp.image;
         }
       } catch (err) {
         // An aborted signal here is almost always our own doing —
@@ -1548,13 +1551,14 @@ export class CacheFirstLoop {
       );
 
       this.appendAndPersist(
-        buildAssistantMessage(assistantContent, repairedCalls, callModel, reasoningContent),
+        buildAssistantMessage(assistantContent, repairedCalls, callModel, reasoningContent, image),
       );
 
       yield {
         turn: this._turn,
         role: "assistant_final",
         content: assistantContent,
+        image,
         stats: turnStats,
         cacheDiagnostic,
         repair: report,

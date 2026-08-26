@@ -212,11 +212,8 @@ describe("gemini payload", () => {
       role: "model",
       parts: [
         {
-          functionCall: {
-            name: "read_file",
-            args: { path: "/a" },
-            thoughtSignature: "signature-abc-123",
-          },
+          functionCall: { name: "read_file", args: { path: "/a" } },
+          thoughtSignature: "signature-abc-123",
         },
       ],
     });
@@ -371,6 +368,29 @@ describe("gemini payload", () => {
     ]);
   });
 
+  it("captures the sibling thoughtSignature on a functionCall part", async () => {
+    const fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify(
+          wrappedResponse([
+            {
+              functionCall: { name: "read", args: { path: "/a" } },
+              thoughtSignature: "sig-xyz",
+            },
+          ]),
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const res = await client.chat({
+      model: "gemini-3.1-flash-high",
+      messages: [{ role: "user", content: "read /a" }],
+    });
+    expect(res.toolCalls[0]?.thoughtSignature).toBe("sig-xyz");
+  });
+
   it("serializes image_url parts to inlineData for the vision API", async () => {
     let captured: { body: unknown } | null = null;
     const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
@@ -497,5 +517,64 @@ describe("gemini streaming", () => {
     const usageChunk = chunks.find((c) => c.usage);
     expect(usageChunk?.usage?.promptTokens).toBe(3);
     expect(usageChunk?.usage?.completionTokens).toBe(2);
+  });
+
+  it("captures an inlineData image part as StreamChunk.image", async () => {
+    const b64 = Buffer.from("fake-bytes").toString("base64");
+    const sse = [
+      `data: ${JSON.stringify({
+        response: {
+          candidates: [
+            { content: { parts: [{ inlineData: { mimeType: "image/jpeg", data: b64 } }] } },
+          ],
+        },
+      })}`,
+      "data: [DONE]",
+    ].join("\n\n");
+
+    const fetch = vi.fn(async () => {
+      return new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const chunks: Array<{ image?: { dataUrl: string; mimeType: string } }> = [];
+    for await (const chunk of client.stream({
+      model: "gemini-3.1-flash-image",
+      messages: [{ role: "user", content: "draw a square" }],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.some((c) => c.image)).toBe(true);
+    expect(chunks.find((c) => c.image)?.image).toEqual({
+      dataUrl: `data:image/jpeg;base64,${b64}`,
+      mimeType: "image/jpeg",
+    });
+  });
+});
+
+describe("gemini inlineData image parsing", () => {
+  it("captures an inlineData part as ChatResponse.image (non-streaming)", async () => {
+    const b64 = Buffer.from("fake-bytes").toString("base64");
+    const fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify(wrappedResponse([{ inlineData: { mimeType: "image/jpeg", data: b64 } }])),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const res = await client.chat({
+      model: "gemini-3.1-flash-image",
+      messages: [{ role: "user", content: "draw a square" }],
+    });
+
+    expect(res.image).toEqual({
+      dataUrl: `data:image/jpeg;base64,${b64}`,
+      mimeType: "image/jpeg",
+    });
   });
 });

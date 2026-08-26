@@ -56,6 +56,48 @@ describe("conversation reducer", () => {
     });
   });
 
+  it("folds a model.final image into structured assistant content", () => {
+    const v = conversation(
+      emptyConversation(),
+      ev<Event>({
+        type: "model.final",
+        ts,
+        turn: 1,
+        content: "here you go",
+        toolCalls: [],
+        usage: {},
+        costUsd: 0,
+        image: { dataUrl: "data:image/jpeg;base64,AAAA", mimeType: "image/jpeg" },
+      }),
+    );
+    expect(v.messages[0]).toEqual({
+      role: "assistant",
+      content: [
+        { type: "text", text: "here you go" },
+        { type: "image", data_url: "data:image/jpeg;base64,AAAA", mime_type: "image/jpeg" },
+      ],
+    });
+  });
+
+  it("image-only model.final omits the text part", () => {
+    const v = conversation(
+      emptyConversation(),
+      ev<Event>({
+        type: "model.final",
+        ts,
+        turn: 1,
+        content: "",
+        toolCalls: [],
+        usage: {},
+        costUsd: 0,
+        image: { dataUrl: "data:image/png;base64,AAAA", mimeType: "image/png" },
+      }),
+    );
+    expect(v.messages[0]?.content).toEqual([
+      { type: "image", data_url: "data:image/png;base64,AAAA", mime_type: "image/png" },
+    ]);
+  });
+
   it("tool.intent → pending; tool.result → tool msg + pending cleared", () => {
     let v = emptyConversation();
     v = conversation(

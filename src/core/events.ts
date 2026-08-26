@@ -84,6 +84,8 @@ export interface ModelFinalEvent extends EventBase {
   costUsd: number;
   /** True iff this was the no-tools wrap-up after budget / abort / context guard. */
   forcedSummary?: boolean;
+  /** Model-generated image (assistant image output) — data URL + mime. */
+  image?: { dataUrl: string; mimeType: string };
 }
 
 export interface ToolPreparingEvent extends EventBase {

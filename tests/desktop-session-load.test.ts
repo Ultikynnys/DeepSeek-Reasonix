@@ -78,4 +78,25 @@ describe("desktop session loading", () => {
       expect(user.images).toBeUndefined();
     }
   });
+
+  it("maps an assistant generated-image content part to an image segment", () => {
+    const records: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "here you go" },
+          { type: "image", data_url: "data:image/jpeg;base64,AAAA", mime_type: "image/jpeg" },
+        ],
+      },
+    ];
+    const loaded = buildLoadedMessages!(records);
+    const assistant = loaded[0];
+    expect(assistant?.kind).toBe("assistant");
+    if (assistant?.kind === "assistant") {
+      expect(assistant.segments).toEqual([
+        { kind: "text", text: "here you go" },
+        { kind: "image", dataUrl: "data:image/jpeg;base64,AAAA", mimeType: "image/jpeg" },
+      ]);
+    }
+  });
 });

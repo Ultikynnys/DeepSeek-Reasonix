@@ -715,8 +715,16 @@ export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
       turn++;
       const segments: LoadedSegment[] = [];
       if (rec.reasoning_content) segments.push({ kind: "reasoning", text: rec.reasoning_content });
-      if (typeof rec.content === "string" && rec.content)
+      if (typeof rec.content === "string" && rec.content) {
         segments.push({ kind: "text", text: rec.content });
+      } else if (Array.isArray(rec.content)) {
+        for (const part of rec.content) {
+          if (part.type === "text" && part.text) segments.push({ kind: "text", text: part.text });
+          else if (part.type === "image") {
+            segments.push({ kind: "image", dataUrl: part.data_url, mimeType: part.mime_type });
+          }
+        }
+      }
       if (rec.tool_calls) {
         for (let i = 0; i < rec.tool_calls.length; i++) {
           const tc = rec.tool_calls[i];

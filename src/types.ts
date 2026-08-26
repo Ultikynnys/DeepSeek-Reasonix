@@ -37,7 +37,10 @@ export interface ToolCall {
  *  gated off for non-OpenAI providers before they reach the client. */
 export type UserContentPart =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } };
+  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } }
+  /** Model-generated image (e.g. Antigravity's inlineData part) — output-side,
+   *  carried on assistant messages so history/reload/compaction preserve it. */
+  | { type: "image"; data_url: string; mime_type: string };
 
 export type Role = "system" | "user" | "assistant" | "tool";
 

@@ -24,6 +24,8 @@ export interface StreamModelResult {
   usage: Usage | null;
   /** Last non-empty finish reason from the stream (e.g. ollama `done_reason`). */
   finishReason?: string;
+  /** Model-generated image (Antigravity inlineData part) — data URL + mime. */
+  image?: { dataUrl: string; mimeType: string };
 }
 
 export async function* streamModelResponse(
@@ -34,6 +36,7 @@ export async function* streamModelResponse(
   let reasoningContent = "";
   let usage: Usage | null = null;
   let finishReason: string | undefined;
+  let image: { dataUrl: string; mimeType: string } | undefined;
   const callBuf: Map<number, ToolCall> = new Map();
   const readyIndices = new Set<number>();
   let emittedOutput = false;
@@ -107,6 +110,7 @@ export async function* streamModelResponse(
       }
       if (chunk.usage) usage = chunk.usage;
       if (chunk.finishReason) finishReason = chunk.finishReason;
+      if (chunk.image) image = chunk.image;
     }
   } catch (err) {
     // The loop may safely replay a body-read failure only when no assistant
@@ -124,5 +128,6 @@ export async function* streamModelResponse(
     toolCalls: [...callBuf.values()],
     usage,
     finishReason,
+    image,
   };
 }

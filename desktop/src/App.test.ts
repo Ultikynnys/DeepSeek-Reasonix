@@ -1054,6 +1054,32 @@ describe("Desktop App reducer — model.final content", () => {
     });
   });
 
+  it("appends an image segment when model.final carries an image", () => {
+    const state = reduce(initialState(), { t: "incoming", event: turnStarted });
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.final",
+        id: 3,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        content: "",
+        toolCalls: [],
+        usage: {},
+        costUsd: 0,
+        image: { dataUrl: "data:image/jpeg;base64,AAAA", mimeType: "image/jpeg" },
+      },
+    });
+    const assistant = next.messages.find((m) => m.kind === "assistant");
+    expect(assistant?.kind).toBe("assistant");
+    if (assistant?.kind !== "assistant") return;
+    expect(assistant.segments.at(-1)).toMatchObject({
+      kind: "image",
+      dataUrl: "data:image/jpeg;base64,AAAA",
+      mimeType: "image/jpeg",
+    });
+  });
+
   it("does not duplicate content already streamed as deltas", () => {
     let state = reduce(initialState(), { t: "incoming", event: turnStarted });
     state = reduce(state, {

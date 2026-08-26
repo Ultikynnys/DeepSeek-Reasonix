@@ -37,6 +37,8 @@ export interface LoopEvent {
   turn: number;
   role: EventRole;
   content: string;
+  /** Model-generated image (assistant image output) — data URL + mime. */
+  image?: { dataUrl: string; mimeType: string };
   severity?: EventSeverity;
   reasoningDelta?: string;
   toolName?: string;

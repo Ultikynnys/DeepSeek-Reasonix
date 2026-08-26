@@ -283,6 +283,7 @@ export interface JobsEvent {
 export type LoadedSegment =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
+  | { kind: "image"; dataUrl: string; mimeType: string }
   | {
       kind: "tool";
       callId: string;

@@ -218,6 +218,8 @@ export type ModelFinalEvent = {
   costUsd: number;
   /** True iff this was the no-tools wrap-up after budget / abort / context guard. */
   forcedSummary?: boolean;
+  /** Model-generated image (assistant image output) — data URL + mime. */
+  image?: { dataUrl: string; mimeType: string };
 };
 
 export type ToolPreparingEvent = {

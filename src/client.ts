@@ -248,6 +248,8 @@ export interface ChatResponse {
   toolCalls: ToolCall[];
   usage: Usage;
   raw: unknown;
+  /** Model-generated image (Antigravity inlineData part) — data URL + mime. */
+  image?: { dataUrl: string; mimeType: string };
 }
 
 export interface StreamChunk {
@@ -263,6 +265,8 @@ export interface StreamChunk {
   };
   usage?: Usage;
   finishReason?: string;
+  /** Model-generated image (Antigravity inlineData part) — data URL + mime. */
+  image?: { dataUrl: string; mimeType: string };
   raw: any;
 }
 
@@ -782,9 +786,16 @@ export class DeepSeekClient {
     const candidate = inner.candidates?.[0];
     const parts = candidate?.content?.parts ?? [];
     let content = "";
+    let image: { dataUrl: string; mimeType: string } | undefined;
     const toolCalls: ToolCall[] = [];
     for (const part of parts) {
       if (typeof part.text === "string") content += part.text;
+      if (part.inlineData?.data && part.inlineData?.mimeType) {
+        image = {
+          dataUrl: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+          mimeType: part.inlineData.mimeType,
+        };
+      }
       if (part.functionCall) {
         toolCalls.push({
           type: "function" as const,
@@ -792,6 +803,8 @@ export class DeepSeekClient {
             name: part.functionCall.name ?? "",
             arguments: JSON.stringify(part.functionCall.args ?? {}),
           },
+          // Part.thought_signature is a SIBLING of functionCall, not nested.
+          thoughtSignature: part.thoughtSignature,
         });
       }
     }
@@ -800,6 +813,7 @@ export class DeepSeekClient {
       content,
       reasoningContent: null,
       toolCalls,
+      image,
       usage: new Usage(
         usage?.promptTokenCount ?? 0,
         usage?.candidatesTokenCount ?? 0,
@@ -944,6 +958,12 @@ export class DeepSeekClient {
       if (typeof part.text === "string" && part.text.length > 0) {
         chunk.contentDelta = (chunk.contentDelta ?? "") + part.text;
       }
+      if (part.inlineData?.data && part.inlineData?.mimeType) {
+        chunk.image = {
+          dataUrl: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+          mimeType: part.inlineData.mimeType,
+        };
+      }
       if (part.functionCall) {
         chunk.toolCallDelta = {
           index: 0,
@@ -951,7 +971,8 @@ export class DeepSeekClient {
           argumentsDelta: JSON.stringify(part.functionCall.args ?? {}),
           // Gemini 3.x requires the model's thoughtSignature to be echoed back
           // unchanged on the next request, or the tool continuation 400s.
-          thoughtSignature: part.functionCall.thoughtSignature,
+          // Part.thought_signature is a SIBLING of functionCall, not nested.
+          thoughtSignature: part.thoughtSignature,
         };
       }
     }
@@ -959,7 +980,8 @@ export class DeepSeekClient {
       chunk.contentDelta !== undefined ||
       chunk.toolCallDelta !== undefined ||
       chunk.usage !== undefined ||
-      chunk.finishReason !== undefined
+      chunk.finishReason !== undefined ||
+      chunk.image !== undefined
     ) {
       return chunk;
     }
@@ -1024,10 +1046,13 @@ export class DeepSeekClient {
               name: tc.function.name,
               args: parseToolCallArguments(tc.function.arguments),
             };
-            // Echo the model's thought signature back unchanged, or Gemini 3.x
-            // rejects the tool continuation with a 400 INVALID_ARGUMENT.
-            if (tc.thoughtSignature) call.thoughtSignature = tc.thoughtSignature;
-            parts.push({ functionCall: call });
+            // Echo the model's thought signature back unchanged as a SIBLING of
+            // functionCall — Part.thought_signature is a top-level field, not a
+            // nested functionCall field. Nesting it 400s (INVALID_ARGUMENT:
+            // "Function call is missing a thought_signature").
+            const part: Record<string, unknown> = { functionCall: call };
+            if (tc.thoughtSignature) part.thoughtSignature = tc.thoughtSignature;
+            parts.push(part);
           }
           if (parts.length > 0) contents.push({ role: "model", parts });
           break;

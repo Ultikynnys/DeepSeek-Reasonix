@@ -858,6 +858,7 @@ export const en = {
     copyMessage: "Copy this message",
     editMessage: "Edit this message and re-send",
     copyResponse: "Copy this response",
+    downloadImage: "Download image",
   },
   live: {
     reasoning: "live · reasoning",

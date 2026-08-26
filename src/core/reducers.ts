@@ -78,7 +78,13 @@ export const conversation: Reducer<ConversationView> = (v, ev) => {
       return { ...v, messages: [...v.messages, msg] };
     }
     case EventType.modelFinal: {
-      const msg: ChatMessage = { role: "assistant", content: ev.content };
+      const content: ChatMessage["content"] = ev.image
+        ? [
+            ...(ev.content ? [{ type: "text" as const, text: ev.content }] : []),
+            { type: "image" as const, data_url: ev.image.dataUrl, mime_type: ev.image.mimeType },
+          ]
+        : ev.content;
+      const msg: ChatMessage = { role: "assistant", content };
       if (ev.toolCalls.length > 0) msg.tool_calls = [...ev.toolCalls];
       if (ev.reasoningContent !== undefined) msg.reasoning_content = ev.reasoningContent;
       return { ...v, messages: [...v.messages, msg] };
