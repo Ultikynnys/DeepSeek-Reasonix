@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openPath: vi.fn(), openUrl: vi.fn() }));
 
 import { WorkspaceProvider } from "../Markdown";
-import { DiffCard, SubagentCard, ToolCard } from "./cards";
+import { DiffCard, SubagentCard, ToolCard, isSubagentTool } from "./cards";
 
 beforeAll(() => {
   Object.defineProperty(navigator, "clipboard", {
@@ -209,6 +209,36 @@ describe("SubagentCard — model visibility", () => {
     expect(header.textContent).toContain("deepseek-v4-flash + deepseek-v4-pro");
     expect(header.textContent).toContain("ctx 12.3k / 24.7k");
     expect(header.textContent).toContain("$0.0323");
+  });
+
+  it("renders subagent kind badge and markdown result in card body", () => {
+    const { container } = render(
+      <SubagentCard
+        name="explore"
+        runs={[run]}
+        result="Found 3 references in `src/index.ts`."
+        durationMs={2500}
+      />,
+    );
+
+    const header = screen.getByRole("button", { name: /explore/ });
+    expect(header.querySelector(".kind")?.textContent).toBe("subagent");
+    expect(header.textContent).toContain("2.5s");
+
+    const resultEl = container.querySelector(".subagent-result");
+    expect(resultEl?.textContent).toContain("Found 3 references in src/index.ts.");
+  });
+
+  it("identifies subagent tool names correctly", () => {
+    expect(isSubagentTool("explore")).toBe(true);
+    expect(isSubagentTool("research")).toBe(true);
+    expect(isSubagentTool("review")).toBe(true);
+    expect(isSubagentTool("security_review")).toBe(true);
+    expect(isSubagentTool("security-review")).toBe(true);
+    expect(isSubagentTool("spawn_subagent")).toBe(true);
+    expect(isSubagentTool("run_skill", JSON.stringify({ name: "explore" }))).toBe(true);
+    expect(isSubagentTool("read_file")).toBe(false);
+    expect(isSubagentTool("run_command")).toBe(false);
   });
 });
 

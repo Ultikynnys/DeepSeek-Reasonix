@@ -26,6 +26,8 @@ import {
   ShellCard,
   SubagentCard,
   ToolCard,
+  extractSubagentDetails,
+  isSubagentTool,
   parseEditResult,
 } from "./cards";
 import { ApprovalCard, TaskCard, type TaskStepView } from "./extra-cards";
@@ -228,20 +230,37 @@ export const AssistantMsg = memo(function AssistantMsg({
             (s.name === "run_command" || s.name === "run_background") && s.result === undefined
               ? pendingConfirms.find((c) => c.command === extractCommand(s.args))
               : undefined;
-          if (s.subagentRuns && s.subagentRuns.length > 0) {
+          const isSubagent =
+            (s.subagentRuns !== undefined && s.subagentRuns.length > 0) ||
+            isSubagentTool(s.name, s.args);
+          if (isSubagent) {
+            const { task, skillName, model } = extractSubagentDetails(s.name, s.args);
+            const status: "running" | "done" | "failed" =
+              s.result !== undefined ? (s.ok === false ? "failed" : "done") : "running";
+            const runs =
+              s.subagentRuns && s.subagentRuns.length > 0
+                ? s.subagentRuns
+                : [
+                    {
+                      runId: s.callId,
+                      task,
+                      skillName,
+                      model,
+                      status,
+                      tools: [],
+                    },
+                  ];
             return (
-              <div key={i}>
-                <SubagentCard name={s.name} runs={s.subagentRuns} />
-                {s.result ? (
-                  <ToolCard
-                    name={s.name}
-                    args=""
-                    result={s.result}
-                    ok={s.ok}
-                    durationMs={s.durationMs}
-                  />
-                ) : null}
-              </div>
+              <SubagentCard
+                // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
+                key={i}
+                name={skillName}
+                runs={runs}
+                args={s.args}
+                result={s.result}
+                ok={s.ok}
+                durationMs={s.durationMs}
+              />
             );
           }
           if (s.name === "run_command" || s.name === "run_background") {

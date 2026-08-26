@@ -91,7 +91,7 @@ import {
   themeForStyle,
 } from "./theme";
 import { AboutModal } from "./ui/about";
-import { parseEditResult } from "./ui/cards";
+import { isSubagentTool, parseEditResult } from "./ui/cards";
 import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
@@ -1582,11 +1582,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
               .filter(
                 ({ segment }) =>
                   segment.kind === "tool" &&
-                  (segment.name === "explore" ||
-                    segment.name === "research" ||
-                    segment.name === "review" ||
-                    segment.name === "security_review" ||
-                    segment.name === "run_skill"),
+                  isSubagentTool(segment.name, segment.args),
               );
             if (candidates.length === 1) host = candidates[0]?.index ?? -1;
           }

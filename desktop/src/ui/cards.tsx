@@ -834,12 +834,69 @@ export function WebSearchCard({ query, results }: { query: string; results: Sear
 
 // ---- Subagent ----
 
+export const SUBAGENT_TOOLS = new Set([
+  "explore",
+  "research",
+  "review",
+  "security_review",
+  "security-review",
+  "spawn_subagent",
+]);
+
+export function isSubagentTool(name: string, args?: string): boolean {
+  if (SUBAGENT_TOOLS.has(name)) return true;
+  if (name === "run_skill" && args) {
+    try {
+      const parsed = JSON.parse(args);
+      if (typeof parsed.name === "string" && SUBAGENT_TOOLS.has(parsed.name)) return true;
+    } catch {
+      // ignore JSON parse error
+    }
+  }
+  return false;
+}
+
+export function extractSubagentDetails(
+  name: string,
+  args?: string,
+): { task: string; skillName: string; model?: string } {
+  let task = "";
+  let skillName = name;
+  let model: string | undefined;
+  if (args) {
+    try {
+      const parsed = JSON.parse(args);
+      if (typeof parsed.task === "string") task = parsed.task;
+      else if (typeof parsed.arguments === "string") task = parsed.arguments;
+      else if (typeof parsed.query === "string") task = parsed.query;
+      else task = args;
+
+      if (name === "run_skill" && typeof parsed.name === "string") {
+        skillName = parsed.name;
+      }
+      if (typeof parsed.model === "string") {
+        model = parsed.model;
+      }
+    } catch {
+      task = args;
+    }
+  }
+  return { task: task || name, skillName, model };
+}
+
 export function SubagentCard({
   name,
   runs,
+  result,
+  ok,
+  durationMs,
 }: {
   name: string;
   runs: import("../App").SubagentRunProgress[];
+  args?: string;
+  result?: string;
+  ok?: boolean;
+  durationMs?: number;
 }) {
   useLang();
   const done = runs.filter((run) => run.status === "done").length;
@@ -849,7 +906,7 @@ export function SubagentCard({
   );
   const status = runs.some((run) => run.status === "running")
     ? "running"
-    : runs.some((run) => run.status === "failed")
+    : runs.some((run) => run.status === "failed") || ok === false
       ? "failed"
       : "done";
   const settled = status !== "running";
@@ -875,7 +932,7 @@ export function SubagentCard({
         : null;
   return (
     <Card
-      tone="violet"
+      tone={status === "failed" ? "danger" : "violet"}
       icon={<I.bot size={12} />}
       kind="subagent"
       name={name}
@@ -894,6 +951,11 @@ export function SubagentCard({
           ) : (
             <StatusIcon state="running" label={t("cards.subagentRunning")} />
           )}
+          {settled && durationMs !== undefined ? (
+            <span className="meta-dur">
+              {durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs} ms`}
+            </span>
+          ) : null}
         </>
       }
     >
@@ -947,6 +1009,18 @@ export function SubagentCard({
             </span>
           </div>
         ))}
+        {result ? (
+          <div
+            className="subagent-result"
+            style={{
+              marginTop: "8px",
+              paddingTop: "8px",
+              borderTop: "1px solid var(--border)",
+            }}
+          >
+            <Markdown source={result} />
+          </div>
+        ) : null}
       </div>
     </Card>
   );
