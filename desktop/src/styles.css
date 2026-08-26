@@ -4120,7 +4120,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .model-menu-cols {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   padding: 4px;
 }
 .model-menu-col {
@@ -4132,9 +4132,12 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .model-menu-col-head {
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   color: var(--muted);
-  padding: 4px 8px 6px;
+  padding: 4px 6px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The reasoning-effort column holds short items — keep it narrow next to the
    two model columns so it doesn't hog the popup width. */
@@ -4143,10 +4146,29 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .model-menu-col + .model-menu-col {
   border-left: 1px solid var(--border);
-  padding-left: 8px;
+  padding-left: 6px;
 }
 .model-menu-col .popup-list {
   max-height: 460px;
+}
+/* Compact the shared model rows (main-agent + subagent columns) so each
+   column stays narrow and the whole picker fits narrow windows. */
+.model-menu-list .popup-item {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 5px 6px;
+  font-size: 13px;
+}
+.model-menu-list .popup-item .ico {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+.model-menu-list .popup-item .cmd {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .effort-menu-list {
   overflow-x: hidden;

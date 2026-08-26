@@ -1132,7 +1132,7 @@ function ModelEffortMenu({
         bottom: "calc(100% + 6px)",
         left: "auto",
         right: 0,
-        width: 920,
+        width: "min(920px, calc(100vw - 16px))",
         position: "absolute",
       }}
     >
