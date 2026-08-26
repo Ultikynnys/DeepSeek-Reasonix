@@ -3330,19 +3330,72 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // reads use the async loader so they overlap across tabs instead of
     // serializing on the event loop.
     void (async () => {
+      // Restore the conversation's stored model/effort FIRST — it's a cheap
+      // meta.json read, but the runtime (built inside initTabToolset) reads
+      // `tab.currentModel` / `tab.currentSession` at build time, so it must
+      // see the restored pair before the toolset build starts.
+      if (restore?.session) {
+        try {
+          if (existsSync(sessionPath(restore.session))) {
+            tab.currentSession = restore.session;
+            restoreSessionModelPrefs(tab, loadSessionMeta(tab.currentSession));
+          }
+        } catch (err) {
+          // unreadable meta — fall back to the freshly minted session, but LOG
+          emitDiagnosticError("session.restore.failed", err, {
+            tabId: tab.id,
+            details: { requestedSession: restore.session, ...tabDiagnosticState(tab) },
+          });
+          process.stderr.write(`reasonix: session load for resync failed — ${messageOf(err)}\n`);
+        }
+      }
+
+      // Emit the credential gate up front too — `$needs_setup` is the other
+      // side of `$ready` and must not wait on the session read either.
+      if (!tabHasCredential(tab)) {
+        emitTabDiagnostic(tab, "tab.setup.required", { reason: "credential-unavailable" }, "warn");
+        emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
+      }
+
+      // Launch the toolset/runtime build IMMEDIATELY. `$ready` (the composer's
+      // enable gate) must not depend on the heavy display work below: the full
+      // current-session jsonl read+parse and the synchronous scan of every
+      // session file are pure for the sidebar/conversation view. Running them
+      // before initTabToolset put boot-to-ready behind the entire session
+      // history, once per restored tab. This order ($ready before
+      // $session_loaded) is the same the desktop_resync path already emits, so
+      // the frontend handles it.
+      void initTabToolset(tab)
+        .then(() => {
+          if (tabHasCredential(tab)) {
+            emitTabDiagnostic(tab, "tab.ready", undefined, "info");
+            emit({ type: "$ready" }, tab.id);
+          } else {
+            emitTabDiagnostic(
+              tab,
+              "tab.ready.skipped",
+              { reason: "credential-unavailable" },
+              "warn",
+            );
+          }
+          emitCtxBreakdown(tab);
+        })
+        .catch((err) => {
+          emitDiagnosticError("tab.bootstrap.failed", err, {
+            tabId: tab.id,
+            details: tabDiagnosticState(tab),
+          });
+          emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, tab.id);
+        });
+
+      // Non-gating display work — runs in parallel with the toolset build above.
       // Reopen the conversation the tab had, if its jsonl is still readable.
       let restoredMessages: LoadedMessage[] | undefined;
       if (restore?.session) {
         try {
           if (existsSync(sessionPath(restore.session))) {
             const msgs = buildLoadedMessages(await loadSessionMessagesAsync(restore.session));
-            if (msgs.length > 0) {
-              tab.currentSession = restore.session;
-              // Restore the conversation's stored model/effort so the system
-              // prompt + runtime (built by initTabToolset) use them.
-              restoreSessionModelPrefs(tab, loadSessionMeta(tab.currentSession));
-              restoredMessages = msgs;
-            }
+            if (msgs.length > 0) restoredMessages = msgs;
           }
         } catch (err) {
           // unreadable jsonl — fall back to the freshly minted session, but LOG
@@ -3376,33 +3429,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           tab.id,
         );
       }
-      if (!tabHasCredential(tab)) {
-        emitTabDiagnostic(tab, "tab.setup.required", { reason: "credential-unavailable" }, "warn");
-        emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
-      }
       void emitBalance(tab);
-      void initTabToolset(tab)
-        .then(() => {
-          if (tabHasCredential(tab)) {
-            emitTabDiagnostic(tab, "tab.ready", undefined, "info");
-            emit({ type: "$ready" }, tab.id);
-          } else {
-            emitTabDiagnostic(
-              tab,
-              "tab.ready.skipped",
-              { reason: "credential-unavailable" },
-              "warn",
-            );
-          }
-          emitCtxBreakdown(tab);
-        })
-        .catch((err) => {
-          emitDiagnosticError("tab.bootstrap.failed", err, {
-            tabId: tab.id,
-            details: tabDiagnosticState(tab),
-          });
-          emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, tab.id);
-        });
     })();
     return tab;
   }
