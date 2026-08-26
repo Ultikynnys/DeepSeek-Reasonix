@@ -1125,15 +1125,51 @@ function ModelEffortMenu({
     onRefreshOllamaModels,
     onRefreshAntigravityModels,
   };
+
+  // The picker is up to 920px wide and anchored to the model pill, which sits
+  // inside the `.main` column. `.main` has `overflow: hidden`, so an
+  // absolutely positioned popup gets clipped at the sidebar boundary and ends
+  // up rendering behind the sidebar. Pin it to the viewport (position: fixed)
+  // so it escapes the clip and stacks above the sidebar, anchored to the pill's
+  // box and clamped to the window.
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [visible, setVisible] = useState(false);
+  useLayoutEffect(() => {
+    const position = () => {
+      const pop = popRef.current;
+      const wrap = pop?.parentElement; // the model-pill wrapper
+      if (!pop || !wrap) return;
+      const wr = wrap.getBoundingClientRect();
+      const pr = pop.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const pad = 8;
+      const width = Math.min(920, vw - 16);
+      const left = Math.max(pad, Math.min(wr.right - width, vw - width - pad));
+      let top = wr.top - pr.height - 6;
+      if (top < pad) top = wr.bottom + 6; // no room above the pill — open below
+      top = Math.max(pad, Math.min(top, vh - pr.height - pad));
+      setPos({ left, top });
+      setVisible(true);
+    };
+    position();
+    window.addEventListener("resize", position);
+    return () => window.removeEventListener("resize", position);
+  }, []);
+
   return (
     <div
+      ref={popRef}
       className="popup"
       style={{
-        bottom: "calc(100% + 6px)",
-        left: "auto",
-        right: 0,
+        position: "fixed",
+        left: pos?.left ?? 0,
+        top: pos?.top ?? 0,
+        bottom: "auto",
+        right: "auto",
         width: "min(920px, calc(100vw - 16px))",
-        position: "absolute",
+        visibility: visible ? undefined : "hidden",
       }}
     >
       <div className="ph">
