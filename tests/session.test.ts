@@ -691,13 +691,10 @@ describe("session persistence", () => {
 });
 
 describe("resolveSessionModelPrefs", () => {
-  const fallback = {
-    model: "deepseek-v4-flash",
-    reasoningEffort: "high",
-    subagentModel: "deepseek-v4-flash",
-  } as const;
+  // subagentModel is undefined by default = subagents follow the main model.
+  const fallback = { model: "deepseek-v4-flash", reasoningEffort: "high" } as const;
 
-  it("prefers the stored triple when all present", () => {
+  it("prefers the stored model + effort + subagent override when present", () => {
     expect(
       resolveSessionModelPrefs(
         { model: "deepseek-v4-pro", reasoningEffort: "max", subagentModel: "deepseek-v4-pro" },
@@ -710,11 +707,11 @@ describe("resolveSessionModelPrefs", () => {
     });
   });
 
-  it("falls back per-field when a value is missing", () => {
+  it("falls back per-field when a value is missing (subagent undefined → follows main)", () => {
     expect(resolveSessionModelPrefs({ model: "deepseek-v4-pro" }, fallback)).toEqual({
       model: "deepseek-v4-pro",
       reasoningEffort: "high",
-      subagentModel: "deepseek-v4-flash",
+      subagentModel: undefined,
     });
     expect(
       resolveSessionModelPrefs(
@@ -743,7 +740,7 @@ describe("resolveSessionModelPrefs", () => {
     ).toEqual({
       model: "deepseek-v4-pro",
       reasoningEffort: "high",
-      subagentModel: "deepseek-v4-flash",
+      subagentModel: undefined,
     });
   });
 });

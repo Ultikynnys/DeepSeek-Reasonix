@@ -333,7 +333,9 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
 export interface ModelPrefs {
   model: string;
   reasoningEffort: ReasoningEffort;
-  subagentModel: string;
+  /** Explicit per-tab subagent model override. `undefined` = subagents follow
+   *  the main agent's model. */
+  subagentModel?: string;
 }
 
 /** Pick the conversation's stored model/effort/subagent-model triple, validated

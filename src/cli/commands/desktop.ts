@@ -198,7 +198,7 @@ import {
   visionModelsFor,
 } from "../../ollama-model-map.js";
 import { registerSeeImageTool } from "../../tools/see-image.js";
-import { DEFAULT_SUBAGENT_MODEL, type SubagentEvent } from "../../tools/subagent.js";
+import type { SubagentEvent } from "../../tools/subagent.js";
 
 import {
   discoverExternalSessionApps,
@@ -1881,8 +1881,10 @@ interface Tab {
   rootDir: string;
   currentSession: string;
   currentModel: string;
-  /** Per-tab subagent model — the default model for subagent skills without an explicit `model:` frontmatter. Persisted in session meta like the main model. */
-  currentSubagentModel: string;
+  /** Per-tab subagent model override, set only when the user picks one in the
+   *  chat menu. `undefined` = subagents implicitly follow the main agent's
+   *  model. Persisted in session meta like the main model. */
+  currentSubagentModel?: string;
   /** Per-tab reasoning effort — restored from the session's meta on load so a config reset doesn't flip it back to the global default. */
   currentReasoningEffort: import("../../config.js").ReasoningEffort;
   budgetUsd: number | undefined;
@@ -2382,7 +2384,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       rootDir: dir,
       currentSession: "",
       currentModel: model,
-      currentSubagentModel: DEFAULT_SUBAGENT_MODEL,
       currentReasoningEffort: loadReasoningEffort(),
       budgetUsd: opts.budgetUsd,
       ctxMaxOverride: loadContextTokens(),
@@ -2440,7 +2441,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       onJobsChanged: () => emitJobs(),
       subagentSink: subagentSinkFor(tab),
       subagentBilling: (m) => subagentBillingFor(m),
-      subagentModel: () => tab.currentSubagentModel,
+      subagentModel: () => tab.currentSubagentModel ?? tab.currentModel,
       visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.toolset = toolset;
@@ -2951,7 +2952,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       onJobsChanged: () => emitJobs(),
       subagentSink: subagentSinkFor(tab),
       subagentBilling: (m) => subagentBillingFor(m),
-      subagentModel: () => tab.currentSubagentModel,
+      subagentModel: () => tab.currentSubagentModel ?? tab.currentModel,
       visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.system = codeSystemPrompt(target, {

@@ -3212,7 +3212,9 @@ function TabRuntime({
                 }
                 textareaRef={composerRef}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
-                subagentModelLabel={state.settings?.subagentModel ?? "deepseek-v4-flash"}
+                subagentModelLabel={
+                  state.settings?.subagentModel ?? state.settings?.model ?? "deepseek-v4-flash"
+                }
                 reasoningEffort={state.settings?.reasoningEffort ?? "high"}
                 ollamaModels={ollamaModels}
                 ollamaModelsError={ollamaModelsError ?? undefined}
