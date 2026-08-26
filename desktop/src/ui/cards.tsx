@@ -2,6 +2,7 @@ import { type ReactNode, memo, useContext, useMemo, useState } from "react";
 import { Markdown, WorkspaceContext, openWithEditor, resolveAgainstWorkspace } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
+import { FileMenu } from "./file-menu";
 import { Shortcut } from "./shortcut";
 
 type Tone = "default" | "success" | "warning" | "danger" | "accent" | "violet";
@@ -46,17 +47,36 @@ function extractToolFileRef(args?: string): { path: string; line?: number } | nu
 
 /** Always-visible "open in editor" action rendered in the card header, next to the collapse toggle. */
 function OpenFileButton({ path, line, label }: { path: string; line?: number; label: string }) {
+  useLang();
   const ws = useContext(WorkspaceContext);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const abs = resolveAgainstWorkspace(path, ws.dir);
   return (
-    <button
-      type="button"
-      className="head-action"
-      title={label}
-      onClick={() => void openWithEditor(ws.editor, resolveAgainstWorkspace(path, ws.dir), line)}
-    >
-      <I.link size={12} />
-      <span>{label}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        className="head-action"
+        title={label}
+        onClick={() => void openWithEditor(ws.editor, abs, line)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setMenu({ x: e.clientX, y: e.clientY });
+        }}
+      >
+        <I.link size={12} />
+        <span>{label}</span>
+      </button>
+      {menu ? (
+        <FileMenu
+          anchor={menu}
+          abs={abs}
+          editor={ws.editor}
+          line={line}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
+    </>
   );
 }
 

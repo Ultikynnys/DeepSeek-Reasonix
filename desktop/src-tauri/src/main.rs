@@ -218,6 +218,47 @@ fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<()
     Ok(())
 }
 
+/// Open a file with the native OS "Open with…" chooser, so the user can pick
+/// which app handles it (notepad++, notepad, etc.) instead of a hardcoded
+/// editor. On Windows this uses `rundll32.exe shell32.dll,OpenAs_RunDLL`,
+/// which pops the same dialog Explorer uses for right-click → "Open with…".
+/// On other platforms there is no portable equivalent, so fall back to the OS
+/// default handler (the `open` / `xdg-open` behaviour).
+#[tauri::command]
+fn open_with_dialog(path: String) -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let normalized = path.replace('/', "\\");
+        let mut cmd = Command::new("rundll32.exe");
+        cmd.arg("shell32.dll,OpenAs_RunDLL")
+            .arg(&normalized)
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        cmd.spawn()
+            .map_err(|e| format!("spawn rundll32 OpenAs_RunDLL: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = Command::new("open");
+        cmd.arg(&path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.spawn().map_err(|e| format!("spawn open: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(&path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.spawn().map_err(|e| format!("spawn xdg-open: {e}"))?;
+        return Ok(());
+    }
+}
+
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, &content).map_err(|e| format!("write failed: {e}"))
@@ -237,6 +278,7 @@ fn main() {
             rpc_send,
             rpc_kill,
             open_in_editor,
+            open_with_dialog,
             list_workspace_tree,
             git_status,
             write_text_file

@@ -152,7 +152,7 @@ const DEFAULT_MAX_RESULT_CHARS = 8000;
 // (explore, research), which doesn't need the 12× pro tier. Skill
 // frontmatter `model: deepseek-v4-pro` is the opt-in override for
 // skills that empirically benefit from the stronger model.
-const DEFAULT_SUBAGENT_MODEL = "deepseek-v4-flash";
+export const DEFAULT_SUBAGENT_MODEL = "deepseek-v4-flash";
 const DEFAULT_SUBAGENT_EFFORT: import("../config.js").ReasoningEffort = "high";
 
 const SUBAGENT_TOOL_NAME = "spawn_subagent";

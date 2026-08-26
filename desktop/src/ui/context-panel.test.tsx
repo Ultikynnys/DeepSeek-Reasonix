@@ -146,6 +146,23 @@ describe("ContextPanel files", () => {
     expect(openPath).not.toHaveBeenCalled();
   });
 
+  it("right-clicking a file row opens an Open-with… menu that fires open_with_dialog", async () => {
+    const { container } = renderPanel();
+
+    fireEvent.contextMenu(container.querySelector('[data-kind="file"]')!);
+
+    const openWith = await screen.findByRole("menuitem", { name: "Open with…" });
+    expect(openWith).toBeTruthy();
+
+    fireEvent.click(openWith);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_with_dialog", {
+        path: "/repo/src/new-file.ts",
+      }),
+    );
+    expect(openPath).not.toHaveBeenCalled();
+  });
+
   it("renders live log tokens even before final usage arrives", () => {
     render(
       <ContextPanel

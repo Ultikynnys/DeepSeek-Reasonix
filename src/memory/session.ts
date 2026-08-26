@@ -85,6 +85,8 @@ export interface SessionMeta {
   model?: string;
   /** Reasoning effort the conversation last ran with — same resume semantics as `model`. */
   reasoningEffort?: ReasoningEffort;
+  /** Per-tab subagent model the conversation last ran with — same resume semantics as `model`. Only the desktop UI's subagent selector writes this. */
+  subagentModel?: string;
   /** Source app when the session was imported from another local AI client. */
   importedSource?: "claude" | "codex";
   /** Absolute path of the source transcript used for import. */
@@ -331,17 +333,22 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
 export interface ModelPrefs {
   model: string;
   reasoningEffort: ReasoningEffort;
+  subagentModel: string;
 }
 
-/** Pick the conversation's stored model/effort pair, validated against the
- *  stored types; anything missing or malformed falls back to the caller's
- *  current defaults. Kept pure so desktop restore logic is testable. */
+/** Pick the conversation's stored model/effort/subagent-model triple, validated
+ *  against the stored types; anything missing or malformed falls back to the
+ *  caller's current defaults. Kept pure so desktop restore logic is testable. */
 export function resolveSessionModelPrefs(meta: SessionMeta, fallback: ModelPrefs): ModelPrefs {
   return {
     model: typeof meta.model === "string" && meta.model.trim() ? meta.model.trim() : fallback.model,
     reasoningEffort: isReasoningEffort(meta.reasoningEffort)
       ? meta.reasoningEffort
       : fallback.reasoningEffort,
+    subagentModel:
+      typeof meta.subagentModel === "string" && meta.subagentModel.trim()
+        ? meta.subagentModel.trim()
+        : fallback.subagentModel,
   };
 }
 

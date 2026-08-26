@@ -125,8 +125,10 @@ export function Composer({
   busy,
   busyLabel,
   modelLabel,
+  subagentModelLabel = "deepseek-v4-flash",
   reasoningEffort,
   onModelChange,
+  onSubagentModelChange = () => {},
   onEffortChange,
   editMode,
   onEditModeChange,
@@ -167,8 +169,12 @@ export function Composer({
   /** Replaces the hint-row left side while the agent is running — typically "Reasoning" or "Skill · <name>". */
   busyLabel?: string;
   modelLabel: string;
+  /** Per-tab subagent model shown in the menu's subagent column. Defaults to deepseek-v4-flash when the caller omits it. */
+  subagentModelLabel?: string;
   reasoningEffort: ReasoningEffort;
   onModelChange: (model: string) => void;
+  /** Called when the user picks a model in the subagent column. */
+  onSubagentModelChange?: (model: string) => void;
   onEffortChange: (effort: ReasoningEffort) => void;
   editMode: EditMode;
   onEditModeChange: (mode: EditMode) => void;
@@ -734,6 +740,7 @@ export function Composer({
               {modelMenuOpen ? (
                 <ModelEffortMenu
                   modelLabel={modelLabel}
+                  subagentModelLabel={subagentModelLabel}
                   currentEffort={reasoningEffort}
                   ollamaModels={ollamaModels}
                   ollamaModelsError={ollamaModelsError}
@@ -745,6 +752,10 @@ export function Composer({
                   onRefreshAntigravityModels={onRefreshAntigravityModels}
                   onPickModel={(m) => {
                     onModelChange(m);
+                    setModelMenuOpen(false);
+                  }}
+                  onPickSubagentModel={(m) => {
+                    onSubagentModelChange(m);
                     setModelMenuOpen(false);
                   }}
                   onPickEffort={(e) => {
@@ -905,10 +916,180 @@ function Popup({
   );
 }
 
+/** Shared model picker column. Rendered once per selector (main agent and
+ *  subagent) so both expose the exact same model options — KNOWN_MODELS, the
+ *  signed-in Antigravity group, the Ollama catalog, and a custom-model input. */
+function ModelList({
+  activeModel,
+  onPick,
+  ollamaModels,
+  ollamaModelsError,
+  ollamaHiddenCount,
+  ollamaVisionModels,
+  antigravityModels,
+  antigravityModelsError,
+  onRefreshOllamaModels,
+  onRefreshAntigravityModels,
+}: {
+  activeModel: string;
+  onPick: (model: string) => void;
+  ollamaModels?: string[];
+  ollamaModelsError?: string;
+  ollamaHiddenCount?: number;
+  ollamaVisionModels?: ReadonlySet<string>;
+  antigravityModels?: string[];
+  antigravityModelsError?: string;
+  onRefreshOllamaModels?: (force?: boolean) => void;
+  onRefreshAntigravityModels?: () => void;
+}) {
+  const [draft, setDraft] = useState(activeModel);
+  const knownModels = KNOWN_MODELS.filter(
+    (model) =>
+      !model.startsWith("gemini-") &&
+      !model.startsWith("claude-") &&
+      !model.startsWith("gpt-oss-"),
+  );
+  const antigravityGroup = antigravityModels && antigravityModels.length > 0;
+  const ollamaGroup = ollamaModels && ollamaModels.length > 0;
+  return (
+    <div className="popup-list model-menu-list">
+      {knownModels.map((m) => (
+        <div
+          key={m}
+          className="popup-item"
+          data-active={m === activeModel}
+          onClick={() => onPick(m)}
+          onKeyDown={activationHandler(() => onPick(m))}
+        >
+          <span className="ico">
+            <I.brain size={12} />
+          </span>
+          <div className="nm">
+            <span className="cmd">{m}</span>
+          </div>
+          {modelAcceptsImages(m, ollamaVisionModels) ? (
+            <span className="badge">vision</span>
+          ) : null}
+        </div>
+      ))}
+      {antigravityGroup || antigravityModelsError ? (
+        <>
+          <div className="model-menu-group">
+            <span className="grow">{t("composer.modelAntigravityGroup")}</span>
+            <button
+              type="button"
+              className="mini-btn"
+              title={t("composer.modelAntigravityRefresh")}
+              onClick={() => onRefreshAntigravityModels?.()}
+            >
+              <I.refresh size={10} />
+            </button>
+          </div>
+          {antigravityModelsError ? (
+            <div className="model-menu-error">
+              {t("composer.modelAntigravityError", { error: antigravityModelsError })}
+            </div>
+          ) : null}
+          {antigravityModels?.map((model) => (
+            <div
+              key={model}
+              className="popup-item"
+              data-active={model === activeModel}
+              onClick={() => onPick(model)}
+              onKeyDown={activationHandler(() => onPick(model))}
+            >
+              <span className="ico">
+                <I.brain size={12} />
+              </span>
+              <div className="nm">
+                <span className="cmd">{model}</span>
+              </div>
+              {modelAcceptsImages(model, ollamaVisionModels) ? (
+                <span className="badge">vision</span>
+              ) : null}
+            </div>
+          ))}
+        </>
+      ) : null}
+      {ollamaGroup || ollamaModelsError ? (
+        <>
+          <div className="model-menu-group">
+            <span className="grow">{t("composer.modelOllamaGroup")}</span>
+            {ollamaHiddenCount && ollamaHiddenCount > 0 ? (
+              <span className="model-menu-note">
+                {t("composer.modelOllamaHidden", { count: ollamaHiddenCount })}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="mini-btn"
+              title={t("composer.modelOllamaRefresh")}
+              onClick={() => onRefreshOllamaModels?.(true)}
+            >
+              <I.refresh size={10} />
+            </button>
+          </div>
+          {/* The error only matters when the selector's model IS an Ollama model —
+              a DeepSeek/OpenAI tab with a down local daemon would otherwise
+              show a spurious "Ollama unreachable" line. The Models settings
+              page surfaces it unconditionally. */}
+          {ollamaModelsError && !ollamaGroup && activeModel.startsWith("ollama/") ? (
+            <div className="model-menu-error">
+              {t("composer.modelOllamaError", { error: ollamaModelsError })}
+            </div>
+          ) : null}
+          {ollamaModels && ollamaModels.length > 0
+            ? ollamaModels.map((id) => {
+                const full = `ollama/${id}`;
+                return (
+                  <div
+                    key={full}
+                    className="popup-item"
+                    data-active={full === activeModel}
+                    onClick={() => onPick(full)}
+                    onKeyDown={activationHandler(() => onPick(full))}
+                  >
+                    <span className="ico">
+                      <I.bot size={12} />
+                    </span>
+                    <div className="nm">
+                      <span className="cmd">{full}</span>
+                    </div>
+                    {modelAcceptsImages(full, ollamaVisionModels) ? (
+                      <span className="badge">vision</span>
+                    ) : null}
+                  </div>
+                );
+              })
+            : null}
+        </>
+      ) : null}
+      <div className="model-menu-custom">
+        <input
+          className="field mono model-menu-custom-input"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="custom model id"
+        />
+        <button
+          type="button"
+          className="btn model-menu-custom-confirm"
+          disabled={!draft.trim() || draft.trim() === activeModel}
+          onClick={() => onPick(draft.trim())}
+        >
+          {t("composer.confirm")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ModelEffortMenu({
   modelLabel,
+  subagentModelLabel,
   currentEffort,
   onPickModel,
+  onPickSubagentModel,
   onPickEffort,
   ollamaModels,
   ollamaModelsError,
@@ -920,8 +1101,10 @@ function ModelEffortMenu({
   onRefreshAntigravityModels,
 }: {
   modelLabel: string;
+  subagentModelLabel: string;
   currentEffort: ReasoningEffort;
   onPickModel: (model: string) => void;
+  onPickSubagentModel: (model: string) => void;
   onPickEffort: (effort: ReasoningEffort) => void;
   ollamaModels?: string[];
   ollamaModelsError?: string;
@@ -932,16 +1115,16 @@ function ModelEffortMenu({
   onRefreshOllamaModels?: (force?: boolean) => void;
   onRefreshAntigravityModels?: () => void;
 }) {
-  const [draft, setDraft] = useState(modelLabel);
-  const knownModels = KNOWN_MODELS.filter(
-    (model) =>
-      !model.startsWith("gemini-") &&
-      !model.startsWith("claude-") &&
-      !model.startsWith("gpt-oss-"),
-  );
-  const availableModels = knownModels;
-  const antigravityGroup = antigravityModels && antigravityModels.length > 0;
-  const ollamaGroup = ollamaModels && ollamaModels.length > 0;
+  const modelListProps = {
+    ollamaModels,
+    ollamaModelsError,
+    ollamaHiddenCount,
+    ollamaVisionModels,
+    antigravityModels,
+    antigravityModelsError,
+    onRefreshOllamaModels,
+    onRefreshAntigravityModels,
+  };
   return (
     <div
       className="popup"
@@ -949,7 +1132,7 @@ function ModelEffortMenu({
         bottom: "calc(100% + 6px)",
         left: "auto",
         right: 0,
-        width: 560,
+        width: 920,
         position: "absolute",
       }}
     >
@@ -957,144 +1140,30 @@ function ModelEffortMenu({
         <span className="tok">M</span>
         <span>{t("composer.switchModel")}</span>
         <span className="grow" />
+        <span className="tok">S</span>
+        <span>{t("composer.switchSubagentModel")}</span>
+        <span className="grow" />
         <span className="tok">E</span>
         <span>{t("composer.switchEffort")}</span>
       </div>
       <div className="model-menu-cols">
-        {/* Models column — the Ollama group alone can run to hundreds of ids. */}
+        {/* Main-agent models column */}
         <div className="model-menu-col">
-          <div className="popup-list model-menu-list">
-            {availableModels.map((m) => (
-              <div
-                key={m}
-                className="popup-item"
-                data-active={m === modelLabel}
-                onClick={() => onPickModel(m)}
-                onKeyDown={activationHandler(() => onPickModel(m))}
-              >
-                <span className="ico">
-                  <I.brain size={12} />
-                </span>
-                <div className="nm">
-                  <span className="cmd">{m}</span>
-                </div>
-                {modelAcceptsImages(m, ollamaVisionModels) ? (
-                  <span className="badge">vision</span>
-                ) : null}
-              </div>
-            ))}
-            {antigravityGroup || antigravityModelsError ? (
-              <>
-                <div className="model-menu-group">
-                  <span className="grow">{t("composer.modelAntigravityGroup")}</span>
-                  <button
-                    type="button"
-                    className="mini-btn"
-                    title={t("composer.modelAntigravityRefresh")}
-                    onClick={() => onRefreshAntigravityModels?.()}
-                  >
-                    <I.refresh size={10} />
-                  </button>
-                </div>
-                {antigravityModelsError ? (
-                  <div className="model-menu-error">
-                    {t("composer.modelAntigravityError", { error: antigravityModelsError })}
-                  </div>
-                ) : null}
-                {antigravityModels?.map((model) => (
-                  <div
-                    key={model}
-                    className="popup-item"
-                    data-active={model === modelLabel}
-                    onClick={() => onPickModel(model)}
-                    onKeyDown={activationHandler(() => onPickModel(model))}
-                  >
-                    <span className="ico">
-                      <I.brain size={12} />
-                    </span>
-                    <div className="nm">
-                      <span className="cmd">{model}</span>
-                    </div>
-                    {modelAcceptsImages(model, ollamaVisionModels) ? (
-                      <span className="badge">vision</span>
-                    ) : null}
-                  </div>
-                ))}
-              </>
-            ) : null}
-            {ollamaGroup || ollamaModelsError ? (
-              <>
-                <div className="model-menu-group">
-                  <span className="grow">{t("composer.modelOllamaGroup")}</span>
-                  {ollamaHiddenCount && ollamaHiddenCount > 0 ? (
-                    <span className="model-menu-note">
-                      {t("composer.modelOllamaHidden", { count: ollamaHiddenCount })}
-                    </span>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="mini-btn"
-                    title={t("composer.modelOllamaRefresh")}
-                    onClick={() => onRefreshOllamaModels?.(true)}
-                  >
-                    <I.refresh size={10} />
-                  </button>
-                </div>
-                {/* The error only matters when the tab's model IS an Ollama model —
-                    a DeepSeek/OpenAI tab with a down local daemon would otherwise
-                    show a spurious "Ollama unreachable" line. The Models settings
-                    page surfaces it unconditionally. */}
-                {ollamaModelsError && !ollamaGroup && modelLabel.startsWith("ollama/") ? (
-                  <div className="model-menu-error">
-                    {t("composer.modelOllamaError", { error: ollamaModelsError })}
-                  </div>
-                ) : null}
-                {ollamaModels && ollamaModels.length > 0
-                  ? ollamaModels.map((id) => {
-                      const full = `ollama/${id}`;
-                      return (
-                        <div
-                          key={full}
-                          className="popup-item"
-                          data-active={full === modelLabel}
-                          onClick={() => onPickModel(full)}
-                          onKeyDown={activationHandler(() => onPickModel(full))}
-                        >
-                          <span className="ico">
-                            <I.bot size={12} />
-                          </span>
-                          <div className="nm">
-                            <span className="cmd">{full}</span>
-                          </div>
-                          {modelAcceptsImages(full, ollamaVisionModels) ? (
-                            <span className="badge">vision</span>
-                          ) : null}
-                        </div>
-                      );
-                    })
-                  : null}
-              </>
-            ) : null}
-            <div className="model-menu-custom">
-              <input
-                className="field mono model-menu-custom-input"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="custom model id"
-              />
-              <button
-                type="button"
-                className="btn model-menu-custom-confirm"
-                disabled={!draft.trim() || draft.trim() === modelLabel}
-                onClick={() => onPickModel(draft.trim())}
-              >
-                {t("composer.confirm")}
-              </button>
-            </div>
-          </div>
+          <div className="model-menu-col-head">{t("composer.mainAgent")}</div>
+          <ModelList activeModel={modelLabel} onPick={onPickModel} {...modelListProps} />
         </div>
-        {/* Reasoning effort column */}
+        {/* Subagent models column — same options as the main agent (DRY). */}
         <div className="model-menu-col">
+          <div className="model-menu-col-head">{t("composer.subagent")}</div>
+          <ModelList
+            activeModel={subagentModelLabel}
+            onPick={onPickSubagentModel}
+            {...modelListProps}
+          />
+        </div>
+        {/* Reasoning effort column — narrower than the two model columns. */}
+        <div className="model-menu-col model-menu-effort-col">
+          <div className="model-menu-col-head">{t("composer.switchEffort")}</div>
           <div className="popup-list effort-menu-list">
             {EFFORTS.map((e) => (
               <div

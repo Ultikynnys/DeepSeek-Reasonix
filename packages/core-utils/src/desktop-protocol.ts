@@ -365,7 +365,8 @@ export interface SettingsEvent {
     ollama?: string;
     brave?: string;
   };
-  subagentModels?: Record<string, "flash" | "pro">;
+  /** Per-tab subagent model — the default model used when a subagent skill has no explicit `model:` frontmatter override. Absent = deepseek-v4-flash. */
+  subagentModel?: string;
   showSystemEvents?: boolean;
   /** Per-field visibility toggles for the bottom status row. Absent = all default to true. */
   statusBar?: {
@@ -575,6 +576,8 @@ export interface SettingsPatch {
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;
+  /** Per-tab subagent model — default for subagent skills without an explicit `model:` frontmatter. */
+  subagentModel?: string;
   /** Ollama chat endpoint override (OpenAI-compatible). null = back to the local default. */
   ollamaBaseUrl?: string | null;
   editor?: string;
@@ -587,7 +590,6 @@ export interface SettingsPatch {
   exaApiKey?: string | null;
   ollamaApiKey?: string | null;
   braveApiKey?: string | null;
-  subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
 }
 

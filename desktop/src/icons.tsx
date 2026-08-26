@@ -320,6 +320,12 @@ export const I = {
       <path d="M4 16V6a2 2 0 0 1 2-2h10" />
     </Ic>
   ),
+  external: (p: IconProps) => (
+    <Ic {...p}>
+      <path d="M14 4h6v6M20 4 10 14" />
+      <path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5" />
+    </Ic>
+  ),
 };
 
 export type IconKey = keyof typeof I;

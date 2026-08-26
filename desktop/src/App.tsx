@@ -363,7 +363,8 @@ export type Settings = {
     ollama?: string;
     brave?: string;
   };
-  subagentModels?: Record<string, "flash" | "pro">;
+  /** Per-tab subagent model — default for subagent skills without an explicit `model:` frontmatter. */
+  subagentModel?: string;
   showSystemEvents?: boolean;
   /** Per-field visibility toggles for the bottom status row. Absent = all default to true. */
   statusBar?: {
@@ -1322,7 +1323,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           webSearchEngine: ev.webSearchEngine,
           webSearchEndpoint: ev.webSearchEndpoint,
           webSearchApiKeys: ev.webSearchApiKeys,
-          subagentModels: ev.subagentModels,
+          subagentModel: ev.subagentModel,
           showSystemEvents: ev.showSystemEvents,
           statusBar: ev.statusBar,
           modelEndpoint: ev.modelEndpoint,
@@ -3211,6 +3212,7 @@ function TabRuntime({
                 }
                 textareaRef={composerRef}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
+                subagentModelLabel={state.settings?.subagentModel ?? "deepseek-v4-flash"}
                 reasoningEffort={state.settings?.reasoningEffort ?? "high"}
                 ollamaModels={ollamaModels}
                 ollamaModelsError={ollamaModelsError ?? undefined}
@@ -3223,6 +3225,10 @@ function TabRuntime({
                 onModelChange={(model) => {
                   applySettingsPatch({ model });
                   flashToast(t("app.toast.modelSwitched", { model }));
+                }}
+                onSubagentModelChange={(model) => {
+                  applySettingsPatch({ subagentModel: model });
+                  flashToast(t("app.toast.subagentModelSwitched", { model }));
                 }}
                 onEffortChange={applyReasoningEffort}
                 editMode={state.settings?.editMode ?? "review"}

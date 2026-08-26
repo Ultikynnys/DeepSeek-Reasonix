@@ -1,4 +1,5 @@
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SessionInfo } from "../App";
 import { t, useLang } from "../i18n";
@@ -186,6 +187,21 @@ export function Sidebar({
           </span>
           <I.chev size={12} />
         </button>
+        {workspaceDir ? (
+          <button
+            type="button"
+            className="open-workdir-btn"
+            title={t("sidebarPanel.openWorkspace")}
+            onClick={() => {
+              void openPath(workspaceDir).catch((err) =>
+                console.error("open workspace failed", err),
+              );
+            }}
+          >
+            <I.external size={12} />
+            <span>{t("sidebarPanel.openWorkspace")}</span>
+          </button>
+        ) : null}
       </div>
 
       <div className="search-row">

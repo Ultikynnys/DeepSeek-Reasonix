@@ -969,6 +969,74 @@ html[data-platform="macos"] .titlebar .tb-left {
   color: var(--muted);
   flex: 0 0 auto;
 }
+.side-workspace .open-workdir-btn {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 12px;
+  min-width: 0;
+}
+.side-workspace .open-workdir-btn svg {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.side-workspace .open-workdir-btn:hover {
+  color: var(--fg);
+  background: var(--card-hover);
+  border-color: var(--border);
+}
+.side-workspace .open-workdir-btn:hover svg {
+  color: var(--accent);
+}
+
+/* ---- File context menu (right-click on a file ref / card) ---- */
+.file-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 168px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.4);
+}
+.file-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  border-radius: 5px;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.file-menu-item:hover {
+  background: var(--card-hover);
+  color: var(--fg);
+}
+.file-menu-item .ico {
+  display: inline-flex;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.file-menu-item:hover .ico {
+  color: var(--accent);
+}
 
 .search-row {
   padding: 0 12px 10px;
@@ -4060,6 +4128,18 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+.model-menu-col-head {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 4px 8px 6px;
+}
+/* The reasoning-effort column holds short items — keep it narrow next to the
+   two model columns so it doesn't hog the popup width. */
+.model-menu-col.model-menu-effort-col {
+  flex: 0 1 220px;
 }
 .model-menu-col + .model-menu-col {
   border-left: 1px solid var(--border);

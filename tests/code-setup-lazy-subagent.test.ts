@@ -43,4 +43,21 @@ describe("buildCodeToolset", () => {
     expect(JSON.parse(out).error).toMatch(/unavailable in plan mode/i);
     await toolset.jobs.shutdown();
   });
+
+  it("accepts a per-tab subagentModel getter and builds without error", async () => {
+    // The getter is read lazily at spawn time, so merely passing it must not
+    // change build-time behavior (and must not construct a client eagerly).
+    let reads = 0;
+    const toolset = await buildCodeToolset({
+      rootDir: tmpRoot,
+      subagentModel: () => {
+        reads += 1;
+        return "deepseek-v4-flash";
+      },
+    });
+    expect(toolset.tools.size).toBeGreaterThan(0);
+    // Never consulted during toolset construction — only on an actual subagent spawn.
+    expect(reads).toBe(0);
+    await toolset.jobs.shutdown();
+  });
 });

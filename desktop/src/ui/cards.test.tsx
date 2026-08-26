@@ -334,4 +334,53 @@ describe("DiffCard — open-in-editor button", () => {
     );
     expect(openPath).not.toHaveBeenCalled();
   });
+
+  it("right-click exposes an Open-with… menu that fires open_with_dialog", async () => {
+    render(
+      wrap(
+        <ToolCard
+          name="read_file"
+          args={JSON.stringify({ path: "src/foo.ts", range: "1-10" })}
+          result="…content…"
+          ok
+        />,
+      ),
+    );
+
+    const btn = screen.getByRole("button", { name: "src/foo.ts:1" });
+    fireEvent.contextMenu(btn);
+
+    const openWith = await screen.findByRole("menuitem", { name: "Open with…" });
+    expect(openWith).toBeTruthy();
+    expect(invoke).not.toHaveBeenCalledWith("open_with_dialog", expect.anything());
+
+    fireEvent.click(openWith);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_with_dialog", {
+        path: "/repo/src/foo.ts",
+      }),
+    );
+  });
+
+  it("right-click menu also offers Copy path and copies the resolved absolute path", async () => {
+    render(
+      wrap(
+        <ToolCard
+          name="write_file"
+          args={JSON.stringify({ path: "src/new.ts", content: "…" })}
+          result="ok"
+          ok
+        />,
+      ),
+    );
+
+    const btn = screen.getByRole("button", { name: "src/new.ts" });
+    fireEvent.contextMenu(btn);
+
+    const copyPath = await screen.findByRole("menuitem", { name: "Copy path" });
+    fireEvent.click(copyPath);
+    await waitFor(() =>
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("/repo/src/new.ts"),
+    );
+  });
 });

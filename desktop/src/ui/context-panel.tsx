@@ -7,6 +7,7 @@ import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
+import { FileMenu } from "./file-menu";
 import { activationHandler } from "./keyboard";
 
 type Tab = "files" | "tools" | "memory" | "rules";
@@ -190,16 +191,19 @@ type TreeNode =
   | { kind: "dir"; depth: number; name: string; key: string }
   | { kind: "file"; depth: number; name: string; path: string; key: string; status: "c" | "m" };
 
-async function openContextFile(path: string, settings: Settings | null): Promise<void> {
+function resolveContextAbs(path: string, settings: Settings | null): string {
   const workspaceDir = settings?.workspaceDir;
   const isWindows = workspaceDir?.includes("\\") ?? false;
   const sep = isWindows ? "\\" : "/";
-  const abs =
-    workspaceDir && !/^[a-zA-Z]:[\\/]/.test(path) && !path.startsWith("/")
-      ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "").replace(/\//g, sep)}`
-      : isWindows
-        ? path.replace(/\//g, "\\")
-        : path;
+  return workspaceDir && !/^[a-zA-Z]:[\\/]/.test(path) && !path.startsWith("/")
+    ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "").replace(/\//g, sep)}`
+    : isWindows
+      ? path.replace(/\//g, "\\")
+      : path;
+}
+
+async function openContextFile(path: string, settings: Settings | null): Promise<void> {
+  const abs = resolveContextAbs(path, settings);
   // Same contract as openWithEditor: an empty command makes the Rust side
   // auto-detect a code editor (code / cursor / windsurf) so `.ts` files
   // don't fall through to the Windows media player; openPath is only the
@@ -249,6 +253,7 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
 
 function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Settings | null }) {
   const tree = useMemo(() => buildSessionTree(files), [files]);
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   return (
     <div className="ctx-block">
       <div className="h">
@@ -285,6 +290,11 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
                 style={{ paddingLeft: 4 + n.depth * 14 }}
                 onClick={() => void openContextFile(n.path, settings)}
                 onKeyDown={activationHandler(() => void openContextFile(n.path, settings))}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setMenu({ x: e.clientX, y: e.clientY, path: n.path });
+                }}
               >
                 <span className="ico">
                   <I.file size={12} />
@@ -331,6 +341,14 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
           )
         )}
       </div>
+      {menu ? (
+        <FileMenu
+          anchor={{ x: menu.x, y: menu.y }}
+          abs={resolveContextAbs(menu.path, settings)}
+          editor={settings?.editor?.trim() || undefined}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }

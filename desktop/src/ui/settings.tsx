@@ -291,13 +291,7 @@ export function SettingsModal({
                 onRemove={onRemoveMcpSpec}
               />
             )}
-            {page === "skills" && (
-              <PageSkills
-                skills={skills}
-                subagentModels={settings.subagentModels ?? {}}
-                onSave={onSave}
-              />
-            )}
+            {page === "skills" && <PageSkills skills={skills} />}
             {page === "memory" && (
               <PageMemory
                 entries={memory}
@@ -1398,18 +1392,7 @@ function PageMCP({
   );
 }
 
-function PageSkills({
-  skills,
-  subagentModels,
-  onSave,
-}: {
-  skills: SkillInfo[];
-  subagentModels: Record<string, "flash" | "pro">;
-  onSave: (patch: SettingsPatch) => void;
-}) {
-  const setSubagentModel = (name: string, value: "flash" | "pro") => {
-    onSave({ subagentModels: { ...subagentModels, [name]: value } });
-  };
+function PageSkills({ skills }: { skills: SkillInfo[] }) {
   return (
     <section className="section">
       <div className="stitle">{t("settings.skillsLoaded", { count: skills.length })}</div>
@@ -1449,18 +1432,6 @@ function PageSkills({
                   {s.model ? ` · ${s.model}` : ""}
                 </div>
               </div>
-              {s.runAs === "subagent" ? (
-                <select
-                  className="field"
-                  style={{ marginLeft: "auto", minWidth: 96 }}
-                  value={subagentModels[s.name] ?? "flash"}
-                  onChange={(e) => setSubagentModel(s.name, e.target.value as "flash" | "pro")}
-                  title={t("settings.subagentModelHint")}
-                >
-                  <option value="flash">{t("settings.subagentModelFlash")}</option>
-                  <option value="pro">{t("settings.subagentModelPro")}</option>
-                </select>
-              ) : null}
             </div>
             <div className="desc">{s.description}</div>
             <div

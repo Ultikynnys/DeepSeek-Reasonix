@@ -88,6 +88,9 @@ export const en = {
     insertFile: "Insert file (@ mention)",
     insertImage: "Insert image (@ mention)",
     switchModel: "Switch model",
+    switchSubagentModel: "Switch subagent model",
+    mainAgent: "Main agent",
+    subagent: "Subagent",
     switchEffort: "Switch reasoning effort",
     modelAntigravityGroup: "Google Antigravity",
     modelAntigravityRefresh: "Refresh",
@@ -312,9 +315,6 @@ export const en = {
     skillsLoaded: "Loaded · {count} · invoke via / commands",
     skillsEmpty:
       "No skills available. Create SKILL.md under ~/.reasonix/skills/ or .reasonix/skills/ in your project root.",
-    subagentModelFlash: "flash",
-    subagentModelPro: "pro",
-    subagentModelHint: "Model used when this skill spawns its isolated subagent",
     // Memory
     memorySection: "Long-term memory",
     memoryDesc:
@@ -377,6 +377,11 @@ export const en = {
     copy: "copy",
     copied: "copied",
   },
+  fileMenu: {
+    openInEditor: "Open in editor",
+    openWith: "Open with…",
+    copyPath: "Copy path",
+  },
   effort: {
     lowDesc: "fastest — minimal reasoning",
     mediumDesc: "balanced",
@@ -413,6 +418,7 @@ export const en = {
       exportDialogTitle: "Export conversation",
       emptySession: "Session is empty",
       modelSwitched: "Model → {model}",
+      subagentModelSwitched: "Subagent model → {model}",
       effortSwitched: "Effort → {effort}",
       modeSwitched: "Mode: {mode}",
       taskComplete: "Task complete",
@@ -756,6 +762,7 @@ export const en = {
     noWorkspace: "No workspace",
     pickWorkspace: "Pick workspace",
     switchWorkspace: "Switch workspace · {workspace}",
+    openWorkspace: "Open workspace",
     searchSessions: "Search sessions…",
     recent: "Recent",
     noSessions: "No sessions yet",

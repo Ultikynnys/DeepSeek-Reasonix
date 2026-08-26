@@ -123,7 +123,6 @@ import {
   saveOpenAIOAuth,
   saveReasoningEffort,
   saveShowSystemEvents,
-  saveSubagentModels,
   saveWorkspaceDir,
   writeConfig,
 } from "../../config.js";
@@ -199,7 +198,7 @@ import {
   visionModelsFor,
 } from "../../ollama-model-map.js";
 import { registerSeeImageTool } from "../../tools/see-image.js";
-import type { SubagentEvent } from "../../tools/subagent.js";
+import { DEFAULT_SUBAGENT_MODEL, type SubagentEvent } from "../../tools/subagent.js";
 
 import {
   discoverExternalSessionApps,
@@ -893,7 +892,7 @@ function emitSettings(tab: Tab): void {
       webSearchEngine: readWebSearchEngine(),
       webSearchEndpoint: readConfig().webSearchEndpoint,
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
-      subagentModels: loadSubagentModels(),
+      subagentModel: tab.currentSubagentModel,
       showSystemEvents: loadShowSystemEvents(),
       statusBar: readConfig().statusBar,
       modelEndpoint: modelEndpointFor(tab.currentModel),
@@ -1882,6 +1881,8 @@ interface Tab {
   rootDir: string;
   currentSession: string;
   currentModel: string;
+  /** Per-tab subagent model — the default model for subagent skills without an explicit `model:` frontmatter. Persisted in session meta like the main model. */
+  currentSubagentModel: string;
   /** Per-tab reasoning effort — restored from the session's meta on load so a config reset doesn't flip it back to the global default. */
   currentReasoningEffort: import("../../config.js").ReasoningEffort;
   budgetUsd: number | undefined;
@@ -1999,15 +2000,16 @@ function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
   return name;
 }
 
-/** The user changed the model/effort enum in the desktop UI — persist the new
- *  pair into the open conversation's meta so a resume (even after a reinstall
- *  wiped the config) restores it. */
+/** The user changed the model/effort/subagent-model enums in the desktop UI —
+ *  persist the new values into the open conversation's meta so a resume (even
+ *  after a reinstall wiped the config) restores them. */
 function persistSessionModelPrefs(tab: Tab): void {
   if (!tab.currentSession) return;
   try {
     patchSessionMeta(tab.currentSession, {
       model: tab.currentModel,
       reasoningEffort: tab.currentReasoningEffort,
+      subagentModel: tab.currentSubagentModel,
     });
   } catch (err) {
     emitDiagnosticError("session.model-prefs.persist.failed", err, {
@@ -2030,6 +2032,7 @@ function stampSessionModelPrefs(tab: Tab): void {
     patchSessionMeta(tab.currentSession, {
       model: meta.model ?? tab.currentModel,
       reasoningEffort: meta.reasoningEffort ?? tab.currentReasoningEffort,
+      subagentModel: meta.subagentModel ?? tab.currentSubagentModel,
     });
   } catch (err) {
     emitDiagnosticError("session.model-prefs.stamp.failed", err, {
@@ -2041,13 +2044,13 @@ function stampSessionModelPrefs(tab: Tab): void {
   }
 }
 
-/** Rebind the tab's model + effort to the conversation's stored pair — a
- *  reinstall wiped the global config, but the conversation comes back on the
- *  model it was using. Sessions without stored prefs keep the tab's pair. */
+/** Rebind the tab's model/effort/subagent-model to the conversation's stored
+ *  values — a reinstall can't flip an ongoing conversation's models. */
 function restoreSessionModelPrefs(tab: Tab, meta: SessionMeta): void {
   const prefs = resolveSessionModelPrefs(meta, {
     model: tab.currentModel,
     reasoningEffort: tab.currentReasoningEffort,
+    subagentModel: tab.currentSubagentModel,
   });
   if (prefs.model !== tab.currentModel) {
     tab.currentModel = prefs.model;
@@ -2062,6 +2065,7 @@ function restoreSessionModelPrefs(tab: Tab, meta: SessionMeta): void {
     }
   }
   tab.currentReasoningEffort = prefs.reasoningEffort;
+  tab.currentSubagentModel = prefs.subagentModel;
 }
 
 /** The toolset is built once per tab — keep `see_image` registered iff the
@@ -2378,6 +2382,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       rootDir: dir,
       currentSession: "",
       currentModel: model,
+      currentSubagentModel: DEFAULT_SUBAGENT_MODEL,
       currentReasoningEffort: loadReasoningEffort(),
       budgetUsd: opts.budgetUsd,
       ctxMaxOverride: loadContextTokens(),
@@ -2402,6 +2407,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.currentSession = mintSessionFor(dir, {
       model: tab.currentModel,
       reasoningEffort: tab.currentReasoningEffort,
+      subagentModel: tab.currentSubagentModel,
     });
     tabs.set(tab.id, tab);
     emitTabDiagnostic(tab, "tab.created", { active: false }, "info");
@@ -2434,6 +2440,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       onJobsChanged: () => emitJobs(),
       subagentSink: subagentSinkFor(tab),
       subagentBilling: (m) => subagentBillingFor(m),
+      subagentModel: () => tab.currentSubagentModel,
       visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.toolset = toolset;
@@ -2944,6 +2951,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       onJobsChanged: () => emitJobs(),
       subagentSink: subagentSinkFor(tab),
       subagentBilling: (m) => subagentBillingFor(m),
+      subagentModel: () => tab.currentSubagentModel,
       visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.system = codeSystemPrompt(target, {
@@ -4022,6 +4030,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       tab.currentSession = mintSessionFor(tab.rootDir, {
         model: tab.currentModel,
         reasoningEffort: tab.currentReasoningEffort,
+        subagentModel: tab.currentSubagentModel,
       });
       persistOpenTabs();
       if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
@@ -4306,9 +4315,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           writeConfig(cfg);
         }
-        if (msg.subagentModels !== undefined) {
-          saveSubagentModels(msg.subagentModels);
-          emitSkills(tab);
+        if (msg.subagentModel !== undefined) {
+          const next = msg.subagentModel.trim();
+          if (next) {
+            tab.currentSubagentModel = next;
+            // Resolved lazily at spawn time (setup reads `() => tab.currentSubagentModel`),
+            // so no toolset rebuild is needed — the next subagent spawn picks it up.
+            persistSessionModelPrefs(tab);
+          }
         }
         if (msg.model !== undefined) {
           const next = msg.model.trim();

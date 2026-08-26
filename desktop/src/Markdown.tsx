@@ -39,6 +39,12 @@ export async function openWithEditor(
   }
 }
 
+/** Open a file with the native OS "Open with…" chooser, letting the user pick
+ *  which app handles it (notepad++, notepad, etc.) instead of a code editor. */
+export async function openWithDialog(abs: string): Promise<void> {
+  await invoke("open_with_dialog", { path: abs });
+}
+
 type WorkspaceCtx = { dir?: string; editor?: string };
 export const WorkspaceContext = createContext<WorkspaceCtx>({});
 export const WorkspaceProvider = WorkspaceContext.Provider;

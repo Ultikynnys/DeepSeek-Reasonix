@@ -66,6 +66,9 @@ export interface CodeToolsetOpts {
    *  (token-priced cost). Desktop supplies this so plan-based providers show a
    *  quota % instead of an invented dollar figure. */
   subagentBilling?: (model: string) => SubagentBilling | undefined;
+  /** Per-tab subagent model, resolved lazily at spawn time via a getter so a
+   *  change applies to the next spawn without rebuilding the toolset. */
+  subagentModel?: () => string;
 }
 
 export interface CodeToolset {
@@ -135,7 +138,10 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     subagentModels: loadSubagentModels(),
     onSkillInstalled: opts.onSkillInstalled,
     subagentRunner: async (skill, task, signal, parentCallId, parentTurn) => {
-      const model = skill.model ?? DEFAULT_MODEL;
+      // Per-tab default wins over the skill's explicit model (frontmatter or the
+      // per-skill config override baked into `skill.model`), so the desktop's
+      // subagent selector is authoritative; DEFAULT_MODEL is the last resort.
+      const model = opts.subagentModel?.() ?? skill.model ?? DEFAULT_MODEL;
       let subagentClient = subagentClients.get(model);
       if (!subagentClient) {
         const ep = loadEndpointForModel(model);

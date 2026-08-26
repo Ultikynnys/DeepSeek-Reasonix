@@ -71,6 +71,66 @@ describe("desktop Composer model catalog", () => {
     fireEvent.click(refresh!);
     expect(onRefreshAntigravityModels).toHaveBeenCalledOnce();
   });
+
+  it("renders a subagent model column that shares the main-agent catalog (DRY)", () => {
+    const onModelChange = vi.fn();
+    const onSubagentModelChange = vi.fn();
+    const { container } = renderComposer({
+      subagentModelLabel: "deepseek-v4-flash",
+      onModelChange,
+      onSubagentModelChange,
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+
+    // Two model columns render the same catalog — one per selector.
+    const lists = container.querySelectorAll(".model-menu-list");
+    expect(lists.length).toBe(2);
+
+    // Both expose the same KNOWN_MODELS (the DRY requirement).
+    const mainText = lists[0]?.textContent ?? "";
+    const subText = lists[1]?.textContent ?? "";
+    expect(mainText).toContain("deepseek-v4-flash");
+    expect(subText).toContain("deepseek-v4-flash");
+    expect(subText).toContain("deepseek-v4-pro");
+
+    // Column headers distinguish the two selectors.
+    expect(container.textContent).toContain("Main agent");
+    expect(container.textContent).toContain("Subagent");
+
+    // Clicking a model in the subagent column routes to onSubagentModelChange.
+    const subItems = lists[1]!.querySelectorAll(".popup-item");
+    const flash = Array.from(subItems).find((el) =>
+      el.textContent?.includes("deepseek-v4-flash"),
+    );
+    fireEvent.click(flash!);
+    expect(onSubagentModelChange).toHaveBeenCalledWith("deepseek-v4-flash");
+    expect(onModelChange).not.toHaveBeenCalled();
+  });
+
+  it("subagent column shares the backend-generated Ollama and Gemini models with the main agent", () => {
+    const ollamaModels = ["llama3.1:latest", "qwen3:32b", "llava"];
+    const antigravityModels = ["gemini-2.5-pro", "gemini-2.5-flash", "claude-3-5-sonnet"];
+    const { container } = renderComposer({
+      subagentModelLabel: "deepseek-v4-flash",
+      ollamaModels,
+      antigravityModels,
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+
+    const lists = container.querySelectorAll(".model-menu-list");
+    expect(lists.length).toBe(2);
+    const mainText = lists[0]?.textContent ?? "";
+    const subText = lists[1]?.textContent ?? "";
+
+    // The subagent column carries the SAME backend-fetched models as the main
+    // agent — Ollama catalog ids and the signed-in Antigravity/Gemini ids.
+    for (const id of [...ollamaModels, ...antigravityModels]) {
+      expect(mainText).toContain(id);
+      expect(subText).toContain(id);
+    }
+    expect(subText).toContain("Google Antigravity");
+    expect(subText).toContain("Ollama");
+  });
 });
 
 describe("desktop Composer @ popup", () => {

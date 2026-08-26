@@ -691,32 +691,60 @@ describe("session persistence", () => {
 });
 
 describe("resolveSessionModelPrefs", () => {
-  const fallback = { model: "deepseek-v4-flash", reasoningEffort: "high" } as const;
+  const fallback = {
+    model: "deepseek-v4-flash",
+    reasoningEffort: "high",
+    subagentModel: "deepseek-v4-flash",
+  } as const;
 
-  it("prefers the stored pair when both are present", () => {
+  it("prefers the stored triple when all present", () => {
     expect(
-      resolveSessionModelPrefs({ model: "deepseek-v4-pro", reasoningEffort: "max" }, fallback),
-    ).toEqual({ model: "deepseek-v4-pro", reasoningEffort: "max" });
+      resolveSessionModelPrefs(
+        { model: "deepseek-v4-pro", reasoningEffort: "max", subagentModel: "deepseek-v4-pro" },
+        fallback,
+      ),
+    ).toEqual({
+      model: "deepseek-v4-pro",
+      reasoningEffort: "max",
+      subagentModel: "deepseek-v4-pro",
+    });
   });
 
   it("falls back per-field when a value is missing", () => {
     expect(resolveSessionModelPrefs({ model: "deepseek-v4-pro" }, fallback)).toEqual({
       model: "deepseek-v4-pro",
       reasoningEffort: "high",
+      subagentModel: "deepseek-v4-flash",
     });
-    expect(resolveSessionModelPrefs({ reasoningEffort: "low" }, fallback)).toEqual({
+    expect(
+      resolveSessionModelPrefs(
+        { reasoningEffort: "low", subagentModel: "deepseek-v4-pro" },
+        fallback,
+      ),
+    ).toEqual({
       model: "deepseek-v4-flash",
       reasoningEffort: "low",
+      subagentModel: "deepseek-v4-pro",
     });
   });
 
   it("rejects blank or malformed values", () => {
-    expect(resolveSessionModelPrefs({ model: "   ", reasoningEffort: "ultra" }, fallback)).toEqual(
-      fallback,
-    );
     expect(
-      resolveSessionModelPrefs({ model: "  deepseek-v4-pro  ", reasoningEffort: 42 }, fallback),
-    ).toEqual({ model: "deepseek-v4-pro", reasoningEffort: "high" });
+      resolveSessionModelPrefs(
+        { model: "   ", reasoningEffort: "ultra", subagentModel: "  " },
+        fallback,
+      ),
+    ).toEqual(fallback);
+    expect(
+      resolveSessionModelPrefs(
+        { model: "  deepseek-v4-pro  ", reasoningEffort: 42, subagentModel: 7 },
+        fallback,
+      ),
+    ).toEqual({
+      model: "deepseek-v4-pro",
+      reasoningEffort: "high",
+      subagentModel: "deepseek-v4-flash",
+    });
   });
 });
 
