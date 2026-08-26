@@ -454,6 +454,63 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
     expect(next.settings?.reasoningEffort).toBe("low");
     expect(next.settings?.editMode).toBe("auto");
   });
+
+  it("stores the per-tab subagent model from $settings and settings_patch", () => {
+    // Each tab has its own reducer state — this locks in that the subagent
+    // model is a per-tab field (not global), so different tabs can hold
+    // different main/subagent model combinations.
+    const fromEvent = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$settings",
+        reasoningEffort: "high",
+        editMode: "review",
+        budgetUsd: null,
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "deepseek-v4-pro",
+        subagentModel: "deepseek-v4-flash",
+        version: "0.50.1",
+      },
+    });
+    expect(fromEvent.settings?.model).toBe("deepseek-v4-pro");
+    expect(fromEvent.settings?.subagentModel).toBe("deepseek-v4-flash");
+
+    // An explicit chat-menu pick patches the tab's own subagent model.
+    const base: Parameters<typeof reduce>[0] = {
+      ...initialState(),
+      settings: {
+        reasoningEffort: "high",
+        editMode: "review",
+        budgetUsd: null,
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "deepseek-v4-flash",
+        version: "0.50.1",
+      },
+    };
+    const patched = reduce(base, {
+      t: "settings_patch",
+      patch: { subagentModel: "gpt-5.6-sol" },
+    });
+    expect(patched.settings?.subagentModel).toBe("gpt-5.6-sol");
+
+    // Absent subagentModel = subagents follow the main model.
+    const noOverride = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$settings",
+        reasoningEffort: "high",
+        editMode: "review",
+        budgetUsd: null,
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "deepseek-v4-pro",
+        version: "0.50.1",
+      },
+    });
+    expect(noOverride.settings?.subagentModel).toBeUndefined();
+  });
 });
 
 describe("Desktop App reducer — yolo interactive countdown", () => {
