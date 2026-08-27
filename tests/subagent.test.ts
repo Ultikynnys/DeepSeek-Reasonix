@@ -176,10 +176,13 @@ describe("registerSubagentTool", () => {
 
   it("stops and trims a degenerating streamed child response", async () => {
     let requestSignal: AbortSignal | undefined;
+    const repeated = Array.from({ length: 120 }, (_, i) =>
+      i % 4 === 0 ? "tool_result" : `tool_result${i % 3 === 0 ? "\n\n" : "\n"}`,
+    ).join("");
     const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
       requestSignal = init?.signal ?? undefined;
       const frames = [
-        `data: ${JSON.stringify({ choices: [{ delta: { content: `Verified findings. ${"wright".repeat(200)}` } }] })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ delta: { content: `Verified findings. ${repeated}` } }] })}\n\n`,
         "data: [DONE]\n\n",
       ];
       const body = new ReadableStream({
@@ -206,7 +209,7 @@ describe("registerSubagentTool", () => {
     expect(requestSignal?.aborted).toBe(true);
     expect(result.success).toBe(true);
     expect(result.output).toBe("Verified findings. ");
-    expect(result.output).not.toContain("wrightwright");
+    expect(result.output).not.toContain("tool_result");
     expect(
       events.some(
         (event) =>

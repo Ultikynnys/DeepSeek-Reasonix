@@ -21,6 +21,8 @@ export class StreamRepetitionDetector {
   private readonly maxPeriod: number;
   private readonly maxBufferChars: number;
   private buffer = "";
+  /** Raw stream offset of each normalized character retained in buffer. */
+  private rawOffsets: number[] = [];
   private totalChars = 0;
 
   constructor(opts: StreamRepetitionDetectorOptions = {}) {
@@ -35,8 +37,14 @@ export class StreamRepetitionDetector {
 
   append(delta: string): RepetitionDetection | null {
     if (delta.length === 0) return null;
+    const deltaStart = this.totalChars;
     this.totalChars += delta.length;
-    this.buffer += delta;
+    for (let i = 0; i < delta.length; i++) {
+      const char = delta[i]!;
+      if (/\s/u.test(char)) continue;
+      this.buffer += char;
+      this.rawOffsets.push(deltaStart + i);
+    }
 
     const maxPeriod = Math.min(this.maxPeriod, Math.floor(this.buffer.length / this.minRepeats));
     for (let period = 1; period <= maxPeriod; period++) {
@@ -57,15 +65,17 @@ export class StreamRepetitionDetector {
       while (runStart > 0 && this.buffer[runStart - 1] === this.buffer[runStart - 1 + period]) {
         runStart--;
       }
-      const repeatedChars = this.buffer.length - runStart;
+      const rawRunStart = this.rawOffsets[runStart];
+      if (rawRunStart === undefined) continue;
       return {
         period,
-        repeatedChars,
-        safeLength: this.totalChars - repeatedChars,
+        repeatedChars: this.totalChars - rawRunStart,
+        safeLength: rawRunStart,
       };
     }
     if (this.buffer.length > this.maxBufferChars) {
       this.buffer = this.buffer.slice(-this.maxBufferChars);
+      this.rawOffsets = this.rawOffsets.slice(-this.maxBufferChars);
     }
     return null;
   }

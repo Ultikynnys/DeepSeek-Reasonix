@@ -2170,6 +2170,75 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     expect(JSON.stringify(loop.log.entries)).not.toContain("wrightwright");
   });
 
+  it("stops mixed-whitespace repeated tool_result text", async () => {
+    const repeated = Array.from({ length: 120 }, (_, i) =>
+      i % 4 === 0 ? "tool_result" : `tool_result${i % 3 === 0 ? "\n\n" : "\n"}`,
+    ).join("");
+    const text = `Safe prefix\n${repeated}`;
+    const frames = Array.from(
+      { length: Math.ceil(text.length / 37) },
+      (_, i) =>
+        `data: ${JSON.stringify({ choices: [{ delta: { content: text.slice(i * 37, i * 37 + 37) } }] })}\n\n`,
+    );
+    frames.push("data: [DONE]\n\n");
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: (async () => {
+        const body = new ReadableStream({
+          start(ctrl) {
+            for (const frame of frames) ctrl.enqueue(new TextEncoder().encode(frame));
+            ctrl.close();
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }) as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: true,
+      maxToolIters: 1,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const event of loop.step("find it")) events.push(event);
+
+    expect(events.find((event) => event.role === "assistant_final")?.content).toBe("Safe prefix\n");
+    expect(JSON.stringify(loop.log.entries)).not.toContain("tool_resulttool_result");
+  });
+
+  it("stops a prefix-free repeated tool_result subagent-style stream", async () => {
+    const repeated = Array.from({ length: 120 }, (_, i) =>
+      i % 2 === 0 ? "tool_result\n" : "tool_result",
+    ).join("");
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: (async () => {
+        const frame = `data: ${JSON.stringify({ choices: [{ delta: { content: repeated } }] })}\n\n`;
+        return new Response(new TextEncoder().encode(`${frame}data: [DONE]\n\n`), {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }) as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: true,
+      maxToolIters: 1,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const event of loop.step("find it")) events.push(event);
+
+    expect(events.find((event) => event.role === "assistant_final")?.content).toContain(
+      "produced only repetitive output",
+    );
+  });
+
   it("stops and trims a degenerating reasoning stream", async () => {
     const reasoning = `Useful thought ${"cycle".repeat(220)}`;
     const client = new DeepSeekClient({

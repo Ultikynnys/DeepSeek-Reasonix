@@ -27,6 +27,24 @@ describe("StreamRepetitionDetector", () => {
     expect(detect(chunks)?.safeLength).toBe("useful prefix ".length);
   });
 
+  it("detects a repeated unit despite variable whitespace", () => {
+    const unit = "tool_result";
+    const repeated = Array.from({ length: 120 }, (_, i) => {
+      if (i % 5 === 0) return unit;
+      if (i % 3 === 0) return `${unit}\n\n`;
+      return `${unit}\n`;
+    }).join("");
+    const text = `useful prefix\n${repeated}`;
+    const chunks = Array.from({ length: Math.ceil(text.length / 13) }, (_, i) =>
+      text.slice(i * 13, i * 13 + 13),
+    );
+
+    expect(detect(chunks)).toMatchObject({
+      period: unit.length,
+      safeLength: "useful prefix\n".length,
+    });
+  });
+
   it("does not flag short repetitions or ordinary prose", () => {
     expect(detect(["ha".repeat(400)])).toBeNull();
     expect(detect(["0123456789abcdef".repeat(60)])).toBeNull();
