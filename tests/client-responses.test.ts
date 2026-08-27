@@ -279,11 +279,11 @@ describe("Responses streaming", () => {
     });
   });
 
-  it("throws a formatted error on response.failed", async () => {
+  it("throws the nested provider error on response.failed", async () => {
     const client = codexClient(
       sseFetch([
         'data: {"type":"response.output_text.delta","delta":"partial"}\n\n',
-        'data: {"type":"response.failed","code":"invalid_prompt","message":"prompt is not allowed"}\n\n',
+        'data: {"type":"response.failed","response":{"error":{"code":"invalid_prompt","message":"prompt is not allowed"}}}\n\n',
       ]),
     );
     const chunks: any[] = [];
@@ -294,8 +294,35 @@ describe("Responses streaming", () => {
       })) {
         chunks.push(c);
       }
-    }).rejects.toThrow(/^Upstream 400: prompt is not allowed/);
+    }).rejects.toThrow(/^Upstream 400: prompt is not allowed \(invalid_prompt\)$/);
     expect(chunks.some((c) => c.contentDelta === "partial")).toBe(true);
+  });
+
+  it.each([
+    [
+      "top-level compatibility",
+      { code: "invalid_prompt", message: "legacy failure" },
+      "Upstream 400: legacy failure (invalid_prompt)",
+    ],
+    [
+      "nested message only",
+      { response: { error: { message: "model unavailable" } } },
+      "Upstream 400: model unavailable",
+    ],
+    ["malformed nested error", { response: { error: "unknown" } }, "Upstream 400: response failed"],
+  ])("formats %s response.failed details", async (_name, failure, expected) => {
+    const client = codexClient(
+      sseFetch([`data: ${JSON.stringify({ type: "response.failed", ...failure })}\n\n`]),
+    );
+
+    await expect(async () => {
+      for await (const _chunk of client.stream({
+        model: "gpt-5.6-sol",
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        // Consume the stream so its terminal failure is raised.
+      }
+    }).rejects.toThrow(expected);
   });
 
   it("marks incomplete streams with finishReason incomplete", async () => {

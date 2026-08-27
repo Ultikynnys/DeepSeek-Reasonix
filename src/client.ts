@@ -1423,9 +1423,7 @@ export class DeepSeekClient {
                 break;
               case "response.failed":
                 streamError = Object.assign(
-                  new Error(
-                    `${this._errorPrefix()} 400: ${json.message ?? json.code ?? "response failed"}`,
-                  ),
+                  new Error(`${this._errorPrefix()} 400: ${responsesFailureDetail(json)}`),
                   { phase: "stream_body_read" as const },
                 );
                 break;
@@ -1507,6 +1505,27 @@ export class DeepSeekClient {
       reader.releaseLock();
     }
   }
+}
+
+function responsesFailureDetail(event: unknown): string {
+  if (!event || typeof event !== "object") return "response failed";
+  const root = event as Record<string, unknown>;
+  const response =
+    root.response && typeof root.response === "object"
+      ? (root.response as Record<string, unknown>)
+      : undefined;
+  const nested =
+    response?.error && typeof response.error === "object"
+      ? (response.error as Record<string, unknown>)
+      : undefined;
+  const message =
+    (typeof nested?.message === "string" && nested.message) ||
+    (typeof root.message === "string" && root.message);
+  const code =
+    (typeof nested?.code === "string" && nested.code) ||
+    (typeof root.code === "string" && root.code);
+  if (message && code && !message.includes(code)) return `${message} (${code})`;
+  return message || code || "response failed";
 }
 
 export type { ChatMessage, ToolCall, ToolSpec };
