@@ -176,9 +176,11 @@ describe("registerSubagentTool", () => {
 
   it("stops and trims a degenerating streamed child response", async () => {
     let requestSignal: AbortSignal | undefined;
-    const repeated = Array.from({ length: 120 }, (_, i) =>
-      i % 4 === 0 ? "tool_result" : `tool_result${i % 3 === 0 ? "\n\n" : "\n"}`,
-    ).join("");
+    const first =
+      'Actually, "loss" might be a specific animation sequence. Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n';
+    const second =
+      "Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n";
+    const repeated = `${first}${second}`.repeat(20);
     const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
       requestSignal = init?.signal ?? undefined;
       const frames = [
@@ -208,8 +210,8 @@ describe("registerSubagentTool", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(requestSignal?.aborted).toBe(true);
     expect(result.success).toBe(true);
-    expect(result.output).toBe("Verified findings. ");
-    expect(result.output).not.toContain("tool_result");
+    expect(result.output).toBe("Verified findings");
+    expect(result.output).not.toContain("eyeball setup");
     expect(
       events.some(
         (event) =>
@@ -220,7 +222,7 @@ describe("registerSubagentTool", () => {
     ).toBe(true);
     expect(events.at(-1)).toMatchObject({
       kind: "end",
-      summary: "Verified findings. ",
+      summary: "Verified findings",
     });
   });
 

@@ -1,5 +1,5 @@
 export interface RepetitionDetection {
-  /** Length of the smallest repeating unit, in UTF-16 code units. */
+  /** Length of the smallest repeating unit in normalized, non-whitespace characters. */
   period: number;
   /** Full periodic suffix length, including repeats received before detection. */
   repeatedChars: number;
@@ -27,11 +27,11 @@ export class StreamRepetitionDetector {
 
   constructor(opts: StreamRepetitionDetectorOptions = {}) {
     this.minRepeatedChars = opts.minRepeatedChars ?? 1024;
-    this.minRepeats = opts.minRepeats ?? 32;
-    this.maxPeriod = opts.maxPeriod ?? 64;
+    this.minRepeats = opts.minRepeats ?? 6;
+    this.maxPeriod = opts.maxPeriod ?? 1024;
     this.maxBufferChars = Math.max(
-      opts.maxBufferChars ?? 4096,
-      this.minRepeatedChars + this.maxPeriod,
+      opts.maxBufferChars ?? 8192,
+      this.minRepeatedChars + this.maxPeriod * this.minRepeats,
     );
   }
 

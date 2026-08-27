@@ -45,6 +45,21 @@ describe("StreamRepetitionDetector", () => {
     });
   });
 
+  it("detects an alternating repeated sentence block", () => {
+    const first =
+      'Actually, "loss" might be a specific animation sequence. Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n';
+    const second =
+      "Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n";
+    const prefix =
+      "Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n";
+    const text = `${prefix}${`${first}${second}`.repeat(20)}`;
+    const chunks = Array.from({ length: Math.ceil(text.length / 29) }, (_, i) =>
+      text.slice(i * 29, i * 29 + 29),
+    );
+
+    expect(detect(chunks)?.safeLength).toBe(0);
+  });
+
   it("does not flag short repetitions or ordinary prose", () => {
     expect(detect(["ha".repeat(400)])).toBeNull();
     expect(detect(["0123456789abcdef".repeat(60)])).toBeNull();

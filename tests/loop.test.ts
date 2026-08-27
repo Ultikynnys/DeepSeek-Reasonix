@@ -2239,6 +2239,46 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     );
   });
 
+  it("stops the reported alternating sentence loop", async () => {
+    const first =
+      'Actually, "loss" might be a specific animation sequence. Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n';
+    const second =
+      "Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n";
+    const text = `${second}${`${first}${second}`.repeat(20)}`;
+    const frames = Array.from(
+      { length: Math.ceil(text.length / 41) },
+      (_, i) =>
+        `data: ${JSON.stringify({ choices: [{ delta: { content: text.slice(i * 41, i * 41 + 41) } }] })}\n\n`,
+    );
+    frames.push("data: [DONE]\n\n");
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: (async () => {
+        return new Response(new TextEncoder().encode(frames.join("")), {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }) as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: true,
+      maxToolIters: 1,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const event of loop.step("inspect animation")) events.push(event);
+
+    expect(events.find((event) => event.role === "warning")?.content).toContain(
+      "Stopped a degenerating model stream",
+    );
+    expect(events.find((event) => event.role === "assistant_final")?.content).toContain(
+      "produced only repetitive output",
+    );
+    expect(JSON.stringify(loop.log.entries)).not.toContain("eyeball setup");
+  });
+
   it("stops and trims a degenerating reasoning stream", async () => {
     const reasoning = `Useful thought ${"cycle".repeat(220)}`;
     const client = new DeepSeekClient({
