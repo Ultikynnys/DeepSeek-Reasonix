@@ -41,6 +41,10 @@ export interface LoopEvent {
   image?: { dataUrl: string; mimeType: string };
   severity?: EventSeverity;
   reasoningDelta?: string;
+  /** Complete reasoning snapshot, present on finals that replace streamed output. */
+  reasoningContent?: string;
+  /** Final content/reasoning supersedes deltas already rendered for this turn. */
+  replaceStreamedOutput?: boolean;
   toolName?: string;
   /** Raw args JSON — needed by `reasonix diff` to explain why a tool was called. */
   toolArgs?: string;

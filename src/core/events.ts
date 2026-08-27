@@ -79,6 +79,8 @@ export interface ModelFinalEvent extends EventBase {
   type: typeof EventType.modelFinal;
   content: string;
   reasoningContent?: string;
+  /** Replace streamed content/reasoning with this authoritative final snapshot. */
+  replaceStreamedOutput?: boolean;
   toolCalls: ReadonlyArray<ToolCall>;
   usage: RawUsage;
   costUsd: number;

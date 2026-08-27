@@ -174,6 +174,53 @@ describe("registerSubagentTool", () => {
     });
   });
 
+  it("stops and trims a degenerating streamed child response", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      const frames = [
+        `data: ${JSON.stringify({ choices: [{ delta: { content: `Verified findings. ${"wright".repeat(200)}` } }] })}\n\n`,
+        "data: [DONE]\n\n",
+      ];
+      const body = new ReadableStream({
+        start(ctrl) {
+          for (const frame of frames) ctrl.enqueue(new TextEncoder().encode(frame));
+          ctrl.close();
+        },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    });
+    const { sink, events } = makeSink();
+    const result = await spawnSubagent({
+      client: new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock as typeof fetch }),
+      parentRegistry: new ToolRegistry(),
+      system: "review",
+      task: "review",
+      sink,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("Verified findings. ");
+    expect(result.output).not.toContain("wrightwright");
+    expect(
+      events.some(
+        (event) =>
+          event.kind === "inner" &&
+          event.inner?.role === "warning" &&
+          event.inner.content.includes("Stopped a degenerating model stream"),
+      ),
+    ).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      kind: "end",
+      summary: "Verified findings. ",
+    });
+  });
+
   it("enforces maxElapsedMs for a hanging child request", async () => {
     const client = new DeepSeekClient({
       apiKey: "sk-test",
@@ -216,7 +263,7 @@ describe("registerSubagentTool", () => {
 
   it("truncates oversized output and signals the truncation", async () => {
     const parent = new ToolRegistry();
-    const huge = "x".repeat(20_000);
+    const huge = Array.from({ length: 2_000 }, (_, i) => `result-${i}: verified\n`).join("");
     const client = makeClient([{ content: huge }]);
     registerSubagentTool(parent, { client, maxResultChars: 100 });
     const out = await parent.dispatch("spawn_subagent", JSON.stringify({ task: "spew" }));

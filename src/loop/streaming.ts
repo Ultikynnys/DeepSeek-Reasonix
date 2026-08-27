@@ -1,6 +1,7 @@
 import type { DeepSeekClient, Usage } from "../client.js";
 import type { ReasoningEffort } from "../config.js";
 import type { ChatMessage, ToolCall, ToolSpec } from "../types.js";
+import { StreamRepetitionDetector } from "./repetition.js";
 import { looksLikeCompleteJson } from "./shrink.js";
 import { thinkingModeForModel } from "./thinking.js";
 import type { LoopEvent } from "./types.js";
@@ -26,6 +27,12 @@ export interface StreamModelResult {
   finishReason?: string;
   /** Model-generated image (Antigravity inlineData part) — data URL + mime. */
   image?: { dataUrl: string; mimeType: string };
+  /** Exact-periodic output detected while the provider was still streaming. */
+  repetitionStall?: {
+    channel: "content" | "reasoning";
+    period: number;
+    repeatedChars: number;
+  };
 }
 
 export async function* streamModelResponse(
@@ -37,6 +44,11 @@ export async function* streamModelResponse(
   let usage: Usage | null = null;
   let finishReason: string | undefined;
   let image: { dataUrl: string; mimeType: string } | undefined;
+  let repetitionStall: StreamModelResult["repetitionStall"];
+  const contentRepetition = new StreamRepetitionDetector();
+  const reasoningRepetition = new StreamRepetitionDetector();
+  const stallAbort = new AbortController();
+  const requestSignal = AbortSignal.any([signal, stallAbort.signal]);
   const callBuf: Map<number, ToolCall> = new Map();
   const readyIndices = new Set<number>();
   let emittedOutput = false;
@@ -46,7 +58,7 @@ export async function* streamModelResponse(
       model,
       messages,
       tools: toolSpecs.length ? toolSpecs : undefined,
-      signal,
+      signal: requestSignal,
       thinking: thinkingModeForModel(model),
       reasoningEffort,
       maxTokens,
@@ -57,6 +69,17 @@ export async function* streamModelResponse(
         // terminates after reasoning-only deltas; marking it partial here
         // incorrectly disables the loop's bounded body-read retry.
         reasoningContent += chunk.reasoningDelta;
+        const repetition = reasoningRepetition.append(chunk.reasoningDelta);
+        if (repetition) {
+          reasoningContent = reasoningContent.slice(0, repetition.safeLength);
+          repetitionStall = {
+            channel: "reasoning",
+            period: repetition.period,
+            repeatedChars: repetition.repeatedChars,
+          };
+          stallAbort.abort(new Error("Repetitive reasoning stream stopped"));
+          break;
+        }
         yield {
           turn,
           role: "assistant_delta",
@@ -67,6 +90,17 @@ export async function* streamModelResponse(
       if (chunk.contentDelta) {
         emittedOutput = true;
         assistantContent += chunk.contentDelta;
+        const repetition = contentRepetition.append(chunk.contentDelta);
+        if (repetition) {
+          assistantContent = assistantContent.slice(0, repetition.safeLength);
+          repetitionStall = {
+            channel: "content",
+            period: repetition.period,
+            repeatedChars: repetition.repeatedChars,
+          };
+          stallAbort.abort(new Error("Repetitive content stream stopped"));
+          break;
+        }
         yield {
           turn,
           role: "assistant_delta",
@@ -129,5 +163,6 @@ export async function* streamModelResponse(
     usage,
     finishReason,
     image,
+    repetitionStall,
   };
 }

@@ -433,6 +433,8 @@ export class Eventizer {
       usage,
       costUsd,
     };
+    if (ev.reasoningContent !== undefined) out.reasoningContent = ev.reasoningContent;
+    if (ev.replaceStreamedOutput) out.replaceStreamedOutput = true;
     if (ev.forcedSummary) out.forcedSummary = true;
     if (ev.image) out.image = ev.image;
     return out;

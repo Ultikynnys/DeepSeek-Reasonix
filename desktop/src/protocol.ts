@@ -213,6 +213,8 @@ export type ModelFinalEvent = {
   turn: number;
   content: string;
   reasoningContent?: string;
+  /** Replace streamed content/reasoning with this authoritative final snapshot. */
+  replaceStreamedOutput?: boolean;
   toolCalls: ReadonlyArray<WireToolCall>;
   usage: Usage;
   costUsd: number;

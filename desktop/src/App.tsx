@@ -1493,8 +1493,14 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           // Skip when text already streamed (would duplicate) or the content
           // belongs to a forced summary (the compaction card renders it).
           const hasText = m.segments.some((s) => s.kind === "text");
-          let segments =
-            !ev.forcedSummary && !hasText && ev.content
+          let segments = ev.replaceStreamedOutput
+            ? [
+                ...(ev.reasoningContent
+                  ? [{ kind: "reasoning" as const, text: ev.reasoningContent }]
+                  : []),
+                ...(ev.content ? [{ kind: "text" as const, text: ev.content }] : []),
+              ]
+            : !ev.forcedSummary && !hasText && ev.content
               ? appendTextSegment(m.segments, "text", ev.content)
               : m.segments;
           if (ev.image) {

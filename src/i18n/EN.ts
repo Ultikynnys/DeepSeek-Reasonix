@@ -679,6 +679,10 @@ export const EN: TranslationSchema = {
       "The model hit its output-token limit mid-response — continuing generation from where it stopped.",
     ollamaTruncatedGiveUp:
       "The model kept hitting its output-token limit after {max} continuations — ending the turn with the partial response. Raise the per-turn output cap (/max-tokens) or switch model.",
+    repetitionStall:
+      "Stopped a degenerating model stream after detecting {repeatedChars} repeated characters (period {period}) in {channel} output. The repetitive tail was discarded; retry or switch models if the response is incomplete.",
+    repetitionStallNoPrefix:
+      "[The model stream was stopped because it produced only repetitive output. Retry or switch models.]",
     reasoningLoop:
       "The model is stuck re-thinking the same point without making progress — collapsing to a summary so you can redirect from a fresh recap.",
     forcingSummary:

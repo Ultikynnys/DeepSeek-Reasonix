@@ -1169,6 +1169,43 @@ describe("Desktop App reducer — model.final content", () => {
     expect(assistant.segments[0]).toMatchObject({ kind: "text", text: "partial answer" });
   });
 
+  it("replaces streamed degeneration with the authoritative trimmed final", () => {
+    let state = reduce(initialState(), { t: "incoming", event: turnStarted });
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.delta",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        channel: "content",
+        text: "Safe prefix wrightwrightwright",
+      },
+    });
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.final",
+        id: 3,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        content: "Safe prefix ",
+        reasoningContent: "Checked files.",
+        replaceStreamedOutput: true,
+        toolCalls: [],
+        usage: {},
+        costUsd: 0,
+      },
+    });
+    const assistant = next.messages.find((m) => m.kind === "assistant");
+    if (assistant?.kind !== "assistant") throw new Error("no assistant message");
+    expect(assistant.pending).toBe(false);
+    expect(assistant.segments).toEqual([
+      { kind: "reasoning", text: "Checked files." },
+      { kind: "text", text: "Safe prefix " },
+    ]);
+  });
+
   it("skips forcedSummary finals — the compaction card renders that content", () => {
     const state = reduce(initialState(), { t: "incoming", event: turnStarted });
     const next = reduce(state, {

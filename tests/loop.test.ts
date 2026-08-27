@@ -2130,6 +2130,85 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     expect(channels).toEqual(["reasoning", "reasoning", "content", "content"]);
   });
 
+  it("stops and trims a degenerating content stream without retrying", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      const frames = [
+        `data: ${JSON.stringify({ choices: [{ delta: { content: `Safe prefix ${"wright".repeat(200)}` } }] })}\n\n`,
+        "data: [DONE]\n\n",
+      ];
+      const body = new ReadableStream({
+        start(ctrl) {
+          for (const frame of frames) ctrl.enqueue(new TextEncoder().encode(frame));
+          ctrl.close();
+        },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    });
+    const loop = new CacheFirstLoop({
+      client: new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock as typeof fetch }),
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: true,
+      maxToolIters: 1,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const event of loop.step("find it")) events.push(event);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(events.find((event) => event.role === "warning")?.content).toContain(
+      "Stopped a degenerating model stream",
+    );
+    const final = events.find((event) => event.role === "assistant_final");
+    expect(final?.content).toBe("Safe prefix ");
+    expect(final?.replaceStreamedOutput).toBe(true);
+    expect(JSON.stringify(loop.log.entries)).not.toContain("wrightwright");
+  });
+
+  it("stops and trims a degenerating reasoning stream", async () => {
+    const reasoning = `Useful thought ${"cycle".repeat(220)}`;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: (async () => {
+        const body = new ReadableStream({
+          start(ctrl) {
+            ctrl.enqueue(
+              new TextEncoder().encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: reasoning } }] })}\n\n`,
+              ),
+            );
+            ctrl.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+            ctrl.close();
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }) as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: true,
+      maxToolIters: 1,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const event of loop.step("think")) events.push(event);
+
+    expect(events.find((event) => event.role === "warning")?.content).toContain(
+      "in reasoning output",
+    );
+    expect(JSON.stringify(loop.log.entries)).toContain("Useful thought ");
+    expect(JSON.stringify(loop.log.entries)).not.toContain("cyclecycle");
+  });
+
   it("does not emit a red error event when the API call is aborted mid-flight", async () => {
     // Reproduces the reported "error This operation was aborted" UX
     // bug: when App.tsx calls loop.abort() to switch to a queued

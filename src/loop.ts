@@ -1250,6 +1250,9 @@ export class CacheFirstLoop {
       let usage: TurnStats["usage"] | null = null;
       let finishReason: string | undefined;
       let image: { dataUrl: string; mimeType: string } | undefined;
+      let repetitionStall:
+        | { channel: "content" | "reasoning"; period: number; repeatedChars: number }
+        | undefined;
       const callModel = this.model;
 
       // Snapshot prefix evidence from the same turn-start tool list sent to the
@@ -1274,6 +1277,7 @@ export class CacheFirstLoop {
           usage = result.usage;
           finishReason = result.finishReason;
           image = result.image;
+          repetitionStall = result.repetitionStall;
         } else {
           const resp = await this.client.chat({
             model: callModel,
@@ -1379,6 +1383,26 @@ export class CacheFirstLoop {
         this._steerQueue.length = 0;
         restoreModelIfNeeded();
         return;
+      }
+
+      if (repetitionStall) {
+        yield {
+          turn: this._turn,
+          role: "warning",
+          severity: "high",
+          content: t("loop.repetitionStall", {
+            channel: repetitionStall.channel,
+            period: repetitionStall.period,
+            repeatedChars: repetitionStall.repeatedChars,
+          }),
+        };
+        if (
+          assistantContent.length === 0 &&
+          reasoningContent.length === 0 &&
+          toolCalls.length === 0
+        ) {
+          assistantContent = t("loop.repetitionStallNoPrefix");
+        }
       }
 
       // Ollama reports `done_reason: "length"` when generation is cut off at
@@ -1558,6 +1582,7 @@ export class CacheFirstLoop {
         turn: this._turn,
         role: "assistant_final",
         content: assistantContent,
+        ...(repetitionStall ? { reasoningContent, replaceStreamedOutput: true } : {}),
         image,
         stats: turnStats,
         cacheDiagnostic,
