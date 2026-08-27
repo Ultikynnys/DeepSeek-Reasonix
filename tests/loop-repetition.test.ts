@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { StreamRepetitionDetector } from "../src/loop/repetition.js";
+import { MATERIAL_REASONING_LOOP } from "./support/repetition-fixtures.js";
 
 function detect(chunks: string[]) {
   const detector = new StreamRepetitionDetector();
@@ -60,6 +61,17 @@ describe("StreamRepetitionDetector", () => {
     expect(detect(chunks)?.safeLength).toBe(0);
   });
 
+  it("detects a repeated multi-paragraph reasoning cycle larger than maxPeriod", () => {
+    expect(MATERIAL_REASONING_LOOP.replace(/\s/gu, "").length).toBeGreaterThan(1024);
+    const prefix = "Verified setup facts ZXQJ\n\n";
+    const text = `${prefix}${MATERIAL_REASONING_LOOP.repeat(4)}`;
+    const chunks = Array.from({ length: Math.ceil(text.length / 53) }, (_, i) =>
+      text.slice(i * 53, i * 53 + 53),
+    );
+
+    expect(detect(chunks)?.safeLength).toBe(prefix.length);
+  });
+
   it("does not flag short repetitions or ordinary prose", () => {
     expect(detect(["ha".repeat(400)])).toBeNull();
     expect(detect(["0123456789abcdef".repeat(60)])).toBeNull();
@@ -68,6 +80,12 @@ describe("StreamRepetitionDetector", () => {
         "The model checked the source folder, compared the files, and explained what was missing.",
       ]),
     ).toBeNull();
+    const largeUniqueProse = Array.from(
+      { length: 240 },
+      (_, i) =>
+        `Finding ${i}: inspected artifact ${i * 17}, compared unique path segment ${i * 31}, and recorded distinct evidence ${i * 47}.`,
+    ).join("\n");
+    expect(detect([largeUniqueProse])).toBeNull();
   });
 
   it("keeps memory bounded while preserving absolute safe offsets", () => {

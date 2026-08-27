@@ -17,6 +17,7 @@ import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
 import { ToolRegistry } from "../src/tools.js";
 import type { ChatMessage } from "../src/types.js";
 import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
+import { MATERIAL_REASONING_LOOP } from "./support/repetition-fixtures.js";
 
 const FOLD_TEST_MODEL = "test-fold-ctx";
 
@@ -2239,12 +2240,9 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     );
   });
 
-  it("stops the reported alternating sentence loop", async () => {
-    const first =
-      'Actually, "loss" might be a specific animation sequence. Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n';
-    const second =
-      "Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n";
-    const text = `${second}${`${first}${second}`.repeat(20)}`;
+  it("stops a repeated reasoning block larger than the short-period ceiling", async () => {
+    expect(MATERIAL_REASONING_LOOP.replace(/\s/gu, "").length).toBeGreaterThan(1024);
+    const text = MATERIAL_REASONING_LOOP.repeat(4);
     const frames = Array.from(
       { length: Math.ceil(text.length / 41) },
       (_, i) =>
@@ -2276,7 +2274,7 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     expect(events.find((event) => event.role === "assistant_final")?.content).toContain(
       "produced only repetitive output",
     );
-    expect(JSON.stringify(loop.log.entries)).not.toContain("eyeball setup");
+    expect(JSON.stringify(loop.log.entries)).not.toContain("blaze_eye_R.vmt");
   });
 
   it("stops and trims a degenerating reasoning stream", async () => {

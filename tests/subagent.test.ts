@@ -16,6 +16,7 @@ import {
   subagentBudgetHint,
 } from "../src/tools/subagent.js";
 import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
+import { MATERIAL_REASONING_LOOP } from "./support/repetition-fixtures.js";
 
 function makeClient(responses: FakeResponseShape[]): DeepSeekClient {
   return makeFakeClient(responses, { echoMessages: true }).client;
@@ -176,11 +177,7 @@ describe("registerSubagentTool", () => {
 
   it("stops and trims a degenerating streamed child response", async () => {
     let requestSignal: AbortSignal | undefined;
-    const first =
-      'Actually, "loss" might be a specific animation sequence. Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n';
-    const second =
-      "Let me look at the animation qci file. But first, let me understand the eyeball setup.\n\n";
-    const repeated = `${first}${second}`.repeat(20);
+    const repeated = MATERIAL_REASONING_LOOP.repeat(4);
     const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
       requestSignal = init?.signal ?? undefined;
       const frames = [
@@ -210,8 +207,8 @@ describe("registerSubagentTool", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(requestSignal?.aborted).toBe(true);
     expect(result.success).toBe(true);
-    expect(result.output).toBe("Verified findings");
-    expect(result.output).not.toContain("eyeball setup");
+    expect(result.output).toBe("Verified findings. ");
+    expect(result.output).not.toContain("blaze_eye_R.vmt");
     expect(
       events.some(
         (event) =>
@@ -222,7 +219,7 @@ describe("registerSubagentTool", () => {
     ).toBe(true);
     expect(events.at(-1)).toMatchObject({
       kind: "end",
-      summary: "Verified findings",
+      summary: "Verified findings. ",
     });
   });
 
