@@ -70,6 +70,7 @@ export type {
   ExternalSessionApp,
   ExternalSessionSource,
   WebSearchEngineName,
+  ConnectedEvent,
   ReadyEvent,
   ProtocolErrorEvent,
   TurnCompleteEvent,

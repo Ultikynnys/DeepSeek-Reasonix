@@ -33,6 +33,7 @@ export interface ExternalSessionApp {
 
 // ---- events ----
 
+export type ConnectedEvent = { type: "$connected" };
 export type ReadyEvent = { type: "$ready" };
 export type ProtocolErrorEvent = { type: "$error"; message: string };
 export type TurnCompleteEvent = { type: "$turn_complete" };

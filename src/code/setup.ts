@@ -1,3 +1,4 @@
+import { markPhase } from "../cli/startup-profile.js";
 import { DeepSeekClient } from "../client.js";
 import { resolveCodexTransport } from "../codex-backend.js";
 import {
@@ -85,6 +86,7 @@ export function applyPlanMode(tools: ToolRegistry, editMode: EditMode): void {
 }
 
 export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeToolset> {
+  markPhase("toolset_build_started");
   const tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
   applyPlanMode(tools, loadEditMode(opts.configPath));
   const jobs = new JobRegistry();
@@ -185,7 +187,9 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     },
   });
 
+  markPhase("tool_registration_completed");
   const semantic = await reBootstrapSemantic(opts.rootDir);
+  markPhase("semantic_check_completed");
 
   return { tools, jobs, registerRooted, reBootstrapSemantic, semantic };
 }

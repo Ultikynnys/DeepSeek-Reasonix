@@ -1838,6 +1838,7 @@ type TabDispatcher = (action: TabAction) => void;
 interface TabRuntimeProps {
   tabId: string;
   active: boolean;
+  backendConnected: boolean;
   currency: "CNY" | "USD";
   registerDispatch: (tabId: string, d: TabDispatcher | null) => void;
   onNewTab: () => void;
@@ -1888,6 +1889,7 @@ interface TabRuntimeProps {
 function TabRuntime({
   tabId,
   active,
+  backendConnected,
   currency,
   registerDispatch,
   onNewTab,
@@ -3162,7 +3164,7 @@ function TabRuntime({
                     />
                   ))}
 
-                  {!state.ready ? (
+                  {!backendConnected ? (
                     <div
                       style={{
                         padding: 12,
@@ -4339,6 +4341,7 @@ let globalToastId = 0;
 
 export function App() {
   const [tabs, setTabs] = useState<TabMeta[]>([]);
+  const [backendConnected, setBackendConnected] = useState(false);
   const [activeTabId, setActiveTabId] = useState<string>("");
   const [startupFailure, setStartupFailure] = useState<StartupFailureState | null>(null);
   const [globalToasts, setGlobalToasts] = useState<GlobalToast[]>([]);
@@ -4626,6 +4629,11 @@ export function App() {
             const ev = JSON.parse(e.payload.data) as IncomingEvent;
             const tabId = ev.tabId;
 
+            if (ev.type === "$connected") {
+              setBackendConnected(true);
+              return;
+            }
+
             if (ev.type === "$diagnostic") {
               const diagnostic = ev as DesktopDiagnosticEvent & { tabId?: string };
               const prefix = `[reasonix ${diagnostic.source}] ${diagnostic.event}`;
@@ -4833,6 +4841,7 @@ export function App() {
           });
         }),
         listen<{ code: number | null }>("rpc:exit", (e) => {
+          setBackendConnected(false);
           for (const tabId of dispatchersRef.current.keys()) flushTabDeltas(tabId);
           if (dispatchersRef.current.size === 0) {
             const exitError = new Error(`reasonix exited (code ${e.payload.code ?? "?"})`);
@@ -4992,6 +5001,7 @@ export function App() {
           key={t.id}
           tabId={t.id}
           active={t.id === activeTabId}
+          backendConnected={backendConnected}
           currency={currency}
           registerDispatch={registerDispatch}
           onNewTab={openTab}

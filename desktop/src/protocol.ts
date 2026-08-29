@@ -17,6 +17,7 @@ import type {
   ChoiceVerdict,
   CodexQuota,
   CodexQuotaEvent,
+  ConnectedEvent,
   ConfirmRequiredEvent,
   ConfirmationChoice,
   CtxBreakdownEvent,
@@ -88,6 +89,7 @@ export type {
   AntigravityQuotaEvent,
   BalanceEvent,
   BtwResultEvent,
+  ConnectedEvent,
   DesktopDiagnosticEvent,
   DesktopDiagnosticLevel,
   OllamaModelsEvent,
@@ -353,6 +355,7 @@ export type KernelErrorEvent = {
 };
 
 export type IncomingEvent = { tabId?: string } & (
+  | ConnectedEvent
   | ReadyEvent
   | ProtocolErrorEvent
   | TurnCompleteEvent

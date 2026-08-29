@@ -82,7 +82,9 @@ program
       effort: opts.effort,
       noConfig: false,
     });
+    markPhase("desktop_import_started");
     const { desktopCommand } = await import("./commands/desktop.js");
+    markPhase("desktop_import_completed");
     await desktopCommand({
       model: defaults.model,
       budgetUsd: parseBudgetFlag(opts.budget),

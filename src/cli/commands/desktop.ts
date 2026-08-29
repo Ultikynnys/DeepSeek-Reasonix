@@ -211,6 +211,7 @@ import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage, TurnImage } from "../../types.js";
 import { VERSION } from "../../version.js";
+import { dumpStartupProfile, markPhase } from "../startup-profile.js";
 import { type McpRuntime, createMcpRuntime } from "./mcp-runtime.js";
 
 export interface DesktopOptions {
@@ -257,6 +258,7 @@ type InMessage = import("@reasonix/core-utils").OutgoingCommand;
 type EmittableEvent =
   | KernelEvent
   | SessionCompactedEvent
+  | { type: "$connected" }
   | { type: "$ready" }
   | { type: "$error"; message: string }
   | { type: "$turn_complete" }
@@ -2343,6 +2345,7 @@ export function installDesktopCrashGuards(
 }
 
 export async function desktopCommand(opts: DesktopOptions): Promise<void> {
+  markPhase("desktop_command_entered");
   loadDotenv();
   const log = createLogger("desktop");
   log.info(`Reasonix desktop daemon starting (${opts.model ?? "default model"})`);
@@ -2351,6 +2354,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // once so nvm / asdf / fnm / volta / mise PATH entries reach `run_command`
   // children too (#1252). No-op on Windows — system PATH already covers GUI apps.
   const augmented = augmentProcessPath();
+  markPhase("process_path_ready");
   if (augmented.added.length > 0) {
     log.debug(`augmented PATH with ${augmented.added.length} login-shell entries`);
   }
@@ -2367,6 +2371,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   let first: Tab;
+  let settleFirstBootstrap!: () => void;
+  const firstBootstrapSettled = new Promise<void>((resolve) => {
+    settleFirstBootstrap = resolve;
+  });
 
   /** Synchronous tab construction — no I/O. All cheap, disk-only events (`$settings`, `$sessions`, `$memory`, `$skills`, `$mcp_specs`) can fire against this immediately. The heavy bits (`buildCodeToolset`, MCP probes, runtime construction) happen in `initTabToolset` so the UI shell paints without waiting for them. */
   function createTabSkeleton(initialDir?: string, restoreId?: string): Tab {
@@ -2445,6 +2453,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.toolset = toolset;
+    markPhase("first_toolset_ready");
     tab.system = codeSystemPrompt(tab.rootDir, {
       hasSemanticSearch: toolset.semantic.enabled,
       modelId: tab.currentModel,
@@ -2452,6 +2461,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (tabCurrentModelUsable(tab)) {
       bridgeEndpointEnv();
       tab.runtime = buildRuntimeFor(tab);
+      markPhase("first_runtime_ready");
       emitTabDiagnostic(tab, "tab.runtime.ready", undefined, "info");
       void bridgeTabMcp(tab);
     } else {
@@ -3379,6 +3389,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           if (tabHasCredential(tab)) {
             emitTabDiagnostic(tab, "tab.ready", undefined, "info");
             emit({ type: "$ready" }, tab.id);
+            if (tab === first) {
+              markPhase("first_tab_ready_emitted");
+              dumpStartupProfile();
+            }
           } else {
             emitTabDiagnostic(
               tab,
@@ -3388,6 +3402,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             );
           }
           emitCtxBreakdown(tab);
+          if (tab === first) settleFirstBootstrap();
         })
         .catch((err) => {
           emitDiagnosticError("tab.bootstrap.failed", err, {
@@ -3395,7 +3410,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             details: tabDiagnosticState(tab),
           });
           emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, tab.id);
+          if (tab === first) settleFirstBootstrap();
         });
+
+      // Synchronous sidebar scans can take seconds on network drives and would
+      // starve the toolset promise despite being logically non-gating.
+      await firstBootstrapSettled;
 
       // Non-gating display work — runs in parallel with the toolset build above.
       // Reopen the conversation the tab had, if its jsonl is still readable.
@@ -3460,12 +3480,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     ? savedTabs.find((t) => resolve(t.dir) === resolve(startupDir))
     : savedTabs[0];
   first = bootstrapTab(opts.dir ?? savedTabs[0]?.dir, startupTab);
-  const restored: Tab[] = [first];
-  for (const t of savedTabs.slice(1)) restored.push(bootstrapTab(t.dir, t));
-  // Mirror the persisted focus so the next persist round-trips it.
-  const activeIdx = savedTabs.findIndex((t) => t.active);
-  lastActiveTabId = ((activeIdx >= 0 ? restored[activeIdx] : first) ?? first).id;
-  persistOpenTabs();
+  const pendingRestores = savedTabs.filter((t) => t !== startupTab);
+  lastActiveTabId = first.id;
   // Account-wide quotas change underneath us (other devices, window resets) —
   // poll so the statusbar chips are never stale. Skipped mid-turn so the
   // $turn_complete fetch stays the authoritative turn-cost measurement.
@@ -3499,6 +3515,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }, 60_000);
 
   const rl = createInterface({ input: stdin });
+  emit({ type: "$connected" });
+  markPhase("rpc_stdin_listening");
+  void firstBootstrapSettled.then(() => {
+    for (const saved of pendingRestores) bootstrapTab(saved.dir, saved);
+    persistOpenTabs();
+  });
   rl.on("line", (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -3625,59 +3647,20 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
 
     if (msg.cmd === "desktop_resync") {
-      // WebView reloads (DevTools F5, host-side respawn) leave the Node child
-      // alive but the React app starts blank. Re-fire the bootstrap events
-      // so it can rehydrate without restarting the agent.
+      // WebView reloads keep the daemon alive, so replay transport state and
+      // cheap tab state first. Disk scans are deferred until startup settles.
+      emit({ type: "$connected" });
       for (const t of tabs.values()) {
         emit(
           { type: "$tab_opened", workspaceDir: t.rootDir, active: t.id === lastActiveTabId },
           t.id,
         );
-        emitSessions(t);
         emitSettings(t);
         emitMcpSpecs(t);
         emitSkills(t);
-        emitMemory(t);
         if (!tabHasCredential(t)) emit({ type: "$needs_setup", reason: "no_api_key" }, t.id);
         else if (t.toolset) emit({ type: "$ready" }, t.id);
-        void emitBalance(t);
-        // Re-emit session_loaded so the resumed session's messages and
-        // usage stats (cost, tokens, cache%) are restored on the frontend.
-        // Marked `resync` so the frontend can ignore the echo when it's
-        // mid-turn — the live transcript is newer than the disk snapshot.
-        if (t.currentSession) {
-          try {
-            const msgs = buildLoadedMessages(loadSessionMessages(t.currentSession));
-            const meta = loadSessionMeta(t.currentSession);
-            emit(
-              {
-                type: "$session_loaded",
-                name: t.currentSession,
-                messages: msgs,
-                carryover: {
-                  totalCostUsd: meta.totalCostUsd ?? 0,
-                  cacheHitTokens: meta.cacheHitTokens ?? 0,
-                  cacheMissTokens: meta.cacheMissTokens ?? 0,
-                  totalCompletionTokens: meta.totalCompletionTokens ?? 0,
-                },
-                resync: true,
-              },
-              t.id,
-            );
-          } catch (err) {
-            emitDiagnosticError("session.resync.failed", err, {
-              tabId: t.id,
-              details: tabDiagnosticState(t),
-            });
-            // unreadable jsonl — skip re-emit, but LOG
-            process.stderr.write(`reasonix: session load for resync failed — ${messageOf(err)}\n`);
-          }
-        }
-        emitCtxBreakdown(t);
       }
-      // Authoritative tab set at the END of the burst — the frontend prunes
-      // tabs this list doesn't contain (ghosts left by an older backend
-      // generation whose ids were re-minted after a restart).
       emit({
         type: "$tabs_snapshot",
         tabs: Array.from(tabs.values()).map((t) => ({
@@ -3685,6 +3668,43 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           workspaceDir: t.rootDir,
           active: t.id === lastActiveTabId,
         })),
+      });
+      void firstBootstrapSettled.then(async () => {
+        for (const t of tabs.values()) {
+          emitSessions(t);
+          emitMemory(t);
+          void emitBalance(t);
+          if (t.currentSession) {
+            try {
+              const msgs = buildLoadedMessages(await loadSessionMessagesAsync(t.currentSession));
+              const meta = loadSessionMeta(t.currentSession);
+              emit(
+                {
+                  type: "$session_loaded",
+                  name: t.currentSession,
+                  messages: msgs,
+                  carryover: {
+                    totalCostUsd: meta.totalCostUsd ?? 0,
+                    cacheHitTokens: meta.cacheHitTokens ?? 0,
+                    cacheMissTokens: meta.cacheMissTokens ?? 0,
+                    totalCompletionTokens: meta.totalCompletionTokens ?? 0,
+                  },
+                  resync: true,
+                },
+                t.id,
+              );
+            } catch (err) {
+              emitDiagnosticError("session.resync.failed", err, {
+                tabId: t.id,
+                details: tabDiagnosticState(t),
+              });
+              process.stderr.write(
+                `reasonix: session load for resync failed — ${messageOf(err)}\n`,
+              );
+            }
+          }
+          emitCtxBreakdown(t);
+        }
       });
       // Auto-refresh the Ollama catalog once per launch/WebView reload — the
       // catalog is app-global (endpoint + key are global config), so a single
