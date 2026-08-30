@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../src/tools.js";
 import { lineDiff, registerFilesystemTools } from "../src/tools/filesystem.js";
 import { compileNameFilter, displayRel } from "../src/tools/filesystem.js";
+import { __setRipgrepForTesting, rgArgs, rgRelOf, ripgrepAvailable } from "../src/tools/fs/rg.js";
+import { clampTimeoutSeconds } from "../src/tools/fs/search.js";
 
 describe("filesystem tools (built-in, sandbox-enforced)", () => {
   let root: string;
@@ -22,6 +24,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
   });
 
   afterEach(async () => {
+    __setRipgrepForTesting(null);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -554,6 +557,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
     });
 
     it("skips a single file with catastrophic regex and keeps walking (issue #1236)", async () => {
+      __setRipgrepForTesting(false);
       // (a+)+! on a long run of 'a' is the textbook ReDoS pattern. With the
       // worker-isolated runner, the bad file is terminated and reported as
       // a regex-timeout in the footer; the remaining file still produces
@@ -584,6 +588,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
     });
 
     it("honors AbortSignal during recursive content search", async () => {
+      __setRipgrepForTesting(false);
       await fs.mkdir(join(root, "src", "nested"), { recursive: true });
       await fs.writeFile(join(root, "src", "nested", "deep.ts"), "export const z = 3;\n");
 
@@ -679,6 +684,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
 
     describe("per-file cap and histogram fallback", () => {
       it("caps a single file's printed hits at 30 and footers the overflow", async () => {
+        __setRipgrepForTesting(false);
         const lines = Array.from({ length: 47 }, () => "TARGETSTRING here");
         await fs.writeFile(join(root, "many.ts"), lines.join("\n"));
         const out = await tools.dispatch(
@@ -717,6 +723,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       });
 
       it("flips remaining files to summary mode once 80% of the byte budget is spent", async () => {
+        __setRipgrepForTesting(false);
         const tiny = new ToolRegistry();
         registerFilesystemTools(tiny, { rootDir: root, maxListBytes: 4096 });
         const dir = join(root, "histtest");
@@ -741,6 +748,130 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
         expect(histogramLines.length).toBeGreaterThan(0);
       });
     });
+  });
+
+  describe("search_content timeout semantics", () => {
+    it("returns partial results with a timeout footer when timeout_seconds is hit", async () => {
+      __setRipgrepForTesting(false);
+      await fs.writeFile(join(root, "hello.txt"), "TIMEOUT_MARKER\n");
+      const realNow = Date.now.bind(Date);
+      const originalReaddir = fs.readdir.bind(fs);
+      let readdirCalls = 0;
+      const nowSpy = vi.spyOn(Date, "now");
+      nowSpy.mockImplementation(() => (readdirCalls >= 2 ? realNow() + 120_000 : realNow()));
+      const readdirSpy = vi
+        .spyOn(fs, "readdir")
+        .mockImplementation(async (...args: Parameters<typeof fs.readdir>) => {
+          readdirCalls++;
+          return originalReaddir(...args);
+        });
+      try {
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "TIMEOUT_MARKER", timeout_seconds: 1 }),
+        );
+        // hello.txt is scanned before src/ recurses; the clock flips on the
+        // second readdir, so the walk stops with partial results + footer.
+        expect(out).toContain("hello.txt:1: TIMEOUT_MARKER");
+        expect(out).toMatch(/timed out after 1s; results incomplete/);
+      } finally {
+        nowSpy.mockRestore();
+        readdirSpy.mockRestore();
+      }
+    });
+
+    it("clamps timeout_seconds to [1, 300] with a 30s default", () => {
+      expect(clampTimeoutSeconds(undefined)).toBe(30);
+      expect(clampTimeoutSeconds(0)).toBe(30);
+      expect(clampTimeoutSeconds(-3)).toBe(30);
+      expect(clampTimeoutSeconds(1)).toBe(1);
+      expect(clampTimeoutSeconds(2.7)).toBe(2);
+      expect(clampTimeoutSeconds(500)).toBe(300);
+    });
+  });
+
+  describe("ripgrep delegation", () => {
+    it("builds default args", () => {
+      expect(rgArgs({ rootDir: "/w", startRel: ".", pattern: "foo", deadlineMs: 30_000 })).toEqual([
+        "--no-heading",
+        "--color",
+        "never",
+        "--no-messages",
+        "--line-number",
+        "--with-filename",
+        "-i",
+        "--regexp",
+        "foo",
+        "--",
+        ".",
+      ]);
+    });
+
+    it("maps case_sensitive, context, glob, excludes, include_deps, summary_only", () => {
+      const args = rgArgs({
+        rootDir: "/w",
+        startRel: "src",
+        pattern: "x",
+        caseSensitive: true,
+        context: 3,
+        glob: "*.ts",
+        excludeGlobs: ["!**/node_modules/**"],
+        includeDeps: true,
+        summaryOnly: true,
+        deadlineMs: 1_000,
+      });
+      expect(args).toContain("--count");
+      expect(args).not.toContain("-i");
+      expect(args).toContain("-C");
+      expect(args).toContain("3");
+      expect(args).toContain("--glob");
+      expect(args).toContain("*.ts");
+      expect(args).toContain("!**/node_modules/**");
+      expect(args).toContain("--no-ignore");
+      expect(args).toContain("--hidden");
+    });
+
+    it("parses the path prefix out of rg output lines", () => {
+      expect(rgRelOf("src/a.ts:12:export const x")).toBe("src/a.ts");
+      expect(rgRelOf("src/a.ts:3")).toBe("src/a.ts");
+      expect(rgRelOf("src/a.ts-4- context line")).toBe("src/a.ts-4- context line");
+    });
+
+    const rgEngine = ripgrepAvailable();
+    it.skipIf(!rgEngine)("honors .gitignore via the ripgrep engine", async () => {
+      await fs.mkdir(join(root, "node_modules", "junk"), { recursive: true });
+      await fs.writeFile(
+        join(root, "node_modules", "junk", "vendor.ts"),
+        "export const NEEDLE = 1;\n",
+      );
+      await fs.writeFile(join(root, ".gitignore"), "node_modules/\n");
+      const out = await tools.dispatch("search_content", JSON.stringify({ pattern: "NEEDLE" }));
+      expect(out).toMatch(/no matches/);
+    });
+
+    it.skipIf(!rgEngine)("returns matches via the ripgrep engine with a glob", async () => {
+      await fs.writeFile(join(root, "src", "a.ts"), "export const MARK = 1;\n");
+      await fs.writeFile(join(root, "src", "b.md"), "export const MARK = 2;\n");
+      const out = await tools.dispatch(
+        "search_content",
+        JSON.stringify({ pattern: "MARK", glob: "*.ts" }),
+      );
+      expect(out).toContain("src/a.ts:");
+      expect(out).not.toContain("b.md");
+    });
+
+    it.skipIf(!rgEngine)(
+      "emits per-file counts via the ripgrep engine in summary mode",
+      async () => {
+        await fs.writeFile(join(root, "src", "a.ts"), "MARK one\nnoise\nMARK two\n");
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "MARK", summary_only: true }),
+        );
+        expect(out).toContain("src/a.ts: 2 matches");
+        expect(out).not.toContain("MARK one");
+      },
+    );
   });
 
   describe("compileNameFilter", () => {

@@ -66,7 +66,10 @@ export class RegexRunner {
       }
       if (!this.worker) this.worker = this.spawn();
       const id = this.nextId++;
-      const timeoutMs = opts.timeoutMs ?? this.defaultTimeoutMs;
+      // Caller-supplied per-file timeouts (e.g. the search walk deadline) are
+      // upper bounds, never exceeding the runner's configured default — so a
+      // session-wide custom default still wins.
+      const timeoutMs = Math.min(opts.timeoutMs ?? this.defaultTimeoutMs, this.defaultTimeoutMs);
       const timer = setTimeout(() => {
         this.pending.delete(id);
         // Hot regex stuck inside V8 — only way out is to kill the worker.

@@ -3,6 +3,7 @@ import * as pathMod from "node:path";
 import { looksBinary } from "./binary.js";
 import { getRegexRunner } from "./regex-runner.js";
 import { displayRel } from "./rel.js";
+import { GLOB_METACHARS, rgRelOf, ripgrepAvailable, runRipgrep } from "./rg.js";
 import { throwIfAborted } from "./walk.js";
 
 export interface SearchContext {
@@ -66,12 +67,28 @@ export async function searchFiles(
 const MAX_HITS_PER_FILE = 30;
 /** Once printed bytes pass this fraction of the byte budget, remaining files switch to histogram. */
 const SUMMARY_MODE_TRIGGER_RATIO = 0.8;
-// Walk-level deadline must be larger than the per-file regex timeout
-// (DEFAULT_TIMEOUT_MS in regex-runner = 60 s) so one timed-out file doesn't
-// immediately trip this guard; 120 s leaves room for a second slow file
-// plus the rest of the walk before declaring the search a lost cause.
-const WALK_DEADLINE_MS = 120_000;
+// Soft walk deadline in seconds, clamped to [1, 300] — mirrors upstream's
+// grep tool (default 30, max 300). On expiry the search returns partial
+// results with a "timed out" footer instead of throwing.
+const DEFAULT_TIMEOUT_SECONDS = 30;
+const MAX_TIMEOUT_SECONDS = 300;
 const REGEX_METACHARS = /[\\.+*?()[\]{}|^$]/;
+
+/** Clamp caller-supplied timeout seconds to [1, 300]; omitted/0 → 30. */
+export function clampTimeoutSeconds(sec: number | undefined): number {
+  if (typeof sec !== "number" || !Number.isFinite(sec) || sec <= 0) return DEFAULT_TIMEOUT_SECONDS;
+  return Math.min(Math.floor(sec), MAX_TIMEOUT_SECONDS);
+}
+
+/** "path:count" → "path: N match(es)" (ripgrep --count output). */
+function formatRgSummary(lines: string[]): string[] {
+  return lines.map((l) => {
+    const i = l.lastIndexOf(":");
+    if (i === -1) return l;
+    const count = Number.parseInt(l.slice(i + 1), 10);
+    return `${l.slice(0, i)}: ${count} match${count === 1 ? "" : "es"}`;
+  });
+}
 
 export async function searchContent(
   ctx: SearchContext,
@@ -81,8 +98,11 @@ export async function searchContent(
     case_sensitive?: boolean;
     include_deps?: boolean;
     context?: number;
+    glob?: string;
     /** Skip line content; return only "rel: N matches" per file. */
     summary_only?: boolean;
+    /** Abort and return partial results after this many seconds (default 30, max 300). */
+    timeout_seconds?: number;
     signal?: AbortSignal;
   },
 ): Promise<string> {
@@ -114,13 +134,15 @@ export async function searchContent(
   let summaryNoticeEmitted = false;
   const fileHitCounts = new Map<string, number>();
   const regexSkippedFiles: Array<{ rel: string; reason: string }> = [];
+  const timeoutSec = clampTimeoutSeconds(args.timeout_seconds);
+  const deadlineMs = timeoutSec * 1000;
   const t0 = Date.now();
-  const throwIfTimedOut = (): void => {
-    if (Date.now() - t0 > WALK_DEADLINE_MS) {
-      throw new Error(
-        `search_content exceeded ${WALK_DEADLINE_MS}ms — narrow the scope (path/glob) or simplify the pattern`,
-      );
-    }
+  let timedOut = false;
+  /** True once the walk budget is spent; the walk stops and results come back partial. */
+  const checkDeadline = (): boolean => {
+    if (timedOut) return true;
+    if (Date.now() - t0 > deadlineMs) timedOut = true;
+    return timedOut;
   };
 
   const pushLine = (out: string): boolean => {
@@ -147,6 +169,76 @@ export async function searchContent(
     }
   };
 
+  // Ripgrep fast path (upstream's default "auto" engine): honors .gitignore
+  // and scans far faster than the JS walker. Falls back to the native walk
+  // below on any rg absence/failure.
+  if (ripgrepAvailable()) {
+    const absRoot = pathMod.resolve(ctx.rootDir);
+    const relToRoot = pathMod.relative(absRoot, startAbs);
+    if (relToRoot === "" || (!relToRoot.startsWith("..") && !pathMod.isAbsolute(relToRoot))) {
+      const globArg = typeof args.glob === "string" && args.glob.length > 0 ? args.glob : null;
+      const metaGlob = globArg !== null && GLOB_METACHARS.test(globArg);
+      const excludeGlobs: string[] = [];
+      if (!includeDeps) {
+        for (const name of ctx.skipDirNames) excludeGlobs.push(`!**/${name}/**`);
+      }
+      const rgRun = await runRipgrep({
+        rootDir: absRoot,
+        startRel: (relToRoot === "" ? "." : relToRoot).replaceAll("\\", "/"),
+        pattern: args.pattern,
+        caseSensitive: args.case_sensitive,
+        context: ctxLines,
+        glob: metaGlob ? globArg : null,
+        excludeGlobs,
+        includeDeps,
+        summaryOnly,
+        deadlineMs,
+        signal: args.signal,
+      });
+      if (rgRun.used) {
+        throwIfAborted(args.signal);
+        // Extension skip + substring-glob filters can't be expressed as rg
+        // flags, so post-filter each output line by its parsed path.
+        const lines = rgRun.lines.filter((l) => {
+          const rel = rgRelOf(l);
+          const base = rel.slice(rel.lastIndexOf("/") + 1);
+          if (ctx.isBinaryByName(base)) return false;
+          if (
+            globArg !== null &&
+            !metaGlob &&
+            ctx.nameMatch !== null &&
+            !ctx.nameMatch(base, rel)
+          ) {
+            return false;
+          }
+          return true;
+        });
+        const out: string[] = [];
+        let bytes = 0;
+        for (const l of summaryOnly ? formatRgSummary(lines) : lines) {
+          if (bytes + l.length + 1 > ctx.maxListBytes) {
+            out.push(`[… truncated at ${ctx.maxListBytes} bytes — refine pattern or path …]`);
+            break;
+          }
+          out.push(l);
+          bytes += l.length + 1;
+        }
+        let result = out.join("\n");
+        if (result === "") {
+          result =
+            rgRun.stop === "timeout"
+              ? `(no matches; timed out after ${timeoutSec}s — narrow the path/pattern or raise timeout_seconds)`
+              : "(no matches)";
+        } else if (rgRun.stop === "timeout") {
+          result += `\n... (timed out after ${timeoutSec}s; results incomplete — narrow the path/pattern or raise timeout_seconds)`;
+        } else if (rgRun.stop === "cap") {
+          result += "\n... (truncated at 200 matches)";
+        }
+        return result;
+      }
+    }
+  }
+
   const walk = async (dir: string): Promise<void> => {
     if (truncated) return;
     throwIfAborted(args.signal);
@@ -159,7 +251,7 @@ export async function searchContent(
     for (const e of entries) {
       if (truncated) return;
       throwIfAborted(args.signal);
-      throwIfTimedOut();
+      if (checkDeadline()) return;
       if (e.isDirectory()) {
         if (!includeDeps && ctx.skipDirNames.has(e.name)) continue;
         await walk(pathMod.join(dir, e.name));
@@ -197,9 +289,13 @@ export async function searchContent(
       let lines: string[];
       if (reSource !== null) {
         lines = text.split(/\r?\n/);
+        // Cap per-file regex work at the remaining walk budget so a single
+        // pathological file can't overshoot timeout_seconds by a full 60 s.
+        const regexBudgetMs = Math.max(1_000, deadlineMs - (Date.now() - t0));
         try {
           hits = await getRegexRunner().testLines(text, reSource, reFlags, {
             signal: args.signal,
+            timeoutMs: regexBudgetMs,
           });
         } catch (err) {
           const reason = (err as Error).message;
@@ -279,6 +375,14 @@ export async function searchContent(
   if (regexSkippedFiles.length > 0) {
     pushLine(
       `[regex timed out on ${regexSkippedFiles.length} file${regexSkippedFiles.length === 1 ? "" : "s"} — pattern may have catastrophic backtracking; first: ${regexSkippedFiles[0]!.rel}]`,
+    );
+  }
+  if (timedOut) {
+    if (matches.length === 0) {
+      return `(no matches; timed out after ${timeoutSec}s — narrow the path/pattern or raise timeout_seconds)`;
+    }
+    matches.push(
+      `... (timed out after ${timeoutSec}s; results incomplete — narrow the path/pattern or raise timeout_seconds)`,
     );
   }
   if (matches.length === 0) {

@@ -30,6 +30,7 @@ import {
 import { globFiles } from "./fs/glob.js";
 import { extractOutline, formatOutline } from "./fs/outline.js";
 import { displayRel } from "./fs/rel.js";
+import { GLOB_METACHARS, ripgrepAvailable } from "./fs/rg.js";
 import { searchContent, searchFiles } from "./fs/search.js";
 
 export { displayRel } from "./fs/rel.js";
@@ -77,8 +78,6 @@ const DELETE_SYMBOL_KINDS: ReadonlySet<SymbolKind> = new Set([
   "type",
 ]);
 
-const GLOB_METACHARS = /[*?{[]/;
-
 /** Glob via picomatch when metachars present, else case-insensitive substring — keeps `.ts` / `test` callers working. Slash in pattern → match rel-path; otherwise basename. */
 export function compileNameFilter(
   filter: string | null | undefined,
@@ -114,6 +113,8 @@ export function registerFilesystemTools(
   const allowWriting = opts.allowWriting !== false;
   const outlineThresholdBytes = opts.outlineThresholdBytes ?? DEFAULT_OUTLINE_THRESHOLD_BYTES;
   const maxListBytes = opts.maxListBytes ?? DEFAULT_MAX_LIST_BYTES;
+  /** Ripgrep presence at registration — drives the engine-variant search_content description. */
+  const rgEngine = ripgrepAvailable();
 
   const normRoot = pathMod.resolve(rootDir);
   /** Approved-this-session directory prefixes — `run_once` keeps the user from being asked twice for follow-up reads in the same dir. Wiped on process exit, not persisted. */
@@ -500,8 +501,9 @@ export function registerFilesystemTools(
     name: "search_content",
     parallelSafe: true,
     skipTruncationSave: true,
-    description:
-      "Recursively grep file CONTENTS for a substring or regex — 'where is X called', 'what files contain Y'. Returns one match per line as `path:line: text`. Per-file hit cap 30; when the byte budget is mostly spent, remaining files switch to a `rel: N matches` histogram. Pass `summary_only:true` for just the histogram. Skips dependency / VCS / build dirs and binary files. For file NAMES use search_files.",
+    description: rgEngine
+      ? "Recursively grep file CONTENTS for a substring or regex — 'where is X called', 'what files contain Y'. Ripgrep-backed (honors .gitignore) when available, built-in scanner otherwise. Returns one match per line as `path:line: text`, capped at 200 matches. Pass `summary_only:true` for a `rel: N matches` histogram. Times out after timeout_seconds (default 30, max 300) and returns partial results. Skips dependency / VCS / build dirs and binary files. For file NAMES use search_files."
+      : "Recursively grep file CONTENTS for a substring or regex — 'where is X called', 'what files contain Y'. Returns one match per line as `path:line: text`. Per-file hit cap 30; when the byte budget is mostly spent, remaining files switch to a `rel: N matches` histogram. Pass `summary_only:true` for just the histogram. Times out after timeout_seconds (default 30, max 300) and returns partial results. Skips dependency / VCS / build dirs and binary files. For file NAMES use search_files.",
     readOnly: true,
     parameters: {
       type: "object",
@@ -537,6 +539,11 @@ export function registerFilesystemTools(
           description:
             "Skip line content, return `rel: N matches` per file. Use for 'where does this exist at all' before drilling in.",
         },
+        timeout_seconds: {
+          type: "integer",
+          description:
+            "Abort and return partial results after this many seconds (default 30, max 300). Raise it for a large tree.",
+        },
       },
       required: ["pattern"],
     },
@@ -549,6 +556,7 @@ export function registerFilesystemTools(
         include_deps?: boolean;
         context?: number;
         summary_only?: boolean;
+        timeout_seconds?: number;
       },
       toolCtx,
     ) =>

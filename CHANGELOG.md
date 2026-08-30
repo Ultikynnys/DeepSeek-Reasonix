@@ -5,6 +5,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Added — `search_content` is ripgrep-backed when available, and times out gracefully instead of erroring.**
+
+- When `rg` is on PATH, `search_content` delegates to ripgrep: it honors `.gitignore`, scans far faster than the JS walker, and its RE2 regex cannot backtrack catastrophically. Missing or misbehaving ripgrep falls back to the built-in scanner, and the tool description advertises which engine is active at registration.
+- New `timeout_seconds` parameter (default 30, max 300) replaces the fixed 120-second hard deadline: searches now return partial results with a "timed out; results incomplete" footer instead of throwing, so a huge or slow tree still yields something useful. An empty timed-out search reports the suggestion to narrow the path/pattern or raise `timeout_seconds`.
+- The ripgrep path preserves the existing semantics: substring `glob` filters and binary-file skipping are post-filtered, the dependency/VCS dir skip list is passed as negated globs, and `summary_only` maps to per-file match counts.
+
 **Added — per-provider session cost tracking in each provider's native unit.**
 
 - Session costs are now tracked per provider instead of being flattened into one converted USD figure. Token-priced APIs (DeepSeek) keep cumulative USD; quota-based APIs (ChatGPT, Ollama cloud, Antigravity) keep plan-window percentage used. The two are never converted into each other.
