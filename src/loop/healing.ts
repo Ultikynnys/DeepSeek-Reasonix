@@ -52,9 +52,9 @@ export function fixToolCallPairing(messages: ChatMessage[]): {
           continue;
         }
         const matchedId = nameToId.get(nxt.name ?? "");
-        if (matchedId && needed.has(matchedId)) {
+        if (!id && matchedId && needed.has(matchedId)) {
           needed.delete(matchedId);
-          candidates.push(nxt);
+          candidates.push({ ...nxt, tool_call_id: matchedId });
           j++;
           continue;
         }

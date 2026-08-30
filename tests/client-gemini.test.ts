@@ -199,6 +199,7 @@ describe("gemini payload", () => {
           role: "assistant",
           tool_calls: [
             {
+              id: "call-read-1",
               function: { name: "read_file", arguments: '{"path":"/a"}' },
               thoughtSignature: "signature-abc-123",
             },
@@ -212,7 +213,7 @@ describe("gemini payload", () => {
       role: "model",
       parts: [
         {
-          functionCall: { name: "read_file", args: { path: "/a" } },
+          functionCall: { id: "call-read-1", name: "read_file", args: { path: "/a" } },
           thoughtSignature: "signature-abc-123",
         },
       ],
@@ -237,12 +238,12 @@ describe("gemini payload", () => {
         {
           role: "assistant",
           tool_calls: [
-            { function: { name: "a", arguments: "{}" } },
-            { function: { name: "b", arguments: "{}" } },
+            { id: "call-a", function: { name: "a", arguments: "{}" } },
+            { id: "call-b", function: { name: "b", arguments: "{}" } },
           ],
         },
-        { role: "tool", name: "a", tool_call_id: "", content: "ra" },
-        { role: "tool", name: "b", tool_call_id: "", content: "rb" },
+        { role: "tool", name: "a", tool_call_id: "call-a", content: "ra" },
+        { role: "tool", name: "b", tool_call_id: "call-b", content: "rb" },
       ],
     });
 
@@ -252,15 +253,15 @@ describe("gemini payload", () => {
       {
         role: "model",
         parts: [
-          { functionCall: { name: "a", args: {} } },
-          { functionCall: { name: "b", args: {} } },
+          { functionCall: { id: "call-a", name: "a", args: {} } },
+          { functionCall: { id: "call-b", name: "b", args: {} } },
         ],
       },
       {
         role: "user",
         parts: [
-          { functionResponse: { name: "a", response: { result: "ra" } } },
-          { functionResponse: { name: "b", response: { result: "rb" } } },
+          { functionResponse: { id: "call-a", name: "a", response: { result: "ra" } } },
+          { functionResponse: { id: "call-b", name: "b", response: { result: "rb" } } },
         ],
       },
     ]);
@@ -281,6 +282,52 @@ describe("gemini payload", () => {
 
     const contents = (captured as { request: { contents: unknown[] } }).request.contents;
     expect(contents).toEqual([]);
+  });
+
+  it("omits optional generation config for fragile discovered models", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({ model: "chat_20706", messages: [{ role: "user", content: "hi" }] });
+
+    expect((captured as { request: Record<string, unknown> }).request).not.toHaveProperty(
+      "generationConfig",
+    );
+  });
+
+  it("only sends explicit thinking config to Gemini models", async () => {
+    const bodies: Array<{ request: Record<string, unknown> }> = [];
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(init?.body as string));
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-3.1-flash-high",
+      messages: [{ role: "user", content: "hi" }],
+      thinking: "disabled",
+    });
+    await client.chat({
+      model: "claude-opus-4-6-thinking",
+      messages: [{ role: "user", content: "hi" }],
+      thinking: "disabled",
+    });
+
+    expect(bodies[0]?.request.generationConfig).toEqual({
+      thinkingConfig: { includeThoughts: false },
+    });
+    expect(bodies[1]?.request).not.toHaveProperty("generationConfig");
   });
 
   it("strips Gemini-incompatible JSON-Schema keywords from tool parameters", async () => {
@@ -350,10 +397,14 @@ describe("gemini payload", () => {
     );
   });
 
-  it("maps functionCall parts to ToolCall with JSON-stringified args", async () => {
+  it("preserves a functionCall id and JSON-stringifies its args", async () => {
     const fetch = vi.fn(async () => {
       return new Response(
-        JSON.stringify(wrappedResponse([{ functionCall: { name: "read", args: { path: "/a" } } }])),
+        JSON.stringify(
+          wrappedResponse([
+            { functionCall: { id: "call-read", name: "read", args: { path: "/a" } } },
+          ]),
+        ),
         { status: 200, headers: { "content-type": "application/json" } },
       );
     }) as unknown as typeof fetch;
@@ -364,8 +415,29 @@ describe("gemini payload", () => {
       messages: [{ role: "user", content: "read /a" }],
     });
     expect(res.toolCalls).toEqual([
-      { type: "function", function: { name: "read", arguments: '{"path":"/a"}' } },
+      {
+        id: "call-read",
+        type: "function",
+        function: { name: "read", arguments: '{"path":"/a"}' },
+      },
     ]);
+  });
+
+  it("generates an id when an Antigravity functionCall omits one", async () => {
+    const fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify(wrappedResponse([{ functionCall: { name: "read", args: {} } }])),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const res = await client.chat({
+      model: "claude-opus-4-6-thinking",
+      messages: [{ role: "user", content: "read" }],
+    });
+
+    expect(res.toolCalls[0]?.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("captures the sibling thoughtSignature on a functionCall part", async () => {
@@ -517,6 +589,46 @@ describe("gemini streaming", () => {
     const usageChunk = chunks.find((c) => c.usage);
     expect(usageChunk?.usage?.promptTokens).toBe(3);
     expect(usageChunk?.usage?.completionTokens).toBe(2);
+  });
+
+  it("preserves parallel function calls across and within SSE frames", async () => {
+    const envelope = (parts: unknown[]) => ({
+      response: { candidates: [{ content: { parts } }] },
+    });
+    const sse = [
+      `data: ${JSON.stringify(
+        envelope([
+          { functionCall: { id: "call-a", name: "a", args: { value: 1 } } },
+          { functionCall: { id: "call-b", name: "b", args: { value: 2 } } },
+        ]),
+      )}`,
+      `data: ${JSON.stringify(
+        envelope([{ functionCall: { id: "call-c", name: "c", args: { value: 3 } } }]),
+      )}`,
+      "data: [DONE]",
+    ].join("\n\n");
+
+    const fetch = vi.fn(async () => {
+      return new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const calls = [];
+    for await (const chunk of client.stream({
+      model: "claude-opus-4-6-thinking",
+      messages: [{ role: "user", content: "run all" }],
+    })) {
+      if (chunk.toolCallDelta) calls.push(chunk.toolCallDelta);
+    }
+
+    expect(calls.map(({ index, id, name }) => ({ index, id, name }))).toEqual([
+      { index: 0, id: "call-a", name: "a" },
+      { index: 1, id: "call-b", name: "b" },
+      { index: 2, id: "call-c", name: "c" },
+    ]);
   });
 
   it("captures an inlineData image part as StreamChunk.image", async () => {

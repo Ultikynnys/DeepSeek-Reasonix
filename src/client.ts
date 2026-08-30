@@ -827,6 +827,7 @@ export class DeepSeekClient {
       }
       if (part.functionCall) {
         toolCalls.push({
+          id: part.functionCall.id ?? globalThis.crypto.randomUUID(),
           type: "function" as const,
           function: {
             name: part.functionCall.name ?? "",
@@ -918,6 +919,7 @@ export class DeepSeekClient {
       throw await this.antigravityUpstreamError(resp);
     }
     const queue: StreamChunk[] = [];
+    let nextToolCallIndex = 0;
     let done = false;
     const parser = createParser({
       onEvent: (ev: EventSourceMessage) => {
@@ -927,8 +929,7 @@ export class DeepSeekClient {
         }
         try {
           const json = JSON.parse(ev.data);
-          const chunk = this.parseAntigravityStreamChunk(json);
-          if (chunk) queue.push(chunk);
+          queue.push(...this.parseAntigravityStreamChunks(json, () => nextToolCallIndex++));
         } catch {
           /* skip malformed sse frame */
         }
@@ -966,11 +967,11 @@ export class DeepSeekClient {
     }
   }
 
-  /** Map one Cloud Code SSE envelope to a StreamChunk, or null when it carries
-   *  no usable content. */
-  private parseAntigravityStreamChunk(json: any): StreamChunk | null {
+  /** Map one Cloud Code SSE envelope to zero or more StreamChunks. */
+  private parseAntigravityStreamChunks(json: any, nextToolCallIndex: () => number): StreamChunk[] {
     const inner = json?.response;
-    if (!inner) return null;
+    if (!inner) return [];
+    const chunks: StreamChunk[] = [];
     const chunk: StreamChunk = { raw: json };
     if (inner.usageMetadata) {
       chunk.usage = new Usage(
@@ -980,9 +981,8 @@ export class DeepSeekClient {
       );
     }
     const candidate = inner.candidates?.[0];
-    if (!candidate) return chunk;
-    if (candidate.finishReason) chunk.finishReason = candidate.finishReason;
-    const parts = candidate.content?.parts ?? [];
+    if (candidate?.finishReason) chunk.finishReason = candidate.finishReason;
+    const parts = candidate?.content?.parts ?? [];
     for (const part of parts) {
       if (typeof part.text === "string" && part.text.length > 0) {
         chunk.contentDelta = (chunk.contentDelta ?? "") + part.text;
@@ -994,27 +994,29 @@ export class DeepSeekClient {
         };
       }
       if (part.functionCall) {
-        chunk.toolCallDelta = {
-          index: 0,
-          name: part.functionCall.name,
-          argumentsDelta: JSON.stringify(part.functionCall.args ?? {}),
-          // Gemini 3.x requires the model's thoughtSignature to be echoed back
-          // unchanged on the next request, or the tool continuation 400s.
-          // Part.thought_signature is a SIBLING of functionCall, not nested.
-          thoughtSignature: part.thoughtSignature,
-        };
+        chunks.push({
+          raw: json,
+          toolCallDelta: {
+            index: nextToolCallIndex(),
+            id: part.functionCall.id ?? globalThis.crypto.randomUUID(),
+            name: part.functionCall.name,
+            argumentsDelta: JSON.stringify(part.functionCall.args ?? {}),
+            // Gemini 3.x requires the model's thoughtSignature to be echoed back
+            // unchanged on the next request, or the tool continuation 400s.
+            thoughtSignature: part.thoughtSignature,
+          },
+        });
       }
     }
     if (
       chunk.contentDelta !== undefined ||
-      chunk.toolCallDelta !== undefined ||
       chunk.usage !== undefined ||
       chunk.finishReason !== undefined ||
       chunk.image !== undefined
     ) {
-      return chunk;
+      chunks.unshift(chunk);
     }
-    return null;
+    return chunks;
   }
 
   /** Cloud Code request body — `{ model, project, request: { contents,
@@ -1030,6 +1032,7 @@ export class DeepSeekClient {
     // result. Gemini rejects a `role: "function"` content and rejects duplicate
     // consecutive roles; Google's own client emits one combined user turn.
     let pendingFunctionResponses: Array<Record<string, unknown>> = [];
+    const pendingCallIdsByName = new Map<string, string[]>();
     const flushFunctionResponses = (): void => {
       if (pendingFunctionResponses.length === 0) return;
       contents.push({ role: "user", parts: pendingFunctionResponses });
@@ -1071,10 +1074,15 @@ export class DeepSeekClient {
             }
           }
           for (const tc of msg.tool_calls ?? []) {
+            const id = tc.id ?? globalThis.crypto.randomUUID();
             const call: Record<string, unknown> = {
+              id,
               name: tc.function.name,
               args: parseToolCallArguments(tc.function.arguments),
             };
+            const pendingIds = pendingCallIdsByName.get(tc.function.name) ?? [];
+            pendingIds.push(id);
+            pendingCallIdsByName.set(tc.function.name, pendingIds);
             // Echo the model's thought signature back unchanged as a SIBLING of
             // functionCall — Part.thought_signature is a top-level field, not a
             // nested functionCall field. Nesting it 400s (INVALID_ARGUMENT:
@@ -1092,22 +1100,34 @@ export class DeepSeekClient {
           // on an empty functionResponse name).
           const name = msg.name ?? "";
           if (name.length === 0) break;
+          const pendingIds = pendingCallIdsByName.get(name);
+          const id = msg.tool_call_id || pendingIds?.shift();
+          if (msg.tool_call_id && pendingIds) {
+            const matchedIndex = pendingIds.indexOf(msg.tool_call_id);
+            if (matchedIndex >= 0) pendingIds.splice(matchedIndex, 1);
+          }
+          if (pendingIds?.length === 0) pendingCallIdsByName.delete(name);
           pendingFunctionResponses.push({
-            functionResponse: { name, response: toolResultContent(msg.content) },
+            functionResponse: {
+              ...(id ? { id } : {}),
+              name,
+              response: toolResultContent(msg.content),
+            },
           });
           break;
         }
       }
     }
     flushFunctionResponses();
-    const request: Record<string, unknown> = {
-      contents,
-      generationConfig: {
-        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-        ...(opts.maxTokens !== undefined ? { maxOutputTokens: opts.maxTokens } : {}),
-        thinkingConfig: { includeThoughts: false },
-      },
+    const request: Record<string, unknown> = { contents };
+    const generationConfig: Record<string, unknown> = {
+      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+      ...(opts.maxTokens !== undefined ? { maxOutputTokens: opts.maxTokens } : {}),
     };
+    if (opts.model.startsWith("gemini-") && opts.thinking !== undefined) {
+      generationConfig.thinkingConfig = { includeThoughts: opts.thinking === "enabled" };
+    }
+    if (Object.keys(generationConfig).length > 0) request.generationConfig = generationConfig;
     if (systemInstruction) {
       request.systemInstruction = { role: "user", parts: [{ text: systemInstruction }] };
     }
