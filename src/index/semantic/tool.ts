@@ -21,6 +21,14 @@ export async function registerSemanticSearchTool(
 ): Promise<boolean> {
   if (!(await indexCompatible(opts.root, { provider: opts.provider, model: opts.model })))
     return false;
+  registerCompatibleSemanticSearchTool(registry, opts);
+  return true;
+}
+
+function registerCompatibleSemanticSearchTool(
+  registry: ToolRegistry,
+  opts: SemanticToolOptions,
+): void {
   const defaultTopK = opts.defaultTopK ?? 8;
   const defaultMinScore = opts.defaultMinScore ?? 0.3;
 
@@ -70,7 +78,6 @@ export async function registerSemanticSearchTool(
       return formatHits(args.query, hits);
     },
   });
-  return true;
 }
 
 export function formatHits(query: string, hits: readonly SearchHit[]): string {
@@ -108,7 +115,7 @@ export async function bootstrapSemanticSearchInCodeMode(
   opts: Omit<SemanticToolOptions, "root" | "defaultTopK" | "defaultMinScore"> = {},
 ): Promise<{ enabled: boolean }> {
   if (await indexCompatible(rootDir, { provider: opts.provider, model: opts.model })) {
-    await registerSemanticSearchTool(registry, { ...opts, root: rootDir });
+    registerCompatibleSemanticSearchTool(registry, { ...opts, root: rootDir });
     return { enabled: true };
   }
   return { enabled: false };

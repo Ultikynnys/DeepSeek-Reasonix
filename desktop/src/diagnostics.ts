@@ -7,6 +7,23 @@ const bootStartedAt = performance.now();
 let installed = false;
 let queue = Promise.resolve();
 const MAX_DEPTH = 3;
+const PERFORMANCE_BATCH_DELAY_MS = 100;
+const DIAGNOSTIC_COMMAND = "record_frontend_diagnostic";
+const performanceEntries: Record<string, unknown>[] = [];
+let performanceFlushTimer: ReturnType<typeof setTimeout> | undefined;
+let performanceCallbackActive = false;
+
+export function isFrontendDiagnosticResource(name: string): boolean {
+  try {
+    const url = new URL(name, window.location.href);
+    return (
+      url.hostname === "ipc.localhost" &&
+      (url.pathname.includes(DIAGNOSTIC_COMMAND) || url.href.includes(DIAGNOSTIC_COMMAND))
+    );
+  } catch {
+    return name.includes(DIAGNOSTIC_COMMAND);
+  }
+}
 
 function safeValue(value: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return "[max-depth]";
@@ -35,19 +52,35 @@ export function recordFrontendDiagnostic(
   details: Record<string, unknown> = {},
   level: FrontendDiagnosticLevel = "debug",
 ): void {
-  queue = queue
-    .then(() =>
-      invoke("record_frontend_diagnostic", {
+  queue = queue.then(async () => {
+    try {
+      await invoke(DIAGNOSTIC_COMMAND, {
         level,
         event,
         details: redactDiagnosticValue(safeValue(details)),
-      }).then(() => undefined),
-    )
-    .catch((error) => {
+      });
+    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       window.console.error(`[diagnostics] frontend write failed: ${message}`);
-      throw error;
-    });
+    }
+  });
+}
+
+function flushPerformanceEntries(): void {
+  performanceFlushTimer = undefined;
+  if (performanceEntries.length === 0) return;
+  const entries = performanceEntries.splice(0, performanceEntries.length);
+  recordFrontendDiagnostic(
+    "frontend.performance.batch",
+    { count: entries.length, entries },
+    "verbose",
+  );
+}
+
+function queuePerformanceEntry(details: Record<string, unknown>): void {
+  performanceEntries.push(details);
+  if (performanceFlushTimer) return;
+  performanceFlushTimer = setTimeout(flushPerformanceEntries, PERFORMANCE_BATCH_DELAY_MS);
 }
 
 function observePerformance(): void {
@@ -59,20 +92,27 @@ function observePerformance(): void {
       continue;
     }
     const observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        const details: Record<string, unknown> = {
-          entryType: entry.entryType,
-          name: entry.name,
-          startTimeMs: Number(entry.startTime.toFixed(3)),
-          durationMs: Number(entry.duration.toFixed(3)),
-        };
-        if (entry instanceof PerformanceResourceTiming) {
-          details.initiatorType = entry.initiatorType;
-          details.transferSize = entry.transferSize;
-          details.encodedBodySize = entry.encodedBodySize;
-          details.decodedBodySize = entry.decodedBodySize;
+      if (performanceCallbackActive) return;
+      performanceCallbackActive = true;
+      try {
+        for (const entry of list.getEntries()) {
+          if (entry.entryType === "resource" && isFrontendDiagnosticResource(entry.name)) continue;
+          const details: Record<string, unknown> = {
+            entryType: entry.entryType,
+            name: entry.name,
+            startTimeMs: Number(entry.startTime.toFixed(3)),
+            durationMs: Number(entry.duration.toFixed(3)),
+          };
+          if (entry instanceof PerformanceResourceTiming) {
+            details.initiatorType = entry.initiatorType;
+            details.transferSize = entry.transferSize;
+            details.encodedBodySize = entry.encodedBodySize;
+            details.decodedBodySize = entry.decodedBodySize;
+          }
+          queuePerformanceEntry(details);
         }
-        recordFrontendDiagnostic("frontend.performance.entry", details, "verbose");
+      } finally {
+        performanceCallbackActive = false;
       }
     });
     observer.observe({ type, buffered: true });

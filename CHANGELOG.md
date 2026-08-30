@@ -11,6 +11,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Backend diagnostics include boot phases, model request/rate-limit timing, real tool and MCP durations, crash guards, daemon events, and periodic CPU/memory/resource health.
 - The Tauri host records startup, panic, child lifecycle, and shutdown before forwarding events; the frontend records boot-to-render, global failures, React render failures, visibility changes, and supported browser performance entries.
 
+**Fixed — diagnostics and restored tabs no longer create their own bottlenecks.**
+
+- Frontend performance diagnostics exclude their own Tauri IPC resource, batch entries, recover after write failures, and enforce host-side payload bounds.
+- Account quota refreshes and workspace session listings now use process-wide single-flight caches instead of repeating network and filesystem work per restored tab.
+- Restored-tab toolset builds are capped at two concurrent tasks with active-tab priority, per-tab phase timing, and one semantic compatibility read.
+
 
 **Fixed — a fresh sign-in / API key now takes effect without restarting.**
 

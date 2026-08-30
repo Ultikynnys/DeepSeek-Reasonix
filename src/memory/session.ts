@@ -13,7 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
 import { DAY_MS, messageOf, sanitizeFilename } from "@reasonix/core-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
@@ -293,6 +293,56 @@ export function normalizeWorkspace(
 
 export function listSessionsForWorkspace(workspace: string): SessionInfo[] {
   return listSessions({ workspaceFilter: workspace, includeLegacyWorkspaceMatches: true });
+}
+
+export async function listSessionsForWorkspaceAsync(workspace: string): Promise<SessionInfo[]> {
+  const dir = sessionsDir();
+  const want = normalizeWorkspace(workspace);
+  const legacyPrefix = legacySessionPrefixForWorkspace(workspace);
+  let files: string[];
+  try {
+    files = (await readdir(dir)).filter(
+      (file) => file.endsWith(".jsonl") && !file.endsWith(SESSION_EVENTS_SUFFIX),
+    );
+  } catch {
+    return [];
+  }
+  const sessions = await Promise.all(
+    files.map(async (file): Promise<SessionInfo | null> => {
+      const path = join(dir, file);
+      const name = file.replace(/\.jsonl$/, "");
+      const meta = loadSessionMeta(name);
+      let workspaceStatus: SessionInfo["workspaceStatus"];
+      if (typeof meta.workspace === "string") {
+        if (normalizeWorkspace(meta.workspace) !== want) return null;
+        workspaceStatus = "matched";
+      } else if (name.startsWith(legacyPrefix)) {
+        workspaceStatus = "legacy_missing_meta";
+      } else {
+        return null;
+      }
+      try {
+        const [fileStat, body] = await Promise.all([stat(path), readFile(path)]);
+        let messageCount = 0;
+        for (const byte of body) if (byte === 0x0a) messageCount++;
+        if (body.length > 0 && body[body.length - 1] !== 0x0a) messageCount++;
+        return {
+          name,
+          path,
+          size: fileStat.size,
+          messageCount,
+          mtime: fileStat.mtime,
+          meta,
+          workspaceStatus,
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return sessions
+    .filter((session): session is SessionInfo => session !== null)
+    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 }
 
 export function legacySessionPrefixForWorkspace(workspace: string): string {

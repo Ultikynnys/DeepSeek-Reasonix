@@ -1,4 +1,3 @@
-import { markPhase } from "../cli/startup-profile.js";
 import { DeepSeekClient } from "../client.js";
 import { resolveCodexTransport } from "../codex-backend.js";
 import {
@@ -70,6 +69,7 @@ export interface CodeToolsetOpts {
   /** Per-tab subagent model, resolved lazily at spawn time via a getter so a
    *  change applies to the next spawn without rebuilding the toolset. */
   subagentModel?: () => string;
+  onPhase?: (phase: string) => void;
 }
 
 export interface CodeToolset {
@@ -86,7 +86,7 @@ export function applyPlanMode(tools: ToolRegistry, editMode: EditMode): void {
 }
 
 export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeToolset> {
-  markPhase("toolset_build_started");
+  opts.onPhase?.("toolset_build_started");
   const tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
   applyPlanMode(tools, loadEditMode(opts.configPath));
   const jobs = new JobRegistry();
@@ -187,9 +187,9 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     },
   });
 
-  markPhase("tool_registration_completed");
+  opts.onPhase?.("tool_registration_completed");
   const semantic = await reBootstrapSemantic(opts.rootDir);
-  markPhase("semantic_check_completed");
+  opts.onPhase?.("semantic_check_completed");
 
   return { tools, jobs, registerRooted, reBootstrapSemantic, semantic };
 }

@@ -126,12 +126,14 @@ import {
   saveWorkspaceDir,
   writeConfig,
 } from "../../config.js";
+import { ConcurrencyGate } from "../../core/concurrency-gate.js";
 import { redactEventValue } from "../../core/event-redaction.js";
 import { Eventizer } from "../../core/eventize.js";
 import { EventType } from "../../core/events.js";
 import type { Event as KernelEvent, SubagentProgressEvent } from "../../core/events.js";
 import { pauseGate } from "../../core/pause-gate.js";
 import { autoResolveVerdict } from "../../core/pause-policy.js";
+import { AccountQuotaCoordinator } from "../../desktop/account-quota.js";
 import { augmentProcessPath } from "../../desktop/login-shell-path.js";
 import {
   collectMemoryEntriesForWorkspace,
@@ -141,6 +143,7 @@ import {
   readMemoryEntryDetail,
   writeMemoryEntry,
 } from "../../desktop/memory-browser.js";
+import { SessionListCache } from "../../desktop/session-list-cache.js";
 import { recordDiagnostic } from "../../diagnostics.js";
 import { normalizeImageToDataUrl } from "../../image-format.js";
 
@@ -170,6 +173,7 @@ import {
   type SessionMeta,
   deleteSession,
   listSessionsForWorkspace,
+  listSessionsForWorkspaceAsync,
   loadSessionMessages,
   loadSessionMessagesAsync,
   loadSessionMeta,
@@ -936,9 +940,6 @@ function emitSettings(tab: Tab): void {
     budgetConfigured: tab.runtime?.loop.budgetUsd !== undefined,
     oauthSignedIn: !!oauth?.accessToken,
   });
-  void emitCodexQuota(tab);
-  void emitOllamaQuota(tab);
-  void emitAntigravityQuota(tab);
 }
 
 /** Account plan for a cloud Ollama endpoint — `POST {origin}/api/me` with the
@@ -1385,17 +1386,33 @@ async function emitBalance(tab: Tab): Promise<void> {
  *  window has ~33× better resolution; weekly covers plans that report only weekly. */
 let lastCodexFiveHourUsedPct: number | null = null;
 let lastCodexWeeklyUsedPct: number | null = null;
+const codexQuotaCoordinator = new AccountQuotaCoordinator(async () => {
+  const result = await fetchCodexQuotaViaOAuth(10_000);
+  if (!result.quota) return result;
+  const fiveHourUsedPct = result.quota.fiveHour?.usedPercent ?? null;
+  const weeklyUsedPct = result.quota.weekly?.usedPercent ?? null;
+  const usedPct = fiveHourUsedPct !== null ? fiveHourUsedPct : weeklyUsedPct;
+  const previousBaseline =
+    fiveHourUsedPct !== null ? lastCodexFiveHourUsedPct : lastCodexWeeklyUsedPct;
+  const turnUsedPct =
+    previousBaseline !== null && usedPct !== null && usedPct >= previousBaseline
+      ? usedPct - previousBaseline
+      : null;
+  if (fiveHourUsedPct !== null) lastCodexFiveHourUsedPct = fiveHourUsedPct;
+  else if (weeklyUsedPct !== null) lastCodexWeeklyUsedPct = weeklyUsedPct;
+  return { ...result, quota: { ...result.quota, turnUsedPct } };
+});
 
 /** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only.
  *  OAuth HTTP fetch only (no codex CLI dependency). */
-async function emitCodexQuota(tab: Tab): Promise<void> {
+async function emitCodexQuota(tab: Tab, options: { force?: boolean } = {}): Promise<void> {
   if (providerForModel(tab.currentModel) !== "openai") {
     emitTabDiagnostic(tab, "quota.skipped", { reason: "non-openai-provider" });
     return;
   }
 
   emitTabDiagnostic(tab, "quota.fetch.started");
-  const oauthResult = await fetchCodexQuotaViaOAuth(10_000).catch((err) => ({
+  const oauthResult = await codexQuotaCoordinator.fetch(options).catch((err) => ({
     quota: null,
     reason: (err as Error).message,
   }));
@@ -1403,33 +1420,13 @@ async function emitCodexQuota(tab: Tab): Promise<void> {
   const reason = oauthResult.reason;
 
   if (quota) {
-    let turnUsedPct: number | null = null;
-    const fiveHourUsedPct = quota.fiveHour?.usedPercent ?? null;
-    const weeklyUsedPct = quota.weekly?.usedPercent ?? null;
-    // Prefer the five-hour window; weekly covers plans that report only weekly.
-    const usedPct = fiveHourUsedPct !== null ? fiveHourUsedPct : weeklyUsedPct;
-    const previousBaseline =
-      fiveHourUsedPct !== null ? lastCodexFiveHourUsedPct : lastCodexWeeklyUsedPct;
-    const rollover = previousBaseline !== null && usedPct !== null && usedPct < previousBaseline;
-    if (usedPct !== null) {
-      // Rollover (window reset) makes the delta go backwards — report no
-      // turn cost for this fetch and adopt the new baseline.
-      if (previousBaseline !== null && usedPct >= previousBaseline) {
-        turnUsedPct = usedPct - previousBaseline;
-      }
-      if (fiveHourUsedPct !== null) lastCodexFiveHourUsedPct = fiveHourUsedPct;
-      else lastCodexWeeklyUsedPct = weeklyUsedPct;
-    }
     emitTabDiagnostic(tab, "quota.fetch.succeeded", {
       plan: quota.plan,
       fiveHour: quota.fiveHour,
       weekly: quota.weekly,
-      previousUsedPct: previousBaseline,
-      currentUsedPct: usedPct,
-      rollover,
-      turnUsedPct,
+      turnUsedPct: quota.turnUsedPct ?? null,
     });
-    emit({ type: "$codex_quota", quota: { ...quota, turnUsedPct } }, tab.id);
+    emit({ type: "$codex_quota", quota }, tab.id);
     return;
   }
   emitTabDiagnostic(tab, "quota.fetch.failed", { reason }, "error");
@@ -1623,22 +1620,33 @@ function subagentBillingFor(model: string): import("../../code/setup.js").Subage
   }
 }
 
-function emitSessions(tab: Tab): void {
-  emitTabDiagnostic(tab, "sessions.list.started");
+type SessionListItem = SessionsEvent["items"][number];
+const sessionListCache = new SessionListCache<SessionListItem[]>(async (workspace) =>
+  (await listSessionsForWorkspaceAsync(workspace)).map((session) => ({
+    name: session.name,
+    messageCount: session.messageCount,
+    mtime: session.mtime.toISOString(),
+    summary: session.meta.summary,
+    workspaceStatus: session.workspaceStatus,
+  })),
+);
+
+async function emitSessions(tab: Tab): Promise<void> {
+  const startedAt = performance.now();
+  const request = sessionListCache.load(tab.rootDir);
+  emitTabDiagnostic(tab, "sessions.list.started", { cache: request.cache });
   try {
-    const items = listSessionsForWorkspace(tab.rootDir).map((s) => ({
-      name: s.name,
-      messageCount: s.messageCount,
-      mtime: s.mtime.toISOString(),
-      summary: s.meta.summary,
-      workspaceStatus: s.workspaceStatus,
-    }));
+    const items = await request.value;
     emit({ type: "$sessions", items }, tab.id);
-    emitTabDiagnostic(tab, "sessions.list.completed", { count: items.length });
+    emitTabDiagnostic(tab, "sessions.list.completed", {
+      count: items.length,
+      cache: request.cache,
+      durationMs: Number((performance.now() - startedAt).toFixed(3)),
+    });
   } catch (err) {
     emitDiagnosticError("sessions.list.failed", err, {
       tabId: tab.id,
-      details: tabDiagnosticState(tab),
+      details: { ...tabDiagnosticState(tab), cache: request.cache },
     });
     emit({ type: "$error", message: `session_list failed: ${(err as Error).message}` }, tab.id);
   }
@@ -1703,7 +1711,10 @@ function loadSessionIntoTab(
   );
   emitCtxBreakdown(tab);
   emitSettings(tab);
-  if (backfilledWorkspace) emitSessions(tab);
+  if (backfilledWorkspace) {
+    sessionListCache.invalidate(tab.rootDir);
+    void emitSessions(tab);
+  }
   emitTabDiagnostic(tab, "session.load.completed", {
     name,
     records: records.length,
@@ -2484,19 +2495,36 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     };
   }
 
-  async function initTabToolset(tab: Tab): Promise<void> {
+  const bootstrapGate = new ConcurrencyGate(2);
+
+  async function initTabToolset(tab: Tab, priority = 0): Promise<void> {
+    const bootstrapStartedAt = performance.now();
+    let previousPhaseAt = bootstrapStartedAt;
     emitTabDiagnostic(tab, "tab.bootstrap.started", undefined, "info");
-    const toolset = await buildCodeToolset({
-      rootDir: tab.rootDir,
-      onSkillInstalled: () => emitSkills(tab),
-      onJobsChanged: () => emitJobs(),
-      subagentSink: subagentSinkFor(tab),
-      subagentBilling: (m) => subagentBillingFor(m),
-      subagentModel: () => tab.currentSubagentModel ?? tab.currentModel,
-      visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
-    });
+    const { value: toolset, queueWaitMs } = await bootstrapGate.run(
+      () =>
+        buildCodeToolset({
+          rootDir: tab.rootDir,
+          onSkillInstalled: () => emitSkills(tab),
+          onJobsChanged: () => emitJobs(),
+          subagentSink: subagentSinkFor(tab),
+          subagentBilling: (m) => subagentBillingFor(m),
+          subagentModel: () => tab.currentSubagentModel ?? tab.currentModel,
+          visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
+          onPhase: (phase) => {
+            const now = performance.now();
+            emitTabDiagnostic(tab, "tab.bootstrap.phase", {
+              phase,
+              phaseDurationMs: Number((now - previousPhaseAt).toFixed(3)),
+              bootstrapCumulativeMs: Number((now - bootstrapStartedAt).toFixed(3)),
+            });
+            previousPhaseAt = now;
+          },
+        }),
+      priority,
+    );
     tab.toolset = toolset;
-    markPhase("first_toolset_ready");
+    if (priority > 0) markPhase("first_toolset_ready");
     tab.system = codeSystemPrompt(tab.rootDir, {
       hasSemanticSearch: toolset.semantic.enabled,
       modelId: tab.currentModel,
@@ -2504,7 +2532,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (tabCurrentModelUsable(tab)) {
       bridgeEndpointEnv();
       tab.runtime = buildRuntimeFor(tab);
-      markPhase("first_runtime_ready");
+      if (priority > 0) markPhase("first_runtime_ready");
       emitTabDiagnostic(tab, "tab.runtime.ready", undefined, "info");
       void bridgeTabMcp(tab);
     } else {
@@ -2516,6 +2544,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       {
         toolCount: toolset.tools.specs().length,
         semanticEnabled: toolset.semantic.enabled,
+        queueWaitMs: Number(queueWaitMs.toFixed(3)),
+        durationMs: Number((performance.now() - bootstrapStartedAt).toFixed(3)),
       },
       "info",
     );
@@ -2932,9 +2962,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             tab.planTotalSteps = 0;
             emit({ type: "$plan_cleared" }, tab.id);
           }
-          emitSessions(tab);
+          void emitSessions(tab);
           void emitBalance(tab);
-          void emitCodexQuota(tab);
+          void emitCodexQuota(tab, { force: true });
           void emitOllamaQuota(tab);
           void emitAntigravityQuota(tab);
           if (tab.hooks.some((h) => h.event === "Stop")) {
@@ -2988,7 +3018,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // shutdown errors aren't actionable here — but LOG
       process.stderr.write(`reasonix: tab job shutdown failed — ${messageOf(err)}\n`);
     }
+    sessionListCache.invalidate(tab.rootDir);
     tab.rootDir = target;
+    sessionListCache.invalidate(target);
     saveWorkspaceDir(target);
     pushRecentWorkspace(target);
     tab.fileIndex = null;
@@ -3013,7 +3045,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       modelId: tab.currentModel,
     });
     if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
-    emitSessions(tab);
+    void emitSessions(tab);
     emitSettings(tab);
     emitSkills(tab);
     persistOpenTabs();
@@ -3427,7 +3459,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // history, once per restored tab. This order ($ready before
       // $session_loaded) is the same the desktop_resync path already emits, so
       // the frontend handles it.
-      void initTabToolset(tab)
+      void initTabToolset(tab, tab === first || restore?.active ? 1 : 0)
         .then(() => {
           if (tabHasCredential(tab)) {
             emitTabDiagnostic(tab, "tab.ready", undefined, "info");
@@ -3482,7 +3514,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         restored: restoredMessages !== undefined,
         restoredMessages: restoredMessages?.length ?? 0,
       });
-      emitSessions(tab);
+      void emitSessions(tab);
       emitMemory(tab);
       if (restoredMessages) {
         const meta = loadSessionMeta(tab.currentSession);
@@ -3502,6 +3534,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         );
       }
       void emitBalance(tab);
+      void emitCodexQuota(tab);
+      void emitOllamaQuota(tab);
+      void emitAntigravityQuota(tab);
     })();
     return tab;
   }
@@ -3548,7 +3583,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emitTabDiagnostic(tab, "quota.poll.started", { intervalMs: 60_000 });
     quotaPolling = true;
     void Promise.allSettled([
-      emitCodexQuota(tab),
+      emitCodexQuota(tab, { force: true }),
       emitOllamaQuota(tab),
       emitAntigravityQuota(tab),
     ]).finally(() => {
@@ -3607,7 +3642,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         persistOpenTabs();
         // Refetch immediately — the tab may have sat idle for hours, and
         // the statusbar must show the current quota the moment it's shown.
-        void emitCodexQuota(activated);
+        void emitCodexQuota(activated, { force: true });
         void emitOllamaQuota(activated);
         void emitAntigravityQuota(activated);
       } else {
@@ -3714,7 +3749,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       });
       void firstBootstrapSettled.then(async () => {
         for (const t of tabs.values()) {
-          emitSessions(t);
+          void emitSessions(t);
           emitMemory(t);
           void emitBalance(t);
           if (t.currentSession) {
@@ -3898,24 +3933,27 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "session_list") {
-      emitSessions(tab);
+      void emitSessions(tab);
       return;
     }
     if (msg.cmd === "session_delete") {
       deleteSession(msg.name);
-      emitSessions(tab);
+      sessionListCache.invalidate(tab.rootDir);
+      void emitSessions(tab);
       return;
     }
     if (msg.cmd === "session_clear") {
       for (const s of listSessionsForWorkspace(tab.rootDir)) deleteSession(s.name);
-      emitSessions(tab);
+      sessionListCache.invalidate(tab.rootDir);
+      void emitSessions(tab);
       return;
     }
     if (msg.cmd === "session_rename") {
       try {
         const trimmed = normalizeSessionTitle(msg.title);
         patchSessionMeta(msg.name, { summary: trimmed || undefined });
-        emitSessions(tab);
+        sessionListCache.invalidate(tab.rootDir);
+        void emitSessions(tab);
       } catch (err) {
         emit(
           { type: "$error", message: `session_rename failed: ${(err as Error).message}` },
@@ -3932,7 +3970,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           name: msg.name,
           workspace: tab.rootDir,
         });
-        emitSessions(tab);
+        sessionListCache.invalidate(tab.rootDir);
+        void emitSessions(tab);
         loadSessionIntoTab(tab, result.name, {
           abortTurn,
           cancelPendingGates,
@@ -3963,7 +4002,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           sources: msg.sources,
           workspace: tab.rootDir,
         });
-        emitSessions(tab);
+        sessionListCache.invalidate(tab.rootDir);
+        void emitSessions(tab);
         emit(
           {
             type: "$session_import_result",
@@ -4098,7 +4138,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       });
       persistOpenTabs();
       if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
-      emitSessions(tab);
+      sessionListCache.invalidate(tab.rootDir);
+      void emitSessions(tab);
       emitTabDiagnostic(tab, "session.new-chat.completed", undefined, "info");
       return;
     }
@@ -4280,7 +4321,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "codex_quota_get") {
-      void emitCodexQuota(tab);
+      void emitCodexQuota(tab, { force: true });
       return;
     }
     if (msg.cmd === "ollama_quota_get") {

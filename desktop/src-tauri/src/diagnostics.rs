@@ -9,6 +9,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
 const RETAINED_FILES: usize = 10;
 const PREFIX: &str = "reasonix-host-";
+const MAX_FRONTEND_DETAILS_BYTES: usize = 64 * 1024;
+const MAX_FRONTEND_NODES: usize = 2_000;
+const MAX_FRONTEND_DEPTH: usize = 6;
 
 struct Sink {
     file: File,
@@ -125,6 +128,30 @@ pub fn record(level: &str, event: &str, details: Value) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_frontend_value(value: &Value, depth: usize, nodes: &mut usize) -> Result<(), String> {
+    *nodes += 1;
+    if *nodes > MAX_FRONTEND_NODES {
+        return Err(format!("frontend diagnostic exceeds {MAX_FRONTEND_NODES} nodes"));
+    }
+    if depth > MAX_FRONTEND_DEPTH {
+        return Err(format!("frontend diagnostic exceeds depth {MAX_FRONTEND_DEPTH}"));
+    }
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                validate_frontend_value(item, depth + 1, nodes)?;
+            }
+        }
+        Value::Object(fields) => {
+            for child in fields.values() {
+                validate_frontend_value(child, depth + 1, nodes)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 #[derive(Serialize)]
 pub struct FrontendDiagnosticResponse {
     pub recorded: bool,
@@ -140,6 +167,15 @@ pub fn record_frontend_diagnostic(
         "error" | "warn" | "info" | "debug" | "verbose" => level,
         _ => "debug".to_string(),
     };
+    let encoded_bytes = serde_json::to_vec(&details)
+        .map_err(|error| format!("encode frontend diagnostic: {error}"))?
+        .len();
+    if encoded_bytes > MAX_FRONTEND_DETAILS_BYTES {
+        return Err(format!(
+            "frontend diagnostic exceeds {MAX_FRONTEND_DETAILS_BYTES} bytes"
+        ));
+    }
+    validate_frontend_value(&details, 0, &mut 0)?;
     let safe_event: String = event
         .chars()
         .filter(|character| character.is_ascii_alphanumeric() || "_.:-".contains(*character))

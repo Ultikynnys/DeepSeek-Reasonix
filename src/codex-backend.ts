@@ -134,7 +134,7 @@ function parseCodexQuotaPayload(payload: unknown): CodexQuota | null {
   };
 }
 
-interface CodexQuotaResult {
+export interface CodexQuotaResult {
   quota: CodexQuota | null;
   reason: string | null;
 }
