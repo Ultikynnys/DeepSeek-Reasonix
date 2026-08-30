@@ -200,6 +200,7 @@ export async function searchContent(
         // Extension skip + substring-glob filters can't be expressed as rg
         // flags, so post-filter each output line by its parsed path.
         const lines = rgRun.lines.filter((l) => {
+          if (l === "--") return true;
           const rel = rgRelOf(l);
           const base = rel.slice(rel.lastIndexOf("/") + 1);
           if (ctx.isBinaryByName(base)) return false;

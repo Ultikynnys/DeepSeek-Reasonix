@@ -793,12 +793,8 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
   describe("ripgrep delegation", () => {
     it("builds default args", () => {
       expect(rgArgs({ rootDir: "/w", startRel: ".", pattern: "foo", deadlineMs: 30_000 })).toEqual([
-        "--no-heading",
-        "--color",
-        "never",
         "--no-messages",
-        "--line-number",
-        "--with-filename",
+        "--json",
         "-i",
         "--regexp",
         "foo",
