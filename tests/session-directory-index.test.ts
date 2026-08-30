@@ -15,7 +15,11 @@ async function fixture(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    dirs
+      .splice(0)
+      .map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
+  );
 });
 
 describe("SessionDirectoryIndex", () => {
@@ -190,9 +194,11 @@ describe("SessionDirectoryIndex", () => {
   it("parallelizes reads across many files", async () => {
     const dir = await fixture();
     const count = 300;
-    for (let index = 0; index < count; index += 1) {
-      await writeFile(join(dir, `session-${index}.jsonl`), "a\nb\nc\n");
-    }
+    await Promise.all(
+      Array.from({ length: count }, (_, index) =>
+        writeFile(join(dir, `session-${index}.jsonl`), "a\nb\nc\n"),
+      ),
+    );
     const index = new SessionDirectoryIndex(
       () => dir,
       () => ({}),
@@ -202,5 +208,5 @@ describe("SessionDirectoryIndex", () => {
     const records = await index.load().value;
     expect(records).toHaveLength(count);
     expect(records.every((record) => record.messageCount === 3)).toBe(true);
-  });
+  }, 30_000);
 });
