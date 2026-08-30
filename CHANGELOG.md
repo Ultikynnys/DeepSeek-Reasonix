@@ -5,6 +5,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Added — per-provider session cost tracking in each provider's native unit.**
+
+- Session costs are now tracked per provider instead of being flattened into one converted USD figure. Token-priced APIs (DeepSeek) keep cumulative USD; quota-based APIs (ChatGPT, Ollama cloud, Antigravity) keep plan-window percentage used. The two are never converted into each other.
+- `SessionStats` and `SessionMeta` carry a `costByProvider` map; the loop records each turn against its provider's billing kind, and the desktop backend accumulates measured quota deltas (Codex, Ollama, Antigravity) into session meta so a quota tab's cumulative usage survives restarts and is emitted on `$session_loaded` resume.
+- The desktop settings billing page shows each provider in its native unit, and the status bar session-cost chip shows quota percentage on quota tabs instead of a currency-converted figure.
+
 **Fixed — session listing no longer rescans the whole session directory on every launch.**
 
 - The session directory index now persists a cache of the last-known file identities, message counts, and metadata to `~/.reasonix/cache/session-directory-index.json` after each refresh, and reuses it across launches. Only files that actually changed on disk are recounted; unchanged sessions keep their cached counts without reopening the JSONL.

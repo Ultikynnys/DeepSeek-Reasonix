@@ -309,6 +309,10 @@ export interface SessionLoadedEvent {
   messages: LoadedMessage[];
   carryover: {
     totalCostUsd: number;
+    /** Per-provider cumulative costs in each provider's native unit (USD for
+     *  token-priced APIs, plan-window % for quota APIs). Never converted between
+     *  providers. Keyed by provider id ("deepseek" | "openai" | "ollama" | "gemini"). */
+    costByProvider?: Record<string, SessionProviderCost>;
     cacheHitTokens: number;
     cacheMissTokens: number;
     totalCompletionTokens: number;
@@ -316,6 +320,17 @@ export interface SessionLoadedEvent {
   /** Set on `desktop_resync` re-emits — the frontend must not let a resync
    *  echo clobber a live streaming transcript (same session, busy). */
   resync?: boolean;
+}
+
+/** Per-provider cumulative session usage in the provider's native unit. Mirrors
+ *  src/telemetry/stats.ts SessionProviderCost — defined here so the frontend
+ *  has a standalone wire shape (core-utils cannot import from src). */
+export interface SessionProviderCost {
+  kind: "usd" | "quota" | "none";
+  /** Cumulative USD — only present when kind === "usd". */
+  totalCostUsd?: number;
+  /** Cumulative plan-window percentage points consumed — only when kind === "quota". */
+  quotaUsedPct?: number;
 }
 
 /** A fold committed and REPLACED the conversation — the chat must swap its

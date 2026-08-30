@@ -61,7 +61,13 @@ import {
   buildCacheDiagnostic,
   latestCacheDiagnostic,
 } from "./telemetry/cache-diagnostics.js";
-import { type CacheDiagnostics, SessionStats, type TurnStats } from "./telemetry/stats.js";
+import {
+  type BillingKind,
+  type CacheDiagnostics,
+  SessionStats,
+  type TurnStats,
+  billingKindForModel,
+} from "./telemetry/stats.js";
 import { countTokensBounded } from "./tokenizer.js";
 import { ToolRegistry, isReadOnlyTool } from "./tools.js";
 import { ReadTracker } from "./tools/read-tracker.js";
@@ -154,6 +160,10 @@ export interface CacheFirstLoopOptions {
   getEditMode?: () => EditMode;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
+  /** Resolves the native billing unit for a model id ("usd" | "quota" | "none").
+   *  Defaults to a provider-based guess; the desktop passes a resolver that knows
+   *  keyless local Ollama is "none". Quota turns record 0 USD — never converted. */
+  billingKindFor?: (model: string) => BillingKind;
   /** User-configured context-window cap (tokens), forwarded to the ContextManager.
    *  Undefined = per-model default. Hot-applied via configure(). */
   ctxMaxOverride?: number;
@@ -250,6 +260,9 @@ export class CacheFirstLoop {
   readonly resumedMessageCount: number;
 
   private readonly _rebuildSystem: (() => string) | null;
+
+  /** Native billing unit resolver — see CacheFirstLoopOptions.billingKindFor. */
+  private readonly _billingKindFor: (model: string) => BillingKind;
 
   private _turn = 0;
   private _streamPreference: boolean;
@@ -363,6 +376,7 @@ export class CacheFirstLoop {
     this.hookCwd = opts.hookCwd ?? process.cwd();
     this.confirmationGate = opts.confirmationGate ?? defaultPauseGate;
     this._rebuildSystem = opts.rebuildSystem ?? null;
+    this._billingKindFor = opts.billingKindFor ?? billingKindForModel;
     this._onPreCompaction = opts.onPreCompaction ?? null;
 
     this._streamPreference = opts.stream ?? true;
@@ -410,6 +424,7 @@ export class CacheFirstLoop {
           cacheMissTokens: meta.cacheMissTokens,
           totalCompletionTokens: meta.totalCompletionTokens,
           lastPromptTokens: meta.lastPromptTokens,
+          costByProvider: meta.costByProvider,
         });
       }
       if (healedCount > 0 || pruned.prunedCount > 0) {
@@ -1458,6 +1473,7 @@ export class CacheFirstLoop {
         callModel,
         usage ?? new Usage(),
         cacheDiagnostics,
+        this._billingKindFor(callModel),
       );
 
       // Carry cumulative stats across app restarts.
@@ -1486,6 +1502,10 @@ export class CacheFirstLoop {
             this.stats.turns.length > 0 ? this.stats.turns[this.stats.turns.length - 1] : null;
           patchSessionMeta(this.sessionName, {
             totalCostUsd: this.stats.totalCost,
+            // Deep-merge per-provider costs: the loop owns USD-kind providers
+            // (from its stats), while the desktop accumulates plan-window quota
+            // deltas directly into meta — one must never overwrite the other.
+            costByProvider: { ...meta.costByProvider, ...this.stats.providerCosts },
             cacheHitTokens: this.stats.cumulativeCacheHitTokens,
             cacheMissTokens: this.stats.cumulativeCacheMissTokens,
             totalCompletionTokens: this.stats.cumulativeCompletionTokens,

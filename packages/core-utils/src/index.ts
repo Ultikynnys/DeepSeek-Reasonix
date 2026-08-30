@@ -113,6 +113,7 @@ export type {
   LoadedSegment,
   LoadedMessage,
   SessionLoadedEvent,
+  SessionProviderCost,
   SessionCompactedEvent,
   SessionEmptyEvent,
   NeedsSetupEvent,

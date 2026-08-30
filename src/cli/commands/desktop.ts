@@ -1416,6 +1416,26 @@ const codexQuotaCoordinator = new AccountQuotaCoordinator(
   },
 );
 
+/** Accumulate a measured plan-window delta (percentage points) into the open
+ *  session's per-provider quota usage. Native unit only — never converted to
+ *  dollars; USD-kind providers untouched. Meta-write failure is logged, never silent. */
+function accumulateQuotaIntoSession(tab: Tab, provider: string, usedPct: number | null): void {
+  if (usedPct === null || usedPct <= 0 || !tab.currentSession) return;
+  try {
+    const meta = loadSessionMeta(tab.currentSession);
+    const prev = meta.costByProvider?.[provider];
+    const prevPct = prev && prev.kind === "quota" ? (prev.quotaUsedPct ?? 0) : 0;
+    patchSessionMeta(tab.currentSession, {
+      costByProvider: {
+        ...(meta.costByProvider ?? {}),
+        [provider]: { kind: "quota", quotaUsedPct: prevPct + usedPct },
+      },
+    });
+  } catch (err) {
+    process.stderr.write(`reasonix: session quota accumulation failed — ${messageOf(err)}\n`);
+  }
+}
+
 /** Weekly Codex quota for the signed-in ChatGPT plan — OpenAI-model tabs only.
  *  OAuth HTTP fetch only (no codex CLI dependency). */
 async function emitCodexQuota(tab: Tab, options: { force?: boolean } = {}): Promise<void> {
@@ -1442,6 +1462,10 @@ async function emitCodexQuota(tab: Tab, options: { force?: boolean } = {}): Prom
       delivery: delivery.delivery,
       requestId: delivery.requestId,
     });
+    // Native unit: the measured plan-window delta accumulates as quota % in the
+    // session's per-provider cost — OpenAI plans expose no dollar amounts, so
+    // no USD is ever derived from this.
+    accumulateQuotaIntoSession(tab, "openai", quota.turnUsedPct ?? null);
     emit({ type: "$codex_quota", quota }, tab.id);
     return;
   }
@@ -1535,6 +1559,8 @@ async function emitOllamaQuota(tab: Tab): Promise<void> {
     currentSessionPct: sessionPct,
     turnUsedPct,
   });
+  // Native unit: cloud Ollama bills plan-window %, not dollars.
+  accumulateQuotaIntoSession(tab, "ollama", turnUsedPct);
   emit(
     {
       type: "$ollama_quota",
@@ -1586,6 +1612,8 @@ async function emitAntigravityQuota(tab: Tab): Promise<void> {
     activeModel: active?.modelId,
     turnUsedPct,
   });
+  // Native unit: Antigravity bills plan-window %, not dollars.
+  accumulateQuotaIntoSession(tab, "gemini", turnUsedPct);
   emit({ type: "$antigravity_quota", quota: { ...quota, turnUsedPct } }, tab.id);
 }
 
@@ -1724,6 +1752,7 @@ function loadSessionIntoTab(
       messages: loadedMessages,
       carryover: {
         totalCostUsd: meta.totalCostUsd ?? 0,
+        costByProvider: meta.costByProvider,
         cacheHitTokens: meta.cacheHitTokens ?? 0,
         cacheMissTokens: meta.cacheMissTokens ?? 0,
         totalCompletionTokens: meta.totalCompletionTokens ?? 0,
@@ -1743,6 +1772,7 @@ function loadSessionIntoTab(
     backfilledWorkspace,
     carryover: {
       totalCostUsd: meta.totalCostUsd ?? 0,
+      costByProvider: meta.costByProvider,
       cacheHitTokens: meta.cacheHitTokens ?? 0,
       cacheMissTokens: meta.cacheMissTokens ?? 0,
       totalCompletionTokens: meta.totalCompletionTokens ?? 0,
@@ -2259,6 +2289,10 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     reasoningEffort,
     maxIterPerTurn: loadMaxIterPerTurn(),
     maxOutputTokens: loadMaxOutputTokens(),
+    // Plan-based providers (Codex OAuth, cloud Ollama, Antigravity) record
+    // quota % not invented dollars — same billing resolution the subagent path
+    // uses, so main-loop and subagent turns agree on the native unit.
+    billingKindFor: (m) => subagentBillingFor(m).kind,
     // Live thunk (not a snapshot) so a mid-session Shift+Tab / /mode flip
     // stops the iteration cap from pausing the turn in yolo.
     getEditMode: () => loadEditMode(),
@@ -3590,6 +3624,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             messages: restoredMessages,
             carryover: {
               totalCostUsd: meta.totalCostUsd ?? 0,
+              costByProvider: meta.costByProvider,
               cacheHitTokens: meta.cacheHitTokens ?? 0,
               cacheMissTokens: meta.cacheMissTokens ?? 0,
               totalCompletionTokens: meta.totalCompletionTokens ?? 0,
@@ -3828,6 +3863,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
                   messages: msgs,
                   carryover: {
                     totalCostUsd: meta.totalCostUsd ?? 0,
+                    costByProvider: meta.costByProvider,
                     cacheHitTokens: meta.cacheHitTokens ?? 0,
                     cacheMissTokens: meta.cacheMissTokens ?? 0,
                     totalCompletionTokens: meta.totalCompletionTokens ?? 0,

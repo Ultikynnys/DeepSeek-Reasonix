@@ -117,9 +117,20 @@ export function StatusBar({
   const showCacheHit = settings?.statusBar?.showCacheHit ?? true;
   const showCtxUsage = settings?.statusBar?.showCtxUsage ?? true;
   // Session-total cost (the settings card's figure) — a distinct chip from the
-  // per-turn "this turn" number, gated by showSessionCost.
+  // per-turn "this turn" number, gated by showSessionCost. Quota-billed sessions
+  // show their accumulated plan-window % (native unit) instead of a dollar
+  // figure — never converted between providers.
   const sessionCostDisplay = formatMoney(usage.totalCostUsd, currency);
   const sessionCostOther = formatMoney(usage.totalCostUsd, currency === "CNY" ? "USD" : "CNY");
+  const sessionQuotaProvider =
+    settings?.model?.startsWith("gpt-") ? "openai"
+    : settings?.model?.startsWith("ollama/") ? "ollama"
+    : isAntigravityModel(settings?.model) ? "gemini"
+    : null;
+  const sessionQuotaCost =
+    sessionQuotaProvider !== null ? usage.costByProvider?.[sessionQuotaProvider] : undefined;
+  const sessionQuotaPct =
+    sessionQuotaCost && sessionQuotaCost.kind === "quota" ? sessionQuotaCost.quotaUsedPct ?? 0 : null;
   const balanceLabel = balance
     ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
     : "—";
@@ -389,8 +400,15 @@ export function StatusBar({
             <span className="conv">{`(${sessionCostOther})`}</span>
           </span>
         </span>
+      ) : showSessionCost && sessionQuotaPct !== null ? (
+        // Quota-billed session: accumulated plan-window % — the native unit, no
+        // dollar figure is ever derived from quota usage.
+        <span className="seg" title={t("settings.sessionCost")}>
+          <I.coin size={11} />
+          <span>{t("settings.sessionCost")}</span>
+          <span className="v ok">{sessionQuotaPct.toFixed(2)}%</span>
+        </span>
       ) : null}
-
       {deepseekTab ? (
         <span className="seg" title={rateTitle}>
           <I.clock size={11} style={{ color: offPeak ? "var(--success)" : "var(--warning)" }} />

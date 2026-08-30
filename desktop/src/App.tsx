@@ -58,6 +58,7 @@ import {
   type PlanStep,
   type PlanVerdict,
   type RevisionVerdict,
+  type SessionProviderCost,
   type SettingsPatch,
   type SkillInfo,
   type UserImageAttachment,
@@ -306,6 +307,10 @@ export type UsageStats = {
   /** Cost of the most recent model call — the statusbar "this turn" figure for
    *  pay-per-token providers (DeepSeek). Distinct from the cumulative session total. */
   lastCallCostUsd: number;
+  /** Per-provider cumulative costs in each provider's native unit (USD for
+   *  token-priced APIs, plan-window % for quota APIs). Never converted between
+   *  providers. Keyed by provider id ("deepseek" | "openai" | "ollama" | "gemini"). */
+  costByProvider?: Record<string, SessionProviderCost>;
   totalPromptTokens: number;
   totalCompletionTokens: number;
   cacheHitTokens: number;
@@ -1021,6 +1026,7 @@ function zeroUsage(): UsageStats {
   return {
     totalCostUsd: 0,
     lastCallCostUsd: 0,
+    costByProvider: {},
     totalPromptTokens: 0,
     totalCompletionTokens: 0,
     cacheHitTokens: 0,
@@ -1029,6 +1035,25 @@ function zeroUsage(): UsageStats {
     lastCallCacheMiss: null,
     reservedTokens: 0,
     liveLogTokens: 0,
+  };
+}
+
+/** Fold a measured plan-window delta (percentage points) into the session's
+ *  per-provider quota usage. Native unit only — never converted to dollars. */
+function applyQuotaDelta(
+  usage: UsageStats,
+  provider: string,
+  usedPct: number | null,
+): UsageStats {
+  if (usedPct === null || usedPct <= 0) return usage;
+  const prev = usage.costByProvider?.[provider];
+  const prevPct = prev && prev.kind === "quota" ? (prev.quotaUsedPct ?? 0) : 0;
+  return {
+    ...usage,
+    costByProvider: {
+      ...(usage.costByProvider ?? {}),
+      [provider]: { kind: "quota", quotaUsedPct: prevPct + usedPct },
+    },
   };
 }
 
@@ -1277,6 +1302,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         codexQuota: ev.quota,
         codexQuotaReason: ev.reason ?? null,
         codexQuotaRefreshing: false,
+        // Native unit: the measured plan-window delta accumulates as quota % —
+        // never converted to a dollar figure.
+        usage: applyQuotaDelta(state.usage, "openai", ev.quota?.turnUsedPct ?? null),
       };
     case "$ollama_quota":
       return {
@@ -1284,6 +1312,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ollamaQuota: ev.quota,
         ollamaQuotaReason: ev.reason ?? null,
         ollamaQuotaRefreshing: false,
+        usage: applyQuotaDelta(state.usage, "ollama", ev.quota?.turnUsedPct ?? null),
       };
     case "$antigravity_quota":
       return {
@@ -1291,6 +1320,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         antigravityQuota: ev.quota,
         antigravityQuotaReason: ev.reason ?? null,
         antigravityQuotaRefreshing: false,
+        usage: applyQuotaDelta(state.usage, "gemini", ev.quota?.turnUsedPct ?? null),
       };
     case "$settings": {
       const prevWs = state.settings?.workspaceDir;
@@ -1372,6 +1402,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         usage: {
           ...zeroUsage(),
           totalCostUsd: ev.carryover.totalCostUsd,
+          costByProvider: ev.carryover.costByProvider ?? {},
           totalPromptTokens: ev.carryover.cacheHitTokens + ev.carryover.cacheMissTokens,
           totalCompletionTokens: ev.carryover.totalCompletionTokens ?? 0,
           cacheHitTokens: ev.carryover.cacheHitTokens,

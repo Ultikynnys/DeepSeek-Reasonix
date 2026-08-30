@@ -19,6 +19,7 @@ import { reasonixHome } from "../reasonix-home.js";
 import {
   CLAUDE_SONNET_PRICING,
   DEEPSEEK_PRICING,
+  billingKindForModel,
   cacheSavingsUsd,
   claudeEquivalentCost,
   costUsd,
@@ -36,8 +37,13 @@ export interface UsageRecord {
   completionTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
-  /** Total cost of the turn in USD. */
+  /** Total cost of the turn in USD — 0 for quota-billed providers (their real
+   *  unit is plan-window %, never converted to dollars). */
   costUsd: number;
+  /** Native billing unit for this record. */
+  billingKind?: "usd" | "quota" | "none";
+  /** Plan-window percentage points consumed — only present when billingKind === "quota". */
+  quotaUsedPct?: number;
   /** What the same turn would have cost at Claude Sonnet 4.6 rates. */
   claudeEquivUsd: number;
   /** Absent on legacy records — treat as "turn" when missing. */
@@ -71,6 +77,10 @@ export interface AppendUsageInput {
   /** When appending a subagent summary row, set `kind: "subagent"` and populate `subagent`. */
   kind?: "turn" | "subagent";
   subagent?: UsageRecord["subagent"];
+  /** Native billing unit for this turn. Quota-billed turns record 0 USD. */
+  billingKind?: "usd" | "quota" | "none";
+  /** Plan-window percentage points consumed — only when billingKind === "quota". */
+  quotaUsedPct?: number;
 }
 
 const USAGE_COMPACTION_THRESHOLD_BYTES = 5 * 1024 * 1024;
@@ -127,6 +137,10 @@ function compactUsageLogIfLarge(path: string, now: number): void {
 
 /** Returns the record so tests can assert cost fields without re-reading the log. */
 export function appendUsage(input: AppendUsageInput): UsageRecord {
+  const billingKind = input.billingKind ?? billingKindForModel(input.model);
+  // Quota-billed providers expose no dollar amounts — never invent a USD figure
+  // from token counts. The telemetry log stores their native unit (quota %).
+  const isUsd = billingKind === "usd";
   const record: UsageRecord = {
     ts: input.now ?? Date.now(),
     session: input.session,
@@ -135,8 +149,13 @@ export function appendUsage(input: AppendUsageInput): UsageRecord {
     completionTokens: input.usage.completionTokens,
     cacheHitTokens: input.usage.promptCacheHitTokens,
     cacheMissTokens: input.usage.promptCacheMissTokens,
-    costUsd: costUsd(input.model, input.usage),
-    claudeEquivUsd: claudeEquivalentCost(input.usage),
+    costUsd: isUsd ? costUsd(input.model, input.usage) : 0,
+    billingKind,
+    ...(billingKind === "quota" && typeof input.quotaUsedPct === "number"
+      ? { quotaUsedPct: input.quotaUsedPct }
+      : {}),
+    // Claude-equivalent is a USD reference — meaningless for quota providers.
+    claudeEquivUsd: isUsd ? claudeEquivalentCost(input.usage) : 0,
   };
   if (input.kind === "subagent") record.kind = "subagent";
   if (input.subagent) record.subagent = input.subagent;

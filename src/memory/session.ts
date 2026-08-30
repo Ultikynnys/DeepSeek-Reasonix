@@ -23,6 +23,7 @@ import { appendJsonlLine, parseJsonl } from "../core/jsonl.js";
 import { SessionDirectoryIndex } from "../desktop/session-directory-index.js";
 import { reasonixHome } from "../reasonix-home.js";
 import type { CacheDiagnosticEntry } from "../telemetry/cache-diagnostics.js";
+import type { SessionProviderCost } from "../telemetry/stats.js";
 import type { ChatMessage } from "../types.js";
 
 /** Sidecar file suffix holding the per-session event log. */
@@ -71,6 +72,10 @@ export interface SessionMeta {
   workspace?: string;
   /** Wallet currency at last save — used to format `totalCostUsd` in the picker without re-fetching balance. */
   balanceCurrency?: string;
+  /** Per-provider cumulative costs in each provider's native unit (USD for
+   *  token-priced APIs, plan-window % for quota APIs). Never converted between
+   *  providers. Keyed by provider id ("deepseek" | "openai" | "ollama" | "gemini"). */
+  costByProvider?: Record<string, SessionProviderCost>;
   /** Cumulative cache hit / miss tokens across the session — survives resume so /status cache% isn't 0 on a fresh boot. */
   cacheHitTokens?: number;
   cacheMissTokens?: number;

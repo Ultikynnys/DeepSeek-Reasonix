@@ -153,8 +153,14 @@ export {
   inputCostUsd,
   outputCostUsd,
   claudeEquivalentCost,
+  billingKindForModel,
 } from "./telemetry/stats.js";
-export type { TurnStats, SessionSummary } from "./telemetry/stats.js";
+export type {
+  BillingKind,
+  SessionProviderCost,
+  TurnStats,
+  SessionSummary,
+} from "./telemetry/stats.js";
 
 export {
   ToolCallRepair,

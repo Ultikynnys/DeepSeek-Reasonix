@@ -1668,9 +1668,14 @@ function PageBilling({
   currency: "CNY" | "USD";
 }) {
   const symbol = currency === "CNY" ? "¥" : "$";
-  const sessionCost = currency === "CNY" ? usage.totalCostUsd * 7.2 : usage.totalCostUsd;
   const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
   const hitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
+  // Per-provider native-unit costs: USD-kind providers show a dollar figure,
+  // quota-kind providers show the accumulated plan-window %. Never converted
+  // between the two.
+  const providerCosts = Object.entries(usage.costByProvider ?? {}).filter(
+    ([, cost]) => (cost.totalCostUsd ?? 0) > 0 || (cost.quotaUsedPct ?? 0) > 0,
+  );
   return (
     <>
       <div className="bill-grid">
@@ -1690,7 +1695,20 @@ function PageBilling({
         <div className="bill-card">
           <div className="l">{t("settings.sessionCost")}</div>
           <div className="v">
-            {symbol} {sessionCost.toFixed(4)}
+            {providerCosts.length === 0 ? (
+              "—"
+            ) : (
+              <span className="provider-costs">
+                {providerCosts.map(([provider, cost]) => (
+                  <span key={provider} className="provider-cost">
+                    {provider}:{" "}
+                    {cost.kind === "quota"
+                      ? `${(cost.quotaUsedPct ?? 0).toFixed(2)}%`
+                      : `${symbol} ${(currency === "CNY" ? (cost.totalCostUsd ?? 0) * 7.2 : (cost.totalCostUsd ?? 0)).toFixed(4)}`}
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
           <div className="sub">prompt {usage.totalPromptTokens.toLocaleString()} t</div>
         </div>

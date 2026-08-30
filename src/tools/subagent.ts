@@ -131,7 +131,11 @@ export interface SubagentToolOptions {
   /** Folds the child loop's usage (cost, cache hit/miss, completion tokens) into the
    *  parent session's SessionStats via `recordExternal` — the parent stats panel then
    *  shows the full spend, not just parent-loop API calls. (#2008) */
-  recordExternal?: (model: string, usage: Usage) => void;
+  recordExternal?: (
+    model: string,
+    usage: Usage,
+    billing: { kind: "usd" | "quota" | "none"; quotaUsedPct?: number },
+  ) => void;
 }
 
 /** Memory-stable prefix — shared across spawns, cached. The model-dependent escalation contract is appended per spawn so a pro spawn doesn't get told it's running on flash (#582). */
@@ -720,7 +724,10 @@ export function registerSubagentTool(
       sessionSpawnTokens += result.usage.totalTokens;
       if (opts.recordExternal && result.usage) {
         try {
-          opts.recordExternal(result.model, result.usage);
+          opts.recordExternal(result.model, result.usage, {
+            kind: result.billingKind ?? "usd",
+            quotaUsedPct: result.quotaUsedPct,
+          });
         } catch {
           // Stats folding must never break the spawn-tool dispatch.
         }

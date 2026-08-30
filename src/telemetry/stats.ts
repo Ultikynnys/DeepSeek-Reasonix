@@ -1,5 +1,5 @@
 import type { Usage } from "../client.js";
-import { loadPricingOverride } from "../config.js";
+import { loadPricingOverride, providerForModel } from "../config.js";
 import type { CacheDiagnosticEntry } from "./cache-diagnostics.js";
 
 /** USD per 1M tokens, off-peak base rate (peak hours bill at 2x — see
@@ -144,6 +144,9 @@ export interface TurnStats {
   model: string;
   usage: Usage;
   cost: number;
+  /** Native billing unit this turn ran under. Quota-billed turns carry
+   *  `cost === 0` — the provider's real unit is plan-window %, never dollars. */
+  billingKind: BillingKind;
   cacheHitRatio: number;
   /** Raw prefix-shape snapshot for this turn — lets UIs attribute a miss to
    *  system/tool/few-shot churn or a log rewrite. */
@@ -165,12 +168,45 @@ export interface CacheDiagnostics {
   promptCacheHitTokens: number;
 }
 
+/** How a provider bills its usage — "usd" = token-priced currency (real dollars),
+ *  "quota" = plan-window % (ChatGPT plan, cloud Ollama, Antigravity),
+ *  "none" = no cost metric (local Ollama). */
+export type BillingKind = "usd" | "quota" | "none";
+
+/** Per-provider cumulative session usage in the provider's NATIVE unit. Never
+ *  converted between providers: a quota-billed provider never contributes a
+ *  dollar figure, and a token-priced provider never contributes a percentage. */
+export interface SessionProviderCost {
+  kind: BillingKind;
+  /** Cumulative USD — only present when kind === "usd". */
+  totalCostUsd?: number;
+  /** Cumulative plan-window percentage points consumed — only when kind === "quota". */
+  quotaUsedPct?: number;
+}
+
+/** Which unit a model's provider bills in. The default for callers that don't
+ *  resolve billing themselves (the desktop passes a richer resolver that treats
+ *  keyless local Ollama as "none"). */
+export function billingKindForModel(model: string): BillingKind {
+  switch (providerForModel(model)) {
+    case "openai":
+    case "ollama":
+    case "gemini":
+      return "quota";
+    default:
+      return "usd";
+  }
+}
+
 export interface SessionSummary {
   turns: number;
   totalCostUsd: number;
   totalInputCostUsd: number;
   /** Output-side (completion) cost aggregated across the session. */
   totalOutputCostUsd: number;
+  /** Per-provider cumulative costs in each provider's native unit — the source
+   *  for `SessionMeta.costByProvider`. Never converted between providers. */
+  costByProvider: Record<string, SessionProviderCost>;
   /** @deprecated Claude reference; kept for benchmarks + replay compat, no longer surfaced in the TUI. */
   claudeEquivalentUsd: number;
   /** @deprecated. Same as claudeEquivalentUsd — synthetic ratio, not a real measurement. */
@@ -214,6 +250,11 @@ export class SessionStats {
   private _compactionCompletionTokens = 0;
   private _compactionCount = 0;
 
+  /** Per-provider cumulative session usage, each in the provider's native unit
+   *  (USD for token-priced APIs, plan-window % for quota APIs), keyed by provider
+   *  id. USD entries mirror legacy costs; quota entries carry only quotaUsedPct. */
+  private _providerCosts = new Map<string, SessionProviderCost>();
+
   /** Per-turn cache diagnostics stored as each turn completes, so the live
    *  cache-miss report can replay accurate prefix hashes per historical turn
    *  rather than computing them all from the current prefix. */
@@ -227,9 +268,30 @@ export class SessionStats {
     cacheMissTokens?: number;
     totalCompletionTokens?: number;
     lastPromptTokens?: number;
+    /** Per-provider native-unit costs from meta — authoritative over the legacy
+     *  flat `totalCostUsd` when both exist (the flat figure is the USD-kind sum). */
+    costByProvider?: Record<string, SessionProviderCost>;
   }): void {
+    let usdCarryover = 0;
+    if (opts.costByProvider) {
+      for (const [provider, cost] of Object.entries(opts.costByProvider)) {
+        if (!cost) continue;
+        this._providerCosts.set(provider, {
+          kind: cost.kind,
+          ...(typeof cost.totalCostUsd === "number" ? { totalCostUsd: cost.totalCostUsd } : {}),
+          ...(typeof cost.quotaUsedPct === "number" ? { quotaUsedPct: cost.quotaUsedPct } : {}),
+        });
+        if (cost.kind === "usd" && typeof cost.totalCostUsd === "number") {
+          usdCarryover += cost.totalCostUsd;
+        }
+      }
+    }
     if (typeof opts.totalCostUsd === "number" && opts.totalCostUsd > 0) {
-      this._carryoverCost = opts.totalCostUsd;
+      // Per-provider records win when present (they disambiguate the provider);
+      // the legacy flat figure covers pre-decoupling sessions.
+      this._carryoverCost = usdCarryover > 0 ? usdCarryover : opts.totalCostUsd;
+    } else {
+      this._carryoverCost = usdCarryover;
     }
     if (typeof opts.turnCount === "number" && opts.turnCount > 0) {
       this._carryoverTurns = opts.turnCount;
@@ -281,6 +343,7 @@ export class SessionStats {
     this._compactionPromptTokens = 0;
     this._compactionCompletionTokens = 0;
     this._compactionCount = 0;
+    this._providerCosts.clear();
     this._cacheDiagnostics = [];
   }
 
@@ -289,17 +352,22 @@ export class SessionStats {
     model: string,
     usage: Usage,
     cacheDiagnostics?: CacheDiagnostics,
+    /** Native billing unit for this call. Quota-billed turns record 0 USD — the
+     *  real unit is plan-window %, which the desktop accumulates separately. */
+    billingKind: BillingKind = billingKindForModel(model),
   ): TurnStats {
-    const cost = costUsd(model, usage);
+    const cost = billingKind === "usd" ? costUsd(model, usage) : 0;
     const stats: TurnStats = {
       turn,
       model,
       usage,
       cost,
+      billingKind,
       cacheHitRatio: usage.cacheHitRatio,
       cacheDiagnostics,
     };
     this.turns.push(stats);
+    this.accrueProviderCost(model, billingKind, { costUsd: cost });
     this.trimOldTurns();
     return stats;
   }
@@ -318,8 +386,19 @@ export class SessionStats {
   /** Fold external usage (e.g. subagent child-loop) into session totals without
    *  creating a turn entry — the parent's stats panel and session meta then see
    *  the full spend, not just the parent loop's API calls. (#2008) */
-  recordExternal(model: string, usage: Usage): void {
-    this._carryoverCost += costUsd(model, usage);
+  recordExternal(
+    model: string,
+    usage: Usage,
+    billing: { kind: BillingKind; quotaUsedPct?: number } = { kind: billingKindForModel(model) },
+  ): void {
+    if (billing.kind === "usd") {
+      const cost = costUsd(model, usage);
+      this._carryoverCost += cost;
+      this.accrueProviderCost(model, "usd", { costUsd: cost });
+    } else if (billing.kind === "quota" && typeof billing.quotaUsedPct === "number") {
+      // Native unit: plan-window % consumed, never converted to dollars.
+      this.accrueProviderCost(model, "quota", { quotaUsedPct: billing.quotaUsedPct });
+    }
     this._carryoverCacheHit += usage.promptCacheHitTokens;
     this._carryoverCacheMiss += usage.promptCacheMissTokens;
     this._carryoverCompletion += usage.completionTokens;
@@ -328,11 +407,62 @@ export class SessionStats {
   /** Record an internal compaction call (fold summarizer/triage) into a dedicated
    *  accumulator. No turn entry, so per-turn cost and the cache-hit ratio stay
    *  clean; still reflected in totalCost so session spend stays honest. */
-  recordCompaction(model: string, usage: Usage): void {
-    this._compactionCost += costUsd(model, usage);
+  recordCompaction(
+    model: string,
+    usage: Usage,
+    billingKind: BillingKind = billingKindForModel(model),
+  ): void {
+    const cost = billingKind === "usd" ? costUsd(model, usage) : 0;
+    this._compactionCost += cost;
+    this.accrueProviderCost(model, billingKind, { costUsd: cost });
     this._compactionPromptTokens += usage.promptTokens;
     this._compactionCompletionTokens += usage.completionTokens;
     this._compactionCount += 1;
+  }
+
+  /** Accrue into the per-provider native-unit bucket. Quota providers never get
+   *  a dollar figure; USD providers never get a percentage. Zero-value records
+   *  are skipped so an empty quota turn can't clobber a desktop-accumulated delta. */
+  private accrueProviderCost(
+    model: string,
+    kind: BillingKind,
+    opts: { costUsd?: number; quotaUsedPct?: number },
+  ): void {
+    const hasUsd = kind === "usd" && typeof opts.costUsd === "number" && opts.costUsd > 0;
+    const hasQuota =
+      kind === "quota" && typeof opts.quotaUsedPct === "number" && opts.quotaUsedPct > 0;
+    if (!hasUsd && !hasQuota) return;
+    const provider = providerForModel(model);
+    const cur = this._providerCosts.get(provider);
+    if (!cur) {
+      this._providerCosts.set(provider, {
+        kind,
+        ...(hasUsd ? { totalCostUsd: opts.costUsd } : {}),
+        ...(hasQuota ? { quotaUsedPct: opts.quotaUsedPct } : {}),
+      });
+      return;
+    }
+    if (hasUsd) {
+      this._providerCosts.set(provider, {
+        ...cur,
+        totalCostUsd: (cur.totalCostUsd ?? 0) + (opts.costUsd ?? 0),
+      });
+    } else if (hasQuota) {
+      this._providerCosts.set(provider, {
+        ...cur,
+        quotaUsedPct: (cur.quotaUsedPct ?? 0) + (opts.quotaUsedPct ?? 0),
+      });
+    }
+  }
+
+  /** Per-provider cumulative native-unit costs — the source of truth for
+   *  `SessionMeta.costByProvider`. */
+  get providerCosts(): Record<string, SessionProviderCost> {
+    const out: Record<string, SessionProviderCost> = {};
+    for (const [provider, cost] of this._providerCosts) {
+      out[provider] = { ...cost };
+    }
+    return out;
   }
 
   /** Drop oldest turns beyond MAX_TURNS, folding their costs into carryover so
@@ -357,7 +487,12 @@ export class SessionStats {
   }
 
   get totalClaudeEquivalent(): number {
-    return this.turns.reduce((sum, t) => sum + claudeEquivalentCost(t.usage), 0);
+    // Quota-billed turns have no dollar meaning — the Claude-equivalent
+    // reference only applies to token-priced providers.
+    return this.turns.reduce(
+      (sum, t) => sum + (t.billingKind === "usd" ? claudeEquivalentCost(t.usage) : 0),
+      0,
+    );
   }
 
   get savingsVsClaude(): number {
@@ -366,11 +501,17 @@ export class SessionStats {
   }
 
   get totalInputCost(): number {
-    return this.turns.reduce((sum, t) => sum + inputCostUsd(t.model, t.usage), 0);
+    return this.turns.reduce(
+      (sum, t) => sum + (t.billingKind === "usd" ? inputCostUsd(t.model, t.usage) : 0),
+      0,
+    );
   }
 
   get totalOutputCost(): number {
-    return this.turns.reduce((sum, t) => sum + outputCostUsd(t.model, t.usage), 0);
+    return this.turns.reduce(
+      (sum, t) => sum + (t.billingKind === "usd" ? outputCostUsd(t.model, t.usage) : 0),
+      0,
+    );
   }
 
   get aggregateCacheHitRatio(): number {
@@ -391,6 +532,7 @@ export class SessionStats {
       totalCostUsd: round(this.totalCost, 6),
       totalInputCostUsd: round(this.totalInputCost, 6),
       totalOutputCostUsd: round(this.totalOutputCost, 6),
+      costByProvider: this.providerCosts,
       claudeEquivalentUsd: round(this.totalClaudeEquivalent, 6),
       savingsVsClaudePct: round(this.savingsVsClaude * 100, 2),
       cacheHitRatio: round(this.aggregateCacheHitRatio, 4),
