@@ -5,6 +5,11 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed — session listing no longer rescans the whole session directory on every launch.**
+
+- The session directory index now persists a cache of the last-known file identities, message counts, and metadata to `~/.reasonix/cache/session-directory-index.json` after each refresh, and reuses it across launches. Only files that actually changed on disk are recounted; unchanged sessions keep their cached counts without reopening the JSONL.
+- The first-pass scan is parallelized with a bounded worker pool, so a cold directory with tens of thousands of sessions indexes in seconds instead of minutes.
+
 **Added — always-on verbose file diagnostics across the desktop stack.**
 
 - Every launch now creates bounded JSONL diagnostics under `~/.reasonix/diagnostics/`, with launch correlation, monotonic timing, redaction, explicit sink failures, and retention.

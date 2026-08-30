@@ -297,7 +297,14 @@ export function listSessionsForWorkspace(workspace: string): SessionInfo[] {
   return listSessions({ workspaceFilter: workspace, includeLegacyWorkspaceMatches: true });
 }
 
-const sessionDirectoryIndex = new SessionDirectoryIndex<SessionMeta>(sessionsDir, loadSessionMeta);
+const sessionDirectoryIndex = new SessionDirectoryIndex<SessionMeta>(
+  sessionsDir,
+  loadSessionMeta,
+  undefined,
+  undefined,
+  undefined,
+  join(reasonixHome(), "cache", "session-directory-index.json"),
+);
 
 export function invalidateSessionDirectoryIndex(): void {
   sessionDirectoryIndex.invalidate();
