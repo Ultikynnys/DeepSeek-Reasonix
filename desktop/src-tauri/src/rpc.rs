@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
+use crate::diagnostics;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -140,6 +141,8 @@ fn find_real_node() -> Result<PathBuf> {
 
 #[tauri::command]
 pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), String> {
+    let started = Instant::now();
+    diagnostics::record("info", "rpc.spawn_started", serde_json::json!({}))?;
     let mut guard = state.inner.lock();
     if guard.is_some() {
         // Idempotent — a second call (effect re-run, WebView reload) keeps the
@@ -151,6 +154,9 @@ pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), Strin
     let (program, args) = resolve_cli(&app).map_err(|e| e.to_string())?;
     let mut cmd = Command::new(program);
     cmd.args(args);
+    if let Some(launch_id) = diagnostics::launch_id() {
+        cmd.env("REASONIX_LAUNCH_ID", launch_id);
+    }
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -176,6 +182,10 @@ pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), Strin
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let stderr = child.stderr.take().ok_or("no stderr")?;
     let child_pid = child.id();
+    diagnostics::record("info", "rpc.spawn_completed", serde_json::json!({
+        "childPid": child_pid,
+        "durationMs": started.elapsed().as_secs_f64() * 1000.0
+    }))?;
 
     let child_shared = Arc::new(parking_lot::Mutex::new(Some(child)));
     *guard = Some(RpcHandle {
@@ -217,13 +227,15 @@ pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), Strin
         };
         match status {
             Ok(Some(s)) => {
+                let _ = diagnostics::record("warn", "rpc.child_exited", serde_json::json!({ "code": s.code() }));
                 child_for_wait.lock().take();
                 let _ = inner_for_exit.lock().take();
                 let _ = app_for_exit.emit("rpc:exit", ExitEvent { code: s.code() });
                 return;
             }
             Ok(None) => thread::sleep(Duration::from_millis(500)),
-            Err(_) => {
+            Err(error) => {
+                let _ = diagnostics::record("error", "rpc.child_wait_failed", serde_json::json!({ "message": error.to_string() }));
                 let _ = inner_for_exit.lock().take();
                 return;
             }

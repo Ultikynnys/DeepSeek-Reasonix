@@ -31,9 +31,9 @@ describe("startup-profile", () => {
     _resetForTests();
   });
 
-  it("is disabled by default — markPhase + dumpStartupProfile are no-ops", () => {
+  it("is always enabled but keeps console output opt-in", () => {
     Reflect.deleteProperty(process.env, "REASONIX_PROFILE_STARTUP");
-    expect(isStartupProfileEnabled()).toBe(false);
+    expect(isStartupProfileEnabled()).toBe(true);
     markPhase("a");
     markPhase("b");
     const sink = makeSink();
@@ -41,13 +41,11 @@ describe("startup-profile", () => {
     expect(sink.output()).toBe("");
   });
 
-  it("recognizes 1 / true / yes as enable values", () => {
-    for (const v of ["1", "true", "yes"]) {
+  it("cannot disable durable startup profiling", () => {
+    for (const v of ["1", "true", "yes", "0"]) {
       process.env.REASONIX_PROFILE_STARTUP = v;
       expect(isStartupProfileEnabled()).toBe(true);
     }
-    process.env.REASONIX_PROFILE_STARTUP = "0";
-    expect(isStartupProfileEnabled()).toBe(false);
   });
 
   it("emits a formatted profile when enabled, with cumulative + delta per phase", () => {

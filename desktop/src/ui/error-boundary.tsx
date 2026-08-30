@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { recordFrontendDiagnostic } from "../diagnostics";
 import { t } from "../i18n";
 
 type Props = { label: string; children: ReactNode };
@@ -12,6 +13,11 @@ export class PanelErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: { componentStack?: string | null }): void {
+    recordFrontendDiagnostic(
+      "frontend.react_render_error",
+      { panel: this.props.label, error, componentStack: info.componentStack },
+      "error",
+    );
     console.error(`[panel:${this.props.label}] render error`, error, info);
   }
 

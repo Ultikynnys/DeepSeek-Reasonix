@@ -1,4 +1,6 @@
-/** Leveled stderr logger gated by REASONIX_LOG_LEVEL. Default: info. */
+/** Leveled console logger with mandatory verbose durable diagnostics. */
+
+import { recordDiagnostic } from "./diagnostics.js";
 
 export type LogLevel = "silent" | "error" | "warn" | "info" | "debug" | "verbose";
 
@@ -62,9 +64,11 @@ class ConsoleLogger implements Logger {
   }
 
   private emit(level: LogLevel, msg: string): void {
+    recordDiagnostic(`log.${this.name}`, {
+      level: level === "silent" ? "verbose" : level,
+      message: msg,
+    });
     if (LEVEL_PRIORITY[globalLevel] < LEVEL_PRIORITY[level]) return;
-    // Timestamps are omitted — the desktop frontend already timestamps
-    // each rpc:stderr line. Keep the format tight.
     process.stderr.write(`[${this.name}] ${msg}\n`);
   }
 }

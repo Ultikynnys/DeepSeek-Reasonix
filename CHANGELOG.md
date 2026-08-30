@@ -5,6 +5,13 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Added — always-on verbose file diagnostics across the desktop stack.**
+
+- Every launch now creates bounded JSONL diagnostics under `~/.reasonix/diagnostics/`, with launch correlation, monotonic timing, redaction, explicit sink failures, and retention.
+- Backend diagnostics include boot phases, model request/rate-limit timing, real tool and MCP durations, crash guards, daemon events, and periodic CPU/memory/resource health.
+- The Tauri host records startup, panic, child lifecycle, and shutdown before forwarding events; the frontend records boot-to-render, global failures, React render failures, visibility changes, and supported browser performance entries.
+
+
 **Fixed — a fresh sign-in / API key now takes effect without restarting.**
 
 - Signing in to Google Antigravity, signing in to ChatGPT, or pasting an OpenAI key only *rebuilt* a tab's runtime when one already existed (`if (t.runtime) t.runtime = buildRuntimeFor(t)`). A tab that booted in the "needs setup" state has a null runtime, so the sign-in emitted `$ready` but never built it — the tab looked ready yet `runTurn` still bailed on `!tab.runtime` until a restart. The three credential handlers now build the runtime unconditionally (guarded only on the toolset), so a fresh sign-in works immediately.

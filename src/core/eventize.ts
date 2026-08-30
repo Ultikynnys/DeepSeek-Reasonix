@@ -43,6 +43,7 @@ export class Eventizer {
   private preparingCallIds: string[] = [];
   /** Tool calls dispatched but not yet finished. FIFO popped by tool result. */
   private inflightCallIds: string[] = [];
+  private inflightToolStartedAt: number[] = [];
   /** Per-turn dedupe so each toolCallIndex emits exactly one tool.preparing. */
   private announcedToolIdx = new Set<string>();
 
@@ -84,14 +85,17 @@ export class Eventizer {
       case "tool_start": {
         const callId = this.preparingCallIds.shift() ?? `tc-${++this.nextToolSeq}`;
         this.inflightCallIds.push(callId);
+        this.inflightToolStartedAt.push(performance.now());
         out.push(this.toolIntentEvent(ev.turn, callId, ev.toolName ?? "", ev.toolArgs ?? ""));
         out.push(this.toolDispatchedEvent(ev.turn, callId));
         break;
       }
       case "tool": {
         const callId = this.inflightCallIds.shift() ?? `tc-orphan-${++this.nextToolSeq}`;
+        const startedAt = this.inflightToolStartedAt.shift();
+        const durationMs = startedAt === undefined ? 0 : performance.now() - startedAt;
         const ok = !looksLikeToolError(ev.content, ev.toolName);
-        out.push(this.toolResultEvent(ev.turn, callId, ok, ev.content, 0));
+        out.push(this.toolResultEvent(ev.turn, callId, ok, ev.content, durationMs));
         break;
       }
       case "warning": {

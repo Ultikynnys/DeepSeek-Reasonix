@@ -134,7 +134,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full writeup.
 - Per-project: `<project>/.reasonix/settings.json` (hooks), `<project>/.reasonix/skills/`, and
   `<project>/REASONIX.md` (project memory).
 - Environment variables: see [.env.example](.env.example). `REASONIX_LOG_LEVEL=INFO` controls
-  logging; `REASONIX_TRANSCRIPT_DIR` relocates session transcripts.
+  console noise; durable diagnostics are always verbose and cannot be disabled.
+- Diagnostics: each launch writes correlated JSONL files to `~/.reasonix/diagnostics/`. Backend
+  files are capped at 10 MiB per segment and host files at 10 MiB per launch; the latest 10 are
+  retained. Records include boot phases, model/tool/MCP timing, process health, host lifecycle,
+  frontend performance entries, and errors. Content payloads and common credential forms are
+  excluded or redacted. Sink initialization or write failure is reported explicitly.
+- `REASONIX_TRANSCRIPT_DIR` relocates session transcripts; diagnostics remain separate.
 - Pricing overrides: `pricingOverride` in `config.json` sets per-model USD rates when a model's
   published price is missing or wrong.
 

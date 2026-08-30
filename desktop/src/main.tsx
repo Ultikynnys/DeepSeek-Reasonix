@@ -15,7 +15,10 @@ import "@fontsource/inter/700.css";
 import "katex/dist/katex.min.css";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { installFrontendDiagnostics, markFrontendReady } from "./diagnostics";
 import { defaultStyleForTheme, isTheme, isThemeStyle, themeForStyle } from "./theme";
+
+installFrontendDiagnostics();
 
 const stored = localStorage.getItem("reasonix.theme");
 const storedStyle = localStorage.getItem("reasonix.themeStyle");
@@ -55,3 +58,4 @@ const host = document.getElementById("root");
 if (!host) throw new Error("#root missing");
 
 createRoot(host).render(<App />);
+requestAnimationFrame(() => requestAnimationFrame(markFrontendReady));

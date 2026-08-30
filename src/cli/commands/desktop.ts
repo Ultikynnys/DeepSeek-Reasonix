@@ -141,6 +141,7 @@ import {
   readMemoryEntryDetail,
   writeMemoryEntry,
 } from "../../desktop/memory-browser.js";
+import { recordDiagnostic } from "../../diagnostics.js";
 import { normalizeImageToDataUrl } from "../../image-format.js";
 
 import {
@@ -446,7 +447,14 @@ function emitDiagnostic(
   details?: Record<string, unknown>,
   opts: { tabId?: string; level?: DesktopDiagnosticEvent["level"]; message?: string } = {},
 ): void {
-  writeEvent(buildDesktopDiagnostic(event, details, opts), opts.tabId);
+  const diagnostic = buildDesktopDiagnostic(event, details, opts);
+  recordDiagnostic(event, {
+    level: diagnostic.level,
+    message: diagnostic.message,
+    details: { ...diagnostic.details, tabId: opts.tabId },
+    source: "daemon",
+  });
+  writeEvent(diagnostic, opts.tabId);
 }
 
 function emitDiagnosticError(
@@ -2324,6 +2332,38 @@ function pushMentionRecent(tab: Tab, path: string): void {
 }
 
 /** The desktop sidecar is a long-running daemon — Tauri spawns this Node process once per app launch and pipes JSON over stdin/stdout. Without these handlers, any orphaned promise rejection (e.g. from an aborted turn whose cleanup races a session-switch — #1074) crashes the process with exit code 1, which the Tauri host surfaces as "reasonix exited (code 1)" and a full reconnect cycle. Log loudly so we can find the underlying bug, but don't take the daemon down. */
+let healthDiagnosticsStarted = false;
+
+function startProcessHealthDiagnostics(): void {
+  if (healthDiagnosticsStarted) return;
+  healthDiagnosticsStarted = true;
+  let previousCpu = process.cpuUsage();
+  let previousAt = performance.now();
+  const timer = setInterval(() => {
+    const now = performance.now();
+    const cpu = process.cpuUsage(previousCpu);
+    const elapsedMs = now - previousAt;
+    previousCpu = process.cpuUsage();
+    previousAt = now;
+    const memory = process.memoryUsage();
+    recordDiagnostic("process.health", {
+      level: "verbose",
+      details: {
+        elapsedMs: Number(elapsedMs.toFixed(3)),
+        cpuUserMs: Number((cpu.user / 1000).toFixed(3)),
+        cpuSystemMs: Number((cpu.system / 1000).toFixed(3)),
+        rssBytes: memory.rss,
+        heapUsedBytes: memory.heapUsed,
+        heapTotalBytes: memory.heapTotal,
+        externalBytes: memory.external,
+        arrayBuffersBytes: memory.arrayBuffers,
+        activeResources: process.getActiveResourcesInfo(),
+      },
+    });
+  }, 30_000);
+  timer.unref();
+}
+
 export function installDesktopCrashGuards(
   stderr: { write: (s: string) => unknown } = process.stderr,
 ): void {
@@ -2333,6 +2373,7 @@ export function installDesktopCrashGuards(
       err.stack ?? err.message,
       Number.POSITIVE_INFINITY,
     );
+    recordDiagnostic("process.unhandled_rejection", { level: "error", message });
     stderr.write(`[desktop] unhandledRejection: ${message}\n`);
   });
   process.on("uncaughtException", (err) => {
@@ -2340,6 +2381,7 @@ export function installDesktopCrashGuards(
       err.stack ?? err.message,
       Number.POSITIVE_INFINITY,
     );
+    recordDiagnostic("process.uncaught_exception", { level: "error", message });
     stderr.write(`[desktop] uncaughtException: ${message}\n`);
   });
 }
@@ -2359,6 +2401,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     log.debug(`augmented PATH with ${augmented.added.length} login-shell entries`);
   }
   installDesktopCrashGuards();
+  startProcessHealthDiagnostics();
 
   const tabs = new Map<string, Tab>();
   const tabContext = new AsyncLocalStorage<string>();

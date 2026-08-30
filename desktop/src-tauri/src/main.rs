@@ -1,7 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod diagnostics;
 mod rpc;
 
+use diagnostics::record_frontend_diagnostic;
 use rpc::{RpcState, rpc_kill, rpc_send, rpc_spawn};
 use serde::Serialize;
 use std::path::Path;
@@ -265,6 +267,21 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 fn main() {
+    let diagnostics_path = diagnostics::initialize().unwrap_or_else(|error| {
+        eprintln!("[diagnostics] initialization failed: {error}");
+        std::process::exit(1);
+    });
+    std::panic::set_hook(Box::new(|info| {
+        let _ = diagnostics::record("error", "host.panic", serde_json::json!({ "message": info.to_string() }));
+    }));
+    if let Err(error) = diagnostics::record(
+        "info",
+        "host.tauri_build_starting",
+        serde_json::json!({ "diagnosticsPath": diagnostics_path }),
+    ) {
+        eprintln!("[diagnostics] write failed: {error}");
+        std::process::exit(1);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -277,6 +294,7 @@ fn main() {
             rpc_spawn,
             rpc_send,
             rpc_kill,
+            record_frontend_diagnostic,
             open_in_editor,
             open_with_dialog,
             list_workspace_tree,
@@ -322,6 +340,7 @@ fn main() {
             // Node child here too — belt-and-braces vs the Drop on RpcHandle.
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 use tauri::Manager;
+                let _ = diagnostics::record("info", "host.exit_requested", serde_json::json!({}));
                 let state = app.state::<RpcState>();
                 let _ = rpc::rpc_kill(state);
             }

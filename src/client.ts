@@ -8,6 +8,7 @@ import {
   providerForModel,
   resolveBaseUrlEnv,
 } from "./config.js";
+import { recordDiagnostic } from "./diagnostics.js";
 import { createLogger } from "./logging.js";
 import { showPayloadContextLength } from "./ollama-model-map.js";
 import { buildResponsesPayload } from "./responses-api.js";
@@ -489,7 +490,10 @@ export class DeepSeekClient {
     stream: boolean,
     signal: AbortSignal,
   ): Promise<{ transport: ResolvedTransport | null; resp: Response }> {
+    const startedAt = performance.now();
+    const rateLimitStartedAt = startedAt;
     await this.waitForChatRateLimit(signal);
+    const rateLimitWaitMs = performance.now() - rateLimitStartedAt;
     const transport = await this.resolveTransport();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (stream) headers.Accept = "text/event-stream";
@@ -506,18 +510,43 @@ export class DeepSeekClient {
         ? `${deriveNativeOllamaOrigin(this.baseUrl)}/api/chat`
         : `${this.baseUrl}/chat/completions`);
     const ollamaNumCtx = isOllama ? await this.resolveOllamaNumCtx(opts) : undefined;
-    const resp = await fetchWithRetry(
-      this._fetch,
-      endpoint,
-      {
-        method: "POST",
-        headers,
-        body: stringifyJsonTransport(this.buildPayload(opts, stream, transport, ollamaNumCtx)),
-        signal,
-      },
-      { ...this.retry, signal },
-    );
-    return { transport, resp };
+    try {
+      const resp = await fetchWithRetry(
+        this._fetch,
+        endpoint,
+        {
+          method: "POST",
+          headers,
+          body: stringifyJsonTransport(this.buildPayload(opts, stream, transport, ollamaNumCtx)),
+          signal,
+        },
+        { ...this.retry, signal },
+      );
+      recordDiagnostic("model.response.headers", {
+        durationMs: performance.now() - startedAt,
+        details: {
+          model: opts.model,
+          provider: providerForModel(opts.model),
+          stream,
+          status: resp.status,
+          rateLimitWaitMs: Number(rateLimitWaitMs.toFixed(3)),
+        },
+      });
+      return { transport, resp };
+    } catch (error) {
+      recordDiagnostic("model.request.failed", {
+        level: "error",
+        durationMs: performance.now() - startedAt,
+        message: error instanceof Error ? error.message : String(error),
+        details: {
+          model: opts.model,
+          provider: providerForModel(opts.model),
+          stream,
+          rateLimitWaitMs: Number(rateLimitWaitMs.toFixed(3)),
+        },
+      });
+      throw error;
+    }
   }
 
   private async waitForChatRateLimit(signal?: AbortSignal): Promise<void> {

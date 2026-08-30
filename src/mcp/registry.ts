@@ -1,3 +1,4 @@
+import { recordDiagnostic } from "../diagnostics.js";
 import { countTokens, countTokensBounded } from "../tokenizer.js";
 import { ToolRegistry } from "../tools.js";
 import type { JSONSchema } from "../types.js";
@@ -93,18 +94,31 @@ export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string 
           ctx?.signal,
         );
       }
-      const t0 = env.tracker ? Date.now() : 0;
-      // Resolve client at call time via the host indirection so `/mcp reconnect`
-      // can swap a fresh client in without re-bridging tools.
-      const live = env.host.client;
-      const toolResult = await live.callTool(stableTool.name, args, {
-        onProgress: env.onProgress
-          ? (info) => env.onProgress!({ toolName: registeredName, ...info })
-          : undefined,
-        signal: ctx?.signal,
-      });
-      if (env.tracker) env.tracker.record(Date.now() - t0);
-      return flattenMcpResult(toolResult, { maxChars: env.maxResultChars });
+      const t0 = performance.now();
+      try {
+        const live = env.host.client;
+        const toolResult = await live.callTool(stableTool.name, args, {
+          onProgress: env.onProgress
+            ? (info) => env.onProgress!({ toolName: registeredName, ...info })
+            : undefined,
+          signal: ctx?.signal,
+        });
+        const durationMs = performance.now() - t0;
+        env.tracker?.record(durationMs);
+        recordDiagnostic("mcp.tool.completed", {
+          durationMs,
+          details: { server: env.serverName, tool: registeredName, ok: true },
+        });
+        return flattenMcpResult(toolResult, { maxChars: env.maxResultChars });
+      } catch (error) {
+        recordDiagnostic("mcp.tool.completed", {
+          level: "error",
+          durationMs: performance.now() - t0,
+          message: error instanceof Error ? error.message : String(error),
+          details: { server: env.serverName, tool: registeredName, ok: false },
+        });
+        throw error;
+      }
     },
   });
   return registeredName;
