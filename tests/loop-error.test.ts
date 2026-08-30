@@ -124,6 +124,46 @@ describe("formatLoopError", () => {
     expect(out).not.toContain("{"); // JSON wrapping is gone
   });
 
+  it("Z.AI insufficient-resource 429 uses only Z.AI billing and Coding Plan guidance", () => {
+    const raw = new Error(
+      'Z.AI 429: {"error":{"message":"Insufficient balance or no resource package"}}',
+    );
+    const out = formatLoopError(raw, undefined, { provider: "zai" });
+    expect(out).toContain("Z.AI");
+    expect(out).toContain("Insufficient balance or no resource package");
+    expect(out).toContain("Coding Plan");
+    expect(out).not.toContain("OpenAI");
+    expect(out).not.toContain("ChatGPT");
+  });
+
+  it.each([
+    ["deepseek", "DeepSeek 401: bad key", "DEEPSEEK_API_KEY"],
+    ["openai", "OpenAI 401: bad key", "OPENAI_API_KEY"],
+    ["ollama", "Ollama 401: bad key", "OLLAMA_API_KEY"],
+    ["gemini", "Antigravity 401: expired", "Google Antigravity"],
+    ["zai", "Z.AI 401: bad key", "ZAI_API_KEY"],
+  ] as const)("%s authentication has provider-only guidance", (provider, message, marker) => {
+    const out = formatLoopError(new Error(message), undefined, { provider });
+    expect(out).toContain(marker);
+    for (const forbidden of [
+      "DEEPSEEK_API_KEY",
+      "OPENAI_API_KEY",
+      "OLLAMA_API_KEY",
+      "ZAI_API_KEY",
+    ]) {
+      if (forbidden !== marker) expect(out).not.toContain(forbidden);
+    }
+  });
+
+  it.each([
+    ["OpenAI 400: invalid", "openai"],
+    ["Ollama 404: model missing", "ollama"],
+    ["Antigravity 403: forbidden", "gemini"],
+    ["Z.AI 429: rate limit", "zai"],
+  ] as const)("recognizes %s as a non-retryable provider 4xx", (message) => {
+    expect(formatLoopError(new Error(message))).not.toBe(message);
+  });
+
   it("leaves non-DeepSeek-shaped errors untouched", () => {
     const raw = new Error("socket hang up");
     expect(formatLoopError(raw)).toBe("socket hang up");
@@ -185,16 +225,15 @@ describe("formatLoopError", () => {
     expect(out).toMatch(/service unavailable \(500\)/);
   });
 
-  it("5xx from a non-DeepSeek host → generic upstream wording, no DS hint, no probe", () => {
-    const out = formatLoopError(new Error("DeepSeek 500: "), undefined, {
+  it("5xx from Ollama → Ollama-specific wording with no DeepSeek hint", () => {
+    const out = formatLoopError(new Error("Ollama 500: daemon failed"), undefined, {
+      provider: "ollama",
       upstreamHost: "http://localhost:11434/v1",
     });
-    expect(out).toMatch(/Upstream service unavailable \(500\)/);
-    expect(out).toContain("localhost:11434");
+    expect(out).toContain("Ollama service failure (500)");
+    expect(out).toContain("local daemon logs");
     expect(out).not.toContain("status.deepseek.com");
     expect(out).not.toMatch(/DeepSeek-side problem/);
-    expect(out).not.toMatch(/main API answered/);
-    expect(out).not.toMatch(/unreachable from your network/);
   });
 
   it("5xx from api.deepseek.com → still gets the DS-specific wording (allow-list)", () => {

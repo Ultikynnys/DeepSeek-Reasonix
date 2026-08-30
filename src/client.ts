@@ -688,10 +688,20 @@ export class DeepSeekClient {
     }
   }
 
-  /** Error-prefix brand for formatLoopError — "DeepSeek NNN" on DeepSeek hosts,
-   *  "Upstream NNN" everywhere else (OpenAI, proxies, local gateways). */
-  private _errorPrefix(): string {
-    return this._isDeepSeekEndpoint() ? "DeepSeek" : "Upstream";
+  /** Provider brand persisted in thrown HTTP errors and consumed by formatLoopError. */
+  private _errorPrefix(model: string): string {
+    switch (providerForModel(model)) {
+      case "deepseek":
+        return "DeepSeek";
+      case "openai":
+        return "OpenAI";
+      case "ollama":
+        return "Ollama";
+      case "gemini":
+        return "Antigravity";
+      case "zai":
+        return "Z.AI";
+    }
   }
 
   /** Returns null on failure so callers can degrade — session must keep working without balance UI. */
@@ -747,7 +757,7 @@ export class DeepSeekClient {
     try {
       const { resp } = await this.prepareRequest(opts, false, signal);
       if (!resp.ok) {
-        throw new Error(`${this._errorPrefix()} ${resp.status}: ${await resp.text()}`);
+        throw new Error(`${this._errorPrefix(opts.model)} ${resp.status}: ${await resp.text()}`);
       }
       const data: any = await resp.json();
       const choice = data.choices?.[0]?.message ?? {};
@@ -780,7 +790,7 @@ export class DeepSeekClient {
     try {
       const { resp } = await this.prepareRequest(opts, false, signal);
       if (!resp.ok) {
-        throw new Error(`${this._errorPrefix()} ${resp.status}: ${await resp.text()}`);
+        throw new Error(`${this._errorPrefix(opts.model)} ${resp.status}: ${await resp.text()}`);
       }
       const data: any = await resp.json();
       const message = data.message ?? {};
@@ -887,7 +897,7 @@ export class DeepSeekClient {
         "Google Antigravity rejected this request as licensed Gemini Code Assist access (#3501). Sign out and sign in again so Reasonix can refresh the current Antigravity client identity, companion project, and account model catalog. The selected model was not downgraded or retried.",
       );
     }
-    return new Error(`Upstream ${resp.status}: ${body}`);
+    return new Error(`Antigravity ${resp.status}: ${body}`);
   }
 
   /** Cloud Code non-streaming request — `POST /v1internal:generateContent`. */
@@ -1221,7 +1231,7 @@ export class DeepSeekClient {
     if (!resp.ok || !resp.body) {
       clearTimeout(timer);
       throw new Error(
-        `${this._errorPrefix()} ${resp.status}: ${await resp.text().catch(() => "")}`,
+        `${this._errorPrefix(opts.model)} ${resp.status}: ${await resp.text().catch(() => "")}`,
       );
     }
     const reader = resp.body.getReader();
@@ -1413,7 +1423,7 @@ export class DeepSeekClient {
     if (!resp.ok || !resp.body) {
       clearTimeout(timer);
       throw new Error(
-        `${this._errorPrefix()} ${resp.status}: ${await resp.text().catch(() => "")}`,
+        `${this._errorPrefix(opts.model)} ${resp.status}: ${await resp.text().catch(() => "")}`,
       );
     }
 
@@ -1488,7 +1498,9 @@ export class DeepSeekClient {
                 break;
               case "response.failed":
                 streamError = Object.assign(
-                  new Error(`${this._errorPrefix()} 400: ${responsesFailureDetail(json)}`),
+                  new Error(
+                    `${this._errorPrefix(opts.model)} 400: ${responsesFailureDetail(json)}`,
+                  ),
                   { phase: "stream_body_read" as const },
                 );
                 break;

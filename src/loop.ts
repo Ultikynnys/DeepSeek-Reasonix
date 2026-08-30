@@ -1385,7 +1385,10 @@ export class CacheFirstLoop {
           turn: this._turn,
           role: "error",
           content: "",
-          error: formatLoopError(err as Error, probe, { upstreamHost }),
+          error: formatLoopError(err as Error, probe, {
+            upstreamHost,
+            provider: providerForModel(this.model),
+          }),
           errorDetail: {
             name: cause.name,
             message: cause.message,

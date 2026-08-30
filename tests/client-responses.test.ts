@@ -210,7 +210,7 @@ describe("Responses chat() → internal streaming (Codex requires stream:true)",
     );
     await expect(
       client.chat({ model: "gpt-5.6-sol", messages: [{ role: "user", content: "hi" }] }),
-    ).rejects.toThrow(/^Upstream 400: quota exceeded/);
+    ).rejects.toThrow(/^OpenAI 400: quota exceeded/);
   });
 });
 
@@ -294,7 +294,7 @@ describe("Responses streaming", () => {
       })) {
         chunks.push(c);
       }
-    }).rejects.toThrow(/^Upstream 400: prompt is not allowed \(invalid_prompt\)$/);
+    }).rejects.toThrow(/^OpenAI 400: prompt is not allowed \(invalid_prompt\)$/);
     expect(chunks.some((c) => c.contentDelta === "partial")).toBe(true);
   });
 
@@ -302,14 +302,14 @@ describe("Responses streaming", () => {
     [
       "top-level compatibility",
       { code: "invalid_prompt", message: "legacy failure" },
-      "Upstream 400: legacy failure (invalid_prompt)",
+      "OpenAI 400: legacy failure (invalid_prompt)",
     ],
     [
       "nested message only",
       { response: { error: { message: "model unavailable" } } },
-      "Upstream 400: model unavailable",
+      "OpenAI 400: model unavailable",
     ],
-    ["malformed nested error", { response: { error: "unknown" } }, "Upstream 400: response failed"],
+    ["malformed nested error", { response: { error: "unknown" } }, "OpenAI 400: response failed"],
   ])("formats %s response.failed details", async (_name, failure, expected) => {
     const client = codexClient(
       sseFetch([`data: ${JSON.stringify({ type: "response.failed", ...failure })}\n\n`]),

@@ -96,7 +96,7 @@ describe("DeepSeekClient with OpenAI GPT-5.6 payloads", () => {
     expect(resp.content).toBe("ok");
   });
 
-  it("prefixes errors Upstream on OpenAI hosts, DeepSeek on deepseek hosts", async () => {
+  it("prefixes errors OpenAI on OpenAI models, DeepSeek on DeepSeek models", async () => {
     const openai = new DeepSeekClient({
       apiKey: "sk-test",
       baseUrl: "https://api.openai.com/v1",
@@ -105,7 +105,7 @@ describe("DeepSeekClient with OpenAI GPT-5.6 payloads", () => {
     });
     await expect(
       openai.chat({ model: "gpt-5.6-sol", messages: [{ role: "user", content: "hi" }] }),
-    ).rejects.toThrow(/^Upstream 401:/);
+    ).rejects.toThrow(/^OpenAI 401:/);
 
     const ds = new DeepSeekClient({
       apiKey: "sk-test",

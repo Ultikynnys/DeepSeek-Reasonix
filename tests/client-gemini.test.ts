@@ -390,7 +390,7 @@ describe("gemini payload", () => {
 
     await expect(
       client.chat({ model: "gemini-2.5-flash", messages: [{ role: "user", content: "hi" }] }),
-    ).rejects.toThrow("Upstream 503: unavailable");
+    ).rejects.toThrow("Antigravity 503: unavailable");
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
       "https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent",

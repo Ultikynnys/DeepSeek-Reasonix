@@ -1,12 +1,16 @@
 import type { DeepSeekClient } from "../client.js";
+import type { ModelProvider } from "../config.js";
 import { t } from "../i18n/index.js";
+import type { TranslationSchema } from "../i18n/types.js";
 
 export interface DeepSeekProbeResult {
   reachable: boolean;
 }
 
 export interface FormatLoopErrorOptions {
-  /** baseUrl of the upstream that just failed — picks DS vs generic wording. */
+  /** Authoritative provider selected from the request model. */
+  provider?: ModelProvider;
+  /** Compatibility fallback for external callers that do not supply provider. */
   upstreamHost?: string;
 }
 
@@ -16,56 +20,65 @@ export function formatLoopError(
   opts?: FormatLoopErrorOptions,
 ): string {
   const msg = err.message ?? "";
-  if (msg.includes("maximum context length")) {
+  const match = /^(DeepSeek|OpenAI|Ollama|Antigravity|Z\.AI|Upstream) (\d{3}):\s*([\s\S]*)$/.exec(
+    msg,
+  );
+  const provider = resolveErrorProvider(opts?.provider, match?.[1], opts?.upstreamHost);
+  if (
+    match &&
+    (msg.includes("maximum context length") || /context window|prompt too long/i.test(msg))
+  ) {
     const reqMatch = msg.match(/requested\s+(\d+)\s+tokens/);
     const requested = reqMatch
       ? `${Number(reqMatch[1]).toLocaleString()} tokens`
       : t("errors.contextOverflowTooMany");
-    return t("errors.contextOverflow", { requested });
+    return providerMessage(provider, "context", { requested, inner: msg });
+  }
+  if (!match) {
+    if (/timed out after/i.test(msg)) return providerMessage(provider, "timeout", { inner: msg });
+    return msg;
   }
 
-  const m = /^(DeepSeek|Upstream) (\d{3}):\s*([\s\S]*)$/.exec(msg);
-  if (!m) return msg;
-  const brand = m[1]!;
-  const status = m[2]!;
-  const body = m[3]!;
-  const inner = extractDeepSeekErrorMessage(body);
-  const label = upstreamLabel(brand, opts?.upstreamHost);
-
-  if (status === "401") {
-    if (label === "DeepSeek") return t("errors.auth401", { inner });
-    if (label === "OpenAI") return t("errors.auth401OpenAI", { inner });
-    return t("errors.auth401Upstream", { inner });
-  }
-  if (status === "402") {
-    if (label === "DeepSeek") return t("errors.balance402", { inner });
-    return t("errors.balance402Generic", { brand: label, inner });
-  }
-  if (status === "422") return t("errors.badparam422", { brand: label, inner });
-  if (status === "400") return t("errors.badrequest400", { brand: label, inner });
-  if (status === "429") {
-    if (label === "DeepSeek") return t("errors.concurrency429", { inner });
-    // OpenAI bills platform credits — a 429 whose body says the account is
-    // out of credits is not a concurrency problem, so the generic "reduce
-    // parallelism" advice would be misleading.
-    if (isOutOfCredits429(inner)) {
-      return t("errors.outOfCredits429", { brand: label, inner });
+  const status = match[2]!;
+  const inner = extractProviderErrorMessage(match[3]!);
+  if (status === "400" || status === "413" || status === "422") {
+    if (/maximum context length|context window|prompt too long|reduce the length/i.test(inner)) {
+      return providerMessage(provider, "context", {
+        requested: t("errors.contextOverflowTooMany"),
+        inner,
+      });
     }
-    return t("errors.concurrency429Generic", { brand: label, inner });
+    return providerMessage(provider, "request", { inner });
   }
-  if (is5xxStatus(status)) return format5xx(status, probe, opts?.upstreamHost);
+  if (status === "401") return providerMessage(provider, "auth", { inner });
+  if (status === "402") return providerMessage(provider, "credits", { inner });
+  if (status === "403") return providerMessage(provider, "permission", { inner });
+  if (status === "404") return providerMessage(provider, "notFound", { inner });
+  if (status === "408") return providerMessage(provider, "timeout", { inner });
+  if (status === "429") {
+    const exhausted =
+      provider === "deepseek"
+        ? /insufficient (?:credits?|balance)|out of credits/i.test(inner)
+        : isOutOfCredits429(inner);
+    return providerMessage(provider, exhausted ? "credits" : "rate", { inner });
+  }
+  if (is5xxStatus(status)) {
+    if (provider === "deepseek") return formatDeepSeek5xx(status, probe);
+    return providerMessage(provider, "server", { inner, status });
+  }
   return msg;
 }
 
+const PROVIDER_ERROR_PREFIX = "(?:DeepSeek|OpenAI|Ollama|Antigravity|Z\\.AI|Upstream)";
+
 export function is5xxError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  const m = /^(?:DeepSeek|Upstream) (5\d{2}):/.exec(err.message ?? "");
-  return m !== null;
+  return new RegExp(`^${PROVIDER_ERROR_PREFIX} 5\\d{2}:`).test(err.message ?? "");
 }
 
 export function is4xxError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  return /^(?:DeepSeek|Upstream) (4\d{2}):/.test(err.message ?? "");
+  return new RegExp(`^${PROVIDER_ERROR_PREFIX} 4\\d{2}:`).test(err.message ?? "");
 }
 
 /** Read structured metadata off thrown errors without resorting to `as any`. */
@@ -107,45 +120,132 @@ export function isDeepSeekHost(baseUrl: string | undefined | null): boolean {
   }
 }
 
-export type UpstreamLabel = "DeepSeek" | "OpenAI" | "Upstream";
+type ErrorProvider = ModelProvider | "upstream";
+type ErrorKind =
+  | "auth"
+  | "credits"
+  | "permission"
+  | "notFound"
+  | "request"
+  | "context"
+  | "timeout"
+  | "rate"
+  | "server";
 
-/** Brand for error copy — "DeepSeek" from the raw prefix, refined to "OpenAI"
- *  for api.openai.com / chatgpt.com hosts; everything else stays "Upstream". */
-function upstreamLabel(rawPrefix: string, upstreamHost: string | undefined): UpstreamLabel {
-  if (rawPrefix === "DeepSeek") return "DeepSeek";
-  if (upstreamHost === undefined) return "Upstream";
-  try {
-    const host = new URL(upstreamHost).hostname.toLowerCase();
-    if (host === "api.openai.com" || host.endsWith(".openai.com")) return "OpenAI";
-    if (host === "chatgpt.com" || host.endsWith(".chatgpt.com")) return "OpenAI";
-  } catch {
-    /* keep generic */
+const ERROR_KEYS: Record<ErrorProvider, Record<ErrorKind, keyof TranslationSchema["errors"]>> = {
+  deepseek: {
+    auth: "deepseekAuth",
+    credits: "deepseekCredits",
+    permission: "deepseekPermission",
+    notFound: "deepseekNotFound",
+    request: "deepseekRequest",
+    context: "deepseekContext",
+    timeout: "deepseekTimeout",
+    rate: "deepseekRate",
+    server: "deepseekServer",
+  },
+  openai: {
+    auth: "openaiAuth",
+    credits: "openaiCredits",
+    permission: "openaiPermission",
+    notFound: "openaiNotFound",
+    request: "openaiRequest",
+    context: "openaiContext",
+    timeout: "openaiTimeout",
+    rate: "openaiRate",
+    server: "openaiServer",
+  },
+  ollama: {
+    auth: "ollamaAuth",
+    credits: "ollamaCredits",
+    permission: "ollamaPermission",
+    notFound: "ollamaNotFound",
+    request: "ollamaRequest",
+    context: "ollamaContext",
+    timeout: "ollamaTimeout",
+    rate: "ollamaRate",
+    server: "ollamaServer",
+  },
+  gemini: {
+    auth: "antigravityAuth",
+    credits: "antigravityCredits",
+    permission: "antigravityPermission",
+    notFound: "antigravityNotFound",
+    request: "antigravityRequest",
+    context: "antigravityContext",
+    timeout: "antigravityTimeout",
+    rate: "antigravityRate",
+    server: "antigravityServer",
+  },
+  zai: {
+    auth: "zaiAuth",
+    credits: "zaiCredits",
+    permission: "zaiPermission",
+    notFound: "zaiNotFound",
+    request: "zaiRequest",
+    context: "zaiContext",
+    timeout: "zaiTimeout",
+    rate: "zaiRate",
+    server: "zaiServer",
+  },
+  upstream: {
+    auth: "customAuth",
+    credits: "customCredits",
+    permission: "customPermission",
+    notFound: "customNotFound",
+    request: "customRequest",
+    context: "customContext",
+    timeout: "customTimeout",
+    rate: "customRate",
+    server: "customServer",
+  },
+};
+
+function providerMessage(
+  provider: ErrorProvider,
+  kind: ErrorKind,
+  vars: Record<string, string>,
+): string {
+  return t(`errors.${ERROR_KEYS[provider][kind]}`, vars);
+}
+
+function resolveErrorProvider(
+  configured: ModelProvider | undefined,
+  prefix: string | undefined,
+  upstreamHost: string | undefined,
+): ErrorProvider {
+  if (configured) return configured;
+  if (prefix === "DeepSeek") return "deepseek";
+  if (prefix === "OpenAI") return "openai";
+  if (prefix === "Ollama") return "ollama";
+  if (prefix === "Antigravity") return "gemini";
+  if (prefix === "Z.AI") return "zai";
+  if (upstreamHost) {
+    try {
+      const host = new URL(upstreamHost).hostname.toLowerCase();
+      if (host.endsWith("deepseek.com")) return "deepseek";
+      if (host.endsWith("openai.com") || host.endsWith("chatgpt.com")) return "openai";
+      if (host.endsWith("ollama.com") || host === "localhost" || host === "127.0.0.1") {
+        return "ollama";
+      }
+      if (host.endsWith("googleapis.com")) return "gemini";
+      if (host.endsWith("z.ai")) return "zai";
+    } catch {
+      return "upstream";
+    }
   }
-  return "Upstream";
+  return "upstream";
 }
 
 function is5xxStatus(status: string): boolean {
   return status === "500" || status === "502" || status === "503" || status === "504";
 }
 
-/** 429s whose body means the account is out of credits / over its plan's
- *  usage limit — distinct from rate-limit/concurrency 429s. */
 const OUT_OF_CREDITS_429 =
-  /no credits? remaining|insufficient (credits?|balance)|out of credits|usage limit/i;
+  /no credits? remaining|insufficient (?:credits?|balance)|out of credits|usage limit|current quota|insufficient_quota|no resource package|resource package|weekly limit|monthly limit|quota exceeded|resource_exhausted/i;
 
 function isOutOfCredits429(inner: string): boolean {
   return OUT_OF_CREDITS_429.test(inner);
-}
-
-function format5xx(
-  status: string,
-  probe: DeepSeekProbeResult | undefined,
-  upstreamHost: string | undefined,
-): string {
-  if (upstreamHost !== undefined && !isDeepSeekHost(upstreamHost)) {
-    return formatUpstream5xx(status, upstreamHost);
-  }
-  return formatDeepSeek5xx(status, probe);
 }
 
 function formatDeepSeek5xx(status: string, probe?: DeepSeekProbeResult): string {
@@ -163,18 +263,6 @@ function formatDeepSeek5xx(status: string, probe?: DeepSeekProbeResult): string 
   return `${head}${probeNote}${action}`;
 }
 
-function formatUpstream5xx(status: string, baseUrl: string): string {
-  let host = baseUrl;
-  try {
-    host = new URL(baseUrl).host || baseUrl;
-  } catch {
-    /* keep raw baseUrl */
-  }
-  const head = t("errors.upstream5xxHead", { status, host });
-  const action = t("errors.upstream5xxActionRetry");
-  return `${head}${action}`;
-}
-
 export function reasonPrefixFor(reason: "aborted" | "context-guard" | "stuck"): string {
   if (reason === "aborted") return t("errors.reasonAborted");
   if (reason === "context-guard") return t("errors.reasonContextGuard");
@@ -187,7 +275,7 @@ export function errorLabelFor(reason: "aborted" | "context-guard" | "stuck"): st
   return t("errors.labelStuck");
 }
 
-function extractDeepSeekErrorMessage(body: string): string {
+function extractProviderErrorMessage(body: string): string {
   const trimmed = body.trim();
   if (!trimmed) return t("errors.innerNoMessage");
   try {

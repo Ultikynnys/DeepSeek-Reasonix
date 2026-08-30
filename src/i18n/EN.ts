@@ -697,41 +697,121 @@ export const EN: TranslationSchema = {
       "YOLO mode: reached the {max}-iteration cap, but the turn keeps running unattended — yolo never pauses on the iteration cap. Stuck loops still force-summarize.",
   },
   errors: {
-    contextOverflow:
-      "Context overflow (DeepSeek 400): session history is {requested}, past the model's prompt limit (V4: 1M tokens; legacy chat/reasoner: 131k). Usually a single tool result grew too big. Reasonix caps new tool results at 8k tokens and auto-heals oversized history on session load — a restart often clears it. If it still overflows, run /new to start fresh, or open /sessions and press [d] to delete this session.",
     contextOverflowTooMany: "too many tokens",
-    auth401:
-      "Authentication failed (DeepSeek 401): {inner}. Your API key is rejected. Fix with `reasonix setup` or `export DEEPSEEK_API_KEY=sk-...`. Get one at https://platform.deepseek.com/api_keys.",
-    auth401OpenAI:
-      "Authentication failed (OpenAI 401): {inner}. Your API key is rejected — set it in Settings → OpenAI, sign in with your ChatGPT account (Settings → OpenAI), or `export OPENAI_API_KEY=sk-...`. Get one at https://platform.openai.com/api-keys.",
-    auth401Upstream:
-      "Authentication failed (Upstream 401): {inner}. The configured endpoint rejected the key — for gpt models set `export OPENAI_API_KEY=sk-...` or sign in with your ChatGPT account in Settings → OpenAI.",
-    balance402:
-      "Out of balance (DeepSeek 402): {inner}. Top up at https://platform.deepseek.com/top_up — the panel header shows your balance once it's non-zero.",
-    balance402Generic:
-      "Payment required ({brand} 402): {inner}. Check the account's billing page for this provider.",
-    badparam422: "Invalid parameter ({brand} 422): {inner}",
-    badrequest400: "Bad request ({brand} 400): {inner}",
-    concurrency429:
-      "DeepSeek concurrency limit hit (429): {inner}. The account has too many in-flight requests (cap: 500 for v4-pro, 2500 for v4-flash, summed across API keys account-wide). Usually means another Reasonix process is sharing the same key, or a parallel subagent fan-out overshot. Wait a few seconds and retry, reduce parallelism, or request a higher cap at https://platform.deepseek.com.",
-    concurrency429Generic:
-      "{brand} rate limit hit (429): {inner}. Too many in-flight requests — wait a few seconds and retry, or reduce parallelism.",
-    outOfCredits429:
-      "{brand} is out of credits (429): {inner}. Top up the account's billing page, or sign in with your ChatGPT account (Settings → OpenAI) to use the plan quota for gpt models.",
+    deepseekAuth:
+      "Authentication failed (DeepSeek 401): {inner}. Run `reasonix setup` or set a valid DEEPSEEK_API_KEY in Settings. Get one at https://platform.deepseek.com/api_keys.",
+    deepseekCredits:
+      "Out of balance (DeepSeek): {inner}. Top up at https://platform.deepseek.com/top_up.",
+    deepseekPermission:
+      "DeepSeek denied this request (403): {inner}. Check the API key permissions and account status.",
+    deepseekNotFound:
+      "DeepSeek could not find the requested model or endpoint (404): {inner}. Select a supported DeepSeek model.",
+    deepseekRequest:
+      "Bad request / Invalid parameter (DeepSeek): {inner}. Check the selected DeepSeek model and request parameters.",
+    deepseekContext:
+      "Context overflow (DeepSeek): session history is {requested}, past the model limit (V4: 1M tokens; legacy: 131k). Start a new conversation, reduce attached/tool content, or use /sessions to remove the oversized session.",
+    deepseekTimeout:
+      "DeepSeek request timed out: {inner}. Check https://status.deepseek.com and retry.",
+    deepseekRate:
+      "DeepSeek concurrency limit hit (429): {inner}. Limits are 500 for pro and 2500 for flash. Wait, reduce parallel model calls, or request a higher limit at https://platform.deepseek.com.",
+    deepseekServer:
+      "DeepSeek service failure ({status}): {inner}. Check https://status.deepseek.com and retry later.",
+    openaiAuth:
+      "Authentication failed (OpenAI 401): {inner}. Set OPENAI_API_KEY or sign in with ChatGPT in Settings → OpenAI.",
+    openaiCredits:
+      "OpenAI is out of credits or plan quota (429): {inner}. Add API credits at https://platform.openai.com/settings/organization/billing or sign in with your ChatGPT account for eligible plan quota.",
+    openaiPermission:
+      "OpenAI denied this request (403): {inner}. Check the OpenAI project, organization, model access, or ChatGPT sign-in.",
+    openaiNotFound:
+      "OpenAI could not find the requested model or endpoint (404): {inner}. Check the GPT model ID and account access.",
+    openaiRequest:
+      "OpenAI rejected the request: {inner}. Check the GPT model's supported parameters and message format.",
+    openaiContext:
+      "OpenAI context overflow: session history is {requested}. Start a new conversation or reduce attached/tool content.",
+    openaiTimeout: "OpenAI request timed out: {inner}. Check https://status.openai.com and retry.",
+    openaiRate:
+      "OpenAI rate limit hit (429): {inner}. Too many in-flight requests. Wait and retry, or review the OpenAI project's rate limits.",
+    openaiServer:
+      "OpenAI service failure ({status}): {inner}. Check https://status.openai.com and retry later.",
+    ollamaAuth:
+      "Ollama authentication failed (401): {inner}. Set OLLAMA_API_KEY for Ollama Cloud; local Ollama should use a localhost endpoint without a key.",
+    ollamaCredits:
+      "Ollama Cloud plan quota is exhausted: {inner}. Review the account plan at https://ollama.com/settings.",
+    ollamaPermission:
+      "Ollama denied this request (403): {inner}. Check the Ollama Cloud subscription and model access.",
+    ollamaNotFound:
+      "Ollama model or endpoint not found (404): {inner}. For local models, run `ollama pull <model>` and confirm OLLAMA_BASE_URL.",
+    ollamaRequest:
+      "Ollama rejected the request: {inner}. Check the model capabilities and native Ollama parameters.",
+    ollamaContext:
+      "Ollama context overflow: session history is {requested}. Increase num_ctx for this model or reduce conversation/tool content.",
+    ollamaTimeout:
+      "Ollama request timed out: {inner}. Confirm the daemon or Ollama Cloud endpoint is reachable and the model is loaded.",
+    ollamaRate:
+      "Ollama Cloud rate limit hit (429): {inner}. Wait and retry or review the Ollama Cloud plan limits.",
+    ollamaServer:
+      "Ollama service failure ({status}): {inner}. Check the local daemon logs or Ollama Cloud status, then retry.",
+    antigravityAuth:
+      "Google Antigravity authentication failed (401): {inner}. Sign out and sign in again in Settings → Google.",
+    antigravityCredits:
+      "Google Antigravity quota is exhausted: {inner}. Review the Google account's Gemini Code Assist quota and subscription.",
+    antigravityPermission:
+      "Google Antigravity denied this request (403): {inner}. Sign in again to refresh client identity, companion project, and model access.",
+    antigravityNotFound:
+      "Google Antigravity could not find the model or Cloud Code endpoint (404): {inner}. Refresh the account model catalog in Settings → Google.",
+    antigravityRequest:
+      "Google Antigravity rejected the request: {inner}. Check the selected Antigravity model and supported tool/message format.",
+    antigravityContext:
+      "Google Antigravity context overflow: session history is {requested}. Start a new conversation or reduce attached/tool content.",
+    antigravityTimeout:
+      "Google Antigravity request timed out: {inner}. Check Google service availability and retry.",
+    antigravityRate:
+      "Google Antigravity rate limit hit (429): {inner}. Wait for the account quota window to recover and retry.",
+    antigravityServer:
+      "Google Antigravity service failure ({status}): {inner}. Retry later or refresh Google authentication if it persists.",
+    zaiAuth:
+      "Z.AI authentication failed (401): {inner}. Set a valid ZAI_API_KEY in Settings → Models. Manage keys at https://z.ai/manage-apikey/apikey-list.",
+    zaiCredits:
+      "Z.AI has insufficient balance, quota, or no applicable resource package: {inner}. Check Z.AI billing/Coding Plan quota and use the Coding Plan dedicated endpoint when your subscription requires it.",
+    zaiPermission:
+      "Z.AI denied this request (403): {inner}. Check the Z.AI key permissions, model entitlement, and Coding Plan endpoint.",
+    zaiNotFound:
+      "Z.AI could not find the requested GLM model or endpoint (404): {inner}. Check the glm-* model ID and ZAI_BASE_URL.",
+    zaiRequest:
+      "Z.AI rejected the GLM request: {inner}. Check GLM-supported parameters, message content, and tool schema.",
+    zaiContext:
+      "Z.AI GLM context overflow: session history is {requested}. Start a new conversation or reduce attached/tool content.",
+    zaiTimeout:
+      "Z.AI request timed out: {inner}. Check the configured Z.AI or Coding Plan endpoint and retry.",
+    zaiRate:
+      "Z.AI rate limit hit (429): {inner}. Wait and retry, or review the Z.AI API/Coding Plan rate limits.",
+    zaiServer:
+      "Z.AI service failure ({status}): {inner}. Check the configured Z.AI endpoint and retry later.",
+    customAuth:
+      "Authentication failed (custom model endpoint 401): {inner}. Check that endpoint's configured API key.",
+    customCredits:
+      "Custom model endpoint reports exhausted credits or quota: {inner}. Check that endpoint's account and billing configuration.",
+    customPermission:
+      "Custom model endpoint denied the request (403): {inner}. Check that endpoint's permissions.",
+    customNotFound:
+      "Custom model endpoint could not find the model or route (404): {inner}. Check baseUrl and model ID.",
+    customRequest:
+      "Custom model endpoint rejected the request: {inner}. Check its supported OpenAI-compatible parameters.",
+    customContext:
+      "Custom model endpoint context overflow: session history is {requested}. Reduce conversation/tool content.",
+    customTimeout: "Custom model endpoint timed out: {inner}. Check that server and network route.",
+    customRate:
+      "Custom model endpoint rate limit hit (429): {inner}. Wait and review that server's limits.",
+    customServer:
+      "Custom model endpoint service failure ({status}): {inner}. Check that server's logs and availability.",
     deepseek5xxHead:
-      "DeepSeek service unavailable ({status}) — this is a DeepSeek-side problem, not Reasonix. Already retried 4× with backoff.",
+      "DeepSeek service unavailable ({status}): this is a DeepSeek-side problem, not Reasonix. Already retried 4× with backoff.",
     deepseek5xxReachable:
-      " DeepSeek's main API answered our health check, but /chat/completions is failing — partial outage on their side.",
-    deepseek5xxUnreachable:
-      " DeepSeek API is unreachable from your network — could be a wider DS outage or a local network issue.",
+      " DeepSeek's main API answered our health check, but chat completion is failing: partial outage on their side.",
+    deepseek5xxUnreachable: " DeepSeek API is unreachable from your network.",
     deepseek5xxActionNetwork:
-      " Try: (1) check your network, (2) wait 30s and retry, (3) status page: https://status.deepseek.com.",
-    deepseek5xxActionRetry:
-      " Try: (1) wait 30s and retry, (2) /model to switch model, (3) status page: https://status.deepseek.com.",
-    upstream5xxHead:
-      "Upstream service unavailable ({status}) at {host} — the configured API endpoint returned a server error, not a Reasonix bug. Already retried 4× with backoff.",
-    upstream5xxActionRetry:
-      " Try: (1) check that the local/proxy model server is up, (2) wait and retry, (3) /model to switch model.",
+      " Try: check your network, wait, then check https://status.deepseek.com.",
+    deepseek5xxActionRetry: " Wait and retry, or check https://status.deepseek.com.",
     innerNoMessage: "(no message)",
     reasonAborted: "[aborted by user (Esc) — summarizing what I found so far]",
     reasonContextGuard:
