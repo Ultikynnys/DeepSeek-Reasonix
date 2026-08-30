@@ -408,8 +408,8 @@ export const EN: TranslationSchema = {
     },
     "search-engine": {
       description:
-        "switch web search backend — bing (default, works from CN without proxy), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), or ollama (Ollama cloud web search)",
-      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa|brave|ollama> [<key>]",
+        "switch web search backend: bing (default), searxng, metaso, tavily, perplexity, exa, brave, ollama, or zai",
+      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa|brave|ollama|zai> [<key>]",
     },
   },
   wizard: {
@@ -1153,6 +1153,8 @@ export const EN: TranslationSchema = {
         "  /search-engine ollama              use Ollama cloud web search — set OLLAMA_API_KEY or ollamaApiKey in config; get one at https://ollama.com/settings/keys",
       usageBrave:
         "  /search-engine brave               use Brave Search API (independent index, free 2000/mo — set BRAVE_SEARCH_API_KEY or braveApiKey in config; get one at https://brave.com/search/api/)",
+      usageZai:
+        "  /search-engine zai                 use Z.AI search-prime; set ZAI_API_KEY or zaiApiKey in config",
       alias: "Alias: /se",
       searxngInfo:
         "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
@@ -1170,6 +1172,8 @@ export const EN: TranslationSchema = {
         " Set OLLAMA_API_KEY or `ollamaApiKey` in config; get one at https://ollama.com/settings/keys.",
       switchedBraveNote:
         " Set BRAVE_SEARCH_API_KEY (or BRAVE_API_KEY) or `braveApiKey` in config; free 2000/mo at https://brave.com/search/api/.",
+      switchedZaiNote:
+        " Set ZAI_API_KEY or `zaiApiKey` in config; get one at https://z.ai/manage-apikey/apikey-list.",
       keyNeeded:
         'No API key configured for "{engine}".\n\n  1. Set the {envVar} environment variable\n  2. Or provide one inline:  /search-engine {engine} <your-key>\n  3. Or add "{engine}ApiKey" to ~/.reasonix/config.json\n\nThen retry /search-engine {engine}.',
       keySaved: " API key saved to config.",
@@ -1560,6 +1564,16 @@ export const EN: TranslationSchema = {
       "web_search: Brave Search server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     braveParseError:
       "web_search: Brave Search returned unparseable response (HTTP {status}) \u2014 try again later",
+    zaiMissingKey:
+      "web_search: Z.AI search requires an API key. Set ZAI_API_KEY or configure zaiApiKey, then select /search-engine zai.",
+    zaiUnauthorized:
+      "web_search: Z.AI API key rejected. Check ZAI_API_KEY or zaiApiKey in settings.",
+    zaiRateLimit:
+      "web_search: Z.AI search rate-limited or quota exceeded. Wait and retry or check your Z.AI plan.",
+    zaiServerError:
+      "web_search: Z.AI search server error ({status}). Try again later or select another engine.",
+    zaiParseError:
+      "web_search: Z.AI search returned an unparseable response (HTTP {status}). Try again later.",
     fetchStatus:
       "web_fetch {status} for {url} \u2014 try: confirm the URL resolves in a browser; status suggests the host returned an error page",
     fetchRateLimit429:

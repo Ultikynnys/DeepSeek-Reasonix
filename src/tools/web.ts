@@ -13,6 +13,7 @@ import {
   loadTavilyApiKey,
   webSearchEndpoint as loadWebSearchEndpoint,
   webSearchEngine as loadWebSearchEngine,
+  loadZaiApiKey,
 } from "../config.js";
 import { t } from "../i18n/index.js";
 import type { ToolRegistry } from "../tools.js";
@@ -59,7 +60,8 @@ export interface WebSearchOptions {
     | "perplexity"
     | "exa"
     | "brave"
-    | "ollama";
+    | "ollama"
+    | "zai";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -88,6 +90,7 @@ const EXA_ENDPOINT = "https://api.exa.ai/answer";
 const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const OLLAMA_WEB_SEARCH_ENDPOINT = "https://ollama.com/api/web_search";
 const OLLAMA_WEB_FETCH_ENDPOINT = "https://ollama.com/api/web_fetch";
+const ZAI_WEB_SEARCH_ENDPOINT = "https://api.z.ai/api/paas/v4/web_search";
 const FETCH_MAX_REDIRECTS = 5;
 
 /** Pick a status-specific webErrors key so the model gets an actionable hint, not a bare status. */
@@ -351,6 +354,9 @@ export async function webSearch(
   if (opts.engine === "brave") {
     return searchBrave(query, opts);
   }
+  if (opts.engine === "zai") {
+    return searchZai(query, opts);
+  }
   if (opts.engine === "bing-intl") {
     return searchBing(query, opts, BING_INTL_ENDPOINT);
   }
@@ -507,6 +513,59 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
     url: wp.link,
     snippet: wp.snippet ?? wp.summary ?? "",
   }));
+}
+
+interface ZaiSearchItem {
+  title?: string;
+  content?: string;
+  link?: string;
+}
+
+interface ZaiSearchResponse {
+  search_result?: ZaiSearchItem[];
+}
+
+async function searchZai(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(50, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadZaiApiKey(opts.configPath);
+  if (!apiKey) throw new Error(t("webErrors.zaiMissingKey"));
+
+  const resp = await fetchSearchApi(
+    ZAI_WEB_SEARCH_ENDPOINT,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "Accept-Language": "en-US,en",
+      },
+      body: JSON.stringify({
+        search_engine: "search-prime",
+        search_query: query,
+        count: topK,
+      }),
+    },
+    opts.signal,
+    {
+      authError: t("webErrors.zaiUnauthorized"),
+      rateLimitError: t("webErrors.zaiRateLimit"),
+      serverError: (status) => t("webErrors.zaiServerError", { status }),
+    },
+  );
+
+  const data = parseSearchJson<ZaiSearchResponse>(
+    await resp.text(),
+    t("webErrors.zaiParseError", { status: resp.status }),
+  );
+  return (data.search_result ?? [])
+    .filter((item) => typeof item.title === "string" && typeof item.link === "string")
+    .slice(0, topK)
+    .map((item) => ({
+      title: item.title!,
+      url: item.link!,
+      snippet: item.content ?? "",
+    }));
 }
 
 interface BaiduReference {

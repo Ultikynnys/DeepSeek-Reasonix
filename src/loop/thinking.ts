@@ -2,6 +2,7 @@
 export function isThinkingModeModel(model: string): boolean {
   if (model.startsWith("gpt-")) return false;
   if (model.includes("reasoner")) return true;
+  if (model.startsWith("glm-")) return true;
   if (model === "deepseek-v4-flash" || model === "deepseek-v4-pro") return true;
   return false;
 }
@@ -10,6 +11,7 @@ export function isThinkingModeModel(model: string): boolean {
 export function thinkingModeForModel(model: string): "enabled" | "disabled" | undefined {
   if (model.startsWith("gpt-")) return undefined;
   if (model === "deepseek-chat") return "disabled";
+  if (model.startsWith("glm-")) return "enabled";
   if (model.includes("reasoner")) return "enabled";
   if (model === "deepseek-v4-flash" || model === "deepseek-v4-pro") return "enabled";
   return undefined;

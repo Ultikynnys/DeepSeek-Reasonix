@@ -34,6 +34,7 @@ export {
   GPT56_MODELS,
   KNOWN_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
+  ZAI_MODELS,
   isAntigravityModel,
   modelAcceptsImages,
 } from "./models.js";

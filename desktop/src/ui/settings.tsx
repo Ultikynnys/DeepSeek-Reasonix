@@ -624,7 +624,8 @@ function PageGeneral({
                   | "perplexity"
                   | "exa"
                   | "brave"
-                  | "ollama",
+                  | "ollama"
+                  | "zai",
               })
             }
           >
@@ -638,6 +639,7 @@ function PageGeneral({
             <option value="exa">{t("settings.webSearchEngineExa")}</option>
             <option value="brave">{t("settings.webSearchEngineBrave")}</option>
             <option value="ollama">{t("settings.webSearchEngineOllama")}</option>
+            <option value="zai">{t("settings.webSearchEngineZai")}</option>
           </select>
         </div>
         <WebSearchEngineCredentials settings={settings} onSave={onSave} />
@@ -647,7 +649,15 @@ function PageGeneral({
 }
 
 const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
-  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  engine:
+    | "metaso"
+    | "baidu"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama"
+    | "zai";
   patchKey:
     | "metasoApiKey"
     | "baiduApiKey"
@@ -655,7 +665,8 @@ const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
     | "perplexityApiKey"
     | "exaApiKey"
     | "braveApiKey"
-    | "ollamaApiKey";
+    | "ollamaApiKey"
+    | "zaiApiKey";
   signupUrl: string;
 }> = [
   { engine: "metaso", patchKey: "metasoApiKey", signupUrl: "https://metaso.cn/settings/api" },
@@ -673,6 +684,7 @@ const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
   { engine: "exa", patchKey: "exaApiKey", signupUrl: "https://dashboard.exa.ai/api-keys" },
   { engine: "brave", patchKey: "braveApiKey", signupUrl: "https://brave.com/search/api/" },
   { engine: "ollama", patchKey: "ollamaApiKey", signupUrl: "https://ollama.com/settings/keys" },
+  { engine: "zai", patchKey: "zaiApiKey", signupUrl: "https://z.ai/manage-apikey/apikey-list" },
 ];
 
 function WebSearchEngineCredentials({
@@ -740,7 +752,15 @@ function WebSearchApiKeyRow({
   prefix,
   onSave,
 }: {
-  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  engine:
+    | "metaso"
+    | "baidu"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama"
+    | "zai";
   patchKey:
     | "metasoApiKey"
     | "baiduApiKey"
@@ -748,7 +768,8 @@ function WebSearchApiKeyRow({
     | "perplexityApiKey"
     | "exaApiKey"
     | "braveApiKey"
-    | "ollamaApiKey";
+    | "ollamaApiKey"
+    | "zaiApiKey";
   signupUrl: string;
   prefix?: string;
   onSave: (patch: SettingsPatch) => void;
@@ -1165,6 +1186,16 @@ function PageModels({
             {t("settings.modelCustomActive", { model: settings.model })}
           </div>
         ) : null}
+      </section>
+      <section className="section">
+        <div className="stitle">Z.AI / GLM</div>
+        <WebSearchApiKeyRow
+          engine="zai"
+          patchKey="zaiApiKey"
+          signupUrl="https://z.ai/manage-apikey/apikey-list"
+          prefix={settings.webSearchApiKeys?.zai}
+          onSave={onSave}
+        />
       </section>
       <section className="section">
         <div className="stitle">{t("settings.ollamaSection")}</div>

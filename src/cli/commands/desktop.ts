@@ -76,6 +76,7 @@ import {
   DEFAULT_GEMINI_CHAT_URL,
   DEFAULT_MODEL,
   DEFAULT_OLLAMA_CHAT_URL,
+  DEFAULT_ZAI_CHAT_URL,
   anyProviderConfigured,
   bridgeEndpointEnv,
   defaultConfigPath,
@@ -106,6 +107,7 @@ import {
   loadSubagentModels,
   loadTavilyApiKey,
   loadWorkspaceDir,
+  loadZaiApiKey,
   modelAcceptsImages,
   providerForModel,
   pushRecentWorkspace,
@@ -782,6 +784,7 @@ function collectWebSearchApiKeyPrefixes(): {
   exa?: string;
   ollama?: string;
   brave?: string;
+  zai?: string;
 } {
   return {
     metaso: maskApiKey(loadMetasoApiKey()),
@@ -790,6 +793,7 @@ function collectWebSearchApiKeyPrefixes(): {
     exa: maskApiKey(loadExaApiKey()),
     ollama: maskApiKey(loadOllamaApiKey()),
     brave: maskApiKey(loadBraveApiKey()),
+    zai: maskApiKey(loadZaiApiKey()),
   };
 }
 
@@ -862,6 +866,13 @@ export function modelEndpointFor(model: string, path?: string): ModelEndpointInf
       baseUrl: oep.baseUrl ?? DEFAULT_GEMINI_CHAT_URL,
       antigravityAuth: oauth?.accessToken ? "oauth" : "none",
       antigravityAccount: oauth?.account,
+    };
+  }
+  if (providerForModel(model) === "zai") {
+    const ep = loadEndpointForModel(model, path);
+    return {
+      provider: "zai",
+      baseUrl: ep.baseUrl ?? DEFAULT_ZAI_CHAT_URL,
     };
   }
   if (providerForModel(model) !== "openai") {
@@ -2166,6 +2177,8 @@ function notConfiguredMessage(model: string): string {
       return "Not configured yet — set an Ollama base URL / key and pick an Ollama model (Settings → Models).";
     case "gemini":
       return "Not configured yet — sign in to Google Antigravity (Settings → Google) to use Gemini models.";
+    case "zai":
+      return "Not configured yet — add a Z.AI API key in Settings → General to use GLM models.";
     default:
       return "Not configured yet — paste your DeepSeek API key first.";
   }
@@ -2189,6 +2202,9 @@ export function tabCurrentModelUsable(tab: Tab): boolean {
   }
   if (providerForModel(tab.currentModel) === "gemini") {
     return !!readConfig().antigravityOAuth?.accessToken;
+  }
+  if (providerForModel(tab.currentModel) === "zai") {
+    return !!loadZaiApiKey();
   }
   return !!loadApiKey();
 }
@@ -2254,6 +2270,8 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     log.debug(
       `model ${tab.currentModel} → Gemini; endpoint ${ep.baseUrl ?? DEFAULT_GEMINI_CHAT_URL} (Antigravity quota)`,
     );
+  } else if (provider === "zai") {
+    log.debug(`model ${tab.currentModel} → Z.AI; endpoint ${ep.baseUrl ?? DEFAULT_ZAI_CHAT_URL}`);
   } else {
     log.debug(`model ${tab.currentModel} → DeepSeek; endpoint ${ep.baseUrl ?? "default"}`);
   }
@@ -2863,7 +2881,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             ? `No Ollama endpoint configured for ${tab.currentModel} — set a base URL / key (Settings → Models → Ollama).`
             : provider === "gemini"
               ? "Not signed in to Google Antigravity — sign in from Settings to use Gemini models."
-              : "No API key configured — paste your DeepSeek API key first.";
+              : provider === "zai"
+                ? `No Z.AI credential for ${tab.currentModel} — add a Z.AI key in Settings → Models.`
+                : "No API key configured — paste your DeepSeek API key first.";
       emit({ type: "$error", message }, tab.id);
       return;
     }
@@ -4485,7 +4505,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           msg.perplexityApiKey !== undefined ||
           msg.exaApiKey !== undefined ||
           msg.ollamaApiKey !== undefined ||
-          msg.braveApiKey !== undefined
+          msg.braveApiKey !== undefined ||
+          msg.zaiApiKey !== undefined
         ) {
           const cfg = readConfig();
           if (msg.webSearchEngine !== undefined) cfg.webSearchEngine = msg.webSearchEngine;
@@ -4512,6 +4533,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           if (msg.braveApiKey !== undefined) {
             cfg.braveApiKey = msg.braveApiKey?.trim() || undefined;
+          }
+          if (msg.zaiApiKey !== undefined) {
+            cfg.zaiApiKey = msg.zaiApiKey?.trim() || undefined;
           }
           writeConfig(cfg);
         }

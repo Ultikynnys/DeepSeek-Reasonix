@@ -275,6 +275,7 @@ export {
   loadPerplexityApiKey,
   loadExaApiKey,
   loadOllamaApiKey,
+  loadZaiApiKey,
   loadBraveApiKey,
   readConfig,
   redactKey,

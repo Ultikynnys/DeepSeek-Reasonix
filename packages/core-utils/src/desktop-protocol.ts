@@ -18,7 +18,8 @@ export type WebSearchEngineName =
   | "perplexity"
   | "exa"
   | "brave"
-  | "ollama";
+  | "ollama"
+  | "zai";
 
 export type ExternalSessionSource = "claude" | "codex";
 
@@ -380,6 +381,7 @@ export interface SettingsEvent {
     exa?: string;
     ollama?: string;
     brave?: string;
+    zai?: string;
   };
   /** Per-tab subagent model — the default model used when a subagent skill has no explicit `model:` frontmatter override. Absent = deepseek-v4-flash. */
   subagentModel?: string;
@@ -418,7 +420,7 @@ export interface SettingsEvent {
 /** Endpoint + auth state for the tab's CURRENT model — the status bar's API
  *  chip is per tab and flips between DeepSeek, OpenAI, Ollama and Gemini with the model. */
 export interface ModelEndpointInfo {
-  provider: "deepseek" | "openai" | "ollama" | "gemini";
+  provider: "deepseek" | "openai" | "ollama" | "gemini" | "zai";
   baseUrl: string;
   /** Auth source for OpenAI endpoints — absent for the DeepSeek provider. */
   openaiAuth?: "oauth" | "apiKey" | "none";
@@ -606,6 +608,7 @@ export interface SettingsPatch {
   exaApiKey?: string | null;
   ollamaApiKey?: string | null;
   braveApiKey?: string | null;
+  zaiApiKey?: string | null;
   showSystemEvents?: boolean;
 }
 

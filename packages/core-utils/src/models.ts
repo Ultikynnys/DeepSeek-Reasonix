@@ -14,6 +14,29 @@ export const GPT56_MODELS: readonly string[] = [
   "gpt-5.6-luna",
 ];
 
+/** Models accepted by Z.AI's general API endpoint. */
+export const ZAI_MODELS: readonly string[] = [
+  "glm-5.3-flash",
+  "glm-5.3",
+  "glm-5.2",
+  "glm-5.1",
+  "glm-5",
+  "glm-4.7",
+  "glm-4.7-flash",
+  "glm-4.7-flashx",
+  "glm-4.6",
+  "glm-4.6v",
+  "glm-4.6v-flash",
+  "glm-4.6v-flashx",
+  "glm-4.5",
+  "glm-4.5-air",
+  "glm-4.5-x",
+  "glm-4.5-airx",
+  "glm-4.5-flash",
+  "glm-4.5v",
+  "glm-4-32b-0414-128k",
+];
+
 /** Unified models served through Google Antigravity OAuth and Cloud Code. */
 export const ANTIGRAVITY_MODELS: readonly string[] = [
   "gemini-2.5-flash",
@@ -47,6 +70,7 @@ export function isAntigravityModel(model: string | undefined | null): boolean {
 export const KNOWN_MODELS: readonly string[] = [
   ...SUPPORTED_OFFICIAL_MODELS,
   ...GPT56_MODELS,
+  ...ZAI_MODELS,
   ...ANTIGRAVITY_MODELS,
 ];
 
@@ -67,6 +91,7 @@ export function modelAcceptsImages(
   if (typeof model !== "string") return false;
   if (model.startsWith("gpt-")) return true;
   if (model === "deepseek-v4-flash-vision-exp") return true;
+  if (model === "glm-5.3-flash" || /^glm-\d+(?:\.\d+)?v(?:-|$)/.test(model)) return true;
   if (isAntigravityModel(model)) return true;
   if (model.startsWith("ollama/") && ollamaVision && ollamaVision.has(model)) return true;
   return false;

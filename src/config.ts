@@ -8,6 +8,7 @@ import {
   GPT56_MODELS,
   KNOWN_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
+  ZAI_MODELS,
   isAntigravityModel,
 } from "@reasonix/core-utils";
 import { z } from "zod";
@@ -30,7 +31,7 @@ import {
 export const DEFAULT_MODEL = "deepseek-v4-flash";
 
 /** Built-in model groups remain public from config for existing library consumers. */
-export { GEMINI_MODELS, GPT56_MODELS, SUPPORTED_OFFICIAL_MODELS };
+export { GEMINI_MODELS, GPT56_MODELS, SUPPORTED_OFFICIAL_MODELS, ZAI_MODELS };
 
 /** Everything the default endpoints accept without a custom baseUrl, across providers. */
 export const SUPPORTED_MODELS: readonly string[] = KNOWN_MODELS;
@@ -38,12 +39,13 @@ export const SUPPORTED_MODELS: readonly string[] = KNOWN_MODELS;
 /** Which provider a model id routes to. `gpt-` prefixed ids → OpenAI,
  *  `ollama/` prefixed ids → Ollama (local daemon or cloud), `gemini-` prefixed
  *  ids → Google Antigravity (Cloud Code API), everything else → DeepSeek. */
-export type ModelProvider = "deepseek" | "openai" | "ollama" | "gemini";
+export type ModelProvider = "deepseek" | "openai" | "ollama" | "gemini" | "zai";
 
 export function providerForModel(model: string | undefined | null): ModelProvider {
   if (isAntigravityModel(model)) return "gemini";
   if (typeof model === "string" && model.startsWith("gpt-")) return "openai";
   if (typeof model === "string" && model.startsWith("ollama/")) return "ollama";
+  if (typeof model === "string" && model.startsWith("glm-")) return "zai";
   return "deepseek";
 }
 
@@ -58,6 +60,9 @@ export const DEFAULT_OLLAMA_CHAT_URL = "https://ollama.com/v1";
 
 /** Antigravity daily gateway used for gemini-* models. */
 export const DEFAULT_GEMINI_CHAT_URL = "https://daily-cloudcode-pa.googleapis.com";
+
+/** Z.AI OpenAI-compatible endpoint used for glm-* models. */
+export const DEFAULT_ZAI_CHAT_URL = "https://api.z.ai/api/paas/v4";
 
 /** Native Ollama API origin: strip a trailing `/v1` — the `/api/*` endpoints
  *  live at that root (localhost:11434/v1 → localhost:11434). */
@@ -238,6 +243,10 @@ export interface ReasonixConfig {
   baseUrl?: string;
   /** Manual OpenAI API key for gpt-* models (falls back to OPENAI_API_KEY env). */
   openaiApiKey?: string;
+  /** Z.AI API key for glm-* models and Z.AI search. Falls back to ZAI_API_KEY. */
+  zaiApiKey?: string;
+  /** Z.AI OpenAI-compatible endpoint override. Falls back to ZAI_BASE_URL. */
+  zaiBaseUrl?: string;
   /** Set by the browser OAuth sign-in; auto-refreshed from refreshToken on expiry. */
   openaiOAuth?: OpenAIOAuthCreds;
   /** Google Antigravity OAuth tokens — set by the "Sign in with Google" flow;
@@ -291,7 +300,8 @@ export interface ReasonixConfig {
     | "perplexity"
     | "exa"
     | "brave"
-    | "ollama";
+    | "ollama"
+    | "zai";
   /** Base URL for SearXNG instance (default http://localhost:8080). */
   webSearchEndpoint?: string;
   /** Metaso API key. Falls back to METASO_API_KEY env var. */
@@ -493,6 +503,14 @@ export function loadPerplexityApiKey(path: string = defaultConfigPath()): string
 export function loadExaApiKey(path: string = defaultConfigPath()): string | undefined {
   if (process.env.EXA_API_KEY) return process.env.EXA_API_KEY.trim();
   const cfg = readConfig(path).exaApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
+/** Z.AI API key shared by glm-* chat and Z.AI web search: env > config > undefined. */
+export function loadZaiApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.ZAI_API_KEY) return process.env.ZAI_API_KEY.trim();
+  const cfg = readConfig(path).zaiApiKey;
   if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
   return undefined;
 }
@@ -866,6 +884,15 @@ export function loadEndpointForModel(
     // token (resolved per request), never a static key. baseUrl is fixed.
     return { baseUrl: DEFAULT_GEMINI_CHAT_URL, apiKey: undefined };
   }
+  if (providerForModel(model) === "zai") {
+    const envBaseUrl = process.env.ZAI_BASE_URL?.trim();
+    if (envBaseUrl) return { baseUrl: envBaseUrl, apiKey: process.env.ZAI_API_KEY };
+    const cfg = readConfig(path);
+    if (cfg.zaiBaseUrl?.trim()) {
+      return { baseUrl: cfg.zaiBaseUrl.trim(), apiKey: cfg.zaiApiKey };
+    }
+    return { baseUrl: DEFAULT_ZAI_CHAT_URL, apiKey: loadZaiApiKey(path) };
+  }
   return loadEndpoint(path);
 }
 
@@ -888,6 +915,7 @@ export function anyProviderConfigured(path: string = defaultConfigPath()): boole
   const cfg = readConfig(path);
   if (process.env.OPENAI_API_KEY || cfg.openaiApiKey || cfg.openaiOAuth?.accessToken) return true;
   if (process.env.OLLAMA_API_KEY || cfg.ollamaApiKey) return true;
+  if (process.env.ZAI_API_KEY || cfg.zaiApiKey) return true;
   if (cfg.antigravityOAuth?.accessToken) return true;
   return !!process.env.OLLAMA_BASE_URL || !!cfg.ollamaBaseUrl;
 }
@@ -1153,7 +1181,8 @@ export function webSearchEngine(
   | "perplexity"
   | "exa"
   | "brave"
-  | "ollama" {
+  | "ollama"
+  | "zai" {
   const cfg = readConfig(path).webSearchEngine;
   if (cfg === "bing-intl") return "bing-intl";
   if (cfg === "searxng") return "searxng";
@@ -1164,6 +1193,7 @@ export function webSearchEngine(
   if (cfg === "exa") return "exa";
   if (cfg === "brave") return "brave";
   if (cfg === "ollama") return "ollama";
+  if (cfg === "zai") return "zai";
   // Any other value (including legacy "mojeek" from configs predating the
   // engine swap) falls through to bing. Read-only — we never rewrite the
   // user's config, so `/search-engine mojeek` later still rejects loudly.

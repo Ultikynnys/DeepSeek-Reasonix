@@ -280,6 +280,7 @@ const PUBLIC_API: readonly string[] = [
   "loadOllamaApiKey",
   "loadPerplexityApiKey",
   "loadSessionMessages",
+  "loadZaiApiKey",
   "matchesTool",
   "memoryEnabled",
   "nestArguments",

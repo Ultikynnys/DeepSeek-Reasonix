@@ -41,6 +41,7 @@ import {
   loadSubagentModels,
   loadTheme,
   loadToolRateLimit,
+  loadZaiApiKey,
   markEditModeHintShown,
   providerForModel,
   readConfig,
@@ -361,6 +362,7 @@ describe("config", () => {
       expect(providerForModel("gpt-oss-120b-medium")).toBe("gemini");
       expect(providerForModel("claude-sonnet-4-6-thinking")).toBe("gemini");
       expect(providerForModel("gemini-3.1-pro-high")).toBe("gemini");
+      expect(providerForModel("glm-5.3-flash")).toBe("zai");
       expect(providerForModel("deepseek-v4-flash")).toBe("deepseek");
       expect(providerForModel(undefined)).toBe("deepseek");
     });
@@ -1192,6 +1194,7 @@ describe("config", () => {
         "exa",
         "brave",
         "ollama",
+        "zai",
       ] as const) {
         writeConfig({ webSearchEngine: engine }, path);
         expect(webSearchEngine(path)).toBe(engine);
@@ -1334,6 +1337,26 @@ describe("config", () => {
         if (origLong !== undefined) process.env.BRAVE_SEARCH_API_KEY = origLong;
         if (origShort !== undefined) process.env.BRAVE_API_KEY = origShort;
       }
+    });
+  });
+
+  describe("Z.AI provider routing", () => {
+    it("uses the official endpoint and config key for GLM models", () => {
+      writeConfig({ zaiApiKey: "zai-config-key" }, path);
+      expect(providerForModel("glm-5.3-flash")).toBe("zai");
+      expect(loadZaiApiKey(path)).toBe("zai-config-key");
+      expect(loadEndpointForModel("glm-5.3-flash", path)).toEqual({
+        baseUrl: "https://api.z.ai/api/paas/v4",
+        apiKey: "zai-config-key",
+      });
+    });
+
+    it("keeps a custom Z.AI endpoint paired with its config key", () => {
+      writeConfig({ zaiBaseUrl: "https://zai.example.com/v4", zaiApiKey: "zai-config-key" }, path);
+      expect(loadEndpointForModel("glm-5.3", path)).toEqual({
+        baseUrl: "https://zai.example.com/v4",
+        apiKey: "zai-config-key",
+      });
     });
   });
 

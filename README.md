@@ -58,15 +58,18 @@ runtime, so no `npm install` or Node installation is needed.
 | DeepSeek (default) | `deepseek-v4-flash`, `deepseek-v4-pro`, `deepseek-v4-flash-vision-exp` (experimental vision line) | `DEEPSEEK_API_KEY` |
 | OpenAI-compatible | GPT-5.6 family: `gpt-5.6` (alias of Sol) / `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` | `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` for proxies / Azure-compatible gateways |
 | Ollama | any local model via `ollama/<name>`; cloud Ollama is also supported | local daemon is keyless; cloud needs `OLLAMA_API_KEY` |
+| Z.AI | GLM family, including `glm-5.3-flash` with vision and a 1M-token context window | `ZAI_API_KEY`; optional `ZAI_BASE_URL` |
 
 - Models are picked in Settings → Models or from the composer. The Ollama catalog is fetched once at
   launch, cached for 60 s, and shared by every tab; refresh buttons force a refetch.
-- `gpt-*` ids route to `https://api.openai.com/v1` automatically; DeepSeek ids route to
-  `https://api.deepseek.com` (overridable via `DEEPSEEK_BASE_URL`).
+- `gpt-*` ids route to `https://api.openai.com/v1` automatically; `glm-*` ids route to
+  `https://api.z.ai/api/paas/v4`; DeepSeek ids route to `https://api.deepseek.com`.
+  Each endpoint has a corresponding optional base URL override.
 - Reasoning effort (`low | medium | high | xhigh | max`) is set per model via the `/effort` command
   or Settings.
-- Image attachments (paste or drop) are enabled for vision-capable models: the GPT-5.6 family and
-  `deepseek-v4-flash-vision-exp`. DeepSeek bills image tokens as input tokens.
+- Image attachments (paste or drop) are enabled for vision-capable models: the GPT-5.6 family,
+  `deepseek-v4-flash-vision-exp`, `glm-5.3-flash`, and GLM `v` models. DeepSeek bills image tokens
+  as input tokens.
 - See [.env.example](.env.example) for the full list of supported environment variables.
 
 ## What makes Reasonix different
@@ -117,8 +120,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full writeup.
 - Hooks: shell commands on lifecycle events, `PreToolUse` (gating), `PostToolUse`,
   `UserPromptSubmit`, `Stop`.
 - Web search: `bing` by default (works from CN without a proxy), switchable in Settings to
-  `bing-intl`, `searxng`, `metaso`, `baidu`, `tavily`, `perplexity`, `exa`, `brave`, or Ollama
-  cloud search.
+  `bing-intl`, `searxng`, `metaso`, `baidu`, `tavily`, `perplexity`, `exa`, `brave`, Ollama
+  cloud search, or Z.AI `search-prime`.
 - Semantic index over the workspace via local Ollama embeddings (`nomic-embed-text` by default) or
   any OpenAI-compatible embedding endpoint.
 - Plan mode with structured, reviewable plans.

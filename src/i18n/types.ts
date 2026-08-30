@@ -742,6 +742,11 @@ export interface TranslationSchema {
     braveRateLimit: string;
     braveServerError: string;
     braveParseError: string;
+    zaiMissingKey: string;
+    zaiUnauthorized: string;
+    zaiRateLimit: string;
+    zaiServerError: string;
+    zaiParseError: string;
     fetchStatus: string;
     fetchRateLimit429: string;
     fetchForbidden403: string;

@@ -586,7 +586,8 @@ export class DeepSeekClient {
     if (providerForModel(opts.model) === "ollama") {
       return this.buildOllamaPayload(opts, stream, ollamaNumCtx);
     }
-    const isOllama = providerForModel(opts.model) === "ollama";
+    const provider = providerForModel(opts.model);
+    const isOllama = provider === "ollama";
     const payload: Record<string, unknown> = {
       // Ollama model ids are namespaced `ollama/<id>` for provider routing, but
       // the server expects the raw id (`llama3.1:latest`) — strip the prefix.
@@ -594,7 +595,7 @@ export class DeepSeekClient {
       messages: opts.messages,
       stream,
     };
-    if (stream) payload.stream_options = { include_usage: true };
+    if (stream && provider !== "zai") payload.stream_options = { include_usage: true };
     // OpenAI now requires explicit `store: false` — omitting it returns
     // 400 {"detail":"Store must be set to false"}.  DeepSeek ignores it.
     if (providerForModel(opts.model) === "openai") {
@@ -620,16 +621,21 @@ export class DeepSeekClient {
     // Proprietary fields are provider-locked: DeepSeek's thinking toggle and
     // reasoning_effort are rejected (or ignored) by other backends — Ollama's
     // OpenAI-compat layer maps only known chat fields.
-    if (
-      opts.thinking &&
-      !this._isAzureEndpoint() &&
-      !isOllama &&
-      providerForModel(opts.model) !== "openai"
-    ) {
+    if (provider === "zai") {
+      if (opts.thinking) {
+        payload.thinking = { type: "enabled", clear_thinking: false };
+      }
+      if (stream && opts.tools?.length) payload.tool_stream = true;
+    } else if (opts.thinking && !this._isAzureEndpoint() && !isOllama && provider !== "openai") {
       payload.extra_body = { thinking: { type: opts.thinking } };
     }
     if (opts.reasoningEffort && !isOllama) {
-      payload.reasoning_effort = opts.reasoningEffort;
+      payload.reasoning_effort =
+        provider === "zai" && opts.reasoningEffort === "medium"
+          ? "high"
+          : provider === "zai" && opts.reasoningEffort === "xhigh"
+            ? "max"
+            : opts.reasoningEffort;
     }
     return payload;
   }
@@ -745,10 +751,20 @@ export class DeepSeekClient {
       }
       const data: any = await resp.json();
       const choice = data.choices?.[0]?.message ?? {};
+      const toolCalls = (choice.tool_calls ?? []).map((toolCall: ToolCall) => ({
+        ...toolCall,
+        function: {
+          ...toolCall.function,
+          arguments:
+            typeof toolCall.function?.arguments === "string"
+              ? toolCall.function.arguments
+              : stringifyJsonTransport(toolCall.function?.arguments ?? {}),
+        },
+      }));
       return {
         content: choice.content ?? "",
         reasoningContent: choice.reasoning_content ?? choice.reasoning ?? null,
-        toolCalls: choice.tool_calls ?? [],
+        toolCalls,
         usage: Usage.fromApi(data.usage ?? data),
         raw: data,
       };
@@ -1507,7 +1523,12 @@ export class DeepSeekClient {
               index: tc.index ?? 0,
               id: tc.id,
               name: tc.function?.name,
-              argumentsDelta: tc.function?.arguments,
+              argumentsDelta:
+                typeof tc.function?.arguments === "string"
+                  ? tc.function.arguments
+                  : tc.function?.arguments === undefined
+                    ? undefined
+                    : stringifyJsonTransport(tc.function.arguments),
             };
           }
           const rawUsage = json.usage ?? (Usage.hasApiUsage(json) ? json : undefined);

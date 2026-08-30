@@ -5,6 +5,7 @@ import {
   GPT56_MODELS,
   KNOWN_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
+  ZAI_MODELS,
   modelAcceptsImages,
 } from "../src/models.js";
 
@@ -15,8 +16,11 @@ describe("modelAcceptsImages", () => {
     expect(modelAcceptsImages("gpt-5.6-luna")).toBe(true);
   });
 
-  it("accepts DeepSeek's vision line", () => {
+  it("accepts DeepSeek and Z.AI vision models", () => {
     expect(modelAcceptsImages("deepseek-v4-flash-vision-exp")).toBe(true);
+    expect(modelAcceptsImages("glm-5.3-flash")).toBe(true);
+    expect(modelAcceptsImages("glm-4.6v")).toBe(true);
+    expect(modelAcceptsImages("glm-5.3")).toBe(false);
   });
 
   it("accepts every Antigravity model exposed by the unified gateway", () => {
@@ -89,6 +93,7 @@ describe("KNOWN_MODELS", () => {
     expect(KNOWN_MODELS).toEqual([
       ...SUPPORTED_OFFICIAL_MODELS,
       ...GPT56_MODELS,
+      ...ZAI_MODELS,
       ...ANTIGRAVITY_MODELS,
     ]);
   });

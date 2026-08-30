@@ -169,6 +169,57 @@ describe("webSearch", () => {
     <li class="b_algo"><h2><a href="https://example.com/b">B</a></h2>
       <div class="b_caption"><p>snippet B</p></div></li>`;
 
+  it("calls Z.AI search-prime and normalizes results", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalKey = process.env.ZAI_API_KEY;
+    process.env.ZAI_API_KEY = "zai-search-key";
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      capturedUrl = String(url);
+      capturedInit = init;
+      return new Response(
+        JSON.stringify({
+          search_result: [{ title: "GLM", link: "https://example.com/glm", content: "GLM result" }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("glm models", { engine: "zai", topK: 99 });
+      expect(capturedUrl).toBe("https://api.z.ai/api/paas/v4/web_search");
+      expect((capturedInit?.headers as Record<string, string>).Authorization).toBe(
+        "Bearer zai-search-key",
+      );
+      expect(JSON.parse(String(capturedInit?.body))).toEqual({
+        search_engine: "search-prime",
+        search_query: "glm models",
+        count: 50,
+      });
+      expect(out).toEqual([
+        { title: "GLM", url: "https://example.com/glm", snippet: "GLM result" },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      // biome-ignore lint/performance/noDelete: restore exact env state
+      if (originalKey === undefined) delete process.env.ZAI_API_KEY;
+      else process.env.ZAI_API_KEY = originalKey;
+    }
+  });
+
+  it("fails explicitly when Z.AI search has no API key", async () => {
+    const originalKey = process.env.ZAI_API_KEY;
+    // biome-ignore lint/performance/noDelete: test requires the key to be absent
+    delete process.env.ZAI_API_KEY;
+    try {
+      await expect(webSearch("glm", { engine: "zai", configPath: "missing.json" })).rejects.toThrow(
+        /Z\.AI search requires an API key/,
+      );
+    } finally {
+      if (originalKey !== undefined) process.env.ZAI_API_KEY = originalKey;
+    }
+  });
+
   it("GETs cn.bing.com with a browser UA and query string", async () => {
     const captured: { url: string; method: string; ua: string } = { url: "", method: "", ua: "" };
     const originalFetch = globalThis.fetch;
@@ -1089,8 +1140,12 @@ describe("searchBrave", () => {
     // biome-ignore lint/performance/noDelete: also clear the short alias
     delete process.env.BRAVE_API_KEY;
     try {
-      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow(/Brave.*API key/i);
-      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow("brave.com/search/api");
+      await expect(webSearch("q", { engine: "brave", configPath: "missing.json" })).rejects.toThrow(
+        /Brave.*API key/i,
+      );
+      await expect(webSearch("q", { engine: "brave", configPath: "missing.json" })).rejects.toThrow(
+        "brave.com/search/api",
+      );
     } finally {
       if (origKey !== undefined) process.env.BRAVE_SEARCH_API_KEY = origKey;
       if (origKeyShort !== undefined) process.env.BRAVE_API_KEY = origKeyShort;

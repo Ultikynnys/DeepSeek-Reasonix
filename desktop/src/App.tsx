@@ -357,7 +357,8 @@ export type Settings = {
     | "perplexity"
     | "exa"
     | "brave"
-    | "ollama";
+    | "ollama"
+    | "zai";
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
@@ -367,6 +368,7 @@ export type Settings = {
     exa?: string;
     ollama?: string;
     brave?: string;
+    zai?: string;
   };
   /** Per-tab subagent model — default for subagent skills without an explicit `model:` frontmatter. */
   subagentModel?: string;
