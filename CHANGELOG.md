@@ -15,7 +15,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Frontend performance diagnostics exclude their own Tauri IPC resource, batch entries, recover after write failures, and enforce host-side payload bounds.
 - Account quota refreshes and workspace session listings now use process-wide single-flight caches instead of repeating network and filesystem work per restored tab.
-- Restored-tab toolset builds are capped at two concurrent tasks with active-tab priority, per-tab phase timing, and one semantic compatibility read.
+- Restored-tab toolset builds are capped at two concurrent tasks with active-tab priority and per-tab phase timing.
+- Session listings now use one mutation-aware directory index with filesystem identity and append-range line counting, avoiding repeated full JSONL reads across workspaces.
+- Optional semantic compatibility checks settle after runtime readiness with normalized-workspace single-flight caching, so slow index metadata cannot block restored tabs.
+- Shared account quota failures produce one underlying error diagnostic with correlated per-tab delivery events.
 
 
 **Fixed — a fresh sign-in / API key now takes effect without restarting.**

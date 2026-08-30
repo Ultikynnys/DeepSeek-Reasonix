@@ -13,13 +13,14 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
 import { DAY_MS, messageOf, sanitizeFilename } from "@reasonix/core-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
 import { atomicWriteSync, tmpSiblingPath } from "../core/atomic-write.js";
 import { readJsonFileSilently } from "../core/json-file.js";
 import { appendJsonlLine, parseJsonl } from "../core/jsonl.js";
+import { SessionDirectoryIndex } from "../desktop/session-directory-index.js";
 import { reasonixHome } from "../reasonix-home.js";
 import type { CacheDiagnosticEntry } from "../telemetry/cache-diagnostics.js";
 import type { ChatMessage } from "../types.js";
@@ -227,6 +228,7 @@ export function appendSessionMessage(name: string, message: ChatMessage): void {
   const path = sessionPath(name);
   appendJsonlLine(path, message);
   chmodPrivate(path);
+  sessionDirectoryIndex.invalidate();
 }
 
 export function listSessions(opts?: {
@@ -295,54 +297,48 @@ export function listSessionsForWorkspace(workspace: string): SessionInfo[] {
   return listSessions({ workspaceFilter: workspace, includeLegacyWorkspaceMatches: true });
 }
 
-export async function listSessionsForWorkspaceAsync(workspace: string): Promise<SessionInfo[]> {
-  const dir = sessionsDir();
+const sessionDirectoryIndex = new SessionDirectoryIndex<SessionMeta>(sessionsDir, loadSessionMeta);
+
+export function invalidateSessionDirectoryIndex(): void {
+  sessionDirectoryIndex.invalidate();
+}
+
+export function listSessionsForWorkspaceAsync(workspace: string): {
+  value: Promise<SessionInfo[]>;
+  cache: "hit" | "refresh" | "inflight";
+} {
+  const request = sessionDirectoryIndex.load();
   const want = normalizeWorkspace(workspace);
   const legacyPrefix = legacySessionPrefixForWorkspace(workspace);
-  let files: string[];
-  try {
-    files = (await readdir(dir)).filter(
-      (file) => file.endsWith(".jsonl") && !file.endsWith(SESSION_EVENTS_SUFFIX),
-    );
-  } catch {
-    return [];
-  }
-  const sessions = await Promise.all(
-    files.map(async (file): Promise<SessionInfo | null> => {
-      const path = join(dir, file);
-      const name = file.replace(/\.jsonl$/, "");
-      const meta = loadSessionMeta(name);
-      let workspaceStatus: SessionInfo["workspaceStatus"];
-      if (typeof meta.workspace === "string") {
-        if (normalizeWorkspace(meta.workspace) !== want) return null;
-        workspaceStatus = "matched";
-      } else if (name.startsWith(legacyPrefix)) {
-        workspaceStatus = "legacy_missing_meta";
-      } else {
-        return null;
-      }
-      try {
-        const [fileStat, body] = await Promise.all([stat(path), readFile(path)]);
-        let messageCount = 0;
-        for (const byte of body) if (byte === 0x0a) messageCount++;
-        if (body.length > 0 && body[body.length - 1] !== 0x0a) messageCount++;
-        return {
-          name,
-          path,
-          size: fileStat.size,
-          messageCount,
-          mtime: fileStat.mtime,
-          meta,
-          workspaceStatus,
-        };
-      } catch {
-        return null;
-      }
-    }),
-  );
-  return sessions
-    .filter((session): session is SessionInfo => session !== null)
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+  return {
+    cache: request.cache,
+    value: request.value.then((records) =>
+      records
+        .flatMap((record): SessionInfo[] => {
+          let workspaceStatus: SessionInfo["workspaceStatus"];
+          if (typeof record.meta.workspace === "string") {
+            if (normalizeWorkspace(record.meta.workspace) !== want) return [];
+            workspaceStatus = "matched";
+          } else if (record.name.startsWith(legacyPrefix)) {
+            workspaceStatus = "legacy_missing_meta";
+          } else {
+            return [];
+          }
+          return [
+            {
+              name: record.name,
+              path: record.path,
+              size: record.identity.size,
+              messageCount: record.messageCount,
+              mtime: record.mtime,
+              meta: record.meta,
+              workspaceStatus,
+            },
+          ];
+        })
+        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime()),
+    ),
+  };
 }
 
 export function legacySessionPrefixForWorkspace(workspace: string): string {
@@ -377,6 +373,7 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, JSON.stringify(next), "utf8");
   chmodPrivate(p);
+  sessionDirectoryIndex.invalidate();
   return next;
 }
 
@@ -425,6 +422,7 @@ export function renameSession(oldName: string, newName: string): boolean {
       }
     }
   }
+  sessionDirectoryIndex.invalidate();
   return true;
 }
 
@@ -452,6 +450,7 @@ export function deleteSession(name: string): boolean {
         void 0; /* expected when the sidecar doesn't exist */
       }
     }
+    sessionDirectoryIndex.remove(sanitizeName(name));
     return true;
   } catch {
     return false;
@@ -470,6 +469,7 @@ export function rewriteSession(name: string, messages: ChatMessage[]): void {
     chmodPrivate(backup);
   }
   atomicWriteSync(path, body ? `${body}\n` : "", tmp);
+  sessionDirectoryIndex.invalidate();
 }
 
 /** Rotate the live jsonl + sidecars to `<name>__archive_<ts>` so /new doesn't destroy history. Returns the archive name, or null if there was nothing to archive. */

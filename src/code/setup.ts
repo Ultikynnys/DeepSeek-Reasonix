@@ -188,8 +188,11 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   });
 
   opts.onPhase?.("tool_registration_completed");
-  const semantic = await reBootstrapSemantic(opts.rootDir);
-  opts.onPhase?.("semantic_check_completed");
-
-  return { tools, jobs, registerRooted, reBootstrapSemantic, semantic };
+  return {
+    tools,
+    jobs,
+    registerRooted,
+    reBootstrapSemantic,
+    semantic: { enabled: false },
+  };
 }

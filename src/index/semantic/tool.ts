@@ -1,6 +1,13 @@
 import type { ToolRegistry } from "../../tools.js";
 import { indexCompatible, querySemantic } from "./builder.js";
+import { SemanticCompatibilityCache } from "./compatibility-cache.js";
 import type { SearchHit } from "./store.js";
+
+const compatibilityCache = new SemanticCompatibilityCache(indexCompatible);
+
+export function invalidateSemanticCompatibility(root?: string): void {
+  compatibilityCache.invalidate(root);
+}
 
 type SemanticToolOptions = {
   provider?: "ollama" | "openai-compat";
@@ -19,7 +26,7 @@ export async function registerSemanticSearchTool(
   registry: ToolRegistry,
   opts: SemanticToolOptions,
 ): Promise<boolean> {
-  if (!(await indexCompatible(opts.root, { provider: opts.provider, model: opts.model })))
+  if (!(await compatibilityCache.get(opts.root, { provider: opts.provider, model: opts.model })))
     return false;
   registerCompatibleSemanticSearchTool(registry, opts);
   return true;
@@ -114,7 +121,7 @@ export async function bootstrapSemanticSearchInCodeMode(
   rootDir: string,
   opts: Omit<SemanticToolOptions, "root" | "defaultTopK" | "defaultMinScore"> = {},
 ): Promise<{ enabled: boolean }> {
-  if (await indexCompatible(rootDir, { provider: opts.provider, model: opts.model })) {
+  if (await compatibilityCache.get(rootDir, { provider: opts.provider, model: opts.model })) {
     registerCompatibleSemanticSearchTool(registry, { ...opts, root: rootDir });
     return { enabled: true };
   }
