@@ -64,4 +64,35 @@ describe("SessionDirectoryIndex", () => {
     await rm(dir, { recursive: true });
     expect(await index.load().value).toEqual([]);
   });
+
+  it("rejects a directory that exceeds the configured file cap", async () => {
+    const dir = await fixture();
+    await writeFile(join(dir, "one.jsonl"), "a\n");
+    await writeFile(join(dir, "two.jsonl"), "b\n");
+    await writeFile(join(dir, "three.jsonl"), "c\n");
+    const index = new SessionDirectoryIndex(
+      () => dir,
+      () => ({}),
+      0,
+      () => 0,
+      2,
+    );
+    await expect(index.load().value).rejects.toThrow("session directory exceeds 2 files");
+    // The failed refresh does not publish, so the next call retries the cap check.
+    await expect(index.load().value).rejects.toThrow("session directory exceeds 2 files");
+  });
+
+  it("indexes a directory right at the configured file cap", async () => {
+    const dir = await fixture();
+    await writeFile(join(dir, "one.jsonl"), "a\n");
+    await writeFile(join(dir, "two.jsonl"), "b\n");
+    const index = new SessionDirectoryIndex(
+      () => dir,
+      () => ({}),
+      0,
+      () => 0,
+      2,
+    );
+    expect((await index.load().value).map((record) => record.name)).toEqual(["one", "two"]);
+  });
 });

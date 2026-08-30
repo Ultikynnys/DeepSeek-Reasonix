@@ -3,7 +3,7 @@ import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 const READ_BUFFER_BYTES = 64 * 1024;
-const MAX_SESSION_FILES = 10_000;
+const MAX_SESSION_FILES = 100_000;
 const MAX_SESSION_BYTES = 1024 * 1024 * 1024;
 
 export interface SessionFileIdentity {
@@ -86,6 +86,7 @@ export class SessionDirectoryIndex<M> {
     private readonly loadMeta: (name: string) => M,
     private readonly ttlMs = 30_000,
     private readonly now: () => number = Date.now,
+    private readonly maxFiles = MAX_SESSION_FILES,
   ) {}
 
   load(): { value: Promise<readonly SessionDirectoryRecord<M>[]>; cache: SessionIndexCache } {
@@ -132,8 +133,8 @@ export class SessionDirectoryIndex<M> {
       }
       throw error;
     }
-    if (files.length > MAX_SESSION_FILES) {
-      throw new Error(`session directory exceeds ${MAX_SESSION_FILES} files`);
+    if (files.length > this.maxFiles) {
+      throw new Error(`session directory exceeds ${this.maxFiles} files`);
     }
     const next = new Map<string, SessionDirectoryRecord<M>>();
     for (const file of files) {
