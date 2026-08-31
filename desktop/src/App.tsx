@@ -3,7 +3,6 @@ import {
   clipText,
   extractPathsFromArgs,
   flattenText,
-  isAntigravityModel,
   isFilePathTool,
   messageOf,
   modelAcceptsImages,
@@ -344,6 +343,9 @@ export type Settings = {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
+  /** Ids with an explicit `models` provider mapping in config.json — offered
+   *  by the model picker alongside the catalogs, since the user declared them. */
+  customModels?: string[];
   /** Ollama chat endpoint (OpenAI-compatible) — shown in the Models settings page. */
   ollamaBaseUrl?: string;
   editor?: string;
@@ -1351,6 +1353,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           workspaceDir: ev.workspaceDir,
           recentWorkspaces: ev.recentWorkspaces,
           model: ev.model,
+          customModels: ev.customModels,
           editor: ev.editor,
           webSearchEngine: ev.webSearchEngine,
           webSearchEndpoint: ev.webSearchEndpoint,
@@ -1367,13 +1370,13 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         antigravityOAuthWaiting: ev.antigravityOAuth?.signedIn
           ? false
           : state.antigravityOAuthWaiting,
-        // Quota is only meaningful while a ChatGPT (gpt-*) model is active —
-        // drop stale numbers the moment the model leaves the OpenAI family.
-        codexQuota: ev.model.startsWith("gpt-") ? state.codexQuota : null,
-        // Same for Ollama usage — only meaningful while an ollama/ model is active.
-        ollamaQuota: ev.model.startsWith("ollama/") ? state.ollamaQuota : null,
-        // Same for Antigravity — only meaningful while an Antigravity model is active.
-        antigravityQuota: isAntigravityModel(ev.model) ? state.antigravityQuota : null,
+        // Quota is only meaningful while its provider's models are active —
+        // drop stale numbers the moment the daemon-resolved provider changes.
+        // The provider comes from the resolved endpoint, never the model name.
+        codexQuota: ev.modelEndpoint?.provider === "openai" ? state.codexQuota : null,
+        ollamaQuota: ev.modelEndpoint?.provider === "ollama" ? state.ollamaQuota : null,
+        antigravityQuota:
+          ev.modelEndpoint?.provider === "gemini" ? state.antigravityQuota : null,
       };
     }
     case "$session_loaded": {
@@ -2999,6 +3002,7 @@ function TabRuntime({
               workspaceDir={state.settings?.workspaceDir}
               onPickWorkspace={pickWorkspace}
               model={state.settings?.model}
+              modelEndpoint={state.settings?.modelEndpoint}
               oauthWaiting={state.oauthWaiting}
               onOAuthBegin={() => sendRpc({ cmd: "oauth_begin" })}
               onSubmit={(key) => sendRpc({ cmd: "setup_save_key", key })}
@@ -3263,6 +3267,7 @@ function TabRuntime({
                 ollamaVisionModels={ollamaVisionModels}
                 antigravityModels={state.settings?.antigravityOAuth?.models}
                 antigravityModelsError={state.settings?.antigravityOAuth?.flowError}
+                customModels={state.settings?.customModels}
                 onRefreshOllamaModels={onRefreshOllamaModels}
                 onRefreshAntigravityModels={onRefreshAntigravityModels}
                 onModelChange={(model) => {
@@ -4152,6 +4157,7 @@ function NeedsSetupView({
   workspaceDir,
   onPickWorkspace,
   model,
+  modelEndpoint,
   oauthWaiting,
   onOAuthBegin,
   onSubmit,
@@ -4162,6 +4168,9 @@ function NeedsSetupView({
   workspaceDir?: string;
   onPickWorkspace: () => void;
   model?: string;
+  /** Daemon-resolved endpoint info for the current model — the provider
+   *  authority for the wizard's preselected tab, never the model name. */
+  modelEndpoint?: ModelEndpointInfo;
   oauthWaiting: boolean;
   onOAuthBegin: () => void;
   onSubmit: (key: string) => void;
@@ -4173,12 +4182,20 @@ function NeedsSetupView({
   const [key, setKey] = useState("");
   const [ollamaModel, setOllamaModel] = useState("");
   const [baseUrl, setBaseUrl] = useState(ollamaBaseUrl ?? "http://localhost:11434/v1");
-  const [provider, setProvider] = useState<"deepseek" | "openai" | "ollama">(() =>
-    typeof model === "string" && model.startsWith("ollama/")
-      ? "ollama"
-      : typeof model === "string" && model.startsWith("gpt-")
+  // Preselect the tab for the daemon-RESOLVED provider (or the ollama/
+  // addressing scheme); a model name never implies its provider, so it never
+  // picks the tab. Unknown resolutions start on the neutral DeepSeek tab and
+  // the user chooses.
+  const [provider, setProvider] = useState<"deepseek" | "openai" | "ollama">(
+    () =>
+      modelEndpoint?.provider === "openai"
         ? "openai"
-        : "deepseek",
+        : modelEndpoint?.provider === "ollama" ||
+            (modelEndpoint === undefined &&
+              typeof model === "string" &&
+              model.startsWith("ollama/"))
+          ? "ollama"
+          : "deepseek",
   );
   const tabs: { id: "deepseek" | "openai" | "ollama"; label: string }[] = [
     { id: "deepseek", label: t("app.setup.providerDeepSeek") },

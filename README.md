@@ -146,6 +146,22 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full writeup.
 - `REASONIX_TRANSCRIPT_DIR` relocates session transcripts; diagnostics remain separate.
 - Pricing overrides: `pricingOverride` in `config.json` sets per-model USD rates when a model's
   published price is missing or wrong.
+- Model provider mapping: a model id's provider is resolved from positive evidence — an explicit
+  `models` entry, the signed-in Antigravity account's discovered ids, the built-in catalogs, or
+  the `ollama/` addressing scheme — never from the id's name shape. Custom gateway ids declare
+  their provider explicitly:
+
+  ```json
+  {
+    "models": {
+      "gpt-4o-custom": { "provider": "openai" },
+      "my-private-gateway-id": { "provider": "gemini" }
+    }
+  }
+  ```
+
+  Valid providers: `deepseek`, `openai`, `ollama`, `gemini`, `zai`. Unmapped ids that match no
+  catalog resolve to the default DeepSeek-compatible endpoint family.
 
 ## Development
 

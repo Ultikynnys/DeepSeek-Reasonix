@@ -1,4 +1,9 @@
-import { KNOWN_MODELS, SUPPORTED_IMAGE_EXTENSIONS, modelAcceptsImages } from "@reasonix/core-utils";
+import {
+  ANTIGRAVITY_MODELS,
+  KNOWN_MODELS,
+  SUPPORTED_IMAGE_EXTENSIONS,
+  modelAcceptsImages,
+} from "@reasonix/core-utils";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   type ChangeEvent,
@@ -142,6 +147,7 @@ export function Composer({
   antigravityModels,
   antigravityModelsError,
   onRefreshAntigravityModels,
+  customModels,
   textareaRef,
   slashCommands,
   onMentionQuery,
@@ -194,6 +200,9 @@ export function Composer({
   antigravityModelsError?: string;
   /** Re-fetch the signed-in account's Antigravity model ids. */
   onRefreshAntigravityModels?: () => void;
+  /** Ids with an explicit `models` provider mapping in config.json — offered
+   *  in the general list because the user declared them. */
+  customModels?: string[];
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   slashCommands: SlashCmd[];
   onMentionQuery?: (q: string, nonce: number) => void;
@@ -748,6 +757,7 @@ export function Composer({
                   ollamaVisionModels={ollamaVisionModels}
                   antigravityModels={antigravityModels}
                   antigravityModelsError={antigravityModelsError}
+                  customModels={customModels}
                   onRefreshOllamaModels={onRefreshOllamaModels}
                   onRefreshAntigravityModels={onRefreshAntigravityModels}
                   onPickModel={(m) => {
@@ -928,6 +938,7 @@ function ModelList({
   ollamaVisionModels,
   antigravityModels,
   antigravityModelsError,
+  customModels,
   onRefreshOllamaModels,
   onRefreshAntigravityModels,
 }: {
@@ -939,16 +950,20 @@ function ModelList({
   ollamaVisionModels?: ReadonlySet<string>;
   antigravityModels?: string[];
   antigravityModelsError?: string;
+  /** Ids with an explicit `models` provider mapping — user-declared, so offered. */
+  customModels?: string[];
   onRefreshOllamaModels?: (force?: boolean) => void;
   onRefreshAntigravityModels?: () => void;
 }) {
   const [draft, setDraft] = useState(activeModel);
-  const knownModels = KNOWN_MODELS.filter(
-    (model) =>
-      !model.startsWith("gemini-") &&
-      !model.startsWith("claude-") &&
-      !model.startsWith("gpt-oss-"),
-  );
+  // Group by catalog membership (exact ids), never by name shape — the
+  // Antigravity catalog's entries are offered by the signed-in discovery
+  // group below, and user-declared `models` ids join the general list.
+  const antigravityCatalog = new Set(ANTIGRAVITY_MODELS);
+  const knownModels = [
+    ...KNOWN_MODELS.filter((model) => !antigravityCatalog.has(model)),
+    ...(customModels ?? []),
+  ];
   const antigravityGroup = antigravityModels && antigravityModels.length > 0;
   const ollamaGroup = ollamaModels && ollamaModels.length > 0;
   return (
@@ -1097,6 +1112,7 @@ function ModelEffortMenu({
   ollamaVisionModels,
   antigravityModels,
   antigravityModelsError,
+  customModels,
   onRefreshOllamaModels,
   onRefreshAntigravityModels,
 }: {
@@ -1112,6 +1128,7 @@ function ModelEffortMenu({
   ollamaVisionModels?: ReadonlySet<string>;
   antigravityModels?: string[];
   antigravityModelsError?: string;
+  customModels?: string[];
   onRefreshOllamaModels?: (force?: boolean) => void;
   onRefreshAntigravityModels?: () => void;
 }) {
@@ -1122,6 +1139,7 @@ function ModelEffortMenu({
     ollamaVisionModels,
     antigravityModels,
     antigravityModelsError,
+    customModels,
     onRefreshOllamaModels,
     onRefreshAntigravityModels,
   };

@@ -4,7 +4,6 @@ import { t } from "../i18n";
 import { I } from "../icons";
 import { isOffPeak, minutesUntilRateChange } from "../peak-hours";
 import type { AntigravityQuota, CodexQuota, JobInfo, OllamaQuota } from "../protocol";
-import { isAntigravityModel } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { activationHandler } from "./keyboard";
 import { localizeShortcutText } from "./shortcut";
@@ -122,11 +121,15 @@ export function StatusBar({
   // figure — never converted between providers.
   const sessionCostDisplay = formatMoney(usage.totalCostUsd, currency);
   const sessionCostOther = formatMoney(usage.totalCostUsd, currency === "CNY" ? "USD" : "CNY");
+  // The tab's provider comes from the daemon-resolved endpoint info
+  // (`ModelEndpointInfo.provider`), NEVER from the model name — a name doesn't
+  // imply its provider (gpt-oss-* ids are served by Antigravity; custom gateway
+  // ids can carry any shape). Absent endpoint info (pre-protocol daemons)
+  // falls back to the resolver's DeepSeek default family.
+  const ep = settings?.modelEndpoint;
+  const provider = ep?.provider ?? "deepseek";
   const sessionQuotaProvider =
-    settings?.model?.startsWith("gpt-") ? "openai"
-    : settings?.model?.startsWith("ollama/") ? "ollama"
-    : isAntigravityModel(settings?.model) ? "gemini"
-    : null;
+    provider === "openai" || provider === "ollama" || provider === "gemini" ? provider : null;
   const sessionQuotaCost =
     sessionQuotaProvider !== null ? usage.costByProvider?.[sessionQuotaProvider] : undefined;
   const sessionQuotaPct =
@@ -135,7 +138,6 @@ export function StatusBar({
     ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
     : "—";
   const connState = !ready ? "off" : busy ? "running" : "online";
-  const ep = settings?.modelEndpoint;
   const apiHost =
     ep?.baseUrl?.replace(/^https?:\/\//, "") ??
     settings?.baseUrl?.replace(/^https?:\/\//, "") ??
@@ -172,10 +174,10 @@ export function StatusBar({
   // OpenAI tabs swap the balance / $ display for the API-reported weekly
   // Codex quota: % + credits left, and this turn's cost as % of the weekly
   // limit (delta between fetches — OpenAI reports no dollar amounts). The
-  // swap happens for every gpt-* model (matches providerForModel), and even
-  // without quota data the chips render an em dash + retry hint — the
-  // DeepSeek balance and $ amounts are meaningless on an OpenAI tab.
-  const openaiTab = !!settings?.model?.startsWith("gpt-");
+  // swap follows the resolved provider, and even without quota data the
+  // chips render an em dash + retry hint — the DeepSeek balance and $
+  // amounts are meaningless on an OpenAI tab.
+  const openaiTab = provider === "openai";
   const quota = codexQuota && openaiTab ? codexQuota : null;
   const showQuota = !!quota;
   const quotaWeekly = quota?.weekly ?? null;
@@ -184,7 +186,7 @@ export function StatusBar({
   // and an ISO resetsAt — the chip shows "% left" + plan, no credit amounts.
   const quotaLeftPct = quotaWeekly ? Math.round(quotaWeekly.remainingPercent) : 0;
   const quotaTurnPct = quota?.turnUsedPct ?? null;
-  const ollamaTab = !!settings?.model?.startsWith("ollama/");
+  const ollamaTab = provider === "ollama";
   const ollamaQuotaData = ollamaQuota && ollamaTab ? ollamaQuota : null;
   const ollamaWeekly = ollamaQuotaData?.weekly ?? null;
   const ollamaSession = ollamaQuotaData?.session ?? null;
@@ -197,15 +199,11 @@ export function StatusBar({
         })
       : t("statusbar.ollamaNoData");
   // Antigravity (Gemini Code Assist): plan + the active model's used fraction.
-  const geminiTab = isAntigravityModel(settings?.model);
+  const geminiTab = provider === "gemini";
   // Peak / off-peak pricing only applies to the DeepSeek API — the chip is
-  // hidden on gpt / ollama / gemini tabs. `ep.provider` is authoritative
-  // ("deepseek" for standard DeepSeek models and any custom DeepSeek-proxy id);
-  // when endpoint info is absent, fall back to the model not being a gpt /
-  // ollama / gemini id.
-  const deepseekTab = ep
-    ? ep.provider === "deepseek"
-    : !openaiTab && !ollamaTab && !geminiTab;
+  // hidden on every other provider's tab. The provider is the daemon's
+  // resolved value; absent endpoint info keeps the resolver's default.
+  const deepseekTab = ep ? ep.provider === "deepseek" : provider === "deepseek";
   const antigravityQuotaData = antigravityQuota && geminiTab ? antigravityQuota : null;
   const agActive =
     antigravityQuotaData?.windows.find((w) => w.modelId === settings?.model) ??

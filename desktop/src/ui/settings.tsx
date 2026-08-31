@@ -1,4 +1,4 @@
-import { KNOWN_MODELS, modelAcceptsImages } from "@reasonix/core-utils";
+import { ANTIGRAVITY_MODELS, KNOWN_MODELS, modelAcceptsImages } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
@@ -1128,16 +1128,15 @@ function PageModels({
 }) {
   const [draft, setDraft] = useState(settings.model);
   useEffect(() => setDraft(settings.model), [settings.model]);
-  const knownModels = KNOWN_MODELS.filter(
-    (model) =>
-      !model.startsWith("gemini-") &&
-      !model.startsWith("claude-") &&
-      !model.startsWith("gpt-oss-"),
-  );
-  const availableModels = [
-    ...knownModels,
-    ...(settings.antigravityOAuth?.models ?? []),
+  // Group by catalog membership (exact ids), never by name shape — the
+  // Antigravity catalog's entries surface via the signed-in discovery list,
+  // and user-declared `models` ids join the general grid.
+  const antigravityCatalog = new Set(ANTIGRAVITY_MODELS);
+  const knownModels = [
+    ...KNOWN_MODELS.filter((model) => !antigravityCatalog.has(model)),
+    ...(settings.customModels ?? []),
   ];
+  const availableModels = [...knownModels, ...(settings.antigravityOAuth?.models ?? [])];
   const isKnown = availableModels.includes(settings.model);
   return (
     <>

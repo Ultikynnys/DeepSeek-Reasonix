@@ -848,17 +848,18 @@ async function refreshAntigravityModels(tab: Tab): Promise<void> {
 }
 
 /** Endpoint + auth state for a model id — drives the status bar's API chip.
- *  DeepSeek models report the DeepSeek endpoint; gpt-* models the OpenAI one
- *  plus auth source (OAuth sign-in > static key > none). Exported for tests. */
+ *  The provider comes from the resolver (config > discovery > catalogs), never
+ *  from the id's name shape. Exported for tests. */
 export function modelEndpointFor(model: string, path?: string): ModelEndpointInfo {
-  if (providerForModel(model) === "ollama") {
+  const provider = providerForModel(model, path);
+  if (provider === "ollama") {
     const oep = loadOllamaEndpoint(path);
     return {
       provider: "ollama",
       baseUrl: oep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL,
     };
   }
-  if (providerForModel(model) === "gemini") {
+  if (provider === "gemini") {
     const oep = loadEndpointForModel(model, path);
     const oauth = readConfig(path).antigravityOAuth;
     return {
@@ -868,14 +869,14 @@ export function modelEndpointFor(model: string, path?: string): ModelEndpointInf
       antigravityAccount: oauth?.account,
     };
   }
-  if (providerForModel(model) === "zai") {
+  if (provider === "zai") {
     const ep = loadEndpointForModel(model, path);
     return {
       provider: "zai",
       baseUrl: ep.baseUrl ?? DEFAULT_ZAI_CHAT_URL,
     };
   }
-  if (providerForModel(model) !== "openai") {
+  if (provider !== "openai") {
     return {
       provider: "deepseek",
       // Mirrors the client's default (src/client.ts) when nothing is configured.
@@ -911,6 +912,7 @@ function emitSettings(tab: Tab): void {
       workspaceDir: tab.rootDir,
       recentWorkspaces: recent,
       model: tab.currentModel,
+      customModels: Object.keys(readConfig().models ?? {}).sort(),
       ollamaBaseUrl: readConfig().ollamaBaseUrl,
       editor: loadEditor(),
       webSearchEngine: readWebSearchEngine(),

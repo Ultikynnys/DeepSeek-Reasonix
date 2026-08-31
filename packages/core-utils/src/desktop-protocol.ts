@@ -369,6 +369,9 @@ export interface SettingsEvent {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
+  /** Ids with an explicit `models` provider mapping in config.json — offered
+   *  by the model picker alongside the catalogs, since the user declared them. */
+  customModels?: string[];
   /** Ollama chat endpoint (OpenAI-compatible) — shown in the Models settings page. */
   ollamaBaseUrl?: string;
   editor?: string;

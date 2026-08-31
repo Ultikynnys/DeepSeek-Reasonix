@@ -5,6 +5,14 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Changed — model provider resolution is evidence-based; a model name never implies its provider.**
+
+- `providerForModel` no longer infers the provider from the id's name shape (`gpt-` → OpenAI, `glm-` → Z.AI, Antigravity prefixes). It now resolves from positive evidence, in order: an explicit `models` config mapping, the signed-in Antigravity account's server-discovered ids, exact-id membership in the built-in vendor catalogs, the `ollama/` addressing scheme, and finally the documented DeepSeek-compatible default.
+- New `models` config field lets any model id declare its provider — the escape hatch for custom gateway ids that carry no catalog entry: `{ "models": { "gpt-4o-custom": { "provider": "openai" } } }`. Entries with an invalid provider are dropped with a warning at config load. `saveModel`/`loadModel` and the subagent model whitelist accept mapped ids.
+- The desktop UI never sniffs names for provider categorization. The status bar's quota/balance chips, the session-quota bucket, and quota retention on model switches read the daemon-resolved `modelEndpoint.provider`; the setup wizard preselects its tab from the resolved provider. `gpt-oss-*` ids served by Google Antigravity therefore display the Antigravity plan usage, not OpenAI's.
+- Model pickers group the static catalog by exact-id membership instead of prefix filters, and offer configured `models` ids alongside the catalogs.
+- **Behavior change**: an uncataloged id shaped like `gpt-*`/`glm-*` (e.g. a custom gateway id) no longer routes to that provider by prefix — map it in `models`. The retired bare `gpt-5.6` alias resolves to the default family, consistent with its long-standing stale-config clamp.
+
 **Added — `search_content` is ripgrep-backed when available, and times out gracefully instead of erroring.**
 
 - When `rg` is on PATH, `search_content` delegates to ripgrep: it honors `.gitignore`, scans far faster than the JS walker, and its RE2 regex cannot backtrack catastrophically. Missing or misbehaving ripgrep falls back to the built-in scanner, and the tool description advertises which engine is active at registration.

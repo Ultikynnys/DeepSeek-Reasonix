@@ -3,13 +3,37 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Settings, UsageStats } from "../App";
-import type { AntigravityQuota, CodexQuota, OllamaQuota } from "../protocol";
+import type { AntigravityQuota, CodexQuota, ModelEndpointInfo, OllamaQuota } from "../protocol";
 import { THEME, THEME_STYLES } from "../theme";
 import { StatusBar } from "./statusbar";
 
+/** Mirrors the daemon's `modelEndpointFor` for the ids used in these tests —
+ *  the statusbar consumes the daemon-resolved provider, never the model name.
+ *  Unmapped ids intentionally resolve to the default family: that is the
+ *  "name doesn't imply provider" contract under test. */
+function endpointFor(model: string): ModelEndpointInfo {
+  if (model.startsWith("ollama/"))
+    return { provider: "ollama", baseUrl: "http://localhost:11434/v1" };
+  if (model === "gpt-5.6-sol" || model === "gpt-5.6-terra")
+    return { provider: "openai", baseUrl: "https://api.openai.com/v1" };
+  // gpt-4o-custom here stands in for a custom id the user mapped to the
+  // OpenAI provider via the `models` config (the daemon resolved it).
+  if (model === "gpt-4o-custom")
+    return { provider: "openai", baseUrl: "https://api.openai.com/v1" };
+  if (model === "gpt-oss-120b-medium" || model === "gemini-2.5-pro" || model === "chat_20706")
+    return { provider: "gemini", baseUrl: "https://daily-cloudcode-pa.googleapis.com" };
+  return { provider: "deepseek", baseUrl: "https://api.deepseek.com" };
+}
+
 function renderBar(overrides: Partial<Parameters<typeof StatusBar>[0]> = {}) {
+  const settings = {
+    model: "deepseek-v4-flash",
+    ...(overrides.settings as Partial<Settings> | undefined),
+  } as Settings;
+  // Tests that don't stub modelEndpoint get the daemon-plausible resolution
+  // for their model, exactly as a live $settings event would carry it.
+  if (!settings.modelEndpoint) settings.modelEndpoint = endpointFor(settings.model);
   const props: Parameters<typeof StatusBar>[0] = {
-    settings: { model: "deepseek-v4-flash" } as Settings,
     balance: null,
     codexQuota: null,
     ollamaQuota: null,
@@ -26,8 +50,12 @@ function renderBar(overrides: Partial<Parameters<typeof StatusBar>[0]> = {}) {
     onSetThemeStyle: () => undefined,
     onToggleCurrency: () => undefined,
     onOpenSettings: () => undefined,
+    ...overrides,
+    // The merged settings (with the resolved endpoint) win over the raw
+    // override copy so the endpoint injection is never clobbered.
+    settings,
   };
-  return render(<StatusBar {...props} {...overrides} />);
+  return render(<StatusBar {...props} />);
 }
 
 const GPT_QUOTA: CodexQuota = {
@@ -163,7 +191,9 @@ describe("StatusBar quota display", () => {
     expect(screen.getByTitle(/sign in with ChatGPT/)).toBeTruthy();
   });
 
-  it("treats any gpt-* model as an OpenAI tab (quota chips, not balance)", () => {
+  it("renders quota chips (not balance) when the daemon resolves a custom id to OpenAI", () => {
+    // gpt-4o-custom is not in any catalog — the daemon only reports it as
+    // OpenAI because the user mapped it via the `models` config.
     renderBar({
       settings: { model: "gpt-4o-custom" } as Settings,
       codexQuota: GPT_QUOTA,
@@ -171,6 +201,43 @@ describe("StatusBar quota display", () => {
     expect(screen.getByText(/58%\s*left/)).toBeTruthy();
     expect(screen.queryByText("balance")).toBeNull();
     expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
+  });
+
+  it("renders the DeepSeek balance for a gpt-* shaped id the daemon did NOT resolve to OpenAI", () => {
+    // The name alone proves nothing: an unmapped custom id resolves to the
+    // default family, so the bar shows the DeepSeek chips, never codex.
+    renderBar({
+      settings: {
+        model: "gpt-4o-custom",
+        modelEndpoint: { provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+      } as Settings,
+      codexQuota: GPT_QUOTA,
+    });
+    expect(screen.getByText("balance")).toBeTruthy();
+    expect(screen.queryByText(/58%\s*left/)).toBeNull();
+    expect(screen.queryByText("codex")).toBeNull();
+  });
+
+  it("treats gpt-oss-* (Antigravity-served) models as Antigravity tabs, never OpenAI", () => {
+    renderBar({
+      settings: { model: "gpt-oss-120b-medium" } as Settings,
+      codexQuota: GPT_QUOTA,
+      antigravityQuota: {
+        ...ANTIGRAVITY_QUOTA,
+        windows: [
+          { modelId: "gpt-oss-120b-medium", usedFraction: 0.1, resetTime: "2026-09-01T13:37:06Z" },
+        ],
+      },
+    });
+    // The Antigravity quota chips render — plan name + window %.
+    expect(screen.getByText(/90%\s*left/)).toBeTruthy();
+    expect(screen.getByText("Antigravity")).toBeTruthy();
+    expect(screen.getByText(/0\.4%/)).toBeTruthy();
+    // The OpenAI codex quota never leaks onto the tab despite the gpt- prefix.
+    expect(screen.queryByText(/58%\s*left/)).toBeNull();
+    expect(screen.queryByText("codex")).toBeNull();
+    expect(screen.queryByText("balance")).toBeNull();
+    expect(screen.queryByText(/\$ 0\./)).toBeNull();
   });
 
   it("falls back to the ChatGPT label when the plan is unknown", () => {

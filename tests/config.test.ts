@@ -15,6 +15,7 @@ import {
   clearProjectPathAllowed,
   clearProjectShellAllowed,
   editModeHintShown,
+  isKnownModelId,
   isPlausibleKey,
   loadApiKey,
   loadBaiduApiKey,
@@ -358,13 +359,106 @@ describe("config", () => {
 
     it("providerForModel keeps OpenAI GPT ids separate from unified Antigravity ids", () => {
       expect(providerForModel("gpt-5.6-sol")).toBe("openai");
-      expect(providerForModel("gpt-5.6")).toBe("openai");
+      // The retired bare alias matches no catalog → the default endpoint family,
+      // consistent with loadModel's stale-config clamp.
+      expect(providerForModel("gpt-5.6")).toBe("deepseek");
       expect(providerForModel("gpt-oss-120b-medium")).toBe("gemini");
       expect(providerForModel("claude-sonnet-4-6-thinking")).toBe("gemini");
       expect(providerForModel("gemini-3.1-pro-high")).toBe("gemini");
       expect(providerForModel("glm-5.3-flash")).toBe("zai");
       expect(providerForModel("deepseek-v4-flash")).toBe("deepseek");
       expect(providerForModel(undefined)).toBe("deepseek");
+    });
+
+    it("providerForModel never infers provider from the name — uncataloged ids fall to the default family", () => {
+      // A gpt-* shaped id that no catalog, discovery, or config maps: the name
+      // alone proves nothing, so it routes to the documented default family.
+      expect(providerForModel("gpt-4o-custom", path)).toBe("deepseek");
+      expect(providerForModel("glm-9-turbo-custom", path)).toBe("deepseek");
+      // The ollama/ addressing namespace is an id scheme, not an inference.
+      expect(providerForModel("ollama/llama3.1:latest", path)).toBe("ollama");
+    });
+
+    it("providerForModel: an explicit models config mapping wins over every other layer", () => {
+      writeConfig(
+        {
+          models: {
+            "gpt-4o-custom": { provider: "openai" },
+            "my-private-gateway-id": { provider: "gemini" },
+            "deepseek-v4-flash": { provider: "zai" },
+          },
+        },
+        path,
+      );
+      // Custom ids now carry their declared provider.
+      expect(providerForModel("gpt-4o-custom", path)).toBe("openai");
+      expect(providerForModel("my-private-gateway-id", path)).toBe("gemini");
+      // The explicit mapping overrides even catalog membership.
+      expect(providerForModel("deepseek-v4-flash", path)).toBe("zai");
+    });
+
+    it("providerForModel: server-discovered Antigravity ids resolve to gemini", () => {
+      writeConfig(
+        {
+          antigravityOAuth: {
+            accessToken: "ya29.test",
+            refreshToken: "rt",
+            clientId: "cid",
+            expiresAt: 1,
+            models: ["chat_20706", "tab_4x_fx_safari_01"],
+          },
+        },
+        path,
+      );
+      expect(providerForModel("chat_20706", path)).toBe("gemini");
+      expect(providerForModel("tab_4x_fx_safari_01", path)).toBe("gemini");
+      // Undiscovered chat-shaped ids stay on the default family — the shape
+      // alone proves nothing.
+      expect(providerForModel("chat_99999", path)).toBe("deepseek");
+    });
+
+    it("readConfig drops models entries with an invalid provider and warns", () => {
+      const warns: string[] = [];
+      const orig = console.warn;
+      console.warn = (msg: string) => warns.push(msg);
+      try {
+        writeConfig(
+          {
+            models: {
+              "good-id": { provider: "openai" },
+              "bad-id": { provider: "not-a-provider" },
+              "worse-id": "openai",
+            },
+          },
+          path,
+        );
+        const cfg = readConfig(path);
+        expect(cfg.models).toEqual({ "good-id": { provider: "openai" } });
+        expect(warns.some((w) => w.includes("models.bad-id"))).toBe(true);
+        expect(warns.some((w) => w.includes("models.worse-id"))).toBe(true);
+      } finally {
+        console.warn = orig;
+      }
+    });
+
+    it("isKnownModelId requires positive evidence, never a name shape", () => {
+      writeConfig({ models: { "gpt-4o-custom": { provider: "openai" } } }, path);
+      expect(isKnownModelId("gpt-5.6-sol", path)).toBe(true);
+      expect(isKnownModelId("gpt-oss-120b-medium", path)).toBe(true);
+      expect(isKnownModelId("ollama/llama3.1:latest", path)).toBe(true);
+      expect(isKnownModelId("gpt-4o-custom", path)).toBe(true);
+      expect(isKnownModelId("gpt-4o-unmapped", path)).toBe(false);
+      expect(isKnownModelId("claude-sonnet-99", path)).toBe(false);
+    });
+
+    it("saveModel/loadModel accept ids with an explicit models mapping", () => {
+      writeConfig({ models: { "gpt-4o-custom": { provider: "openai" } } }, path);
+      expect(() => saveModel("gpt-4o-custom", path)).not.toThrow();
+      writeConfig(
+        { model: "gpt-4o-custom", models: { "gpt-4o-custom": { provider: "openai" } } },
+        path,
+      );
+      expect(loadModel(path)).toBe("gpt-4o-custom");
     });
 
     it("loadEndpointForModel: OpenAI env tuple wins for gpt ids", () => {

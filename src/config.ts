@@ -4,12 +4,12 @@ import { randomBytes } from "node:crypto";
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
+  ANTIGRAVITY_MODELS,
   GEMINI_MODELS,
   GPT56_MODELS,
   KNOWN_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
-  isAntigravityModel,
 } from "@reasonix/core-utils";
 import { z } from "zod";
 import { atomicWriteSync, tmpSiblingPath } from "./core/atomic-write.js";
@@ -36,17 +36,65 @@ export { GEMINI_MODELS, GPT56_MODELS, SUPPORTED_OFFICIAL_MODELS, ZAI_MODELS };
 /** Everything the default endpoints accept without a custom baseUrl, across providers. */
 export const SUPPORTED_MODELS: readonly string[] = KNOWN_MODELS;
 
-/** Which provider a model id routes to. `gpt-` prefixed ids → OpenAI,
- *  `ollama/` prefixed ids → Ollama (local daemon or cloud), `gemini-` prefixed
- *  ids → Google Antigravity (Cloud Code API), everything else → DeepSeek. */
+/** Which provider a model id routes to — resolved from positive evidence, never
+ *  the id's name shape (a name doesn't imply its provider). Resolution order:
+ *  `models` config > Antigravity discovery > catalogs > `ollama/` scheme > DeepSeek default. */
 export type ModelProvider = "deepseek" | "openai" | "ollama" | "gemini" | "zai";
 
-export function providerForModel(model: string | undefined | null): ModelProvider {
-  if (isAntigravityModel(model)) return "gemini";
-  if (typeof model === "string" && model.startsWith("gpt-")) return "openai";
-  if (typeof model === "string" && model.startsWith("ollama/")) return "ollama";
-  if (typeof model === "string" && model.startsWith("glm-")) return "zai";
+/** Valid ModelProvider literals — config validation for the `models` map. */
+const PROVIDER_IDS: readonly ModelProvider[] = ["deepseek", "openai", "ollama", "gemini", "zai"];
+
+export function isModelProvider(value: unknown): value is ModelProvider {
+  return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
+}
+
+/** Catalog membership sets — exact-id matching, never prefix inference. */
+const CATALOG_PROVIDERS: ReadonlyArray<{ ids: ReadonlySet<string>; provider: ModelProvider }> = [
+  { ids: new Set(SUPPORTED_OFFICIAL_MODELS), provider: "deepseek" },
+  { ids: new Set(GPT56_MODELS), provider: "openai" },
+  { ids: new Set(ZAI_MODELS), provider: "zai" },
+  { ids: new Set(ANTIGRAVITY_MODELS), provider: "gemini" },
+];
+
+/** All curated catalog ids combined — `isKnownModelId`'s membership set. */
+const KNOWN_MODEL_IDS: ReadonlySet<string> = new Set(KNOWN_MODELS);
+
+export function providerForModel(
+  model: string | undefined | null,
+  path: string = defaultConfigPath(),
+): ModelProvider {
+  if (typeof model !== "string") return "deepseek";
+  const id = model.trim();
+  if (!id) return "deepseek";
+  const cfg = readConfig(path);
+  // 1. Explicit per-model mapping — the user's declaration wins.
+  const mapped = cfg.models?.[id]?.provider;
+  if (isModelProvider(mapped)) return mapped;
+  // 2. Server-discovered Antigravity models.
+  if (cfg.antigravityOAuth?.models?.includes(id)) return "gemini";
+  // 3. Curated catalogs — exact id membership.
+  for (const catalog of CATALOG_PROVIDERS) {
+    if (catalog.ids.has(id)) return catalog.provider;
+  }
+  // 4. The `ollama/` addressing namespace.
+  if (id.startsWith("ollama/")) return "ollama";
+  // 5. Documented default endpoint family.
   return "deepseek";
+}
+
+/** True when positive evidence places a model id: a `models` mapping, server
+ *  discovery, a catalog entry, or the `ollama/` scheme — a name shape alone
+ *  proves nothing. */
+export function isKnownModelId(model: string, path: string = defaultConfigPath()): boolean {
+  const id = model.trim();
+  if (!id) return false;
+  const cfg = readConfig(path);
+  return (
+    Boolean(cfg.models?.[id]) ||
+    Boolean(cfg.antigravityOAuth?.models?.includes(id)) ||
+    KNOWN_MODEL_IDS.has(id) ||
+    id.startsWith("ollama/")
+  );
 }
 
 /** Model ids that accept image attachments in user messages — shared with the
@@ -238,6 +286,12 @@ export interface AntigravityOAuthCreds {
   models?: string[];
 }
 
+/** A per-model provider declaration from the `models` config map. */
+export interface ModelProviderConfig {
+  /** Which provider's endpoint family serves the model id. */
+  provider: ModelProvider;
+}
+
 export interface ReasonixConfig {
   apiKey?: string;
   baseUrl?: string;
@@ -254,6 +308,9 @@ export interface ReasonixConfig {
   antigravityOAuth?: AntigravityOAuthCreds;
   /** Persisted DeepSeek model id — `/model <id>` and the dashboard model picker write through this. */
   model?: string;
+  /** Explicit per-model provider mapping — the authority when catalogs and discovery can't place an id.
+   *  Example: `{ "gpt-4o-custom": { "provider": "openai" } }`. */
+  models?: Record<string, ModelProviderConfig>;
   editMode?: EditMode;
   editModeHintShown?: boolean;
   mouseClipboardHintShown?: boolean;
@@ -605,6 +662,32 @@ function sanitizeStringArrayField(
   parent[leaf] = filtered;
 }
 
+/** Validate the `models` provider map — drop entries without a valid provider
+ *  (warn, never silently keep a malformed mapping: a wrong provider silently
+ *  routes requests to the wrong endpoint family). */
+function sanitizeModelsField(cfg: Record<string, unknown>, filePath: string): void {
+  const raw = cfg.models;
+  if (raw === undefined) return;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    console.warn(`reasonix: config "${filePath}" field "models" is not an object — ignoring`);
+    cfg.models = undefined;
+    return;
+  }
+  const cleaned: Record<string, ModelProviderConfig> = {};
+  for (const [id, entry] of Object.entries(raw)) {
+    const provider = (entry as { provider?: unknown } | null | undefined)?.provider;
+    if (isModelProvider(provider)) {
+      cleaned[id] = { provider };
+    } else {
+      console.warn(
+        `reasonix: config "${filePath}" field "models.${id}" has no valid provider (${PROVIDER_IDS.join(", ")}) — dropped`,
+      );
+    }
+  }
+  if (Object.keys(cleaned).length > 0) cfg.models = cleaned;
+  else cfg.models = undefined;
+}
+
 export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
   let fd: number | undefined;
   try {
@@ -633,6 +716,7 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
       for (const segments of STRING_ARRAY_FIELDS) {
         sanitizeStringArrayField(cfg, segments, path);
       }
+      sanitizeModelsField(cfg, path);
       const result = cfg as ReasonixConfig;
       _configCache.set(path, { mtimeMs: st.mtimeMs, cfg: result });
       return result;
@@ -860,7 +944,7 @@ export function loadEndpointForModel(
   model: string,
   path: string = defaultConfigPath(),
 ): ResolvedEndpoint {
-  if (providerForModel(model) === "openai") {
+  if (providerForModel(model, path) === "openai") {
     const envBaseUrl = process.env.OPENAI_BASE_URL?.trim();
     if (envBaseUrl) return { baseUrl: envBaseUrl, apiKey: process.env.OPENAI_API_KEY };
     const cfg = readConfig(path);
@@ -876,15 +960,15 @@ export function loadEndpointForModel(
       apiKey: process.env.OPENAI_API_KEY ?? cfg.openaiApiKey,
     };
   }
-  if (providerForModel(model) === "ollama") {
+  if (providerForModel(model, path) === "ollama") {
     return loadOllamaEndpoint(path);
   }
-  if (providerForModel(model) === "gemini") {
+  if (providerForModel(model, path) === "gemini") {
     // Gemini models always hit the Cloud Code API; auth is the Google OAuth
     // token (resolved per request), never a static key. baseUrl is fixed.
     return { baseUrl: DEFAULT_GEMINI_CHAT_URL, apiKey: undefined };
   }
-  if (providerForModel(model) === "zai") {
+  if (providerForModel(model, path) === "zai") {
     const envBaseUrl = process.env.ZAI_BASE_URL?.trim();
     if (envBaseUrl) return { baseUrl: envBaseUrl, apiKey: process.env.ZAI_API_KEY };
     const cfg = readConfig(path);
@@ -899,7 +983,7 @@ export function loadEndpointForModel(
 // True when an OpenAI model hits the standard api.openai.com (not a proxy),
 // meaning OAuth + Codex backend transport is applicable.
 export function isOpenAIStandardEndpoint(model: string, path?: string): boolean {
-  if (providerForModel(model) !== "openai") return false;
+  if (providerForModel(model, path) !== "openai") return false;
   return loadEndpointForModel(model, path).baseUrl === "https://api.openai.com/v1";
 }
 
@@ -1551,7 +1635,8 @@ export function loadModel(path: string = defaultConfigPath()): string {
   // Custom-endpoint owners pick their own model namespace; trust them.
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
   if (customEndpoint) return trimmed;
-  if (providerForModel(trimmed) === "ollama") return trimmed;
+  if (cfg.models?.[trimmed]) return trimmed;
+  if (providerForModel(trimmed, path) === "ollama") return trimmed;
   if (isDiscoveredAntigravityModel(cfg, trimmed)) return trimmed;
   return SUPPORTED_MODELS.includes(trimmed) ? trimmed : DEFAULT_MODEL;
 }
@@ -1565,7 +1650,8 @@ export function saveModel(model: string, path: string = defaultConfigPath()): vo
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
   const accepted =
     SUPPORTED_MODELS.includes(trimmed) ||
-    providerForModel(trimmed) === "ollama" ||
+    Boolean(cfg.models?.[trimmed]) ||
+    providerForModel(trimmed, path) === "ollama" ||
     isDiscoveredAntigravityModel(cfg, trimmed);
   if (!customEndpoint && !accepted) {
     throw new Error(

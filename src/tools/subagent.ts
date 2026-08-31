@@ -1,6 +1,7 @@
 /** Isolated child loop. Inherits parent registry minus spawn_subagent + submit_plan; no hooks; non-streaming. */
 
 import { type DeepSeekClient, Usage } from "../client.js";
+import { isKnownModelId } from "../config.js";
 import { CacheFirstLoop } from "../loop.js";
 import { applyProjectMemory } from "../memory/project.js";
 import { ImmutablePrefix } from "../memory/runtime.js";
@@ -696,11 +697,10 @@ export function registerSubagentTool(
         });
       }
       const typeSpec = getSubagentType(args.type);
+      // Accept only ids with positive evidence (catalog, discovery, explicit
+      // `models` mapping, or the ollama/ scheme) — never a name-shape guess.
       const model =
-        typeof args.model === "string" &&
-        (args.model.startsWith("deepseek-") || args.model.startsWith("gpt-"))
-          ? args.model
-          : defaultModel;
+        typeof args.model === "string" && isKnownModelId(args.model) ? args.model : defaultModel;
       const system =
         typeof args.system === "string" && args.system.trim().length > 0
           ? args.system.trim()
