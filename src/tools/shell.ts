@@ -2,7 +2,7 @@
 
 import * as pathMod from "node:path";
 import { addProjectShellAllowed } from "../config.js";
-import { pauseGate } from "../core/pause-gate.js";
+import { type PauseAskOpts, type PauseGate, pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
 import { ToolControlFlowError } from "./control-flow-error.js";
 import { JobRegistry, mergeSignals } from "./jobs.js";
@@ -125,25 +125,16 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_command: empty command");
       const effectiveTimeout = Math.max(1, Math.min(600, args.timeoutSec ?? timeoutSec));
-      if (
-        !isAllowAll() &&
-        !isCommandAllowed(cmd, getExtraAllowed(), rootDir, opts.sensitivePaths)
-      ) {
-        const gate = ctx?.confirmationGate ?? pauseGate;
-        const choice = await gate.ask({
+      await confirmShellCommand(cmd, {
+        gate: ctx?.confirmationGate ?? pauseGate,
+        isAllowed:
+          isAllowAll() || isCommandAllowed(cmd, getExtraAllowed(), rootDir, opts.sensitivePaths),
+        ask: {
           kind: "run_command",
           payload: { command: cmd, cwd: rootDir, timeoutSec: effectiveTimeout },
-        });
-        if (choice.type === "deny") {
-          throw new Error(
-            `user denied: ${cmd}${choice.denyContext ? ` — ${choice.denyContext}` : ""}`,
-          );
-        }
-        if (choice.type === "always_allow") {
-          addProjectShellAllowed(rootDir, choice.prefix);
-        }
-        // "run_once" — fall through and execute
-      }
+        },
+        onAlwaysAllow: (prefix) => addProjectShellAllowed(rootDir, prefix),
+      });
       const result = await runCommand(cmd, {
         cwd: rootDir,
         timeoutSec: effectiveTimeout,
@@ -191,25 +182,16 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_background: empty command");
       const cwd = resolveCwdInsideRoot(rootDir, args.cwd);
-      if (
-        !isAllowAll() &&
-        !isCommandAllowed(cmd, getExtraAllowed(), rootDir, opts.sensitivePaths)
-      ) {
-        const gate = ctx?.confirmationGate ?? pauseGate;
-        const choice = await gate.ask({
+      await confirmShellCommand(cmd, {
+        gate: ctx?.confirmationGate ?? pauseGate,
+        isAllowed:
+          isAllowAll() || isCommandAllowed(cmd, getExtraAllowed(), rootDir, opts.sensitivePaths),
+        ask: {
           kind: "run_background",
           payload: { command: cmd, cwd, waitSec: args.waitSec },
-        });
-        if (choice.type === "deny") {
-          throw new Error(
-            `user denied: ${cmd}${choice.denyContext ? ` — ${choice.denyContext}` : ""}`,
-          );
-        }
-        if (choice.type === "always_allow") {
-          addProjectShellAllowed(rootDir, choice.prefix);
-        }
-        // "run_once" — fall through and execute
-      }
+        },
+        onAlwaysAllow: (prefix) => addProjectShellAllowed(rootDir, prefix),
+      });
       const result = await jobs.start(cmd, {
         cwd,
         waitSec: args.waitSec,
@@ -354,6 +336,27 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   });
 
   return registry;
+}
+
+// Route a shell command through the confirmation gate unless already allowlisted.
+async function confirmShellCommand<K extends "run_command" | "run_background">(
+  cmd: string,
+  opts: {
+    gate: PauseGate;
+    isAllowed: boolean;
+    ask: PauseAskOpts<K>;
+    onAlwaysAllow: (prefix: string) => void;
+  },
+): Promise<void> {
+  if (opts.isAllowed) return;
+  const choice = await opts.gate.ask(opts.ask);
+  if (choice.type === "deny") {
+    throw new Error(`user denied: ${cmd}${choice.denyContext ? ` — ${choice.denyContext}` : ""}`);
+  }
+  if (choice.type === "always_allow") {
+    opts.onAlwaysAllow(choice.prefix);
+  }
+  // "run_once" — fall through and execute
 }
 
 function resolveCwdInsideRoot(rootDir: string, raw: string | undefined): string {
