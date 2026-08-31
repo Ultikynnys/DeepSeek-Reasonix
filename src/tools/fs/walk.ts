@@ -38,8 +38,20 @@ export async function walkDir(
   if (opts.shouldStop?.()) return;
   let entries: import("node:fs").Dirent[];
   try {
-    entries = await fs.readdir(startAbs, { withFileTypes: true });
-  } catch {
+    const read = fs.readdir(startAbs, { withFileTypes: true });
+    if (!opts.signal) {
+      entries = await read;
+    } else {
+      const signal = opts.signal;
+      entries = await new Promise<import("node:fs").Dirent[]>((resolve, reject) => {
+        const onAbort = () =>
+          reject(new DOMException(`${opts.label} aborted by user`, "AbortError"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        void read.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+      });
+    }
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw err;
     return;
   }
   for (const e of entries) {

@@ -496,7 +496,7 @@ export function registerFilesystemTools(
     parallelSafe: true,
     skipTruncationSave: true,
     description:
-      "Find files whose NAME matches a substring or regex. Case-insensitive. Walks the directory recursively under the sandbox root. Returns one path per line. Skips dependency / VCS / build directories (node_modules, .git, dist, build, .next, target, .venv) by default.",
+      "Find files whose NAME matches a substring or regex. Case-insensitive. Walks recursively and returns one path per line. Skips dependency / VCS / build directories by default. The walk times out after 30 seconds by default and returns partial results; results are capped at 1000.",
     readOnly: true,
     parameters: {
       type: "object",
@@ -511,10 +511,28 @@ export function registerFilesystemTools(
           description:
             "When true, also walk node_modules / .git / dist / build / etc. Off by default — most filename searches are about the user's own code.",
         },
+        timeout_seconds: {
+          type: "integer",
+          description:
+            "Walk timeout in seconds (default 30, max 300); partial results are returned when it expires.",
+        },
+        limit: {
+          type: "integer",
+          description: "Maximum results to return (default and max 1000).",
+        },
       },
       required: ["pattern"],
     },
-    fn: async (args: { path?: string; pattern: string; include_deps?: boolean }, toolCtx) =>
+    fn: async (
+      args: {
+        path?: string;
+        pattern: string;
+        include_deps?: boolean;
+        timeout_seconds?: number;
+        limit?: number;
+      },
+      toolCtx,
+    ) =>
       searchFiles(
         { rootDir, maxListBytes, skipDirNames: SKIP_DIR_NAMES },
         await safePath(args.path ?? ".", "search_files", toolCtx),

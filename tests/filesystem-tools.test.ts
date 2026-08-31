@@ -428,6 +428,39 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toContain(".reasonix/skills/my-skill.md");
     });
 
+    it("returns files only, not matching directory names", async () => {
+      await fs.mkdir(join(root, "matched-dir"), { recursive: true });
+      const out = await tools.dispatch("search_files", JSON.stringify({ pattern: "matched-dir" }));
+      expect(out).toBe("(no matches)");
+    });
+
+    it("stops the whole walk at the result limit", async () => {
+      for (let i = 0; i < 5; i++) {
+        await fs.writeFile(join(root, `limited-${i}.txt`), "x");
+      }
+      const out = await tools.dispatch(
+        "search_files",
+        JSON.stringify({ pattern: "limited-", limit: 2 }),
+      );
+      expect(out.split("\n").filter((line) => line.endsWith(".txt"))).toHaveLength(2);
+      expect(out).toMatch(/truncated at 2 results/);
+    });
+
+    it("returns on timeout even while a directory read is pending", async () => {
+      const readdirSpy = vi
+        .spyOn(fs, "readdir")
+        .mockImplementation(() => new Promise<never>(() => {}));
+      try {
+        const out = await tools.dispatch(
+          "search_files",
+          JSON.stringify({ pattern: "timeout-match", timeout_seconds: 1 }),
+        );
+        expect(out).toMatch(/timed out after 1s/);
+      } finally {
+        readdirSpy.mockRestore();
+      }
+    });
+
     it("honors AbortSignal during recursive search", async () => {
       await fs.mkdir(join(root, "src", "nested"), { recursive: true });
       await fs.writeFile(join(root, "src", "nested", "marker.ts"), "x");

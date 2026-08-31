@@ -4,7 +4,7 @@ import { looksBinary } from "./binary.js";
 import { getRegexRunner } from "./regex-runner.js";
 import { displayRel } from "./rel.js";
 import { GLOB_METACHARS, rgRelOf, ripgrepAvailable, runRipgrep } from "./rg.js";
-import { throwIfAborted } from "./walk.js";
+import { throwIfAborted, walkDir } from "./walk.js";
 
 export interface SearchContext {
   rootDir: string;
@@ -18,11 +18,22 @@ export interface SearchContext {
 export async function searchFiles(
   ctx: Pick<SearchContext, "rootDir" | "maxListBytes" | "skipDirNames">,
   startAbs: string,
-  args: { pattern: string; include_deps?: boolean; signal?: AbortSignal },
+  args: {
+    pattern: string;
+    include_deps?: boolean;
+    timeout_seconds?: number;
+    limit?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<string> {
   throwIfAborted(args.signal);
   const needle = args.pattern.toLowerCase();
   const includeDeps = args.include_deps === true;
+  const timeoutSec = clampTimeoutSeconds(args.timeout_seconds);
+  const deadline = Date.now() + timeoutSec * 1000;
+  const timeoutSignal = AbortSignal.timeout(timeoutSec * 1000);
+  const walkSignal = args.signal ? AbortSignal.any([args.signal, timeoutSignal]) : timeoutSignal;
+  const limit = Math.max(1, Math.min(1000, Math.floor(args.limit ?? 1000)));
   let re: RegExp | null = null;
   try {
     re = new RegExp(args.pattern, "i");
@@ -31,36 +42,68 @@ export async function searchFiles(
   }
   const matches: string[] = [];
   let totalBytes = 0;
-  const walk = async (dir: string): Promise<void> => {
-    throwIfAborted(args.signal);
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
+  let timedOut = false;
+  let truncated = false;
+  const shouldStop = (): boolean => {
+    if (timedOut || truncated) return true;
+    if (Date.now() >= deadline) {
+      timedOut = true;
+      return true;
     }
-    for (const e of entries) {
-      throwIfAborted(args.signal);
-      const full = pathMod.join(dir, e.name);
-      const lower = e.name.toLowerCase();
-      const hit = re ? re.test(e.name) : lower.includes(needle);
-      if (hit) {
-        const rel = displayRel(ctx.rootDir, full);
+    return false;
+  };
+
+  try {
+    await walkDir(
+      startAbs,
+      {
+        includeDeps,
+        skipDirNames: ctx.skipDirNames,
+        signal: walkSignal,
+        label: "search",
+        shouldStop,
+      },
+      (entry) => {
+        if (!entry.dirent.isFile() && !entry.dirent.isSymbolicLink()) return true;
+        const hit = re
+          ? re.test(entry.dirent.name)
+          : entry.dirent.name.toLowerCase().includes(needle);
+        if (!hit) return true;
+        const rel = displayRel(ctx.rootDir, entry.full);
         if (totalBytes + rel.length + 1 > ctx.maxListBytes) {
-          matches.push("[… search truncated — refine pattern …]");
-          return;
+          truncated = true;
+          return false;
         }
         matches.push(rel);
         totalBytes += rel.length + 1;
-      }
-      if (e.isDirectory()) {
-        if (!includeDeps && ctx.skipDirNames.has(e.name)) continue;
-        await walk(full);
-      }
+        if (matches.length >= limit) {
+          truncated = true;
+          return false;
+        }
+        return true;
+      },
+    );
+  } catch (err) {
+    if (timeoutSignal.aborted && !args.signal?.aborted) timedOut = true;
+    else throw err;
+  }
+
+  if (matches.length === 0) {
+    if (timedOut) {
+      return `(no matches; timed out after ${timeoutSec}s — narrow the path/pattern or raise timeout_seconds)`;
     }
-  };
-  await walk(startAbs);
-  return matches.length === 0 ? "(no matches)" : matches.join("\n");
+    return "(no matches)";
+  }
+  if (truncated) {
+    matches.push(
+      `... (truncated at ${matches.length} results — refine pattern/path or raise limit)`,
+    );
+  } else if (timedOut) {
+    matches.push(
+      `... (timed out after ${timeoutSec}s; results incomplete — narrow the path/pattern or raise timeout_seconds)`,
+    );
+  }
+  return matches.join("\n");
 }
 
 /** Per-file printed-hit cap; beyond this we emit a "N more matches in this file" footer. */
