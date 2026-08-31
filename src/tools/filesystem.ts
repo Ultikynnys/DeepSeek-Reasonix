@@ -28,7 +28,8 @@ import {
   generateWriteDiff,
 } from "./fs/edit.js";
 import { globFiles } from "./fs/glob.js";
-import { extractOutline, formatOutline } from "./fs/outline.js";
+import { createOutlineCollector, formatOutline } from "./fs/outline.js";
+import { inspectTextFile, readLineTail, readLineWindow } from "./fs/read.js";
 import { displayRel } from "./fs/rel.js";
 import { GLOB_METACHARS, ripgrepAvailable } from "./fs/rg.js";
 import { searchContent, searchFiles } from "./fs/search.js";
@@ -59,6 +60,8 @@ const HARD_MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 /** Lines shown for orientation when a file is too big for full content. */
 const OUTLINE_HEAD_LINES = 80;
+/** Bound outline discovery so a no-symbol file does not force a full-file scan. */
+const OUTLINE_SCAN_LINES = 2000;
 
 // Skipped unless `include_deps:true`. Derived from the semantic indexer's exclude
 // list, minus `.reasonix` — the indexer shouldn't embed session logs / cache, but
@@ -251,17 +254,15 @@ export function registerFilesystemTools(
     ) => {
       const abs = await safePath(args.path, "read_file", ctx);
       const rel = displayRel(rootDir, abs);
-      // Open once and reuse the fd so the directory check and the read
-      // bind to the same inode — closes the stat→read TOCTOU race.
+      // Open once and reuse the fd so stat, inspection, and reads bind to
+      // the same inode. Large and scoped reads stream instead of slurping.
       const fh = await fs.open(abs, "r");
-      let raw: Buffer;
-      let sizeBytes: number;
       try {
         const stat = await fh.stat();
         if (stat.isDirectory()) {
           throw new Error(`not a file: ${args.path} (it's a directory)`);
         }
-        sizeBytes = stat.size;
+        const sizeBytes = stat.size;
         if (sizeBytes > HARD_MAX_FILE_BYTES) {
           return [
             `[refused: ${rel} is ${formatBytes(sizeBytes)} (> ${formatBytes(HARD_MAX_FILE_BYTES)} hard ceiling) — too large to load]`,
@@ -271,83 +272,107 @@ export function registerFilesystemTools(
             `  - read_file path:"${rel}" head:N  /  tail:N             — read N lines at the start or end`,
           ].join("\n");
         }
-        raw = await fh.readFile();
+
+        const inspection = await inspectTextFile(fh, sizeBytes);
+        if (inspection.binary) {
+          return `[refused: ${rel} appears to be binary (${formatBytes(sizeBytes)}) — read_file returns text only. Use get_file_info for stat.]`;
+        }
+        ctx?.readTracker?.markRead(abs);
+
+        // Small files retain the exact full-content and marker behavior.
+        // Streaming matters for large inputs; preserving compact-file output
+        // avoids an API compatibility break for callers and tests.
+        if (sizeBytes <= outlineThresholdBytes) {
+          const raw = await fh.readFile();
+          const { text } = decodeFileBuffer(raw);
+          let lines = text.split(/\r?\n/);
+          if (lines.length > 0 && lines[lines.length - 1] === "") lines = lines.slice(0, -1);
+          const totalLines = lines.length;
+          if (typeof args.range === "string" && /^\d+\s*-\s*\d+$/.test(args.range)) {
+            const [rawStart, rawEnd] = args.range.split("-").map((s) => Number.parseInt(s, 10));
+            const start = Math.max(1, rawStart ?? 1);
+            const end = Math.min(totalLines, Math.max(start, rawEnd ?? totalLines));
+            return withSubdirMemory(
+              abs,
+              `[range ${start}-${end} of ${totalLines} lines]\n${lines.slice(start - 1, end).join("\n")}`,
+            );
+          }
+          if (typeof args.head === "number" && args.head > 0) {
+            const count = Math.min(args.head, totalLines);
+            const marker =
+              count < totalLines
+                ? `\n\n[…head ${count} of ${totalLines} lines — call again with range / tail for more]`
+                : "";
+            return withSubdirMemory(abs, lines.slice(0, count).join("\n") + marker);
+          }
+          if (typeof args.tail === "number" && args.tail > 0) {
+            const count = Math.min(args.tail, totalLines);
+            const marker =
+              count < totalLines
+                ? `[…tail ${count} of ${totalLines} lines — call again with range / head for more]\n\n`
+                : "";
+            return withSubdirMemory(abs, marker + lines.slice(totalLines - count).join("\n"));
+          }
+          return withSubdirMemory(abs, lines.join("\n"));
+        }
+
+        // range wins over head/tail. Stop one line after the requested window
+        // so reading 20 lines from a huge file does not scan to EOF.
+        if (typeof args.range === "string" && /^\d+\s*-\s*\d+$/.test(args.range)) {
+          const [rawStart, rawEnd] = args.range.split("-").map((s) => Number.parseInt(s, 10));
+          const start = Math.max(1, rawStart ?? 1);
+          const requestedEnd = Math.max(start, rawEnd ?? start);
+          const window = await readLineWindow(fh, inspection, start, requestedEnd - start + 1);
+          const end = window.lines.length === 0 ? start : start + window.lines.length - 1;
+          const suffix = window.hasMore ? "; more lines below" : "; EOF";
+          return withSubdirMemory(
+            abs,
+            `[range ${start}-${end}${suffix}]\n${window.lines.join("\n")}`,
+          );
+        }
+        if (typeof args.head === "number" && args.head > 0) {
+          const window = await readLineWindow(fh, inspection, 1, Math.floor(args.head));
+          const marker = window.hasMore
+            ? `\n\n[…head ${window.lines.length} lines; more below — call again with range / tail for more]`
+            : "";
+          return withSubdirMemory(abs, window.lines.join("\n") + marker);
+        }
+        if (typeof args.tail === "number" && args.tail > 0) {
+          const tail = await readLineTail(fh, inspection, Math.floor(args.tail));
+          const marker =
+            tail.lines.length < tail.totalLines
+              ? `[…tail ${tail.lines.length} of ${tail.totalLines} lines — call again with range / head for more]\n\n`
+              : "";
+          return withSubdirMemory(abs, marker + tail.lines.join("\n"));
+        }
+
+        // Large unscoped reads scan at most OUTLINE_SCAN_LINES. This is the
+        // critical no-match fix: outline discovery can no longer turn one
+        // read_file call into an unbounded whole-file scan.
+        const window = await readLineWindow(fh, inspection, 1, OUTLINE_SCAN_LINES);
+        const collector = createOutlineCollector(abs);
+        for (let i = 0; i < window.lines.length; i++) collector.visit(window.lines[i]!, i + 1);
+        const headLines = window.lines.slice(0, OUTLINE_HEAD_LINES);
+        const outline = formatOutline(collector.entries);
+        const scanned = window.lines.length;
+        const parts: string[] = [
+          `[large file: ${formatBytes(sizeBytes)} — outline mode (threshold ${formatBytes(outlineThresholdBytes)}; scanned first ${scanned}${window.hasMore ? "+" : ""} lines)]`,
+          "",
+          `[head ${headLines.length} lines for orientation]`,
+          headLines.join("\n"),
+        ];
+        if (outline) parts.push("", outline);
+        parts.push(
+          "",
+          "[to read more, call one of:",
+          `  - read_file path:"${rel}" range:"A-B"          — 1-indexed line range`,
+          `  - read_file path:"${rel}" head:N  /  tail:N    — first/last N lines`,
+          `  - search_content path:"${rel}" pattern:"..."   — grep within this file]`,
+        );
+        return withSubdirMemory(abs, parts.join("\n"));
       } finally {
         await fh.close();
       }
-
-      if (looksBinary(raw)) {
-        return `[refused: ${rel} appears to be binary (${formatBytes(sizeBytes)}) — read_file returns text only. Use get_file_info for stat.]`;
-      }
-
-      const { text } = decodeFileBuffer(raw);
-      // Any successful read (full, range, head, tail, outline) marks the
-      // file as seen so the edit gate accepts subsequent edits. Partial-
-      // read mistakes still fail later via "search text not found".
-      ctx?.readTracker?.markRead(abs);
-      let lines = text.split(/\r?\n/);
-      // Most files end with '\n' which splits into an empty trailing
-      // entry; drop it so head/tail/range counts match the user's
-      // visible line numbers in an editor.
-      if (lines.length > 0 && lines[lines.length - 1] === "") lines = lines.slice(0, -1);
-      const totalLines = lines.length;
-
-      // range wins over head/tail when set — the most precise ask
-      // should dominate. Parse "A-B" strictly; bad formats fall through
-      // to head/tail / outline-mode instead of erroring.
-      if (typeof args.range === "string" && /^\d+\s*-\s*\d+$/.test(args.range)) {
-        const [rawStart, rawEnd] = args.range.split("-").map((s) => Number.parseInt(s, 10));
-        const start = Math.max(1, rawStart ?? 1);
-        const end = Math.min(totalLines, Math.max(start, rawEnd ?? totalLines));
-        const slice = lines.slice(start - 1, end);
-        const label = `[range ${start}-${end} of ${totalLines} lines]`;
-        return withSubdirMemory(abs, `${label}\n${slice.join("\n")}`);
-      }
-      if (typeof args.head === "number" && args.head > 0) {
-        const count = Math.min(args.head, totalLines);
-        const slice = lines.slice(0, count);
-        const marker =
-          count < totalLines
-            ? `\n\n[…head ${count} of ${totalLines} lines — call again with range / tail for more]`
-            : "";
-        return withSubdirMemory(abs, slice.join("\n") + marker);
-      }
-      if (typeof args.tail === "number" && args.tail > 0) {
-        const count = Math.min(args.tail, totalLines);
-        const slice = lines.slice(totalLines - count);
-        const marker =
-          count < totalLines
-            ? `[…tail ${count} of ${totalLines} lines — call again with range / head for more]\n\n`
-            : "";
-        return withSubdirMemory(abs, marker + slice.join("\n"));
-      }
-
-      // No explicit scope + file fits the threshold → full content.
-      // Trust the prompt cache: a 100K-token file read once amortizes
-      // across every turn of the same conversation.
-      if (sizeBytes <= outlineThresholdBytes) return withSubdirMemory(abs, lines.join("\n"));
-
-      // No explicit scope + file is over the threshold → outline mode.
-      // Return enough for the model to orient (head + symbol map) plus
-      // concrete next-step commands. Avoids dumping a 5 MB proto into
-      // every cached prefix while still surfacing what's inside.
-      const head = lines.slice(0, Math.min(OUTLINE_HEAD_LINES, totalLines)).join("\n");
-      const outline = formatOutline(extractOutline(abs, lines));
-      const parts: string[] = [
-        `[large file: ${formatBytes(sizeBytes)}, ${totalLines} lines — outline mode (threshold ${formatBytes(outlineThresholdBytes)})]`,
-        "",
-        `[head ${Math.min(OUTLINE_HEAD_LINES, totalLines)} lines for orientation]`,
-        head,
-      ];
-      if (outline) parts.push("", outline);
-      parts.push(
-        "",
-        "[to read more, call one of:",
-        `  - read_file path:"${rel}" range:"A-B"          — 1-indexed line range`,
-        `  - read_file path:"${rel}" head:N  /  tail:N    — first/last N lines`,
-        `  - search_content path:"${rel}" pattern:"..."   — grep within this file]`,
-      );
-      return withSubdirMemory(abs, parts.join("\n"));
     },
   });
 

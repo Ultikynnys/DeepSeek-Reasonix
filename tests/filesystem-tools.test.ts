@@ -195,6 +195,37 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toMatch(/search_content/);
     });
 
+    it("bounds a no-match large-file outline scan to the first 2000 lines", async () => {
+      const reg = new ToolRegistry();
+      registerFilesystemTools(reg, { rootDir: root, outlineThresholdBytes: 200 });
+      const lines = Array.from({ length: 10_000 }, (_, i) => `const local${i + 1} = ${i + 1};`);
+      lines[9_999] = "export function TooLateForPreview() {}";
+      await fs.writeFile(join(root, "generated.ts"), lines.join("\n"));
+
+      const out = await reg.dispatch("read_file", JSON.stringify({ path: "generated.ts" }));
+
+      expect(out).toMatch(/scanned first 2000\+ lines/);
+      expect(out).not.toContain("TooLateForPreview");
+      expect(out).not.toMatch(/\[outline:/);
+    });
+
+    it("streams a bounded range from a large file", async () => {
+      const reg = new ToolRegistry();
+      registerFilesystemTools(reg, { rootDir: root, outlineThresholdBytes: 200 });
+      const lines = Array.from({ length: 10_000 }, (_, i) => `line ${i + 1}`);
+      await fs.writeFile(join(root, "large-range.txt"), lines.join("\n"));
+
+      const out = await reg.dispatch(
+        "read_file",
+        JSON.stringify({ path: "large-range.txt", range: "3-5" }),
+      );
+
+      expect(out).toMatch(/^\[range 3-5; more lines below\]/);
+      expect(out).toContain("line 3\nline 4\nline 5");
+      expect(out).not.toContain("line 6");
+      expect(out).not.toContain("line 10000");
+    });
+
     it("returns full content for small files at or below the threshold", async () => {
       const out = await tools.dispatch("read_file", JSON.stringify({ path: "hello.txt" }));
       expect(out).toBe("line 1\nline 2\nline 3");

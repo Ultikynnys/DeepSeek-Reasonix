@@ -63,127 +63,82 @@ const EXT_TO_LANG: Record<string, Lang> = {
 };
 
 export function extractOutline(filename: string, lines: readonly string[]): OutlineEntry[] {
+  const collector = createOutlineCollector(filename);
+  for (let i = 0; i < lines.length; i++) collector.visit(lines[i]!, i + 1);
+  return collector.entries;
+}
+
+/** Incremental outline collector used by streaming read_file previews. */
+export function createOutlineCollector(filename: string): {
+  visit: (line: string, lineNo: number) => void;
+  entries: OutlineEntry[];
+} {
   const ext = pathMod.extname(filename).toLowerCase();
   const lang = EXT_TO_LANG[ext];
-  if (!lang) return [];
-  switch (lang) {
-    case "ts":
-      return extractTs(lines);
-    case "py":
-      return extractPython(lines);
-    case "go":
-      return extractGo(lines);
-    case "rust":
-      return extractRust(lines);
-    case "md":
-      return extractMarkdown(lines);
-    case "proto":
-      return extractProto(lines);
-    case "txt":
-      return extractText(lines);
-  }
-}
-
-function extractTs(lines: readonly string[]): OutlineEntry[] {
-  const out: OutlineEntry[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (!line.startsWith("export ")) continue;
-    const m = TS_EXPORT_RE.exec(line);
-    if (!m) continue;
-    out.push({ line: i + 1, text: `export ${m[1]} ${m[2]}` });
-  }
-  return out;
-}
-
-function extractPython(lines: readonly string[]): OutlineEntry[] {
-  const out: OutlineEntry[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (line.startsWith(" ") || line.startsWith("\t")) continue;
-    const m = PY_DECL_RE.exec(line);
-    if (!m) continue;
-    out.push({ line: i + 1, text: `${m[1]} ${m[2]}` });
-  }
-  return out;
-}
-
-function extractGo(lines: readonly string[]): OutlineEntry[] {
-  const out: OutlineEntry[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (line.startsWith(" ") || line.startsWith("\t")) continue;
-    const m = GO_DECL_RE.exec(line);
-    if (!m) continue;
-    out.push({ line: i + 1, text: `${m[1]} ${m[2]}` });
-  }
-  return out;
-}
-
-function extractRust(lines: readonly string[]): OutlineEntry[] {
-  const out: OutlineEntry[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (line.startsWith(" ") || line.startsWith("\t")) continue;
-    const implMatch = RUST_IMPL_RE.exec(line);
-    if (implMatch) {
-      out.push({ line: i + 1, text: `impl ${implMatch[1]}` });
-      continue;
-    }
-    const m = RUST_DECL_RE.exec(line);
-    if (!m) continue;
-    out.push({ line: i + 1, text: `${m[1]} ${m[2]}` });
-  }
-  return out;
-}
-
-function extractProto(lines: readonly string[]): OutlineEntry[] {
-  const out: OutlineEntry[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (!line.startsWith(" ") && !line.startsWith("\t")) {
-      const m = PROTO_TOP_RE.exec(line);
-      if (m) {
-        out.push({ line: i + 1, text: `${m[1]} ${m[2]}` });
-        continue;
+  const entries: OutlineEntry[] = [];
+  let inMarkdownFence = false;
+  const visit = (line: string, lineNo: number): void => {
+    let text: string | null = null;
+    switch (lang) {
+      case "ts": {
+        if (!line.startsWith("export ")) break;
+        const match = TS_EXPORT_RE.exec(line);
+        if (match) text = `export ${match[1]} ${match[2]}`;
+        break;
       }
-    }
-    const rpc = PROTO_RPC_RE.exec(line);
-    if (rpc) out.push({ line: i + 1, text: `rpc ${rpc[1]}` });
-  }
-  return out;
-}
-
-function extractText(lines: readonly string[]): OutlineEntry[] {
-  const out: OutlineEntry[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!.trim();
-    if (line.length === 0 || line.length > 100) continue;
-    for (const re of TXT_CHAPTER_PATTERNS) {
-      if (re.test(line)) {
-        out.push({ line: i + 1, text: line });
+      case "py": {
+        if (line.startsWith(" ") || line.startsWith("\t")) break;
+        const match = PY_DECL_RE.exec(line);
+        if (match) text = `${match[1]} ${match[2]}`;
+        break;
+      }
+      case "go": {
+        if (line.startsWith(" ") || line.startsWith("\t")) break;
+        const match = GO_DECL_RE.exec(line);
+        if (match) text = `${match[1]} ${match[2]}`;
+        break;
+      }
+      case "rust": {
+        if (line.startsWith(" ") || line.startsWith("\t")) break;
+        const implMatch = RUST_IMPL_RE.exec(line);
+        if (implMatch) text = `impl ${implMatch[1]}`;
+        else {
+          const match = RUST_DECL_RE.exec(line);
+          if (match) text = `${match[1]} ${match[2]}`;
+        }
+        break;
+      }
+      case "md": {
+        if (MD_FENCE_RE.test(line)) {
+          inMarkdownFence = !inMarkdownFence;
+          break;
+        }
+        if (inMarkdownFence) break;
+        const match = MD_HEADING_RE.exec(line);
+        if (match) text = `${match[1]} ${match[2]}`;
+        break;
+      }
+      case "proto": {
+        if (!line.startsWith(" ") && !line.startsWith("\t")) {
+          const match = PROTO_TOP_RE.exec(line);
+          if (match) text = `${match[1]} ${match[2]}`;
+        }
+        if (text === null) {
+          const rpc = PROTO_RPC_RE.exec(line);
+          if (rpc) text = `rpc ${rpc[1]}`;
+        }
+        break;
+      }
+      case "txt": {
+        const trimmed = line.trim();
+        if (trimmed.length === 0 || trimmed.length > 100) break;
+        if (TXT_CHAPTER_PATTERNS.some((pattern) => pattern.test(trimmed))) text = trimmed;
         break;
       }
     }
-  }
-  return out;
-}
-
-function extractMarkdown(lines: readonly string[]): OutlineEntry[] {
-  const out: OutlineEntry[] = [];
-  let inFence = false;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (MD_FENCE_RE.test(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-    const m = MD_HEADING_RE.exec(line);
-    if (!m) continue;
-    out.push({ line: i + 1, text: `${m[1]} ${m[2]}` });
-  }
-  return out;
+    if (text !== null) entries.push({ line: lineNo, text });
+  };
+  return { visit, entries };
 }
 
 export function formatOutline(entries: readonly OutlineEntry[]): string {
