@@ -394,6 +394,10 @@ export class DeepSeekClient {
     accessToken: string;
     projectId?: string;
   } | null>;
+  /** True when constructed as an Antigravity endpoint (geminiAuthResolver set):
+   *  the endpoint config decides the wire format; account-specific and
+   *  uncataloged ids carry no provider signal, so the name never routes. */
+  private readonly geminiMode: boolean;
   private nextChatRequestAt = 0;
 
   /** What was last sent per Ollama model, for cache-prefix inference. */
@@ -419,6 +423,9 @@ export class DeepSeekClient {
     this.apiKeyResolver = opts.apiKeyResolver;
     this.transportResolver = opts.transportResolver;
     this.geminiAuthResolver = opts.geminiAuthResolver;
+    // A configured Antigravity auth resolver declares this client's endpoint
+    // — wire-format routing follows the endpoint, not the model id's name.
+    this.geminiMode = this.geminiAuthResolver !== undefined;
     let url = opts.baseUrl ?? resolveBaseUrlEnv() ?? "https://api.deepseek.com";
     // Manual trim — `/\/+$/` is O(n²) on slash-heavy non-matches per CodeQL js/polynomial-redos.
     while (url.endsWith("/")) url = url.slice(0, -1);
@@ -690,6 +697,7 @@ export class DeepSeekClient {
 
   /** Provider brand persisted in thrown HTTP errors and consumed by formatLoopError. */
   private _errorPrefix(model: string): string {
+    if (this.geminiMode) return "Antigravity";
     switch (providerForModel(model)) {
       case "deepseek":
         return "DeepSeek";
@@ -750,7 +758,7 @@ export class DeepSeekClient {
     if (providerForModel(opts.model) === "ollama") {
       return this.chatOllama(opts);
     }
-    if (providerForModel(opts.model) === "gemini") {
+    if (this.geminiMode || providerForModel(opts.model) === "gemini") {
       return this.chatGemini(opts);
     }
     const { signal, timer } = this.withTimeout(opts.signal);
@@ -1407,7 +1415,7 @@ export class DeepSeekClient {
       yield* this.streamOllama(opts);
       return;
     }
-    if (providerForModel(opts.model) === "gemini") {
+    if (this.geminiMode || providerForModel(opts.model) === "gemini") {
       yield* this.streamGemini(opts);
       return;
     }

@@ -302,6 +302,34 @@ describe("gemini payload", () => {
     );
   });
 
+  it("routes an uncataloged id through the gemini wire when the endpoint is antigravity-configured", async () => {
+    // The id matches no catalog, no discovery, and no config mapping: the name
+    // says nothing about its provider. The client was CONSTRUCTED as an
+    // Antigravity endpoint (geminiAuthResolver) — the endpoint config decides
+    // the wire format, never the name.
+    let captured: { url: string; body: unknown } | null = null;
+    const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      captured = { url: String(url), body: JSON.parse(init?.body as string) };
+      return new Response(JSON.stringify(wrappedResponse([{ text: "ok" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "some-gateway-model-42",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const body = captured?.body as { model: string; request: { contents: unknown[] } };
+    expect(captured?.url).toBe(
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent",
+    );
+    expect(body.model).toBe("some-gateway-model-42");
+    expect(body.request.contents).toHaveLength(1);
+  });
+
   it("only sends explicit thinking config to Gemini models", async () => {
     const bodies: Array<{ request: Record<string, unknown> }> = [];
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
