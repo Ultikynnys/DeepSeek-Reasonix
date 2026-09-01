@@ -14,6 +14,17 @@ export const THEME_STYLE = {
   SANDSTONE: "sandstone",
   PORCELAIN: "porcelain",
   MIDNIGHT: "midnight",
+  OBSIDIAN: "obsidian",
+  FOREST: "forest",
+  EMBER: "ember",
+  OCEAN: "ocean",
+  ROSE: "rose",
+  PAPER: "paper",
+  LINEN: "linen",
+  MINT: "mint",
+  SKY: "sky",
+  BLUSH: "blush",
+  MIST: "mist",
 } as const;
 
 export type ThemeStyle = (typeof THEME_STYLE)[keyof typeof THEME_STYLE];
@@ -28,6 +39,17 @@ export const THEME_STYLE_THEME: Record<ThemeStyle, Theme> = {
   sandstone: THEME.LIGHT,
   porcelain: THEME.LIGHT,
   midnight: THEME.DARK,
+  obsidian: THEME.DARK,
+  forest: THEME.DARK,
+  ember: THEME.DARK,
+  ocean: THEME.DARK,
+  rose: THEME.DARK,
+  paper: THEME.LIGHT,
+  linen: THEME.LIGHT,
+  mint: THEME.LIGHT,
+  sky: THEME.LIGHT,
+  blush: THEME.LIGHT,
+  mist: THEME.LIGHT,
 };
 
 export const THEME_STYLES = [
@@ -35,6 +57,17 @@ export const THEME_STYLES = [
   THEME_STYLE.SANDSTONE,
   THEME_STYLE.PORCELAIN,
   THEME_STYLE.MIDNIGHT,
+  THEME_STYLE.OBSIDIAN,
+  THEME_STYLE.FOREST,
+  THEME_STYLE.EMBER,
+  THEME_STYLE.OCEAN,
+  THEME_STYLE.ROSE,
+  THEME_STYLE.PAPER,
+  THEME_STYLE.LINEN,
+  THEME_STYLE.MINT,
+  THEME_STYLE.SKY,
+  THEME_STYLE.BLUSH,
+  THEME_STYLE.MIST,
 ] as const;
 
 export function isThemeStyle(value: unknown): value is ThemeStyle {
@@ -42,7 +75,18 @@ export function isThemeStyle(value: unknown): value is ThemeStyle {
     value === THEME_STYLE.GRAPHITE ||
     value === THEME_STYLE.SANDSTONE ||
     value === THEME_STYLE.PORCELAIN ||
-    value === THEME_STYLE.MIDNIGHT
+    value === THEME_STYLE.MIDNIGHT ||
+    value === THEME_STYLE.OBSIDIAN ||
+    value === THEME_STYLE.FOREST ||
+    value === THEME_STYLE.EMBER ||
+    value === THEME_STYLE.OCEAN ||
+    value === THEME_STYLE.ROSE ||
+    value === THEME_STYLE.PAPER ||
+    value === THEME_STYLE.LINEN ||
+    value === THEME_STYLE.MINT ||
+    value === THEME_STYLE.SKY ||
+    value === THEME_STYLE.BLUSH ||
+    value === THEME_STYLE.MIST
   );
 }
 
