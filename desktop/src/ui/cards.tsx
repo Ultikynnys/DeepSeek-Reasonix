@@ -569,13 +569,14 @@ export function ToolCard({
   const fileRef = useMemo(() => extractToolFileRef(args), [args]);
   const running = result === undefined;
   const tone: Tone = running ? "default" : ok === false ? "danger" : "success";
-  // web_search results carry the engine that actually served the call
-  // (resolved from config at call time) — surface it in the header.
+  // Web tool results (web_search, web_fetch, …) carry the engine that
+  // served the call (resolved from config at call time) as an `engine:`
+  // line — surface it in the header. No per-tool special-casing.
   const engine = useMemo(() => {
-    if (name !== "web_search" || !result) return undefined;
+    if (!result) return undefined;
     const m = /^engine:\s*(\S+)/m.exec(result);
     return m?.[1];
-  }, [name, result]);
+  }, [result]);
   return (
     <Card
       tone={tone}

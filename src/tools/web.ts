@@ -1287,7 +1287,9 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
       if (!/^https?:\/\//i.test(args.url)) {
         throw new Error(t("webErrors.fetchInvalidUrl"));
       }
-      if (loadWebSearchEngine(opts.configPath) === "ollama") {
+      // Read at call time, not registration time — `/search-engine` mutates config mid-session (#1309).
+      const engine = loadWebSearchEngine(opts.configPath);
+      if (engine === "ollama") {
         const page = await webFetchOllama(args.url, {
           maxChars: maxFetchChars,
           signal: ctx?.signal,
@@ -1295,11 +1297,11 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
         });
         const header = page.title ? `${page.title}\n${page.url}` : page.url;
         const links = page.links?.length ? `\n\nlinks:\n${page.links.join("\n")}` : "";
-        return `${header}\n\n${page.text}${links}`;
+        return `engine: ${engine}\n\n${header}\n\n${page.text}${links}`;
       }
       const page = await webFetch(args.url, { maxChars: maxFetchChars, signal: ctx?.signal });
       const header = page.title ? `${page.title}\n${page.url}` : page.url;
-      return `${header}\n\n${page.text}`;
+      return `engine: ${engine}\n\n${header}\n\n${page.text}`;
     },
   });
 

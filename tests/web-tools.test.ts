@@ -1415,6 +1415,7 @@ describe("registerWebTools", () => {
       expect(out).toContain("Demo");
       expect(out).toContain("https://example.com/");
       expect(out).toContain("Hello world.");
+      expect(out).toContain("engine: bing");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1485,6 +1486,7 @@ describe("registerWebTools", () => {
       expect(out).toContain("Fetched");
       expect(out).toContain("Fetched content");
       expect(out).toContain("https://example.com/next");
+      expect(out).toContain("engine: ollama");
     } finally {
       globalThis.fetch = originalFetch;
     }

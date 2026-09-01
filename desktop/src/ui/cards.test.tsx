@@ -106,7 +106,7 @@ describe("ToolCard — show-in-explorer button", () => {
     expect(screen.queryByRole("button", { name: /^src\// })).toBeNull();
   });
 
-  it("shows the search engine pill for web_search results", () => {
+  it("shows the engine pill for web_search results", () => {
     render(
       wrap(
         <ToolCard
@@ -122,7 +122,23 @@ describe("ToolCard — show-in-explorer button", () => {
     expect(header.textContent).toContain("bing");
   });
 
-  it("shows no engine pill for non-web_search tools", () => {
+  it("shows the engine pill for web_fetch results too", () => {
+    render(
+      wrap(
+        <ToolCard
+          name="web_fetch"
+          args={JSON.stringify({ url: "https://example.com/" })}
+          result={"engine: ollama\n\nFetched\nhttps://example.com/\n\ncontent"}
+          ok
+        />,
+      ),
+    );
+
+    const header = screen.getByRole("button", { name: /web_fetch/ });
+    expect(header.textContent).toContain("ollama");
+  });
+
+  it("shows no engine pill when the result has no engine line", () => {
     const { container } = render(
       wrap(
         <ToolCard
