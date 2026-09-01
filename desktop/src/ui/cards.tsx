@@ -571,6 +571,13 @@ export function ToolCard({
   const fileRef = useMemo(() => extractToolFileRef(args), [args]);
   const running = result === undefined;
   const tone: Tone = running ? "default" : ok === false ? "danger" : "success";
+  // web_search results carry the engine that actually served the call
+  // (resolved from config at call time) — surface it in the header.
+  const engine = useMemo(() => {
+    if (name !== "web_search" || !result) return undefined;
+    const m = /^engine:\s*(\S+)/m.exec(result);
+    return m?.[1];
+  }, [name, result]);
   return (
     <Card
       tone={tone}
@@ -591,6 +598,7 @@ export function ToolCard({
           {!running && durationMs !== undefined ? (
             <span className="meta-dur">{durationMs} ms</span>
           ) : null}
+          {engine ? <span className="pill-tag ok">{engine}</span> : null}
         </>
       }
       headRight={
@@ -815,44 +823,7 @@ export function ErrorCard({
   );
 }
 
-// ---- Search results ----
 
-export type SearchHit = { url: string; title: string; snippet: string };
-
-export function WebSearchCard({ query, results }: { query: string; results: SearchHit[] }) {
-  useLang();
-  return (
-    <Card
-      tone="default"
-      icon={<I.globe size={12} />}
-      kind="web_search"
-      name={t("cards.searchName")}
-      meta={
-        <>
-          <span>"{query}"</span>
-          <span className="pill-tag ok">
-            {results.length} {t("cards.hits")}
-          </span>
-        </>
-      }
-    >
-      <div className="search-results">
-        {results.map((r) => (
-          <div className="search-result" key={r.url}>
-            <div className="url">
-              <span className="favicon" />
-              <span>{r.url}</span>
-            </div>
-            <div className="title">{r.title}</div>
-            <div className="snippet">{r.snippet}</div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-// ---- Subagent ----
 
 export const SUBAGENT_TOOLS = new Set([
   "explore",

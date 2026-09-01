@@ -109,6 +109,36 @@ describe("ToolCard — open-in-editor button", () => {
     expect(screen.queryByRole("button", { name: /npm test/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^src\// })).toBeNull();
   });
+
+  it("shows the search engine pill for web_search results", () => {
+    render(
+      wrap(
+        <ToolCard
+          name="web_search"
+          args={JSON.stringify({ query: "flutter 3.19" })}
+          result={"query: flutter 3.19\nengine: bing\nresults (2):\n1. One\n   https://one"}
+          ok
+        />,
+      ),
+    );
+
+    const header = screen.getByRole("button", { name: /web_search/ });
+    expect(header.textContent).toContain("bing");
+  });
+
+  it("shows no engine pill for non-web_search tools", () => {
+    const { container } = render(
+      wrap(
+        <ToolCard
+          name="run_command"
+          args={JSON.stringify({ command: "npm test" })}
+          result="✓"
+          ok
+        />,
+      ),
+    );
+    expect(container.querySelector(".pill-tag")).toBeNull();
+  });
 });
 
 describe("SubagentCard — model visibility", () => {

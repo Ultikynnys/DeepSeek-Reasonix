@@ -1266,7 +1266,7 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
         endpoint,
         configPath: opts.configPath,
       });
-      return formatSearchResults(args.query, results);
+      return formatSearchResults(args.query, results, engine);
     },
   });
 
@@ -1306,8 +1306,13 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
   return registry;
 }
 
-export function formatSearchResults(query: string, results: SearchResult[]): string {
+export function formatSearchResults(
+  query: string,
+  results: SearchResult[],
+  engine?: string,
+): string {
   const lines: string[] = [`query: ${query}`];
+  if (engine) lines.push(`engine: ${engine}`);
 
   // Check if the first result carries an AI answer (Perplexity/Exa)
   const hasAnswer = results.length > 0 && results[0]?.url === "" && results[0]?.answer;

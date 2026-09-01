@@ -1326,6 +1326,20 @@ describe("formatSearchResults", () => {
     expect(out).toMatch(/2\. Two/);
   });
 
+  it("renders the engine line when one is provided", () => {
+    const out = formatSearchResults(
+      "hello",
+      [{ title: "One", url: "https://one", snippet: "" }],
+      "tavily",
+    );
+    expect(out).toMatch(/query: hello\nengine: tavily/);
+  });
+
+  it("omits the engine line when none is provided", () => {
+    const out = formatSearchResults("hello", [{ title: "One", url: "https://one", snippet: "" }]);
+    expect(out).not.toMatch(/engine:/);
+  });
+
   it("renders answer + sources dual-section when an AI answer is present", () => {
     const out = formatSearchResults("hello", [
       { title: "An AI answer.", url: "", snippet: "", answer: "An AI answer." },
@@ -1374,6 +1388,7 @@ describe("registerWebTools", () => {
         JSON.stringify({ query: "flutter 3.19", topK: 2 }),
       );
       expect(out).toContain("query: flutter 3.19");
+      expect(out).toContain("engine: bing");
       expect(out).toContain("https://example.com/a");
       expect(out).toContain("snippet A");
     } finally {
