@@ -206,8 +206,8 @@ body[data-drag-over="1"]::after {
   --success-soft: oklch(70% 0.14 150 / 0.14);
   --warning: oklch(78% 0.14 85);
   --warning-soft: oklch(78% 0.14 85 / 0.16);
-  --danger: oklch(66% 0.18 25);
-  --danger-soft: oklch(66% 0.18 25 / 0.16);
+  --danger: oklch(66% 0.18 20);
+  --danger-soft: oklch(66% 0.18 20 / 0.16);
   --violet: oklch(74% 0.13 300);
   --violet-soft: oklch(74% 0.13 300 / 0.16);
 
@@ -238,8 +238,8 @@ body[data-drag-over="1"]::after {
   --success-soft: oklch(72% 0.15 150 / 0.14);
   --warning: oklch(80% 0.13 90);
   --warning-soft: oklch(80% 0.13 90 / 0.16);
-  --danger: oklch(68% 0.17 25);
-  --danger-soft: oklch(68% 0.17 25 / 0.16);
+  --danger: oklch(68% 0.17 35);
+  --danger-soft: oklch(68% 0.17 35 / 0.16);
   --violet: oklch(74% 0.12 280);
   --violet-soft: oklch(74% 0.12 280 / 0.16);
 
@@ -270,8 +270,8 @@ body[data-drag-over="1"]::after {
   --success-soft: oklch(70% 0.14 145 / 0.14);
   --warning: oklch(80% 0.14 80);
   --warning-soft: oklch(80% 0.14 80 / 0.16);
-  --danger: oklch(68% 0.18 30);
-  --danger-soft: oklch(68% 0.18 30 / 0.16);
+  --danger: oklch(70% 0.18 45);
+  --danger-soft: oklch(70% 0.18 45 / 0.16);
   --violet: oklch(72% 0.12 300);
   --violet-soft: oklch(72% 0.12 300 / 0.16);
 
@@ -302,8 +302,8 @@ body[data-drag-over="1"]::after {
   --success-soft: oklch(70% 0.13 160 / 0.14);
   --warning: oklch(78% 0.13 90);
   --warning-soft: oklch(78% 0.13 90 / 0.16);
-  --danger: oklch(66% 0.17 25);
-  --danger-soft: oklch(66% 0.17 25 / 0.16);
+  --danger: oklch(66% 0.17 15);
+  --danger-soft: oklch(66% 0.17 15 / 0.16);
   --violet: oklch(74% 0.12 280);
   --violet-soft: oklch(74% 0.12 280 / 0.16);
 
@@ -334,8 +334,8 @@ body[data-drag-over="1"]::after {
   --success-soft: oklch(70% 0.14 150 / 0.14);
   --warning: oklch(78% 0.14 85);
   --warning-soft: oklch(78% 0.14 85 / 0.16);
-  --danger: oklch(68% 0.18 20);
-  --danger-soft: oklch(68% 0.18 20 / 0.16);
+  --danger: oklch(68% 0.18 10);
+  --danger-soft: oklch(68% 0.18 10 / 0.16);
   --violet: oklch(74% 0.13 320);
   --violet-soft: oklch(74% 0.13 320 / 0.16);
 
@@ -398,8 +398,8 @@ body[data-drag-over="1"]::after {
   --success-soft: oklch(48% 0.13 150 / 0.1);
   --warning: oklch(56% 0.14 80);
   --warning-soft: oklch(56% 0.14 80 / 0.12);
-  --danger: oklch(54% 0.19 30);
-  --danger-soft: oklch(54% 0.19 30 / 0.1);
+  --danger: oklch(56% 0.19 40);
+  --danger-soft: oklch(56% 0.19 40 / 0.1);
   --violet: oklch(58% 0.13 300);
   --violet-soft: oklch(58% 0.13 300 / 0.1);
 
@@ -430,8 +430,8 @@ body[data-drag-over="1"]::after {
   --success-soft: oklch(48% 0.15 155 / 0.1);
   --warning: oklch(58% 0.14 85);
   --warning-soft: oklch(58% 0.14 85 / 0.12);
-  --danger: oklch(54% 0.2 25);
-  --danger-soft: oklch(54% 0.2 25 / 0.1);
+  --danger: oklch(50% 0.16 35);
+  --danger-soft: oklch(50% 0.16 35 / 0.1);
   --violet: oklch(58% 0.12 280);
   --violet-soft: oklch(58% 0.12 280 / 0.1);
 
@@ -462,8 +462,8 @@ body[data-drag-over="1"]::after {
   --success-soft: oklch(48% 0.13 160 / 0.1);
   --warning: oklch(58% 0.14 85);
   --warning-soft: oklch(58% 0.14 85 / 0.12);
-  --danger: oklch(54% 0.2 25);
-  --danger-soft: oklch(54% 0.2 25 / 0.1);
+  --danger: oklch(52% 0.18 15);
+  --danger-soft: oklch(52% 0.18 15 / 0.1);
   --violet: oklch(58% 0.13 285);
   --violet-soft: oklch(58% 0.13 285 / 0.1);
 
@@ -494,8 +494,8 @@ body[data-drag-over="1"]::after {
   --success-soft: oklch(48% 0.13 155 / 0.1);
   --warning: oklch(58% 0.14 80);
   --warning-soft: oklch(58% 0.14 80 / 0.12);
-  --danger: oklch(56% 0.2 20);
-  --danger-soft: oklch(56% 0.2 20 / 0.1);
+  --danger: oklch(56% 0.2 10);
+  --danger-soft: oklch(56% 0.2 10 / 0.1);
   --violet: oklch(58% 0.13 320);
   --violet-soft: oklch(58% 0.13 320 / 0.1);
 
@@ -3413,10 +3413,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  background: oklch(10% 0.006 255);
-}
-[data-theme="light"] .shell .cmd {
-  background: oklch(94% 0.006 255);
+  background: var(--bg);
 }
 .shell .cmd .prompt {
   color: var(--accent);
@@ -3471,9 +3468,6 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   padding: 10px 12px;
   background: var(--warning-soft);
   border-top: 1px solid var(--border);
-}
-[data-theme="light"] .approve-row {
-  background: oklch(98% 0.02 75);
 }
 .approve-row .why {
   font-size: 14px;
@@ -4299,6 +4293,13 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .send-btn:hover {
   background: var(--accent-strong);
+}
+.send-btn.danger {
+  background: var(--danger);
+}
+.send-btn.danger:hover {
+  background: var(--danger);
+  filter: brightness(1.12);
 }
 .send-btn[disabled] {
   background: var(--panel-2);
