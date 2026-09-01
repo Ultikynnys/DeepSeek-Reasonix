@@ -72,7 +72,7 @@ describe("desktop Composer model catalog", () => {
     expect(onRefreshAntigravityModels).toHaveBeenCalledOnce();
   });
 
-  it("renders a subagent model column that shares the main-agent catalog (DRY)", () => {
+  it("renders a subagent model menu that shares the main-agent catalog (DRY)", () => {
     const onModelChange = vi.fn();
     const onSubagentModelChange = vi.fn();
     const { container } = renderComposer({
@@ -80,26 +80,21 @@ describe("desktop Composer model catalog", () => {
       onModelChange,
       onSubagentModelChange,
     });
+
+    // Main-agent menu exposes the catalog.
     fireEvent.click(container.querySelector(".model-pill")!);
+    const mainList = container.querySelector(".model-menu-list");
+    expect(mainList?.textContent).toContain("deepseek-v4-flash");
+    expect(mainList?.textContent).toContain("deepseek-v4-pro");
 
-    // Two model columns render the same catalog — one per selector.
-    const lists = container.querySelectorAll(".model-menu-list");
-    expect(lists.length).toBe(2);
+    // The subagent menu is its own button with the same catalog (DRY).
+    fireEvent.click(container.querySelector(".subagent-pill")!);
+    const subList = container.querySelector(".model-menu-list");
+    expect(subList?.textContent).toContain("deepseek-v4-flash");
+    expect(subList?.textContent).toContain("deepseek-v4-pro");
 
-    // Both expose the same KNOWN_MODELS (the DRY requirement).
-    const mainText = lists[0]?.textContent ?? "";
-    const subText = lists[1]?.textContent ?? "";
-    expect(mainText).toContain("deepseek-v4-flash");
-    expect(subText).toContain("deepseek-v4-flash");
-    expect(subText).toContain("deepseek-v4-pro");
-
-    // Column headers distinguish the two selectors.
-    expect(container.textContent).toContain("Main agent");
-    expect(container.textContent).toContain("Subagent");
-
-    // Clicking a model in the subagent column routes to onSubagentModelChange.
-    const subItems = lists[1]!.querySelectorAll(".popup-item");
-    const flash = Array.from(subItems).find((el) =>
+    // Clicking a model in the subagent menu routes to onSubagentModelChange.
+    const flash = Array.from(subList!.querySelectorAll(".popup-item")).find((el) =>
       el.textContent?.includes("deepseek-v4-flash"),
     );
     fireEvent.click(flash!);
@@ -107,7 +102,7 @@ describe("desktop Composer model catalog", () => {
     expect(onModelChange).not.toHaveBeenCalled();
   });
 
-  it("subagent column shares the backend-generated Ollama and Gemini models with the main agent", () => {
+  it("subagent menu shares the backend-generated Ollama and Gemini models with the main agent", () => {
     const ollamaModels = ["llama3.1:latest", "qwen3:32b", "llava"];
     const antigravityModels = ["gemini-2.5-pro", "gemini-2.5-flash", "claude-3-5-sonnet"];
     const { container } = renderComposer({
@@ -115,14 +110,14 @@ describe("desktop Composer model catalog", () => {
       ollamaModels,
       antigravityModels,
     });
+
     fireEvent.click(container.querySelector(".model-pill")!);
+    const mainText = container.querySelector(".model-menu-list")?.textContent ?? "";
 
-    const lists = container.querySelectorAll(".model-menu-list");
-    expect(lists.length).toBe(2);
-    const mainText = lists[0]?.textContent ?? "";
-    const subText = lists[1]?.textContent ?? "";
+    fireEvent.click(container.querySelector(".subagent-pill")!);
+    const subText = container.querySelector(".model-menu-list")?.textContent ?? "";
 
-    // The subagent column carries the SAME backend-fetched models as the main
+    // The subagent menu carries the SAME backend-fetched models as the main
     // agent — Ollama catalog ids and the signed-in Antigravity/Gemini ids.
     for (const id of [...ollamaModels, ...antigravityModels]) {
       expect(mainText).toContain(id);

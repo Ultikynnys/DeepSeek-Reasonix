@@ -4273,12 +4273,11 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .composer-foot .model-pill:hover {
   background: var(--panel-2);
 }
-.composer-foot .model-pill .badge {
-  font-size: 14px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  padding: 1px 5px;
-  border-radius: 3px;
+.composer-foot .model-pill.subagent-pill {
+  max-width: 200px;
+}
+.composer-foot .model-pill.effort-pill {
+  max-width: 110px;
 }
 
 .send-btn {
@@ -4431,37 +4430,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   padding-inline: clamp(6px, 1.5vw, 12px);
   font-size: clamp(10px, 1.7vw, 14px);
 }
-.model-menu-cols {
-  display: flex;
-  gap: 6px;
-  padding: 4px;
-}
-.model-menu-col {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.model-menu-col-head {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--muted);
-  padding: 4px 6px 5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* The reasoning-effort column holds short items — keep it narrow next to the
-   two model columns so it doesn't hog the popup width. */
-.model-menu-col.model-menu-effort-col {
-  flex: 0 1 220px;
-}
-.model-menu-col + .model-menu-col {
-  border-left: 1px solid var(--border);
-  padding-left: 6px;
-}
-.model-menu-col .popup-list {
+.model-menu-list {
   max-height: 460px;
 }
 /* Compact the shared model rows (main-agent + subagent columns) so each

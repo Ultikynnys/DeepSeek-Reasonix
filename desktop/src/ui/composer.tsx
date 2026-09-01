@@ -1,7 +1,6 @@
 import {
   ANTIGRAVITY_MODELS,
   KNOWN_MODELS,
-  SUPPORTED_IMAGE_EXTENSIONS,
   modelAcceptsImages,
 } from "@reasonix/core-utils";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
@@ -234,8 +233,12 @@ export function Composer({
   const [popup, setPopup] = useState<Popup>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [subagentMenuOpen, setSubagentMenuOpen] = useState(false);
+  const [effortMenuOpen, setEffortMenuOpen] = useState(false);
   const nonceRef = useRef(0);
   const modelWrapRef = useRef<HTMLDivElement>(null);
+  const subagentWrapRef = useRef<HTMLDivElement>(null);
+  const effortWrapRef = useRef<HTMLDivElement>(null);
   // macOS Chinese IME fires compositionend BEFORE the confirm keydown.
   const composingRef = useRef(false);
   const compositionEndedAtRef = useRef(0);
@@ -277,43 +280,34 @@ export function Composer({
   }, [draft]);
 
   useEffect(() => {
-    if (!modelMenuOpen) return;
+    if (!modelMenuOpen && !subagentMenuOpen && !effortMenuOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (modelWrapRef.current && !modelWrapRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inside =
+        (modelWrapRef.current?.contains(target) ?? false) ||
+        (subagentWrapRef.current?.contains(target) ?? false) ||
+        (effortWrapRef.current?.contains(target) ?? false);
+      if (!inside) {
         setModelMenuOpen(false);
+        setSubagentMenuOpen(false);
+        setEffortMenuOpen(false);
       }
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
-  }, [modelMenuOpen]);
+  }, [modelMenuOpen, subagentMenuOpen, effortMenuOpen]);
 
-  const attachFile = async (filter?: "image") => {
+  const attachFile = async () => {
     try {
       const picked = await openFileDialog({
         multiple: false,
         directory: false,
         defaultPath: workspaceDir,
-        filters:
-          filter === "image"
-            ? [
-                {
-                  name: t("composer.imageFilterName"),
-                  // Only raster formats the daemon reads (png/jpg/jpeg/webp) go
-                  // down the vision path; keep the wider list for @-mentions.
-                  extensions: imageCapable
-                    ? [...SUPPORTED_IMAGE_EXTENSIONS]
-                    : ["png", "jpg", "jpeg", "gif", "webp", "svg"],
-                },
-              ]
-            : undefined,
       });
       if (typeof picked !== "string" || !picked) return;
-      // gif/svg fall back to an @-mention (matching drag-drop) so a send can
-      // never abort on a pick the daemon's accept-list doesn't read.
-      if (filter === "image" && imageCapable && onPickImage && isImagePath(picked)) {
-        onPickImage(picked);
-        return;
-      }
+      // insertMention detects image files: on a vision-capable model the
+      // picked image attaches as a pending image, anything else becomes an
+      // @-mention — one button covers both.
       insertMention(picked);
     } catch (err) {
       console.error("attach failed", err);
@@ -561,6 +555,18 @@ export function Composer({
     }
   };
 
+  const modelListProps = {
+    ollamaModels,
+    ollamaModelsError,
+    ollamaHiddenCount,
+    ollamaVisionModels,
+    antigravityModels,
+    antigravityModelsError,
+    customModels,
+    onRefreshOllamaModels,
+    onRefreshAntigravityModels,
+  };
+
   return (
     <div className="composer-wrap">
       <div className="composer-inner">
@@ -698,39 +704,6 @@ export function Composer({
                 <I.paperclip size={14} />
               </span>
             </button>
-            <button
-              type="button"
-              className="cf-btn"
-              title={t("composer.insertImage")}
-              onClick={() => void attachFile("image")}
-            >
-              <span className="ico">
-                <I.image size={14} />
-              </span>
-            </button>
-            <button
-              type="button"
-              className="cf-btn"
-              onClick={() => setPopup({ kind: "slash", query: "" })}
-            >
-              <span className="ico">
-                <I.slash size={14} />
-              </span>
-              <span className="label">{t("composer.commandsLabel")}</span>
-            </button>
-            <button
-              type="button"
-              className="cf-btn"
-              onClick={() => {
-                const nonce = ++nonceRef.current;
-                setPopup({ kind: "at", query: "", nonce });
-              }}
-            >
-              <span className="ico">
-                <I.at size={14} />
-              </span>
-              <span className="label">{t("composer.mentionLabel")}</span>
-            </button>
 
             <span className="grow" />
 
@@ -738,41 +711,113 @@ export function Composer({
               <button
                 type="button"
                 className="model-pill"
-                onClick={() => setModelMenuOpen((v) => !v)}
+                onClick={() => {
+                  setModelMenuOpen((v) => !v);
+                  setSubagentMenuOpen(false);
+                  setEffortMenuOpen(false);
+                }}
                 title={t("composer.switchModel")}
               >
                 <I.brain size={12} />
                 <span>{modelLabel}</span>
-                <span className="badge">{reasoningEffort}</span>
                 <I.chev size={10} />
               </button>
               {modelMenuOpen ? (
-                <ModelEffortMenu
-                  modelLabel={modelLabel}
-                  subagentModelLabel={subagentModelLabel}
-                  currentEffort={reasoningEffort}
-                  ollamaModels={ollamaModels}
-                  ollamaModelsError={ollamaModelsError}
-                  ollamaHiddenCount={ollamaHiddenCount}
-                  ollamaVisionModels={ollamaVisionModels}
-                  antigravityModels={antigravityModels}
-                  antigravityModelsError={antigravityModelsError}
-                  customModels={customModels}
-                  onRefreshOllamaModels={onRefreshOllamaModels}
-                  onRefreshAntigravityModels={onRefreshAntigravityModels}
-                  onPickModel={(m) => {
-                    onModelChange(m);
-                    setModelMenuOpen(false);
-                  }}
-                  onPickSubagentModel={(m) => {
-                    onSubagentModelChange(m);
-                    setModelMenuOpen(false);
-                  }}
-                  onPickEffort={(e) => {
-                    onEffortChange(e);
-                    setModelMenuOpen(false);
-                  }}
-                />
+                <MenuPop width={420}>
+                  <div className="ph">
+                    <span className="tok">M</span>
+                    <span>{t("composer.switchModel")}</span>
+                  </div>
+                  <ModelList
+                    activeModel={modelLabel}
+                    onPick={(m) => {
+                      onModelChange(m);
+                      setModelMenuOpen(false);
+                    }}
+                    {...modelListProps}
+                  />
+                </MenuPop>
+              ) : null}
+            </div>
+            <div ref={subagentWrapRef} style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="model-pill subagent-pill"
+                onClick={() => {
+                  setSubagentMenuOpen((v) => !v);
+                  setModelMenuOpen(false);
+                  setEffortMenuOpen(false);
+                }}
+                title={t("composer.switchSubagentModel")}
+              >
+                <I.bot size={12} />
+                <span>{subagentModelLabel}</span>
+                <I.chev size={10} />
+              </button>
+              {subagentMenuOpen ? (
+                <MenuPop width={420}>
+                  <div className="ph">
+                    <span className="tok">S</span>
+                    <span>{t("composer.switchSubagentModel")}</span>
+                  </div>
+                  <ModelList
+                    activeModel={subagentModelLabel}
+                    onPick={(m) => {
+                      onSubagentModelChange(m);
+                      setSubagentMenuOpen(false);
+                    }}
+                    {...modelListProps}
+                  />
+                </MenuPop>
+              ) : null}
+            </div>
+            <div ref={effortWrapRef} style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="model-pill effort-pill"
+                onClick={() => {
+                  setEffortMenuOpen((v) => !v);
+                  setModelMenuOpen(false);
+                  setSubagentMenuOpen(false);
+                }}
+                title={t("composer.switchEffort")}
+              >
+                <I.cpu size={12} />
+                <span>{reasoningEffort}</span>
+                <I.chev size={10} />
+              </button>
+              {effortMenuOpen ? (
+                <MenuPop width={320}>
+                  <div className="ph">
+                    <span className="tok">E</span>
+                    <span>{t("composer.switchEffort")}</span>
+                  </div>
+                  <div className="popup-list effort-menu-list">
+                    {EFFORTS.map((e) => (
+                      <div
+                        key={e}
+                        className="popup-item"
+                        data-active={e === reasoningEffort}
+                        onClick={() => {
+                          onEffortChange(e);
+                          setEffortMenuOpen(false);
+                        }}
+                        onKeyDown={activationHandler(() => {
+                          onEffortChange(e);
+                          setEffortMenuOpen(false);
+                        })}
+                      >
+                        <span className="ico">
+                          <I.cpu size={12} />
+                        </span>
+                        <div className="nm">
+                          <span className="cmd">{e}</span>
+                          <div className="desc">{t(`effort.${e}Desc` as TKey)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </MenuPop>
               ) : null}
             </div>
             {busy ? (
@@ -1098,72 +1143,28 @@ function ModelList({
   );
 }
 
-function ModelEffortMenu({
-  modelLabel,
-  subagentModelLabel,
-  currentEffort,
-  onPickModel,
-  onPickSubagentModel,
-  onPickEffort,
-  ollamaModels,
-  ollamaModelsError,
-  ollamaHiddenCount,
-  ollamaVisionModels,
-  antigravityModels,
-  antigravityModelsError,
-  customModels,
-  onRefreshOllamaModels,
-  onRefreshAntigravityModels,
-}: {
-  modelLabel: string;
-  subagentModelLabel: string;
-  currentEffort: ReasoningEffort;
-  onPickModel: (model: string) => void;
-  onPickSubagentModel: (model: string) => void;
-  onPickEffort: (effort: ReasoningEffort) => void;
-  ollamaModels?: string[];
-  ollamaModelsError?: string;
-  ollamaHiddenCount?: number;
-  ollamaVisionModels?: ReadonlySet<string>;
-  antigravityModels?: string[];
-  antigravityModelsError?: string;
-  customModels?: string[];
-  onRefreshOllamaModels?: (force?: boolean) => void;
-  onRefreshAntigravityModels?: () => void;
-}) {
-  const modelListProps = {
-    ollamaModels,
-    ollamaModelsError,
-    ollamaHiddenCount,
-    ollamaVisionModels,
-    antigravityModels,
-    antigravityModelsError,
-    customModels,
-    onRefreshOllamaModels,
-    onRefreshAntigravityModels,
-  };
-
-  // The picker is up to 920px wide and anchored to the model pill, which sits
-  // inside the `.main` column. `.main` has `overflow: hidden`, so an
-  // absolutely positioned popup gets clipped at the sidebar boundary and ends
-  // up rendering behind the sidebar. Pin it to the viewport (position: fixed)
-  // so it escapes the clip and stacks above the sidebar, anchored to the pill's
-  // box and clamped to the window.
+/** Fixed-position popup anchored to its wrapper (the pill's `position:
+ *  relative` container). The picker sits inside the `.main` column, which has
+ *  `overflow: hidden` — an absolutely positioned popup would get clipped at
+ *  the sidebar boundary and render behind it. Pinning to the viewport escapes
+ *  the clip and stacks above the sidebar, anchored to the pill's box and
+ *  clamped to the window. */
+function MenuPop({ width, children }: { width: number; children: React.ReactNode }) {
   const popRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [visible, setVisible] = useState(false);
   useLayoutEffect(() => {
     const position = () => {
       const pop = popRef.current;
-      const wrap = pop?.parentElement; // the model-pill wrapper
+      const wrap = pop?.parentElement; // the pill wrapper
       if (!pop || !wrap) return;
       const wr = wrap.getBoundingClientRect();
       const pr = pop.getBoundingClientRect();
       const vw = window.innerWidth;
       const vh = window.innerHeight;
       const pad = 8;
-      const width = Math.min(920, vw - 16);
-      const left = Math.max(pad, Math.min(wr.right - width, vw - width - pad));
+      const w = Math.min(width, vw - 16);
+      const left = Math.max(pad, Math.min(wr.right - w, vw - w - pad));
       let top = wr.top - pr.height - 6;
       if (top < pad) top = wr.bottom + 6; // no room above the pill — open below
       top = Math.max(pad, Math.min(top, vh - pr.height - pad));
@@ -1173,7 +1174,7 @@ function ModelEffortMenu({
     position();
     window.addEventListener("resize", position);
     return () => window.removeEventListener("resize", position);
-  }, []);
+  }, [width]);
 
   return (
     <div
@@ -1185,59 +1186,11 @@ function ModelEffortMenu({
         top: pos?.top ?? 0,
         bottom: "auto",
         right: "auto",
-        width: "min(920px, calc(100vw - 16px))",
+        width: `min(${width}px, calc(100vw - 16px))`,
         visibility: visible ? undefined : "hidden",
       }}
     >
-      <div className="ph">
-        <span className="tok">M</span>
-        <span>{t("composer.switchModel")}</span>
-        <span className="grow" />
-        <span className="tok">S</span>
-        <span>{t("composer.switchSubagentModel")}</span>
-        <span className="grow" />
-        <span className="tok">E</span>
-        <span>{t("composer.switchEffort")}</span>
-      </div>
-      <div className="model-menu-cols">
-        {/* Main-agent models column */}
-        <div className="model-menu-col">
-          <div className="model-menu-col-head">{t("composer.mainAgent")}</div>
-          <ModelList activeModel={modelLabel} onPick={onPickModel} {...modelListProps} />
-        </div>
-        {/* Subagent models column — same options as the main agent (DRY). */}
-        <div className="model-menu-col">
-          <div className="model-menu-col-head">{t("composer.subagent")}</div>
-          <ModelList
-            activeModel={subagentModelLabel}
-            onPick={onPickSubagentModel}
-            {...modelListProps}
-          />
-        </div>
-        {/* Reasoning effort column — narrower than the two model columns. */}
-        <div className="model-menu-col model-menu-effort-col">
-          <div className="model-menu-col-head">{t("composer.switchEffort")}</div>
-          <div className="popup-list effort-menu-list">
-            {EFFORTS.map((e) => (
-              <div
-                key={e}
-                className="popup-item"
-                data-active={e === currentEffort}
-                onClick={() => onPickEffort(e)}
-                onKeyDown={activationHandler(() => onPickEffort(e))}
-              >
-                <span className="ico">
-                  <I.cpu size={12} />
-                </span>
-                <div className="nm">
-                  <span className="cmd">{e}</span>
-                  <div className="desc">{t(`effort.${e}Desc` as TKey)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      {children}
     </div>
   );
 }
