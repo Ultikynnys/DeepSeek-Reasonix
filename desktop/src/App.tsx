@@ -44,7 +44,6 @@ import {
   type ConfirmationChoice,
   type DesktopDiagnosticEvent,
   type ExternalSessionApp,
-  type ExternalSessionSource,
   type IncomingEvent,
   type JobInfo,
   type LoadedMessage,
@@ -99,7 +98,7 @@ import { JumpBar } from "./ui/jump-bar";
 import { activationHandler, escapeHandler } from "./ui/keyboard";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
-import { Sidebar } from "./ui/sidebar";
+import { type PendingImport, SessionImportPopover, Sidebar } from "./ui/sidebar";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import {
   StartupFailure,
@@ -2028,6 +2027,7 @@ function TabRuntime({
   const [wdAnchor, setWdAnchor] = useState<
     { top?: number; bottom?: number; left: number } | undefined
   >(undefined);
+  const [importAnchor, setImportAnchor] = useState<PendingImport | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const threadInnerRef = useRef<HTMLDivElement>(null);
@@ -2684,6 +2684,23 @@ function TabRuntime({
     openSettingsAt,
   ]);
 
+  useEffect(() => {
+    if (!importAnchor) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest(".session-import-popover")) setImportAnchor(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setImportAnchor(null);
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [importAnchor]);
+
   const commands = buildCommands({
     newChat: () => {
       newChat();
@@ -2954,7 +2971,6 @@ function TabRuntime({
 
         <Sidebar
           sessions={state.sessions}
-          importSources={state.externalImportSources}
           activeName={state.currentSession}
           workspaceDir={state.settings?.workspaceDir}
           onNewChat={newChat}
@@ -2965,13 +2981,6 @@ function TabRuntime({
           onDeleteSession={(name) => sendRpc({ cmd: "session_delete", name })}
           onClearSessions={() => sendRpc({ cmd: "session_clear" })}
           onRenameSession={(name, title) => sendRpc({ cmd: "session_rename", name, title })}
-          onRefreshImportSources={() => sendRpc({ cmd: "session_import_scan" })}
-          onImportDetectedSessions={(sources: ExternalSessionSource[]) =>
-            sendRpc({ cmd: "session_import_bulk", sources })
-          }
-          onImportSession={({ source, path, name }) =>
-            sendRpc({ cmd: "session_import", source, path, ...(name ? { name } : {}) })
-          }
           onOpenWorkdir={(anchor) => {
             setWdAnchor(anchor);
             setWdOpen(true);
@@ -3016,10 +3025,12 @@ function TabRuntime({
                 workspaceDir={state.settings?.workspaceDir}
                 busy={state.busy}
                 hasMessages={state.messages.length > 0}
-                onAbort={abort}
-                onNewChat={newChat}
                 onCopy={conversationCopy}
                 onExport={exportConversation}
+                onOpenImport={(anchor) => {
+                  sendRpc({ cmd: "session_import_scan" });
+                  setImportAnchor(anchor);
+                }}
                 onOpenWorkdir={(anchor) => {
                   setWdAnchor(anchor);
                   setWdOpen(true);
@@ -3384,6 +3395,28 @@ function TabRuntime({
           }}
           onBrowse={pickWorkspace}
         />
+
+        {importAnchor ? (
+          <SessionImportPopover
+            target={importAnchor}
+            importSources={state.externalImportSources}
+            onRefresh={() => sendRpc({ cmd: "session_import_scan" })}
+            onCancel={() => setImportAnchor(null)}
+            onImportDetected={(sources) => {
+              sendRpc({ cmd: "session_import_bulk", sources });
+              setImportAnchor(null);
+            }}
+            onImport={(payload) => {
+              sendRpc({
+                cmd: "session_import",
+                source: payload.source,
+                path: payload.path,
+                ...(payload.name ? { name: payload.name } : {}),
+              });
+              setImportAnchor(null);
+            }}
+          />
+        ) : null}
 
         {aboutOpen ? <AboutModal onClose={() => setAboutOpen(false)} /> : null}
 
@@ -3979,10 +4012,9 @@ function MainHead({
   workspaceDir,
   busy,
   hasMessages,
-  onAbort,
-  onNewChat,
   onCopy,
   onExport,
+  onOpenImport,
   onOpenWorkdir,
 }: {
   session: string;
@@ -3990,10 +4022,9 @@ function MainHead({
   workspaceDir?: string;
   busy: boolean;
   hasMessages: boolean;
-  onAbort: () => void;
-  onNewChat: () => void;
   onCopy: () => void;
   onExport: () => void;
+  onOpenImport: (anchor: { x: number; y: number }) => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
 }) {
   useLang();
@@ -4054,14 +4085,17 @@ function MainHead({
       >
         <I.download size={12} /> {t("app.header.export")}
       </button>
-      <button type="button" className="h-btn" onClick={onNewChat}>
-        <I.plus size={12} /> {t("app.header.newChat")}
+      <button
+        type="button"
+        className="h-btn"
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          onOpenImport({ x: rect.right, y: rect.bottom });
+        }}
+        title={t("sidebarPanel.importSessions")}
+      >
+        <I.upload size={12} /> {t("app.header.import")}
       </button>
-      {busy ? (
-        <button type="button" className="h-btn primary" onClick={onAbort}>
-          <I.stop size={12} /> {t("app.header.abort")}
-        </button>
-      ) : null}
     </div>
   );
 }

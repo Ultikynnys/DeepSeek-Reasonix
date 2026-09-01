@@ -518,8 +518,7 @@ export const en = {
       copyMd: "Copy conversation as Markdown",
       export: "Export",
       exportMd: "Export as Markdown file",
-      newChat: "New chat",
-      abort: "Stop",
+      import: "Import",
     },
     empty: {
       welcome: "Welcome to Reasonix",

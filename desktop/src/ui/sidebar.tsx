@@ -22,12 +22,12 @@ type PendingClear = {
   y: number;
 };
 
-type PendingImport = {
+export type PendingImport = {
   x: number;
   y: number;
 };
 
-type ImportSource = ExternalSessionSource;
+export type ImportSource = ExternalSessionSource;
 
 function prettyName(s: SessionInfo): string {
   if (s.summary?.trim()) return s.summary.trim();
@@ -57,7 +57,6 @@ function relative(ms: number): string {
 
 export function Sidebar({
   sessions,
-  importSources,
   activeName,
   workspaceDir,
   onNewChat,
@@ -65,9 +64,6 @@ export function Sidebar({
   onDeleteSession,
   onClearSessions,
   onRenameSession,
-  onRefreshImportSources,
-  onImportDetectedSessions,
-  onImportSession,
   onOpenWorkdir,
   onOpenSettings,
   onOpenRules,
@@ -75,7 +71,6 @@ export function Sidebar({
   onOpenAbout,
 }: {
   sessions: SessionInfo[];
-  importSources: ExternalSessionApp[];
   activeName?: string;
   workspaceDir?: string;
   onNewChat: () => void;
@@ -83,9 +78,6 @@ export function Sidebar({
   onDeleteSession: (name: string) => void;
   onClearSessions: () => void;
   onRenameSession: (name: string, title: string) => void;
-  onRefreshImportSources: () => void;
-  onImportDetectedSessions: (sources: ImportSource[]) => void;
-  onImportSession: (payload: { source: ImportSource; path: string; name?: string }) => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
   onOpenSettings: () => void;
   onOpenRules: () => void;
@@ -96,7 +88,6 @@ export function Sidebar({
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [pendingClear, setPendingClear] = useState<PendingClear | null>(null);
-  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const workspaceLabel = workspaceDir
@@ -110,21 +101,19 @@ export function Sidebar({
     : sessions;
 
   useEffect(() => {
-    if (!pendingDelete && !pendingClear && !pendingImport) return;
+    if (!pendingDelete && !pendingClear) return;
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target?.closest(".session-delete-popover")) {
         setPendingDelete(null);
         setPendingClear(null);
       }
-      if (!target?.closest(".session-import-popover")) setPendingImport(null);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setPendingDelete(null);
         setPendingClear(null);
       }
-      if (e.key === "Escape") setPendingImport(null);
     };
     window.addEventListener("mousedown", onMouseDown);
     window.addEventListener("keydown", onKey);
@@ -132,7 +121,7 @@ export function Sidebar({
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("keydown", onKey);
     };
-  }, [pendingDelete, pendingClear, pendingImport]);
+  }, [pendingDelete, pendingClear]);
 
   return (
     <aside className="sidebar">
@@ -141,18 +130,6 @@ export function Sidebar({
           <I.plus size={14} />
           <span className="label">{t("sidebarPanel.newChat")}</span>
           <Shortcut keys={["mod", "N"]} />
-        </button>
-        <button
-          type="button"
-          className="icon-btn"
-          title={t("sidebarPanel.importSessions")}
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            onRefreshImportSources();
-            setPendingImport({ x: rect.right, y: rect.bottom });
-          }}
-        >
-          <I.upload size={14} />
         </button>
         <button
           type="button"
@@ -431,22 +408,6 @@ export function Sidebar({
           }}
         />
       ) : null}
-      {pendingImport ? (
-        <SessionImportPopover
-          target={pendingImport}
-          importSources={importSources}
-          onRefresh={onRefreshImportSources}
-          onCancel={() => setPendingImport(null)}
-          onImportDetected={(sources) => {
-            onImportDetectedSessions(sources);
-            setPendingImport(null);
-          }}
-          onImport={(payload) => {
-            onImportSession(payload);
-            setPendingImport(null);
-          }}
-        />
-      ) : null}
     </aside>
   );
 }
@@ -526,7 +487,7 @@ function SessionConfirmPopover({
   );
 }
 
-function SessionImportPopover({
+export function SessionImportPopover({
   target,
   importSources,
   onRefresh,
