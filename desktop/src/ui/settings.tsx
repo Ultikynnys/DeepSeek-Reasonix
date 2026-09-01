@@ -346,7 +346,6 @@ function PageGeneral({
   onSave: (patch: SettingsPatch) => void;
   onPickWorkspace: () => void;
 }) {
-  const [editorDraft, setEditorDraft] = useState(settings.editor ?? "");
   const [customFontDraft, setCustomFontDraft] = useState(customFontFamily);
   useEffect(() => {
     setCustomFontDraft(customFontFamily);
@@ -519,19 +518,6 @@ function PageGeneral({
           <button type="button" className="btn" onClick={onPickWorkspace}>
             {t("settings.workspaceChange")}
           </button>
-        </div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.editor")}</div>
-            <div className="h">{t("settings.editorHint")}</div>
-          </div>
-          <input
-            className="field mono"
-            value={editorDraft}
-            placeholder="cursor --goto"
-            onChange={(e) => setEditorDraft(e.target.value)}
-            onBlur={() => onSave({ editor: editorDraft.trim() })}
-          />
         </div>
       </section>
 

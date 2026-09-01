@@ -348,7 +348,6 @@ export type Settings = {
   customModels?: string[];
   /** Ollama chat endpoint (OpenAI-compatible) — shown in the Models settings page. */
   ollamaBaseUrl?: string;
-  editor?: string;
   webSearchEngine?:
     | "bing"
     | "bing-intl"
@@ -1354,7 +1353,6 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           recentWorkspaces: ev.recentWorkspaces,
           model: ev.model,
           customModels: ev.customModels,
-          editor: ev.editor,
           webSearchEngine: ev.webSearchEngine,
           webSearchEndpoint: ev.webSearchEndpoint,
           webSearchApiKeys: ev.webSearchApiKeys,
@@ -2911,9 +2909,7 @@ function TabRuntime({
   }, [state.messages, flashToast]);
 
   return (
-    <WorkspaceProvider
-      value={{ dir: state.settings?.workspaceDir, editor: state.settings?.editor }}
-    >
+    <WorkspaceProvider value={{ dir: state.settings?.workspaceDir }}>
       <div
         className="app"
         data-theme={theme}

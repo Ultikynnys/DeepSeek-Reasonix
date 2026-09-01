@@ -83,10 +83,8 @@ describe("ContextPanel files", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open file: src/new-file.ts" }));
 
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("open_in_editor", {
-        command: "",
+      expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/new-file.ts",
-        line: null,
       }),
     );
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -99,34 +97,15 @@ describe("ContextPanel files", () => {
     fireEvent.click(container.querySelector('[data-kind="file"]')!);
 
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("open_in_editor", {
-        command: "",
+      expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/new-file.ts",
-        line: null,
       }),
     );
     expect(openPath).not.toHaveBeenCalled();
   });
 
-  it("uses the configured editor command when one is set", async () => {
-    renderPanel({ editor: "cursor --goto" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Open file: src/new-file.ts" }));
-
-    await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("open_in_editor", {
-        command: "cursor --goto",
-        path: "/repo/src/new-file.ts",
-        line: null,
-      }),
-    );
-    expect(openPath).not.toHaveBeenCalled();
-  });
-
-  it("falls back to the OS default when no code editor is detected", async () => {
-    vi.mocked(invoke).mockRejectedValue(
-      new Error("no editor configured and none detected (tried code, cursor, windsurf)"),
-    );
+  it("falls back to the OS default handler when the explorer command fails", async () => {
+    vi.mocked(invoke).mockRejectedValue(new Error("spawn explorer.exe: boom"));
     renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: "Open file: src/new-file.ts" }));

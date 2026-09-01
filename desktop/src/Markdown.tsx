@@ -19,24 +19,20 @@ import remarkMath from "remark-math";
 import { CodeView } from "./CodeView";
 import { t, useLang } from "./i18n";
 
-export async function openWithEditor(
-  editor: string | undefined,
-  abs: string,
-  line?: number,
-): Promise<void> {
-  // Always route through the Rust command: with an empty command it
-  // auto-detects a code editor (code / cursor / windsurf), so Windows
-  // doesn't hand `.ts` files (MPEG transport stream) to the media player
-  // via the OS default. openPath is only the no-editor-at-all last resort.
+/** Reveal a file or directory in the OS file explorer: a file opens its
+ *  parent folder with the item selected, a directory opens itself. */
+export async function revealInExplorer(abs: string): Promise<void> {
   try {
-    await invoke("open_in_editor", {
-      command: editor?.trim() ?? "",
-      path: abs,
-      line: line ?? null,
-    });
+    await invoke("reveal_in_explorer", { path: abs });
   } catch {
-    await openPath(abs);
+    // Last resort: open the parent directory with the OS default handler.
+    await openPath(parentDir(abs));
   }
+}
+
+function parentDir(abs: string): string {
+  const idx = Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\"));
+  return idx > 0 ? abs.slice(0, idx) : abs;
 }
 
 /** Open a file with the native OS "Open with…" chooser, letting the user pick
@@ -45,7 +41,7 @@ export async function openWithDialog(abs: string): Promise<void> {
   await invoke("open_with_dialog", { path: abs });
 }
 
-type WorkspaceCtx = { dir?: string; editor?: string };
+type WorkspaceCtx = { dir?: string };
 export const WorkspaceContext = createContext<WorkspaceCtx>({});
 export const WorkspaceProvider = WorkspaceContext.Provider;
 
@@ -83,12 +79,6 @@ const FILE_PATH_RE = new RegExp(
 const EXACT_FILE_REF_RE = new RegExp(`^(${FILE_REF_SOURCE})${LINE_REF_SOURCE}$`);
 
 type ParsedFileRef = { path: string; line?: string };
-
-function firstLine(line?: string): number | undefined {
-  if (!line) return undefined;
-  const parsed = Number.parseInt(line.split(/[:-]/)[0] ?? line, 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
 
 function parseFileRef(value: string): ParsedFileRef | null {
   const trimmed = value.trim();
@@ -132,10 +122,10 @@ function FilePill({ path, line }: { path: string; line?: string }) {
   const ctx = useContext(WorkspaceContext);
   const [done, setDone] = useState<"open" | "copy" | null>(null);
   const display = line ? `${path}:${line}` : path;
-  const openInEditor = async () => {
+  const openInExplorer = async () => {
     try {
       const abs = resolveAgainstWorkspace(path, ctx.dir);
-      await openWithEditor(ctx.editor, abs, firstLine(line));
+      await revealInExplorer(abs);
       setDone("open");
       setTimeout(() => setDone(null), 1200);
     } catch {
@@ -162,7 +152,7 @@ function FilePill({ path, line }: { path: string; line?: string }) {
     <button
       type="button"
       className={`file-pill ${done ? "done" : ""}`}
-      onClick={openInEditor}
+      onClick={openInExplorer}
       onContextMenu={(e) => {
         e.preventDefault();
         void copyOnly(e);
@@ -170,7 +160,7 @@ function FilePill({ path, line }: { path: string; line?: string }) {
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          void openInEditor();
+          void openInExplorer();
         }
       }}
       title={t("markdown.filePillTitle")}
@@ -304,7 +294,7 @@ function SafeLink({ href, children }: { href?: string; children: ReactNode }) {
       const parsed = parseFileHref(href);
       const target = parsed ?? { path: decodeMaybeUri(stripFileScheme(href)) };
       const abs = resolveAgainstWorkspace(target.path, ctx.dir);
-      await openWithEditor(ctx.editor, abs, firstLine(target.line));
+      await revealInExplorer(abs);
     } catch {
       try {
         await navigator.clipboard.writeText(href);

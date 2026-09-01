@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { openWithDialog, openWithEditor } from "../Markdown";
+import { openWithDialog, revealInExplorer } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 
@@ -28,21 +28,17 @@ function useClampedMenuPosition(
 }
 
 /**
- * Shared right-click menu for a file path. Offers "Open in editor" (the
- * configured/auto-detected code editor), "Open with…" (the native OS app
- * picker), and "Copy path". Dismisses on outside click or Escape.
+ * Shared right-click menu for a file path. Offers "Show in file explorer"
+ * (reveals the file/directory in the OS file manager), "Open with…" (the
+ * native OS app picker), and "Copy path". Dismisses on outside click or Escape.
  */
 export function FileMenu({
   anchor,
   abs,
-  editor,
-  line,
   onClose,
 }: {
   anchor: { x: number; y: number };
   abs: string;
-  editor?: string;
-  line?: number;
   onClose: () => void;
 }) {
   useLang();
@@ -73,16 +69,16 @@ export function FileMenu({
     try {
       await fn();
     } catch {
-      /* ignore — the OS picker / editor is best-effort */
+      /* ignore — the OS picker / explorer reveal is best-effort */
     }
     onClose();
   };
 
   const items: MenuItem[] = [
     {
-      label: t("fileMenu.openInEditor"),
+      label: t("fileMenu.showInExplorer"),
       icon: <I.link size={12} />,
-      onSelect: open(() => openWithEditor(editor, abs, line)),
+      onSelect: open(() => revealInExplorer(abs)),
     },
     {
       label: t("fileMenu.openWith"),

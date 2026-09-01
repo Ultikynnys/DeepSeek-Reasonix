@@ -204,16 +204,10 @@ function resolveContextAbs(path: string, settings: Settings | null): string {
 
 async function openContextFile(path: string, settings: Settings | null): Promise<void> {
   const abs = resolveContextAbs(path, settings);
-  // Same contract as openWithEditor: an empty command makes the Rust side
-  // auto-detect a code editor (code / cursor / windsurf) so `.ts` files
-  // don't fall through to the Windows media player; openPath is only the
-  // no-code-editor-at-all last resort.
+  // Reveal the file in the OS file explorer (parent folder with the item
+  // selected); openPath is only the last resort.
   try {
-    await invoke("open_in_editor", {
-      command: settings?.editor?.trim() ?? "",
-      path: abs,
-      line: null,
-    });
+    await invoke("reveal_in_explorer", { path: abs });
   } catch {
     await openPath(abs);
   }
@@ -345,7 +339,6 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
         <FileMenu
           anchor={{ x: menu.x, y: menu.y }}
           abs={resolveContextAbs(menu.path, settings)}
-          editor={settings?.editor?.trim() || undefined}
           onClose={() => setMenu(null)}
         />
       ) : null}

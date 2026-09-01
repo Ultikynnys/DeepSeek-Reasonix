@@ -332,8 +332,6 @@ export interface ReasonixConfig {
   recentWorkspaces?: string[];
   /** Desktop only — open tabs in tab order, each with its workspace dir, loaded session and focus, persisted so restart restores every tab and its conversation (issues #933, #1244). Empty/absent → boot with a single default tab. */
   desktopOpenTabs?: DesktopOpenTab[];
-  /** Desktop only — `openWith` value for clicking file links. Empty/undefined = OS default app. Examples: "code", "cursor", "C:\\path\\to\\editor.exe". */
-  editor?: string;
   theme?: ThemeName | "auto";
   /** Stored as `--mcp`-format strings so one parser handles both flag and config. */
   mcp?: string[];
@@ -1679,19 +1677,6 @@ export function saveWorkspaceDir(dir: string, path: string = defaultConfigPath()
   const trimmed = dir.trim();
   if (trimmed) cfg.workspaceDir = trimmed;
   else cfg.workspaceDir = undefined;
-  writeConfig(cfg, path);
-}
-
-export function loadEditor(path: string = defaultConfigPath()): string | undefined {
-  const v = readConfig(path).editor;
-  return typeof v === "string" && v.trim() ? v : undefined;
-}
-
-export function saveEditor(editor: string, path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  const trimmed = editor.trim();
-  if (trimmed) cfg.editor = trimmed;
-  else cfg.editor = undefined;
   writeConfig(cfg, path);
 }
 

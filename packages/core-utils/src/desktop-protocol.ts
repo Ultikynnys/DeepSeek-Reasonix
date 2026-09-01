@@ -374,7 +374,6 @@ export interface SettingsEvent {
   customModels?: string[];
   /** Ollama chat endpoint (OpenAI-compatible) — shown in the Models settings page. */
   ollamaBaseUrl?: string;
-  editor?: string;
   webSearchEngine?: WebSearchEngineName;
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
@@ -601,7 +600,6 @@ export interface SettingsPatch {
   subagentModel?: string;
   /** Ollama chat endpoint override (OpenAI-compatible). null = back to the local default. */
   ollamaBaseUrl?: string | null;
-  editor?: string;
   webSearchEngine?: WebSearchEngineName;
   webSearchEndpoint?: string | null;
   metasoApiKey?: string | null;

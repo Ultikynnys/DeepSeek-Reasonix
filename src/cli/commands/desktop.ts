@@ -89,7 +89,6 @@ import {
   loadContextTokens,
   loadDesktopOpenTabs,
   loadEditMode,
-  loadEditor,
   loadEndpoint,
   loadEndpointForModel,
   loadExaApiKey,
@@ -119,7 +118,6 @@ import {
   saveContextTokens,
   saveDesktopOpenTabs,
   saveEditMode,
-  saveEditor,
   saveModel,
   saveOpenAIApiKey,
   saveOpenAIOAuth,
@@ -914,7 +912,6 @@ function emitSettings(tab: Tab): void {
       model: tab.currentModel,
       customModels: Object.keys(readConfig().models ?? {}).sort(),
       ollamaBaseUrl: readConfig().ollamaBaseUrl,
-      editor: loadEditor(),
       webSearchEngine: readWebSearchEngine(),
       webSearchEndpoint: readConfig().webSearchEndpoint,
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
@@ -4491,7 +4488,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           void switchWorkspace(tab, msg.workspaceDir);
           return;
         }
-        if (msg.editor !== undefined) saveEditor(msg.editor);
         if (msg.showSystemEvents !== undefined) saveShowSystemEvents(msg.showSystemEvents);
         if (msg.ollamaBaseUrl !== undefined) {
           const cfg = readConfig();

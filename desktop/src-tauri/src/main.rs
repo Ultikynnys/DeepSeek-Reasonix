@@ -124,100 +124,60 @@ fn git_status(root: String) -> Result<Vec<GitStatusEntry>, String> {
     Ok(out)
 }
 
-/// Probe whether an editor command resolves and runs — used to auto-detect
-/// a code editor when none is configured. On Windows this goes through
-/// cmd.exe so `.cmd` shims (code.cmd, cursor.cmd) resolve via PATH; a
-/// missing command exits with 9009, so a successful `--version` run is a
-/// reliable probe.
-fn probe_editor(candidate: &str) -> bool {
-    use std::process::{Command, Stdio};
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let probe = Command::new("cmd")
-            .arg("/c")
-            .arg(format!("{candidate} --version"))
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output();
-        return matches!(probe, Ok(out) if out.status.success());
-    }
-    #[cfg(not(windows))]
-    {
-        let probe = Command::new(candidate)
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output();
-        return matches!(probe, Ok(out) if out.status.success());
-    }
-}
-
-/// Auto-detect a code editor for the "no editor configured" case. Without
-/// this the frontend falls back to the OS default handler, and on Windows
-/// `.ts` is registered to media players (MPEG transport stream) — so
-/// `loop.ts` would open in the media player instead of an editor. Probes
-/// the editors this app knows understand `-g path:line`, in order.
-fn detect_editor_command() -> Option<String> {
-    for candidate in ["code", "cursor", "windsurf"] {
-        if probe_editor(candidate) {
-            return Some(candidate.to_string());
-        }
-    }
-    None
-}
-
+/// Reveal a file or directory in the OS file explorer: a file opens its
+/// parent folder with the item selected (Explorer / Finder), a directory
+/// opens the directory itself. Replaces the old "open in code editor"
+/// flow — no editor detection, no editor config.
 #[tauri::command]
-fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<(), String> {
+fn reveal_in_explorer(path: String) -> Result<(), String> {
     use std::process::{Command, Stdio};
-    let trimmed = command.trim();
-    // Empty command = no editor configured in settings. Auto-detect one
-    // (VS Code / Cursor / Windsurf) so file links never fall through to the
-    // OS default handler (Windows would open `.ts` in the media player).
-    let resolved = if trimmed.is_empty() {
-        match detect_editor_command() {
-            Some(candidate) => candidate,
-            None => {
-                return Err(
-                    "no editor configured and none detected (tried code, cursor, windsurf)".into(),
-                );
-            }
-        }
-    } else {
-        trimmed.to_string()
-    };
-    // VS Code / Cursor / Windsurf understand `-g path:line`; harmless for others if `line` is None.
-    let mut cmd;
+    let is_dir = std::fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(false);
     #[cfg(windows)]
     {
-        // Spawn through cmd.exe so `.cmd` shims (code.cmd, cursor.cmd) resolve via PATH.
-        // Normalize forward slashes to backslashes — cmd.exe doesn't handle them reliably.
-        let normalized = path.replace('/', "\\");
-        cmd = Command::new("cmd");
-        cmd.arg("/c").arg(&resolved);
-        if let Some(l) = line {
-            cmd.arg("-g").arg(format!("{}:{}", normalized, l));
-        } else {
-            cmd.arg(&normalized);
-        }
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    #[cfg(not(windows))]
-    {
-        cmd = Command::new(&resolved);
-        if let Some(l) = line {
-            cmd.arg("-g").arg(format!("{}:{}", path, l));
+        let normalized = path.replace('/', "\\");
+        let mut cmd = Command::new("explorer.exe");
+        if is_dir {
+            cmd.arg(&normalized);
         } else {
-            cmd.arg(&path);
+            cmd.arg("/select,").arg(&normalized);
         }
+        cmd.creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        cmd.spawn().map_err(|e| format!("spawn explorer.exe: {e}"))?;
+        return Ok(());
     }
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    cmd.spawn().map_err(|e| format!("spawn {resolved}: {e}"))?;
-    Ok(())
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = Command::new("open");
+        if is_dir {
+            cmd.arg(&path);
+        } else {
+            cmd.arg("-R").arg(&path);
+        }
+        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.spawn().map_err(|e| format!("spawn open: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // No portable "select file" on Linux — open the parent directory.
+        let target = if is_dir {
+            path.clone()
+        } else {
+            std::path::Path::new(&path)
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone())
+        };
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(&target).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.spawn().map_err(|e| format!("spawn xdg-open: {e}"))?;
+        return Ok(());
+    }
 }
 
 /// Open a file with the native OS "Open with…" chooser, so the user can pick
@@ -295,7 +255,7 @@ fn main() {
             rpc_send,
             rpc_kill,
             record_frontend_diagnostic,
-            open_in_editor,
+            reveal_in_explorer,
             open_with_dialog,
             list_workspace_tree,
             git_status,

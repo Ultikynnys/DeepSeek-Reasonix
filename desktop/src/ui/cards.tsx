@@ -1,5 +1,5 @@
 import { type ReactNode, memo, useContext, useMemo, useState } from "react";
-import { Markdown, WorkspaceContext, openWithEditor, resolveAgainstWorkspace } from "../Markdown";
+import { Markdown, WorkspaceContext, revealInExplorer, resolveAgainstWorkspace } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import { FileMenu } from "./file-menu";
@@ -45,8 +45,8 @@ function extractToolFileRef(args?: string): { path: string; line?: number } | nu
   return null;
 }
 
-/** Always-visible "open in editor" action rendered in the card header, next to the collapse toggle. */
-function OpenFileButton({ path, line, label }: { path: string; line?: number; label: string }) {
+/** Always-visible "show in file explorer" action rendered in the card header, next to the collapse toggle. */
+function OpenFileButton({ path, label }: { path: string; label: string }) {
   useLang();
   const ws = useContext(WorkspaceContext);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -57,7 +57,7 @@ function OpenFileButton({ path, line, label }: { path: string; line?: number; la
         type="button"
         className="head-action"
         title={label}
-        onClick={() => void openWithEditor(ws.editor, abs, line)}
+        onClick={() => void revealInExplorer(abs)}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -71,8 +71,6 @@ function OpenFileButton({ path, line, label }: { path: string; line?: number; la
         <FileMenu
           anchor={menu}
           abs={abs}
-          editor={ws.editor}
-          line={line}
           onClose={() => setMenu(null)}
         />
       ) : null}
@@ -605,8 +603,7 @@ export function ToolCard({
         fileRef ? (
           <OpenFileButton
             path={fileRef.path}
-            line={fileRef.line}
-            label={`${fileRef.path}${fileRef.line ? `:${fileRef.line}` : ""}`}
+            label={fileRef.path}
           />
         ) : undefined
       }
@@ -721,13 +718,6 @@ export function DiffCard({
   onDiscard?: () => void;
 }) {
   useLang();
-  const openLine = useMemo(() => {
-    for (const x of lines) {
-      if (x.t === "rm" && x.l) return x.l;
-      if (x.t === "add" && x.r) return x.r;
-    }
-    return undefined;
-  }, [lines]);
   const adds = lines.filter((x) => x.t === "add").length;
   const rms = lines.filter((x) => x.t === "rm").length;
   return (
@@ -747,7 +737,7 @@ export function DiffCard({
           )}
         </>
       }
-      headRight={<OpenFileButton path={filename} line={openLine} label={t("cards.openInEditor")} />}
+      headRight={<OpenFileButton path={filename} label={t("cards.showInExplorer")} />}
     >
       <div className="diff">
         <div className="lines">

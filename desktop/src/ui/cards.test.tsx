@@ -32,13 +32,13 @@ afterEach(() => {
 
 function wrap(ui: React.ReactNode) {
   return (
-    <WorkspaceProvider value={{ dir: "/repo", editor: "code" }}>
+    <WorkspaceProvider value={{ dir: "/repo" }}>
       <div>{ui}</div>
     </WorkspaceProvider>
   );
 }
 
-describe("ToolCard — open-in-editor button", () => {
+describe("ToolCard — show-in-explorer button", () => {
   it("shows the button for read_file even while the card body is collapsed", async () => {
     const { container } = render(
       wrap(
@@ -54,15 +54,13 @@ describe("ToolCard — open-in-editor button", () => {
     // ToolCard body starts collapsed (defaultOpen=false) — but the header
     // action must be visible regardless.
     expect(container.querySelector(".tool-call")).toBeNull();
-    const btn = screen.getByRole("button", { name: "src/foo.ts:50" });
+    const btn = screen.getByRole("button", { name: "src/foo.ts" });
     expect(btn).toBeTruthy();
 
     fireEvent.click(btn);
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("open_in_editor", {
-        command: "code",
+      expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/foo.ts",
-        line: 50,
       }),
     );
     expect(openPath).not.toHaveBeenCalled();
@@ -70,7 +68,7 @@ describe("ToolCard — open-in-editor button", () => {
     expect(container.querySelector(".tool-call")).toBeNull();
   });
 
-  it("shows the button for write_file args (no line → null)", async () => {
+  it("shows the button for write_file args", async () => {
     render(
       wrap(
         <ToolCard
@@ -87,10 +85,8 @@ describe("ToolCard — open-in-editor button", () => {
 
     fireEvent.click(btn);
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("open_in_editor", {
-        command: "code",
+      expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/new.ts",
-        line: null,
       }),
     );
   });
@@ -334,8 +330,8 @@ describe("SubagentCard — model visibility", () => {
   });
 });
 
-describe("DiffCard — open-in-editor button", () => {
-  it("renders the button in the header and opens at the first changed line", async () => {
+describe("DiffCard — show-in-explorer button", () => {
+  it("renders the button in the header and reveals the file in the explorer", async () => {
     render(
       wrap(
         <DiffCard
@@ -351,15 +347,13 @@ describe("DiffCard — open-in-editor button", () => {
       ),
     );
 
-    const btn = screen.getByRole("button", { name: "Open in editor" });
+    const btn = screen.getByRole("button", { name: "Show in file explorer" });
     expect(btn).toBeTruthy();
 
     fireEvent.click(btn);
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("open_in_editor", {
-        command: "code",
+      expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/foo.ts",
-        line: 13,
       }),
     );
     expect(openPath).not.toHaveBeenCalled();
@@ -377,7 +371,7 @@ describe("DiffCard — open-in-editor button", () => {
       ),
     );
 
-    const btn = screen.getByRole("button", { name: "src/foo.ts:1" });
+    const btn = screen.getByRole("button", { name: "src/foo.ts" });
     fireEvent.contextMenu(btn);
 
     const openWith = await screen.findByRole("menuitem", { name: "Open with…" });
