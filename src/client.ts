@@ -52,21 +52,34 @@ export class Usage {
       typeof u.eval_count === "number" ||
       // OpenAI Responses API usage names (codex backend / /v1/responses).
       typeof u.input_tokens === "number" ||
-      typeof u.output_tokens === "number"
+      typeof u.output_tokens === "number" ||
+      // Google Antigravity / Gemini usageMetadata names.
+      typeof u.promptTokenCount === "number" ||
+      typeof u.candidatesTokenCount === "number" ||
+      typeof u.totalTokenCount === "number" ||
+      typeof u.cachedContentTokenCount === "number" ||
+      typeof u.cached_content_token_count === "number"
     );
   }
 
   static fromApi(raw: RawUsage | undefined | null): Usage {
     const u = raw ?? {};
-    const promptTokens = u.prompt_tokens ?? u.prompt_eval_count ?? u.input_tokens ?? 0;
-    const completionTokens = u.completion_tokens ?? u.eval_count ?? u.output_tokens ?? 0;
-    const cacheHitTokens = u.prompt_cache_hit_tokens ?? u.input_tokens_details?.cached_tokens ?? 0;
+    const promptTokens =
+      u.prompt_tokens ?? u.prompt_eval_count ?? u.input_tokens ?? u.promptTokenCount ?? 0;
+    const completionTokens =
+      u.completion_tokens ?? u.eval_count ?? u.output_tokens ?? u.candidatesTokenCount ?? 0;
+    const cacheHitTokens =
+      u.prompt_cache_hit_tokens ??
+      u.input_tokens_details?.cached_tokens ??
+      u.cachedContentTokenCount ??
+      u.cached_content_token_count ??
+      0;
     const cacheMissTokens =
       u.prompt_cache_miss_tokens ?? Math.max(0, promptTokens - cacheHitTokens);
     return new Usage(
       promptTokens,
       completionTokens,
-      u.total_tokens ?? promptTokens + completionTokens,
+      u.total_tokens ?? u.totalTokenCount ?? promptTokens + completionTokens,
       cacheHitTokens,
       cacheMissTokens,
       nsToMs(u.prompt_eval_duration),
@@ -880,19 +893,32 @@ export class DeepSeekClient {
         });
       }
     }
-    const usage = inner.usageMetadata;
     return {
       content,
       reasoningContent: null,
       toolCalls,
       image,
-      usage: new Usage(
-        usage?.promptTokenCount ?? 0,
-        usage?.candidatesTokenCount ?? 0,
-        usage?.totalTokenCount ?? 0,
-      ),
+      usage: this.usageForAntigravity(inner.usageMetadata),
       raw: data,
     };
+  }
+
+  /** Normalize Google Antigravity / Gemini usageMetadata into a standard Usage record. */
+  private usageForAntigravity(usage: any): Usage {
+    if (!usage) return new Usage();
+    const promptTokens = usage.promptTokenCount ?? usage.prompt_token_count ?? 0;
+    const completionTokens = usage.candidatesTokenCount ?? usage.candidates_token_count ?? 0;
+    const totalTokens =
+      usage.totalTokenCount ?? usage.total_token_count ?? promptTokens + completionTokens;
+    const cacheHitTokens =
+      usage.cachedContentTokenCount ??
+      usage.cached_content_token_count ??
+      usage.prompt_cache_hit_tokens ??
+      usage.input_tokens_details?.cached_tokens ??
+      0;
+    const cacheMissTokens =
+      usage.prompt_cache_miss_tokens ?? Math.max(0, promptTokens - cacheHitTokens);
+    return new Usage(promptTokens, completionTokens, totalTokens, cacheHitTokens, cacheMissTokens);
   }
 
   private async fetchAntigravity(
@@ -1016,11 +1042,7 @@ export class DeepSeekClient {
     const chunks: StreamChunk[] = [];
     const chunk: StreamChunk = { raw: json };
     if (inner.usageMetadata) {
-      chunk.usage = new Usage(
-        inner.usageMetadata.promptTokenCount ?? 0,
-        inner.usageMetadata.candidatesTokenCount ?? 0,
-        inner.usageMetadata.totalTokenCount ?? 0,
-      );
+      chunk.usage = this.usageForAntigravity(inner.usageMetadata);
     }
     const candidate = inner.candidates?.[0];
     if (candidate?.finishReason) chunk.finishReason = candidate.finishReason;

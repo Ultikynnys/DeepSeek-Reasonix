@@ -82,6 +82,12 @@ export interface RawUsage {
   input_tokens?: number;
   output_tokens?: number;
   input_tokens_details?: { cached_tokens?: number };
+  /** Google Antigravity / Gemini usageMetadata names. */
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
+  cachedContentTokenCount?: number;
+  cached_content_token_count?: number;
 }
 
 export interface ChatRequestOptions {
