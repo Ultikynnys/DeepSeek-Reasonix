@@ -61,6 +61,7 @@ describe("ToolCard — show-in-explorer button", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/foo.ts",
+        workspace: "/repo",
       }),
     );
     expect(openPath).not.toHaveBeenCalled();
@@ -87,6 +88,7 @@ describe("ToolCard — show-in-explorer button", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/new.ts",
+        workspace: "/repo",
       }),
     );
   });
@@ -370,6 +372,7 @@ describe("DiffCard — show-in-explorer button", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/foo.ts",
+        workspace: "/repo",
       }),
     );
     expect(openPath).not.toHaveBeenCalled();

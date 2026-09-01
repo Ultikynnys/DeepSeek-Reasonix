@@ -85,6 +85,7 @@ describe("ContextPanel files", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/new-file.ts",
+        workspace: "/repo",
       }),
     );
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -99,6 +100,7 @@ describe("ContextPanel files", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
         path: "/repo/src/new-file.ts",
+        workspace: "/repo",
       }),
     );
     expect(openPath).not.toHaveBeenCalled();

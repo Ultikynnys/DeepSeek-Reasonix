@@ -20,10 +20,12 @@ import { CodeView } from "./CodeView";
 import { t, useLang } from "./i18n";
 
 /** Reveal a file or directory in the OS file explorer: a file opens its
- *  parent folder with the item selected, a directory opens itself. */
-export async function revealInExplorer(abs: string): Promise<void> {
+ *  parent folder with the item selected, a directory opens itself. The
+ *  workspace lets the Rust side resolve bare references (e.g. `web.ts`)
+ *  to their real location when the joined path doesn't exist. */
+export async function revealInExplorer(abs: string, workspace?: string): Promise<void> {
   try {
-    await invoke("reveal_in_explorer", { path: abs });
+    await invoke("reveal_in_explorer", { path: abs, workspace: workspace ?? null });
   } catch {
     // Last resort: open the parent directory with the OS default handler.
     await openPath(parentDir(abs));
@@ -125,7 +127,7 @@ function FilePill({ path, line }: { path: string; line?: string }) {
   const openInExplorer = async () => {
     try {
       const abs = resolveAgainstWorkspace(path, ctx.dir);
-      await revealInExplorer(abs);
+      await revealInExplorer(abs, ctx.dir);
       setDone("open");
       setTimeout(() => setDone(null), 1200);
     } catch {
@@ -294,7 +296,7 @@ function SafeLink({ href, children }: { href?: string; children: ReactNode }) {
       const parsed = parseFileHref(href);
       const target = parsed ?? { path: decodeMaybeUri(stripFileScheme(href)) };
       const abs = resolveAgainstWorkspace(target.path, ctx.dir);
-      await revealInExplorer(abs);
+      await revealInExplorer(abs, ctx.dir);
     } catch {
       try {
         await navigator.clipboard.writeText(href);

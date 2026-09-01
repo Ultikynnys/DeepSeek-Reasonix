@@ -205,9 +205,13 @@ function resolveContextAbs(path: string, settings: Settings | null): string {
 async function openContextFile(path: string, settings: Settings | null): Promise<void> {
   const abs = resolveContextAbs(path, settings);
   // Reveal the file in the OS file explorer (parent folder with the item
-  // selected); openPath is only the last resort.
+  // selected); openPath is only the last resort. The workspace lets the
+  // Rust side resolve bare references to their real location.
   try {
-    await invoke("reveal_in_explorer", { path: abs });
+    await invoke("reveal_in_explorer", {
+      path: abs,
+      workspace: settings?.workspaceDir ?? null,
+    });
   } catch {
     await openPath(abs);
   }

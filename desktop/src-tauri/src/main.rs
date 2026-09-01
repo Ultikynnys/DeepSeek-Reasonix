@@ -124,19 +124,82 @@ fn git_status(root: String) -> Result<Vec<GitStatusEntry>, String> {
     Ok(out)
 }
 
+/// Search `root` (bounded, skipping hidden entries and well-known noise
+/// dirs) for a file whose basename matches `name` (case-insensitive).
+/// Returns the first match — used to resolve bare chat references like
+/// `web.ts` to their real location under the workspace.
+fn find_by_basename(root: &Path, name: &str) -> Option<String> {
+    const MAX_DEPTH: u32 = 6;
+    const MAX_VISITED: usize = 20_000;
+    let mut queue: std::collections::VecDeque<(std::path::PathBuf, u32)> =
+        std::collections::VecDeque::new();
+    queue.push_back((root.to_path_buf(), 0));
+    let mut visited = 0usize;
+    while let Some((dir, depth)) = queue.pop_front() {
+        if depth > MAX_DEPTH || visited >= MAX_VISITED {
+            continue;
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            visited += 1;
+            let entry_name = entry.file_name();
+            let name_str = entry_name.to_string_lossy();
+            if name_str.starts_with('.') || SKIP_DIRS.contains(&name_str.as_ref()) {
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else { continue };
+            if file_type.is_dir() {
+                queue.push_back((entry.path(), depth + 1));
+            } else if file_type.is_file() && name_str.eq_ignore_ascii_case(name) {
+                return Some(entry.path().to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Resolve a file reference to a path that actually exists: absolute paths
+/// pass through, relative paths join the workspace, and a path that still
+/// doesn't exist falls back to a basename search under the workspace (chat
+/// references are often bare names like `web.ts`).
+fn resolve_existing(path: &str, workspace: Option<&str>) -> String {
+    let candidate = if Path::new(path).is_absolute() {
+        path.to_string()
+    } else if let Some(ws) = workspace {
+        Path::new(ws).join(path).to_string_lossy().into_owned()
+    } else {
+        path.to_string()
+    };
+    if std::fs::metadata(&candidate).is_ok() {
+        return candidate;
+    }
+    if let Some(ws) = workspace {
+        if let Some(base) = Path::new(&candidate).file_name().and_then(|n| n.to_str()) {
+            if let Some(found) = find_by_basename(Path::new(ws), base) {
+                return found;
+            }
+        }
+    }
+    candidate
+}
+
 /// Reveal a file or directory in the OS file explorer: a file opens its
 /// parent folder with the item selected (Explorer / Finder), a directory
 /// opens the directory itself. Replaces the old "open in code editor"
 /// flow — no editor detection, no editor config.
 #[tauri::command]
-fn reveal_in_explorer(path: String) -> Result<(), String> {
+fn reveal_in_explorer(path: String, workspace: Option<String>) -> Result<(), String> {
     use std::process::{Command, Stdio};
-    let is_dir = std::fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(false);
+    let resolved = resolve_existing(&path, workspace.as_deref());
+    let is_dir = std::fs::metadata(&resolved).map(|m| m.is_dir()).unwrap_or(false);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let normalized = path.replace('/', "\\");
+        let normalized = resolved.replace('/', "\\");
         let mut cmd = Command::new("explorer.exe");
         if is_dir {
             cmd.arg(&normalized);
@@ -154,9 +217,9 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     {
         let mut cmd = Command::new("open");
         if is_dir {
-            cmd.arg(&path);
+            cmd.arg(&resolved);
         } else {
-            cmd.arg("-R").arg(&path);
+            cmd.arg("-R").arg(&resolved);
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         cmd.spawn().map_err(|e| format!("spawn open: {e}"))?;
@@ -166,12 +229,12 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     {
         // No portable "select file" on Linux — open the parent directory.
         let target = if is_dir {
-            path.clone()
+            resolved.clone()
         } else {
-            std::path::Path::new(&path)
+            std::path::Path::new(&resolved)
                 .parent()
                 .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.clone())
+                .unwrap_or_else(|| resolved.clone())
         };
         let mut cmd = Command::new("xdg-open");
         cmd.arg(&target).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());

@@ -57,7 +57,7 @@ function OpenFileButton({ path, label }: { path: string; label: string }) {
         type="button"
         className="head-action"
         title={label}
-        onClick={() => void revealInExplorer(abs)}
+        onClick={() => void revealInExplorer(abs, ws.dir)}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
