@@ -154,6 +154,7 @@ import {
   fetchAntigravityQuota,
   onboardAntigravity,
   resolveAntigravityToken,
+  resolveGeminiAuth,
   signOutAntigravity,
 } from "../../antigravity-oauth.js";
 import { loadDotenv } from "../../env.js";
@@ -806,24 +807,6 @@ let pendingAntigravityOAuth: OAuthFlow | null = null;
 /** Last Antigravity OAuth flow failure — surfaced in the status bar's Gemini
  *  auth chip until the next successful sign-in clears it. */
 let lastAntigravityOAuthError: string | null = null;
-
-/** Resolve the Google OAuth token and managed Code Assist project for Gemini
- *  requests. The first request completes eligibility/onboarding and persists
- *  the account catalog. */
-async function resolveGeminiAuth(): Promise<{ accessToken: string; projectId: string } | null> {
-  const accessToken = await resolveAntigravityToken(defaultConfigPath());
-  if (!accessToken) return null;
-  const creds = readConfig().antigravityOAuth;
-  let projectId = creds?.projectId;
-  if (!projectId) {
-    projectId = await onboardAntigravity(accessToken);
-  }
-  if (creds && (!creds.projectId || !creds.models?.length)) {
-    const models = (await fetchAntigravityModels(accessToken, projectId)).map(({ id }) => id);
-    saveAntigravityOAuth({ ...creds, projectId, models });
-  }
-  return { accessToken, projectId };
-}
 
 async function refreshAntigravityModels(tab: Tab): Promise<void> {
   try {

@@ -410,11 +410,19 @@ export class DeepSeekClient {
   private readonly ollamaContextCache = new Map<string, { at: number; contextTokens?: number }>();
 
   constructor(opts: DeepSeekClientOptions = {}) {
-    // Keyless endpoints (local Ollama) must NOT fall back to the
-    // DEEPSEEK_API_KEY env — that would ship the DeepSeek key to whatever the
-    // baseUrl points at (a cloud Ollama endpoint could capture it).
-    const apiKey = opts.apiKey ?? (opts.allowMissingKey ? undefined : process.env.DEEPSEEK_API_KEY);
-    if (!apiKey && !opts.apiKeyResolver && !opts.transportResolver && !opts.allowMissingKey) {
+    // Keyless endpoints (local Ollama, Antigravity Gemini) must NOT fall back
+    // to the DEEPSEEK_API_KEY env — that would ship the DeepSeek key to whatever
+    // the baseUrl points at.
+    const apiKey =
+      opts.apiKey ??
+      (opts.allowMissingKey || opts.geminiAuthResolver ? undefined : process.env.DEEPSEEK_API_KEY);
+    if (
+      !apiKey &&
+      !opts.apiKeyResolver &&
+      !opts.transportResolver &&
+      !opts.geminiAuthResolver &&
+      !opts.allowMissingKey
+    ) {
       throw new Error(
         "No API key: set DEEPSEEK_API_KEY (deepseek-* models) or OPENAI_API_KEY (gpt-* models) in .env, or pass apiKey to DeepSeekClient.",
       );

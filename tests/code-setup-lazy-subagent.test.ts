@@ -1,8 +1,10 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ANTIGRAVITY_OAUTH_CLIENT_ID } from "../src/antigravity-oauth.js";
 import { buildCodeToolset } from "../src/code/setup.js";
+import { saveAntigravityOAuth } from "../src/config.js";
 
 // #700-followup: buildCodeToolset used to eagerly construct a DeepSeekClient
 // for the subagent runner, which threw "DEEPSEEK_API_KEY is not set" before
@@ -58,6 +60,55 @@ describe("buildCodeToolset", () => {
     expect(toolset.tools.size).toBeGreaterThan(0);
     // Never consulted during toolset construction — only on an actual subagent spawn.
     expect(reads).toBe(0);
+    await toolset.jobs.shutdown();
+  });
+
+  it("runs subagents with Gemini models using resolved Antigravity auth", async () => {
+    saveAntigravityOAuth(
+      {
+        clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
+        accessToken: "at-test-token",
+        refreshToken: "rt-test-token",
+        expiresAt: Date.now() + 3600_000,
+        projectId: "test-project-123",
+        models: ["gemini-3.7-flash-tiered"],
+      },
+      cfgPath,
+    );
+
+    const sse = [
+      `data: ${JSON.stringify({
+        response: {
+          candidates: [{ content: { parts: [{ text: "subagent investigation complete" }] } }],
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
+        },
+      })}\n\n`,
+    ].join("");
+
+    let capturedAuth: string | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: unknown, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      capturedAuth = headers.authorization ?? headers.Authorization;
+      return new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const toolset = await buildCodeToolset({
+      rootDir: tmpRoot,
+      configPath: cfgPath,
+      subagentModel: () => "gemini-3.7-flash-tiered",
+    });
+
+    const result = await toolset.tools.dispatch(
+      "explore",
+      JSON.stringify({ task: "investigate repo structure" }),
+    );
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+    expect(parsed.output).toBe("subagent investigation complete");
+    expect(capturedAuth).toBe("Bearer at-test-token");
     await toolset.jobs.shutdown();
   });
 });

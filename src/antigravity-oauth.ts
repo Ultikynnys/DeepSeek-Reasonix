@@ -447,6 +447,26 @@ export async function fetchAntigravityModels(
   return [...ids].sort().map((id) => ({ id, displayName: id }));
 }
 
+/** Resolve the Google OAuth token and managed Code Assist project for Gemini
+ *  requests. The first request completes eligibility/onboarding and persists
+ *  the account catalog. */
+export async function resolveGeminiAuth(
+  path: string = defaultConfigPath(),
+): Promise<{ accessToken: string; projectId: string } | null> {
+  const accessToken = await resolveAntigravityToken(path);
+  if (!accessToken) return null;
+  const creds = readConfig(path).antigravityOAuth;
+  let projectId = creds?.projectId;
+  if (!projectId) {
+    projectId = await onboardAntigravity(accessToken);
+  }
+  if (creds && (!creds.projectId || !creds.models?.length)) {
+    const models = (await fetchAntigravityModels(accessToken, projectId)).map(({ id }) => id);
+    saveAntigravityOAuth({ ...creds, projectId, models }, path);
+  }
+  return { accessToken, projectId };
+}
+
 // ── Browser OAuth flow ─────────────────────────────────────────────────────
 
 export interface OAuthFlow {

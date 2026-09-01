@@ -1,3 +1,4 @@
+import { resolveGeminiAuth } from "../antigravity-oauth.js";
 import { DeepSeekClient } from "../client.js";
 import { resolveCodexTransport } from "../codex-backend.js";
 import {
@@ -146,18 +147,22 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
       const model = opts.subagentModel?.() ?? skill.model ?? DEFAULT_MODEL;
       let subagentClient = subagentClients.get(model);
       if (!subagentClient) {
-        const ep = loadEndpointForModel(model);
-        const isOpenAI = isOpenAIStandardEndpoint(model);
+        const ep = loadEndpointForModel(model, opts.configPath);
+        const isOpenAI = isOpenAIStandardEndpoint(model, opts.configPath);
+        const provider = providerForModel(model, opts.configPath);
         subagentClient = new DeepSeekClient({
           apiKey: ep.apiKey,
           baseUrl: ep.baseUrl,
           // Local Ollama is keyless — the client omits the Authorization header.
-          allowMissingKey: providerForModel(model) === "ollama",
+          allowMissingKey: provider === "ollama",
           // OAuth fallback — when Codex backend is unavailable the static key is used
           // (bills platform credits). OAuth tokens are audience-locked to api.openai.com.
-          apiKeyResolver: isOpenAI ? () => resolveOpenAIToken() : undefined,
+          apiKeyResolver: isOpenAI ? () => resolveOpenAIToken(opts.configPath) : undefined,
           // Primary: route through ChatGPT Codex backend for plan-quota billing.
           transportResolver: isOpenAI ? () => resolveCodexTransport() : undefined,
+          // Gemini models authenticate via Google Antigravity OAuth (Starter quota).
+          geminiAuthResolver:
+            provider === "gemini" ? () => resolveGeminiAuth(opts.configPath) : undefined,
         });
         subagentClients.set(model, subagentClient);
       }

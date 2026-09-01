@@ -14,6 +14,7 @@ import {
   parseAntigravityPlan,
   refreshAntigravityToken,
   resolveAntigravityToken,
+  resolveGeminiAuth,
   signOutAntigravity,
 } from "../src/antigravity-oauth.js";
 import { readConfig, saveAntigravityOAuth } from "../src/config.js";
@@ -368,5 +369,25 @@ describe("antigravity-oauth", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
       "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
     );
+  });
+
+  it("resolveGeminiAuth returns null when no token is present", async () => {
+    expect(await resolveGeminiAuth(path)).toBeNull();
+  });
+
+  it("resolveGeminiAuth returns accessToken and projectId when present", async () => {
+    saveAntigravityOAuth(
+      {
+        clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
+        accessToken: "at-valid",
+        refreshToken: "rt-valid",
+        expiresAt: Date.now() + 3600_000,
+        projectId: "proj-abc",
+        models: ["gemini-3.7-flash-tiered"],
+      },
+      path,
+    );
+    const auth = await resolveGeminiAuth(path);
+    expect(auth).toEqual({ accessToken: "at-valid", projectId: "proj-abc" });
   });
 });
