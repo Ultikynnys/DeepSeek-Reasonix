@@ -23,7 +23,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
 import { memo, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { CommandPalette, ToastStack, buildCommands, useCommandPalette } from "./CommandPalette";
+import { ToastStack } from "./Toast";
 import { WorkspaceProvider } from "./Markdown";
 import { type AbortDraftSource, nextAbortDraftCandidate, restoreAbortedDraft } from "./abort-draft";
 import { formatBytes } from "./format";
@@ -63,11 +63,6 @@ import {
   rpcSend,
 } from "./protocol";
 import {
-  type SlashSettingsCommand,
-  buildSlashSettingsDescriptors,
-  parseSlashSettingsCommand,
-} from "./slash-settings";
-import {
   DEFAULT_TAB_THEME,
   type TabTheme,
   clearTabTheme,
@@ -81,7 +76,6 @@ import {
   FONT_SCALE_ZOOM,
   type FontFamily,
   type FontScale,
-  THEME,
   type Theme,
   type ThemeStyle,
   defaultStyleForTheme,
@@ -91,13 +85,13 @@ import {
 } from "./theme";
 import { AboutModal } from "./ui/about";
 import { isSubagentTool, parseEditResult } from "./ui/cards";
-import { Composer, type SlashCmd } from "./ui/composer";
+import { Composer } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
 import { JumpBar } from "./ui/jump-bar";
 import { activationHandler, escapeHandler } from "./ui/keyboard";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
-import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
+import { Shortcut, localizeShortcutText } from "./ui/shortcut";
 import { type PendingImport, SessionImportPopover, Sidebar } from "./ui/sidebar";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import {
@@ -557,18 +551,6 @@ function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
     sanitized.ollamaBaseUrl = _ollamaBaseUrl ?? undefined;
   }
   return sanitized;
-}
-
-function fallbackSkillDesc(skill: SkillInfo): string {
-  const scope =
-    skill.scope === "builtin"
-      ? t("app.skill.scope.builtin")
-      : skill.scope === "global"
-        ? t("app.skill.scope.global")
-        : t("app.skill.scope.project");
-  const runAs =
-    skill.runAs === "subagent" ? t("app.skill.runAs.subagent") : t("app.skill.runAs.inline");
-  return t("app.skill.generic", { scope, runAs });
 }
 
 function nextMessageTurn(messages: ChatMessage[]): number {
@@ -1875,13 +1857,10 @@ interface TabRuntimeProps {
   currency: "CNY" | "USD";
   registerDispatch: (tabId: string, d: TabDispatcher | null) => void;
   onNewTab: () => void;
-  onCloseTab: () => void;
-  canCloseTab: boolean;
   theme: Theme;
   themeStyle: ThemeStyle;
   onSetTheme: (theme: Theme) => void;
   onSetThemeStyle: (style: ThemeStyle) => void;
-  onToggleTheme: () => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
   fontFamily: FontFamily;
@@ -1926,13 +1905,10 @@ function TabRuntime({
   currency,
   registerDispatch,
   onNewTab,
-  onCloseTab,
-  canCloseTab,
   theme,
   themeStyle,
   onSetTheme,
   onSetThemeStyle,
-  onToggleTheme,
   fontScale,
   onSetFontScale,
   fontFamily,
@@ -2060,7 +2036,6 @@ function TabRuntime({
     setSettingsPage(page);
     setSettingsOpen(true);
   }, []);
-  const palette = useCommandPalette(active);
 
   useEffect(() => {
     registerDispatch(tabId, dispatch);
@@ -2074,18 +2049,6 @@ function TabRuntime({
     [tabId],
   );
 
-  const queryMentions = useCallback(
-    (query: string, nonce: number) => sendRpc({ cmd: "mention_query", query, nonce }),
-    [sendRpc],
-  );
-  const previewMention = useCallback(
-    (path: string, nonce: number) => sendRpc({ cmd: "mention_preview", path, nonce }),
-    [sendRpc],
-  );
-  const markMentionPicked = useCallback(
-    (path: string) => sendRpc({ cmd: "mention_picked", path }),
-    [sendRpc],
-  );
   const saveSettings = useCallback(
     (patch: SettingsPatch) => sendRpc({ cmd: "settings_save", ...patch }),
     [sendRpc],
@@ -2220,21 +2183,6 @@ function TabRuntime({
     [applySettingsPatch, flashToast],
   );
 
-  const applySlashSettingsCommand = useCallback(
-    (command: SlashSettingsCommand) => {
-      if (command.type === "reasoningEffort") {
-        applyReasoningEffort(command.reasoningEffort);
-      } else {
-        applyEditMode(command.editMode);
-      }
-    },
-    [applyEditMode, applyReasoningEffort],
-  );
-
-  // Drag-and-drop: dropping files/folders onto the window inserts them
-  // as @-mentions in the draft (relative to workspaceDir when inside it).
-  // activeRef gates the handler — without it, a single drop hits every
-  // mounted tab's draft (issue #1027, exposed once #1063 restored tabs).
   const dropActiveRef = useRef(active);
   useEffect(() => {
     dropActiveRef.current = active;
@@ -2262,8 +2210,6 @@ function TabRuntime({
           delete document.body.dataset.dragOver;
           const paths = event.payload.paths ?? [];
           if (paths.length === 0) return;
-          // Vision-capable models accept image attachments; everything else
-          // (and all non-image files) still drops in as @-mentions.
           const imageCapable = modelAcceptsImages(state.settings?.model, ollamaVisionModels);
           const imagePaths = imageCapable ? paths.filter(isImagePath) : [];
           const mentionPaths = imageCapable ? paths.filter((p) => !isImagePath(p)) : paths;
@@ -2281,9 +2227,8 @@ function TabRuntime({
             });
             setDraft((d) => {
               const prefix = d.trim() ? `${d.replace(/\s+$/, "")} ` : "";
-              return `${prefix}${mentions.map((m) => `@${m}`).join(" ")} `;
+              return `${prefix}${mentions.join(" ")} `;
             });
-            for (const m of mentions) markMentionPicked(m);
           }
           composerRef.current?.focus();
         });
@@ -2298,71 +2243,13 @@ function TabRuntime({
       unlisten?.();
       delete document.body.dataset.dragOver;
     };
-  }, [state.settings?.workspaceDir, state.settings?.model, markMentionPicked, attachPickedImage]);
+  }, [state.settings?.workspaceDir, state.settings?.model, attachPickedImage, ollamaVisionModels]);
 
   const send = useCallback(
     (override?: string) => {
       const text = (override ?? draft).trim();
       if ((!text && pendingImages.length === 0) || !state.ready || state.busy) return;
 
-      const settingsCommand = parseSlashSettingsCommand(text);
-      if (settingsCommand) {
-        applySlashSettingsCommand(settingsCommand);
-        if (!override) setDraft("");
-        return;
-      }
-
-      // /btw <question> — route to side-question RPC instead of user_input.
-      // Empty payload used to silently swallow the keystroke (#1370); surface
-      // the usage hint as a status message so the user knows what's expected.
-      // The full /btw line is echoed via send_user so the typed text appears
-      // immediately and busy=true gives a thinking indicator while the side
-      // call runs (#1470).
-      const btwMatch = /^\/btw(?:\s+([\s\S]+))?$/.exec(text);
-      if (btwMatch) {
-        const question = btwMatch[1]?.trim() ?? "";
-        if (!question) {
-          dispatch({ t: "push_status", text: t("app.btwUsage") });
-          if (!override) setDraft("/btw ");
-          return;
-        }
-        const clientId = `btw-${Date.now()}`;
-        recordAbortDraft("btw", text);
-        dispatch({ t: "send_user", text, clientId });
-        sendRpc({ cmd: "btw", text: question });
-        if (!override) setDraft("");
-        return;
-      }
-
-      const skillMatch = text.match(/^\/([a-zA-Z0-9_-]+)(\s+.*)?$/);
-      if (skillMatch) {
-        const [, name, args] = skillMatch;
-        if (name === "search-engine" || name === "se") {
-          openSettingsAt("general");
-          if (!override) setDraft("");
-          return;
-        }
-        if (name === "skill" || name === "skills") {
-          openSettingsAt("skills");
-          if (!override) setDraft("");
-          return;
-        }
-        const skill = state.skills.find((s) => s.name === name);
-        if (skill) {
-          const clientId = `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          const trimmedArgs = args?.trim() ?? "";
-          recordAbortDraft("skill_run", text);
-          dispatch({
-            t: "start_skill",
-            skill: { name: skill.name, runAs: skill.runAs },
-            args: trimmedArgs,
-            clientId,
-          });
-          sendRpc({ cmd: "skill_run", name: skill.name, args: trimmedArgs || undefined });
-          if (!override) setDraft("");
-          return;
-        }
-      }
       const clientId = `c-${Date.now()}`;
       const images = pendingImages.map((im) => im.wire);
       const imageUrls = pendingImages.map((im) => im.thumbnail);
@@ -2394,12 +2281,9 @@ function TabRuntime({
       imageCapable,
       state.ready,
       state.busy,
-      state.skills,
       state.settings?.workspaceDir,
       sendRpc,
       recordAbortDraft,
-      applySlashSettingsCommand,
-      openSettingsAt,
     ],
   );
 
@@ -2701,156 +2585,6 @@ function TabRuntime({
     };
   }, [importAnchor]);
 
-  const commands = buildCommands({
-    newChat: () => {
-      newChat();
-      flashToast(t("app.toast.newSession"));
-    },
-    clearChat: () => {
-      clearConversation();
-      flashToast(t("app.toast.cleared"));
-    },
-    focusComposer: () => composerRef.current?.focus(),
-    openSettings: () => openSettingsAt("general"),
-    about: () => setAboutOpen(true),
-    abort,
-    copyLast: () => {
-      const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
-      if (!last || last.kind !== "assistant") return;
-      const text = last.segments
-        .filter((s): s is { kind: "text"; text: string } => s.kind === "text")
-        .map((s) => s.text)
-        .join("\n\n")
-        .trim();
-      if (text) {
-        void navigator.clipboard.writeText(text);
-        flashToast(t("app.toast.copied"));
-      }
-    },
-    conversationCopy: () => {
-      conversationCopy();
-    },
-    exportMarkdown: () => {
-      exportConversation();
-    },
-    pickWorkspace,
-    newTab: onNewTab,
-    closeTab: onCloseTab,
-    busy: state.busy,
-    canCloseTab,
-    hasMessages: state.messages.length > 0,
-  });
-
-  const slashSettingCommands: SlashCmd[] = buildSlashSettingsDescriptors().map(
-    ({ cmd, action }) => ({
-      cmd,
-      desc:
-        action.type === "editMode"
-          ? t("app.cmd.setMode", { mode: action.editMode })
-          : t("app.cmd.setEffort", { effort: action.reasoningEffort }),
-      run: () => applySlashSettingsCommand(action),
-    }),
-  );
-
-  const slashCommands: SlashCmd[] = [
-    {
-      cmd: "/help",
-      desc: t("app.cmd.help"),
-      run: () => {
-        setDraft("/");
-        composerRef.current?.focus();
-      },
-    },
-    {
-      cmd: "/new",
-      desc: t("app.cmd.newSession"),
-      run: () => newChat(),
-      kb: shortcutText(["mod", "N"]),
-    },
-    { cmd: "/clear", desc: t("app.cmd.clearChat"), run: () => clearConversation() },
-    { cmd: "/abort", desc: t("app.cmd.abort"), run: () => abort(), kb: "esc" },
-    {
-      cmd: "/copy",
-      desc: t("app.cmd.copyLast"),
-      run: () => {
-        const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
-        if (last?.kind === "assistant") {
-          const text = last.segments
-            .filter((s): s is { kind: "text"; text: string } => s.kind === "text")
-            .map((s) => s.text)
-            .join("\n\n");
-          if (text) {
-            void navigator.clipboard.writeText(text);
-            flashToast(t("app.toast.copied"));
-          }
-        }
-      },
-    },
-    { cmd: "/model", desc: t("app.cmd.switchModel"), run: () => openSettingsAt("models") },
-    {
-      cmd: "/search-engine",
-      desc: t("app.cmd.searchEngine"),
-      run: () => openSettingsAt("general"),
-    },
-    { cmd: "/skill", desc: t("app.cmd.skill"), run: () => openSettingsAt("skills") },
-    { cmd: "/skills", desc: t("app.cmd.skill"), run: () => openSettingsAt("skills") },
-    ...slashSettingCommands,
-    { cmd: "/theme", desc: t("app.cmd.toggleTheme"), run: onToggleTheme },
-    {
-      cmd: "/currency",
-      desc: t("app.cmd.toggleCurrency"),
-      run: onToggleCurrency,
-    },
-    {
-      cmd: "/export",
-      desc: t("app.cmd.exportMd"),
-      run: () => exportConversation(),
-    },
-    {
-      cmd: "/feedback",
-      desc: t("app.cmd.feedback"),
-      run: () => {
-        void openUrl("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose").catch((err) =>
-          console.error("[reasonix frontend] feedback URL failed", err),
-        );
-      },
-    },
-    {
-      cmd: "/compact",
-      desc: t("app.cmd.compact"),
-      run: () => sendRpc({ cmd: "compact_history" }),
-    },
-    {
-      cmd: "/retry",
-      desc: t("app.cmd.retry"),
-      run: () => sendRpc({ cmd: "retry" }),
-    },
-    {
-      cmd: "/btw",
-      desc: t("app.cmd.btw"),
-      run: () => {
-        // Sets the draft to /btw so the user can type their question.
-        // The send() handler detects the /btw prefix and routes to the btw RPC.
-        setDraft("/btw ");
-        composerRef.current?.focus();
-      },
-    },
-    ...state.skills.map((s) => ({
-      cmd: `/${s.name}`,
-      desc: s.description?.trim() || fallbackSkillDesc(s),
-      insertOnly: true,
-      run: () => {
-        recordAbortDraft("skill_run", `/${s.name}`);
-        dispatch({
-          t: "start_skill",
-          skill: { name: s.name, runAs: s.runAs },
-          clientId: `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        });
-        sendRpc({ cmd: "skill_run", name: s.name });
-      },
-    })),
-  ];
-
   // Track how long the current turn has been stuck (no events received)
   const [stuckSec, setStuckSec] = useState(0);
   useEffect(() => {
@@ -2947,7 +2681,6 @@ function TabRuntime({
           ctxOn={!ctxCollapsed}
           onToggleSide={onToggleSide}
           onToggleCtx={onToggleCtx}
-          onOpenCommands={() => palette.setOpen(true)}
           onOpenSettings={() => openSettingsAt("general")}
           onCopy={conversationCopy}
           onExport={exportConversation}
@@ -2987,7 +2720,6 @@ function TabRuntime({
           }}
           onOpenSettings={() => openSettingsAt("general")}
           onOpenRules={() => openSettingsAt("rules")}
-          onOpenCommands={() => palette.setOpen(true)}
           onOpenAbout={() => setAboutOpen(true)}
         />
 
@@ -3052,18 +2784,7 @@ function TabRuntime({
 
                   {state.messages.length === 0 ? (
                     <EmptyState
-                      onPick={(text) => {
-                        const trimmed = text.trim();
-                        if (trimmed.startsWith("/")) {
-                          const cmd = trimmed.split(/\s+/)[0] ?? "";
-                          const match = slashCommands.find((s) => s.cmd === cmd);
-                          if (match) {
-                            match.run();
-                            return;
-                          }
-                        }
-                        send(text);
-                      }}
+                      onPick={(text) => send(text)}
                       workspaceDir={state.settings?.workspaceDir}
                     />
                   ) : null}
@@ -3289,11 +3010,6 @@ function TabRuntime({
                 editMode={state.settings?.editMode ?? "review"}
                 onEditModeChange={applyEditMode}
                 workspaceDir={state.settings?.workspaceDir}
-                slashCommands={slashCommands}
-                onMentionQuery={queryMentions}
-                onMentionPreview={previewMention}
-                onMentionPicked={markMentionPicked}
-                mentionResults={state.mentionResults}
                 queuedSends={state.queuedSends}
                 onQueueWhileBusy={(text) => {
                   dispatch({ t: "enqueue_send", text });
@@ -3375,12 +3091,6 @@ function TabRuntime({
             setWdAnchor(anchor);
             setWdOpen(true);
           }}
-        />
-
-        <CommandPalette
-          open={palette.open}
-          onClose={() => palette.setOpen(false)}
-          commands={commands}
         />
 
         <WorkdirPop
@@ -3654,7 +3364,6 @@ function TitleBar({
   ctxOn,
   onToggleSide,
   onToggleCtx,
-  onOpenCommands,
   onOpenSettings,
   onCopy,
   onExport,
@@ -3667,7 +3376,6 @@ function TitleBar({
   ctxOn: boolean;
   onToggleSide: () => void;
   onToggleCtx: () => void;
-  onOpenCommands: () => void;
   onOpenSettings: () => void;
   onCopy: () => void;
   onExport: () => void;
@@ -3815,21 +3523,6 @@ function TitleBar({
               }}
             >
               <div className="popup-list">
-                <div
-                  className="popup-item"
-                  onClick={closeAnd(onOpenCommands)}
-                  onKeyDown={activationHandler(closeAnd(onOpenCommands))}
-                >
-                  <span className="ico">
-                    <I.search size={12} />
-                  </span>
-                  <div className="nm">
-                    <span>{t("app.titlebar.commandPalette")}</span>
-                  </div>
-                  <span className="kb">
-                    <Shortcut keys={["mod", "K"]} />
-                  </span>
-                </div>
                 <div
                   className="popup-item"
                   onClick={closeAnd(() => {
@@ -4113,7 +3806,6 @@ function EmptyState({
     t("app.empty.suggestion1"),
     t("app.empty.suggestion2"),
     t("app.empty.suggestion3"),
-    "/help",
   ];
   const wsLabel = workspaceDir ? workspaceDir.split(/[\\/]/).pop() : null;
   return (
@@ -5050,17 +4742,6 @@ export function App() {
     [activeTabId],
   );
 
-  const onToggleTheme = useCallback(() => {
-    setTabThemes((prev) => {
-      const cur = prev[activeTabId];
-      if (!cur) return prev;
-      const nextTheme: Theme = cur.theme === THEME.DARK ? THEME.LIGHT : THEME.DARK;
-      const next: TabTheme = { theme: nextTheme, themeStyle: defaultStyleForTheme(nextTheme) };
-      writeTabTheme(localStorage, activeTabId, next);
-      return { ...prev, [activeTabId]: next };
-    });
-  }, [activeTabId]);
-
   const onToggleCurrency = useCallback(() => {
     setCurrency((c) => {
       const next = c === "CNY" ? "USD" : "CNY";
@@ -5085,13 +4766,10 @@ export function App() {
           currency={currency}
           registerDispatch={registerDispatch}
           onNewTab={openTab}
-          onCloseTab={() => closeTab(t.id)}
-          canCloseTab={tabs.length > 1}
           theme={tabThemes[t.id]?.theme ?? DEFAULT_TAB_THEME.theme}
           themeStyle={tabThemes[t.id]?.themeStyle ?? DEFAULT_TAB_THEME.themeStyle}
           onSetTheme={onSetTheme}
           onSetThemeStyle={onSetThemeStyle}
-          onToggleTheme={onToggleTheme}
           fontScale={fontScale}
           onSetFontScale={setFontScale}
           fontFamily={fontFamily}

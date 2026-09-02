@@ -29,10 +29,13 @@ describe("modelAcceptsImages", () => {
     }
   });
 
-  it("recognizes live Antigravity chat and tab model ids", async () => {
+  it("recognizes live Antigravity model ids and rejects internal chat/tab IDs", async () => {
     const { isAntigravityModel } = await import("../src/models.js");
-    expect(isAntigravityModel("chat_20706")).toBe(true);
-    expect(isAntigravityModel("tab_flash_lite_preview")).toBe(true);
+    expect(isAntigravityModel("gemini-3.7-flash")).toBe(true);
+    expect(isAntigravityModel("claude-sonnet-4-6")).toBe(true);
+    expect(isAntigravityModel("gpt-oss-120b-medium")).toBe(true);
+    expect(isAntigravityModel("chat_20706")).toBe(false);
+    expect(isAntigravityModel("tab_flash_lite_preview")).toBe(false);
   });
 
   it("rejects plain DeepSeek, Ollama, and unknown ids", () => {

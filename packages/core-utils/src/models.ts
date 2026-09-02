@@ -41,12 +41,6 @@ export const ZAI_MODELS: readonly string[] = [
 
 /** Unified models served through Google Antigravity OAuth and Cloud Code. */
 export const ANTIGRAVITY_MODELS: readonly string[] = [
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
-  "gemini-3.1-flash-fast",
-  "gemini-3.1-flash-high",
-  "gemini-3.1-pro-low",
-  "gemini-3.1-pro-high",
   "gemini-3.6-flash",
   "gemini-3.7-flash",
   "claude-sonnet-4-6-thinking",
@@ -62,9 +56,7 @@ export function isAntigravityModel(model: string | undefined | null): boolean {
     typeof model === "string" &&
     (model.startsWith("gemini-") ||
       model.startsWith("claude-") ||
-      model.startsWith("gpt-oss-") ||
-      model.startsWith("chat_") ||
-      model.startsWith("tab_"))
+      model.startsWith("gpt-oss-"))
   );
 }
 

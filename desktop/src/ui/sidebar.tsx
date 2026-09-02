@@ -67,7 +67,6 @@ export function Sidebar({
   onOpenWorkdir,
   onOpenSettings,
   onOpenRules,
-  onOpenCommands,
   onOpenAbout,
 }: {
   sessions: SessionInfo[];
@@ -81,7 +80,6 @@ export function Sidebar({
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
   onOpenSettings: () => void;
   onOpenRules: () => void;
-  onOpenCommands: () => void;
   onOpenAbout: () => void;
 }) {
   useLang();
@@ -130,14 +128,6 @@ export function Sidebar({
           <I.plus size={14} />
           <span className="label">{t("sidebarPanel.newChat")}</span>
           <Shortcut keys={["mod", "N"]} />
-        </button>
-        <button
-          type="button"
-          className="icon-btn"
-          title={t("sidebarPanel.commandPalette")}
-          onClick={onOpenCommands}
-        >
-          <I.history size={14} />
         </button>
       </div>
 

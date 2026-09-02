@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./composer";
@@ -12,7 +12,6 @@ afterEach(() => {
 
 function renderComposer(props?: Partial<React.ComponentProps<typeof Composer>>) {
   const textareaRef = createRef<HTMLTextAreaElement>();
-  const onMentionQuery = vi.fn();
   const utils = render(
     <Composer
       draft=""
@@ -28,17 +27,12 @@ function renderComposer(props?: Partial<React.ComponentProps<typeof Composer>>) 
       editMode="review"
       onEditModeChange={vi.fn()}
       textareaRef={textareaRef}
-      slashCommands={[]}
-      onMentionQuery={onMentionQuery}
-      onMentionPreview={vi.fn()}
-      onMentionPicked={vi.fn()}
-      mentionResults={null}
       workspaceDir="/repo"
       {...props}
     />,
   );
 
-  return { ...utils, textareaRef, onMentionQuery };
+  return { ...utils, textareaRef };
 }
 
 describe("desktop Composer model catalog", () => {
@@ -102,6 +96,26 @@ describe("desktop Composer model catalog", () => {
     expect(onModelChange).not.toHaveBeenCalled();
   });
 
+  it("renders distinct category headers for DeepSeek, ChatGPT, Z.AI, Custom, and external providers", () => {
+    const { container } = renderComposer({
+      customModels: ["my-fine-tuned-model"],
+      antigravityModels: ["gemini-3.7-flash-tiered"],
+      ollamaModels: ["llama3.1:latest"],
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+    const groups = Array.from(container.querySelectorAll(".model-menu-group")).map(
+      (el) => el.querySelector(".grow")?.textContent,
+    );
+    expect(groups).toEqual([
+      "DeepSeek",
+      "ChatGPT",
+      "Z.AI",
+      "Custom",
+      "Google Antigravity",
+      "Ollama",
+    ]);
+  });
+
   it("subagent menu shares the backend-generated Ollama and Gemini models with the main agent", () => {
     const ollamaModels = ["llama3.1:latest", "qwen3:32b", "llava"];
     const antigravityModels = ["gemini-2.5-pro", "gemini-2.5-flash", "claude-3-5-sonnet"];
@@ -125,173 +139,5 @@ describe("desktop Composer model catalog", () => {
     }
     expect(subText).toContain("Google Antigravity");
     expect(subText).toContain("Ollama");
-  });
-});
-
-describe("desktop Composer @ popup", () => {
-  it("keeps the active mention row when async results shrink", async () => {
-    const { container, rerender, onMentionQuery } = renderComposer();
-    const textarea = container.querySelector("textarea");
-    if (!textarea) throw new Error("missing textarea");
-
-    fireEvent.change(textarea, { target: { value: "@re" } });
-
-    await waitFor(() => expect(onMentionQuery).toHaveBeenCalled());
-    const nonce = onMentionQuery.mock.calls[0]?.[1] as number;
-
-    rerender(
-      <Composer
-        draft="@re"
-        setDraft={vi.fn()}
-        onSend={vi.fn()}
-        onAbort={vi.fn()}
-        disabled={false}
-        busy={false}
-        modelLabel="deepseek-v4-flash"
-        reasoningEffort="high"
-        onModelChange={vi.fn()}
-        onEffortChange={vi.fn()}
-        editMode="review"
-        onEditModeChange={vi.fn()}
-        textareaRef={createRef<HTMLTextAreaElement>()}
-        slashCommands={[]}
-        onMentionQuery={onMentionQuery}
-        onMentionPreview={vi.fn()}
-        onMentionPicked={vi.fn()}
-        mentionResults={{ nonce, query: "re", results: ["alpha", "beta", "gamma"] }}
-        workspaceDir="/repo"
-      />,
-    );
-
-    await waitFor(() => {
-      expect(container.querySelector('.popup-item[data-active="true"]')?.textContent).toContain(
-        "alpha",
-      );
-    });
-
-    const items = container.querySelectorAll(".popup-item");
-    fireEvent.mouseEnter(items[1]!);
-
-    expect(container.querySelector('.popup-item[data-active="true"]')?.textContent).toContain(
-      "beta",
-    );
-
-    rerender(
-      <Composer
-        draft="@re"
-        setDraft={vi.fn()}
-        onSend={vi.fn()}
-        onAbort={vi.fn()}
-        disabled={false}
-        busy={false}
-        modelLabel="deepseek-v4-flash"
-        reasoningEffort="high"
-        onModelChange={vi.fn()}
-        onEffortChange={vi.fn()}
-        editMode="review"
-        onEditModeChange={vi.fn()}
-        textareaRef={createRef<HTMLTextAreaElement>()}
-        slashCommands={[]}
-        onMentionQuery={onMentionQuery}
-        onMentionPreview={vi.fn()}
-        onMentionPicked={vi.fn()}
-        mentionResults={{ nonce, query: "re", results: ["alpha", "beta"] }}
-        workspaceDir="/repo"
-      />,
-    );
-
-    await waitFor(() => {
-      expect(container.querySelector('.popup-item[data-active="true"]')?.textContent).toContain(
-        "beta",
-      );
-    });
-  });
-
-  it("uses the wider at popup class for mention results", async () => {
-    const { container, rerender, onMentionQuery } = renderComposer();
-    const textarea = container.querySelector("textarea");
-    if (!textarea) throw new Error("missing textarea");
-
-    fireEvent.change(textarea, { target: { value: "@re" } });
-    await waitFor(() => expect(onMentionQuery).toHaveBeenCalled());
-    const nonce = onMentionQuery.mock.calls[0]?.[1] as number;
-
-    rerender(
-      <Composer
-        draft="@re"
-        setDraft={vi.fn()}
-        onSend={vi.fn()}
-        onAbort={vi.fn()}
-        disabled={false}
-        busy={false}
-        modelLabel="deepseek-v4-flash"
-        reasoningEffort="high"
-        onModelChange={vi.fn()}
-        onEffortChange={vi.fn()}
-        editMode="review"
-        onEditModeChange={vi.fn()}
-        textareaRef={createRef<HTMLTextAreaElement>()}
-        slashCommands={[]}
-        onMentionQuery={onMentionQuery}
-        onMentionPreview={vi.fn()}
-        onMentionPicked={vi.fn()}
-        mentionResults={{ nonce, query: "re", results: ["alpha"] }}
-        workspaceDir="/repo"
-      />,
-    );
-
-    expect(container.querySelector(".popup-list.at-popup-list")).not.toBeNull();
-  });
-
-  it("routes a mentioned image file to onPickImage when the model is image-capable", async () => {
-    const onPickImage = vi.fn();
-    const setDraft = vi.fn();
-    const { container, rerender, onMentionQuery } = renderComposer({
-      imageCapable: true,
-      onPickImage,
-      setDraft,
-    });
-    const textarea = container.querySelector("textarea");
-    if (!textarea) throw new Error("missing textarea");
-
-    fireEvent.change(textarea, { target: { value: "@sho" } });
-    await waitFor(() => expect(onMentionQuery).toHaveBeenCalled());
-    const nonce = onMentionQuery.mock.calls[0]?.[1] as number;
-
-    rerender(
-      <Composer
-        draft="@sho"
-        setDraft={setDraft}
-        onSend={vi.fn()}
-        onAbort={vi.fn()}
-        disabled={false}
-        busy={false}
-        modelLabel="gpt-5.6-sol"
-        reasoningEffort="high"
-        onModelChange={vi.fn()}
-        onEffortChange={vi.fn()}
-        editMode="review"
-        onEditModeChange={vi.fn()}
-        textareaRef={createRef<HTMLTextAreaElement>()}
-        slashCommands={[]}
-        onMentionQuery={onMentionQuery}
-        onMentionPreview={vi.fn()}
-        onMentionPicked={vi.fn()}
-        mentionResults={{ nonce, query: "sho", results: ["assets/shot.png"] }}
-        workspaceDir="/repo"
-        imageCapable
-        onPickImage={onPickImage}
-      />,
-    );
-
-    // Typing already exercised setDraft — clear so the click's effect is
-    // isolated: the image mention must attach, not insert @text.
-    setDraft.mockClear();
-    fireEvent.click(container.querySelectorAll(".popup-item")[0]!);
-
-    // The workspace-relative mention resolves against the composer workspaceDir
-    // and attaches as a vision pending image — no @text, no draft change.
-    expect(onPickImage).toHaveBeenCalledWith("/repo/assets/shot.png");
-    expect(setDraft).not.toHaveBeenCalled();
   });
 });

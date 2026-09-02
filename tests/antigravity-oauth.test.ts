@@ -278,20 +278,28 @@ describe("antigravity-oauth", () => {
     await expect(onboardAntigravity("at")).rejects.toThrow("Account is not eligible");
   });
 
-  it("fetchAntigravityModels returns unique model ids from quota buckets", async () => {
+  it("fetchAntigravityModels returns unique usable model ids from quota buckets, dropping legacy 2.0-3.1 and chat/tab/vertex", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({
         buckets: [
-          { modelId: "gemini-3.1-pro-high" },
+          { modelId: "gemini-3.6-flash" },
           { modelId: "claude-sonnet-4-6-thinking" },
+          { modelId: "gemini-3.6-flash" },
+          { modelId: "gemini-2.5-pro" },
+          { modelId: "gemini-3-flash" },
           { modelId: "gemini-3.1-pro-high" },
+          { modelId: "chat_20706" },
+          { modelId: "chat_23310" },
+          { modelId: "tab_flash_lite_preview" },
+          { modelId: "tab_jump_flash_lite_preview" },
+          { modelId: "gemini-3.6-flash_vertex" },
         ],
       }),
     );
 
     await expect(fetchAntigravityModels("at", "project-123")).resolves.toEqual([
       { id: "claude-sonnet-4-6-thinking", displayName: "claude-sonnet-4-6-thinking" },
-      { id: "gemini-3.1-pro-high", displayName: "gemini-3.1-pro-high" },
+      { id: "gemini-3.6-flash", displayName: "gemini-3.6-flash" },
     ]);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
@@ -333,7 +341,7 @@ describe("antigravity-oauth", () => {
     });
   });
 
-  it("fetchAntigravityQuota returns plan + per-model usedFraction, dropping vertex buckets", async () => {
+  it("fetchAntigravityQuota returns plan + per-model usedFraction, dropping vertex, legacy, and chat/tab buckets", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -343,12 +351,15 @@ describe("antigravity-oauth", () => {
         jsonResponse({
           buckets: [
             {
-              modelId: "gemini-2.5-pro",
+              modelId: "gemini-3.7-flash-tiered",
               remainingFraction: 0.8,
               resetTime: "2026-09-01T13:37:06Z",
             },
-            { modelId: "gemini-2.5-pro_vertex", remainingFraction: 0.8 },
+            { modelId: "gemini-3.7-flash-tiered_vertex", remainingFraction: 0.8 },
+            { modelId: "gemini-2.5-pro", remainingFraction: 0.5 },
+            { modelId: "gemini-3.1-pro-high", remainingFraction: 0.7 },
             { modelId: "chat_20706", remainingFraction: 1 },
+            { modelId: "tab_flash_lite_preview", remainingFraction: 1 },
           ],
         }),
       );
@@ -357,11 +368,10 @@ describe("antigravity-oauth", () => {
     expect(quota.plan).toEqual({ tierId: "free-tier", name: "Antigravity" });
     expect(quota.windows).toEqual([
       {
-        modelId: "gemini-2.5-pro",
+        modelId: "gemini-3.7-flash-tiered",
         usedFraction: 0.2,
         resetTime: "2026-09-01T13:37:06Z",
       },
-      { modelId: "chat_20706", usedFraction: 0 },
     ]);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",

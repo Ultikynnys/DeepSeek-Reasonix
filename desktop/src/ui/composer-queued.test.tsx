@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 // registers, so unmount between tests to keep queries unambiguous.
 afterEach(cleanup);
 
-import { Composer, type SlashCmd } from "./composer";
+import { Composer } from "./composer";
 
 const baseProps = {
   draft: "",
@@ -24,7 +24,6 @@ const baseProps = {
   editMode: "review",
   onEditModeChange: vi.fn(),
   textareaRef: { current: null },
-  slashCommands: [] as SlashCmd[],
 } as const;
 
 function renderQueued({

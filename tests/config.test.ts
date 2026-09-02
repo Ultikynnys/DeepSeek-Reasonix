@@ -364,7 +364,7 @@ describe("config", () => {
       expect(providerForModel("gpt-5.6")).toBe("deepseek");
       expect(providerForModel("gpt-oss-120b-medium")).toBe("gemini");
       expect(providerForModel("claude-sonnet-4-6-thinking")).toBe("gemini");
-      expect(providerForModel("gemini-3.1-pro-high")).toBe("gemini");
+      expect(providerForModel("gemini-3.7-flash")).toBe("gemini");
       expect(providerForModel("glm-5.3-flash")).toBe("zai");
       expect(providerForModel("deepseek-v4-flash")).toBe("deepseek");
       expect(providerForModel(undefined)).toBe("deepseek");

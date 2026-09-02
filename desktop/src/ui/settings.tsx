@@ -1746,7 +1746,6 @@ function PageShortcuts() {
     { nm: t("settings.shortcutNewChat"), keys: ["mod", "N"] },
     { nm: t("settings.shortcutNewTab"), keys: ["mod", "T"] },
     { nm: t("settings.shortcutCloseTab"), keys: ["mod", "W"] },
-    { nm: t("settings.shortcutCommandPalette"), keys: ["mod", "K"] },
     { nm: t("settings.shortcutFocusComposer"), keys: ["mod", "L"] },
     { nm: t("settings.shortcutSwitchTab"), keys: ["mod", "tab"] },
     { nm: t("settings.shortcutAbort"), keys: ["esc"] },

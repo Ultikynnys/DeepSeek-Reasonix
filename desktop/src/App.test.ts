@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("./CommandPalette", () => ({
-  CommandPalette: () => null,
+vi.mock("./Toast", () => ({
   Toast: () => null,
-  buildCommands: vi.fn(() => []),
-  useCommandPalette: vi.fn(() => ({ open: false, setOpen: vi.fn() })),
+  ToastStack: () => null,
 }));
 vi.mock("./Markdown", () => ({
   WorkspaceProvider: ({ children }: { children?: unknown }) => children ?? null,

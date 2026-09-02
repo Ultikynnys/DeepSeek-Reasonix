@@ -16,7 +16,7 @@ afterEach(() => {
   vi.mocked(open).mockReset();
 });
 
-import { Composer, type SlashCmd } from "./composer";
+import { Composer } from "./composer";
 
 const baseProps = {
   draft: "",
@@ -30,7 +30,6 @@ const baseProps = {
   editMode: "review",
   onEditModeChange: vi.fn(),
   textareaRef: { current: null },
-  slashCommands: [] as SlashCmd[],
 } as const;
 
 function firePaste(textarea: HTMLTextAreaElement, file: File): void {
@@ -117,7 +116,7 @@ describe("Composer image pick button (ChatGPT vision path)", () => {
     expect(setDraft).not.toHaveBeenCalled();
   });
 
-  it("falls back to an @-mention for gif picks even when image-capable (#no stranded send)", async () => {
+  it("inserts the path for gif picks even when image-capable (#no stranded send)", async () => {
     const onPickImage = vi.fn();
     const setDraft = vi.fn();
     vi.mocked(open).mockResolvedValue("C:\\shots\\anim.gif");
@@ -128,10 +127,10 @@ describe("Composer image pick button (ChatGPT vision path)", () => {
     await vi.waitFor(() => expect(setDraft).toHaveBeenCalled());
     expect(onPickImage).not.toHaveBeenCalled();
     const updater = setDraft.mock.calls[0]![0] as (cur: string) => string;
-    expect(updater("")).toBe("@C:\\shots\\anim.gif ");
+    expect(updater("")).toBe("C:\\shots\\anim.gif ");
   });
 
-  it("keeps the @-mention path when the model is DeepSeek", async () => {
+  it("inserts the file path when the model is DeepSeek", async () => {
     const onPickImage = vi.fn();
     const setDraft = vi.fn();
     vi.mocked(open).mockResolvedValue("/ws/shot.png");
@@ -146,5 +145,7 @@ describe("Composer image pick button (ChatGPT vision path)", () => {
     fireEvent.click(pickButton(container));
     await vi.waitFor(() => expect(setDraft).toHaveBeenCalled());
     expect(onPickImage).not.toHaveBeenCalled();
+    const updater = setDraft.mock.calls[0]![0] as (cur: string) => string;
+    expect(updater("")).toBe("/ws/shot.png ");
   });
 });

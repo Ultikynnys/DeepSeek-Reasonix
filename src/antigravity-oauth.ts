@@ -287,14 +287,36 @@ export function parseAntigravityPlan(currentTier: unknown): AntigravityPlan | nu
   };
 }
 
+/** Drops unusable Antigravity ids: internal chat/tab routing ids, duplicate
+ *  vertex buckets, and legacy Gemini models between 2.0 and 3.1 inclusive. */
+export function isUsableAntigravityModel(modelId: string | undefined | null): boolean {
+  if (typeof modelId !== "string") return false;
+  const trimmed = modelId.trim();
+  if (!trimmed) return false;
+  if (trimmed.endsWith("_vertex")) return false;
+  if (trimmed.startsWith("chat_") || trimmed.startsWith("tab_")) return false;
+
+  const geminiMatch = trimmed.match(/^gemini-(\d+)(?:\.(\d+))?/i);
+  if (geminiMatch) {
+    const major = Number.parseInt(geminiMatch[1]!, 10);
+    const minor = geminiMatch[2] !== undefined ? Number.parseInt(geminiMatch[2], 10) : 0;
+    // Filter legacy models between 2.0 and 3.1 (2.x and 3.0/3.1)
+    if (major === 2 || (major === 3 && minor <= 1)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 /** Map a retrieveUserQuota bucket into a quota window. `_vertex`-suffixed
- *  buckets share the same quota as their non-vertex twin; drop them so the
- *  active model's number is not double-counted. */
+ *  buckets share the same quota as their non-vertex twin, and internal chat/tab
+ *  buckets are unusable; drop them so only valid models are tracked. */
 function parseQuotaWindow(
   bucket: NonNullable<UserQuotaResponse["buckets"]>[number],
 ): AntigravityQuotaWindow | null {
   const modelId = bucket.modelId?.trim();
-  if (!modelId || modelId.endsWith("_vertex")) return null;
+  if (!modelId || !isUsableAntigravityModel(modelId)) return null;
   const fraction = bucket.remainingFraction;
   if (typeof fraction !== "number" || !Number.isFinite(fraction)) {
     return { modelId, usedFraction: 0 };
@@ -429,7 +451,8 @@ export async function onboardAntigravity(accessToken: string): Promise<string> {
   return projectId;
 }
 
-/** Fetch the exact model ids advertised by the account's quota buckets. */
+/** Fetch the exact model ids advertised by the account's quota buckets,
+ *  filtering out unusable internal chat/tab routing ids and duplicate vertex buckets. */
 export async function fetchAntigravityModels(
   accessToken: string,
   projectId: string,
@@ -440,7 +463,7 @@ export async function fetchAntigravityModels(
   const ids = new Set(
     (quota.buckets ?? []).flatMap((bucket) => {
       const id = bucket.modelId?.trim();
-      return id ? [id] : [];
+      return id && isUsableAntigravityModel(id) ? [id] : [];
     }),
   );
   if (ids.size === 0) throw new Error("Antigravity quota returned no model ids");

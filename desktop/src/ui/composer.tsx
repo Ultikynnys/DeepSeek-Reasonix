@@ -1,16 +1,17 @@
 import {
-  ANTIGRAVITY_MODELS,
-  KNOWN_MODELS,
+  GPT56_MODELS,
+  SUPPORTED_OFFICIAL_MODELS,
+  ZAI_MODELS,
   modelAcceptsImages,
 } from "@reasonix/core-utils";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   type ChangeEvent,
+  Fragment,
   type KeyboardEvent,
   type RefObject,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -68,58 +69,6 @@ export function ModeSwitch({
   );
 }
 
-export type SlashCmd = {
-  cmd: string;
-  desc: string;
-  run: () => void;
-  kb?: string;
-  insertOnly?: boolean;
-};
-export type MentionItem = {
-  name: string;
-  kind: "file" | "dir" | "url" | "agent" | "clip";
-  desc?: string;
-};
-
-export type Chip = { kind: "at"; label: string } | { kind: "slash"; label: string };
-
-type Popup = { kind: "slash"; query: string } | { kind: "at"; query: string; nonce: number } | null;
-
-function slashIcon(cmd: string) {
-  const m: Record<string, React.ReactNode> = {
-    "/clear": <I.x size={12} />,
-    "/new": <I.plus size={12} />,
-    "/abort": <I.stop size={12} />,
-    "/copy": <I.layers size={12} />,
-    "/export": <I.download size={12} />,
-    "/model": <I.cpu size={12} />,
-    "/theme": <I.sun size={12} />,
-    "/lang": <I.globe size={12} />,
-  };
-  return m[cmd] || <I.slash size={12} />;
-}
-
-/** Parent dir of the current @ query, with trailing slash. `null` = no parent to show (at workspace root). */
-function parentOfAtQuery(query: string): string | null {
-  const normalized = query.replace(/\\/g, "/");
-  const trailingSlash = normalized.endsWith("/");
-  const lastSlash = normalized.lastIndexOf("/");
-  if (lastSlash < 0) return null;
-  const dirContext = trailingSlash ? normalized.slice(0, -1) : normalized.slice(0, lastSlash);
-  if (!dirContext) return null;
-  const parentIdx = dirContext.lastIndexOf("/");
-  return parentIdx >= 0 ? `${dirContext.slice(0, parentIdx)}/` : "";
-}
-
-function atIcon(k: MentionItem["kind"]) {
-  if (k === "file") return <I.file size={12} />;
-  if (k === "dir") return <I.folder size={12} />;
-  if (k === "url") return <I.globe size={12} />;
-  if (k === "agent") return <I.bot size={12} />;
-  if (k === "clip") return <I.layers size={12} />;
-  return <I.at size={12} />;
-}
-
 export function Composer({
   draft,
   setDraft,
@@ -148,11 +97,6 @@ export function Composer({
   onRefreshAntigravityModels,
   customModels,
   textareaRef,
-  slashCommands,
-  onMentionQuery,
-  onMentionPreview,
-  onMentionPicked,
-  mentionResults,
   workspaceDir,
   queuedSends,
   onQueueWhileBusy,
@@ -203,11 +147,6 @@ export function Composer({
    *  in the general list because the user declared them. */
   customModels?: string[];
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  slashCommands: SlashCmd[];
-  onMentionQuery?: (q: string, nonce: number) => void;
-  onMentionPreview?: (path: string, nonce: number) => void;
-  onMentionPicked?: (path: string) => void;
-  mentionResults?: { nonce: number; query: string; results: string[] } | null;
   workspaceDir?: string;
   /** Messages typed while busy=true; rendered as removable chips above the textarea and auto-drained FIFO on turn-complete. */
   queuedSends?: string[];
@@ -229,13 +168,9 @@ export function Composer({
   /** Vision path for picked/dropped image paths — daemon reads the bytes. */
   onPickImage?: (path: string) => void;
 }) {
-  const [chips, setChips] = useState<Chip[]>([]);
-  const [popup, setPopup] = useState<Popup>(null);
-  const [activeIdx, setActiveIdx] = useState(0);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [subagentMenuOpen, setSubagentMenuOpen] = useState(false);
   const [effortMenuOpen, setEffortMenuOpen] = useState(false);
-  const nonceRef = useRef(0);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const subagentWrapRef = useRef<HTMLDivElement>(null);
   const effortWrapRef = useRef<HTMLDivElement>(null);
@@ -246,38 +181,11 @@ export function Composer({
   const [browseIdx, setBrowseIdx] = useState(-1);
   const savedDraftRef = useRef("");
 
-  const insertMention = (picked: string) => {
-    // ChatGPT models auto-attach supported image paths (paperclip / drag-drop
-    // / paste) instead of text-mentioning them — the daemon reads the bytes.
-    if (imageCapable && onPickImage && isImagePath(picked)) {
-      onPickImage(resolveImagePath(picked, workspaceDir));
-      return;
-    }
-    const rel =
-      workspaceDir && picked.startsWith(workspaceDir)
-        ? picked.slice(workspaceDir.length).replace(/^[\\/]+/, "")
-        : picked;
-    setDraft((current) => (current ? `${current.replace(/\s+$/, "")} @${rel} ` : `@${rel} `));
-    setChips((c) => [...c, { kind: "at", label: rel }]);
-    onMentionPicked?.(rel);
-    textareaRef.current?.focus();
-  };
-
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     applyComposerTextareaAutosize(textarea);
   });
-
-  // Programmatic draft transitions to "/" (e.g. /help suggestion in EmptyState, #929) must open the slash popup, since handleChange only fires on actual user input.
-  const prevDraftRef = useRef(draft);
-  useEffect(() => {
-    const prev = prevDraftRef.current;
-    prevDraftRef.current = draft;
-    if (draft === "/" && prev !== "/") {
-      setPopup({ kind: "slash", query: "" });
-    }
-  }, [draft]);
 
   useEffect(() => {
     if (!modelMenuOpen && !subagentMenuOpen && !effortMenuOpen) return;
@@ -305,10 +213,16 @@ export function Composer({
         defaultPath: workspaceDir,
       });
       if (typeof picked !== "string" || !picked) return;
-      // insertMention detects image files: on a vision-capable model the
-      // picked image attaches as a pending image, anything else becomes an
-      // @-mention — one button covers both.
-      insertMention(picked);
+      if (imageCapable && onPickImage && isImagePath(picked)) {
+        onPickImage(resolveImagePath(picked, workspaceDir));
+        return;
+      }
+      const rel =
+        workspaceDir && picked.startsWith(workspaceDir)
+          ? picked.slice(workspaceDir.length).replace(/^[\\/]+/, "")
+          : picked;
+      setDraft((current) => (current ? `${current.replace(/\s+$/, "")} ${rel} ` : `${rel} `));
+      textareaRef.current?.focus();
     } catch (err) {
       console.error("attach failed", err);
     }
@@ -329,120 +243,11 @@ export function Composer({
       }
       return;
     }
-    // Non-vision models can't receive image parts at all (the daemon hard-gates
-    // them), so there's no point saving the bytes to a temp file and injecting
-    // an @temp-path mention: the daemon only converts mentions for vision
-    // models, and the temp dir sits outside the workspace the model's tools can
-    // read. Reject loudly so the user switches models instead of sending a
-    // dead path.
     onImageRejected?.();
   };
 
-  const slashItems = useMemo(() => {
-    if (!popup || popup.kind !== "slash") return [];
-    const q = popup.query.toLowerCase();
-    if (!q) return slashCommands;
-    return slashCommands.filter((c) => c.cmd.toLowerCase().includes(q));
-  }, [popup, slashCommands]);
-
-  const atItems = useMemo<MentionItem[]>(() => {
-    if (!popup || popup.kind !== "at") return [];
-    if (!mentionResults || mentionResults.nonce !== popup.nonce) return [];
-    const base: MentionItem[] = mentionResults.results.map((path) => ({
-      name: path,
-      kind: path.endsWith("/") || path.endsWith("\\") ? "dir" : "file",
-      desc: path,
-    }));
-    // "../" entry (#1019): one level up whenever the @ query is inside a subdir.
-    const parent = parentOfAtQuery(popup.query);
-    if (parent !== null) {
-      base.unshift({
-        name: "..",
-        kind: "dir",
-        desc: parent ? `↑ ${parent}` : `↑ ${t("composer.workspaceRoot")}`,
-      });
-    }
-    return base;
-  }, [popup, mentionResults]);
-
-  const items = popup?.kind === "slash" ? slashItems : popup?.kind === "at" ? atItems : [];
-
-  useEffect(() => {
-    // reset the highlighted row whenever the popup kind changes
-    if (popup?.kind) setActiveIdx(0);
-  }, [popup?.kind]);
-
-  useEffect(() => {
-    setActiveIdx((i) => (items.length ? Math.min(i, items.length - 1) : 0));
-  }, [items.length]);
-
-  useEffect(() => {
-    if (!popup || popup.kind !== "at" || !onMentionQuery) return;
-    onMentionQuery(popup.query, popup.nonce);
-  }, [popup, onMentionQuery]);
-
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    const v = e.target.value;
-    setDraft(v);
-    const trail = v.match(/(^|\s)([/@])([^\s]*)$/);
-    if (trail) {
-      const sigil = trail[2];
-      const query = trail[3] ?? "";
-      if (sigil === "/") {
-        setPopup({ kind: "slash", query });
-      } else {
-        const nonce = ++nonceRef.current;
-        setPopup({ kind: "at", query, nonce });
-      }
-    } else if (popup) {
-      setPopup(null);
-    }
-  };
-
-  const dismiss = () => setPopup(null);
-
-  const pickItem = (idx: number) => {
-    const it = items[idx];
-    if (!it || !popup) return;
-    if (popup.kind === "slash") {
-      const cmd = (it as SlashCmd).cmd;
-      const insertOnly = (it as SlashCmd).insertOnly === true;
-      if (insertOnly) {
-        const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
-        setDraft(next ? `${next} ${cmd} ` : `${cmd} `);
-        setChips((c) => [...c, { kind: "slash", label: cmd.replace(/^\//, "") }]);
-      } else {
-        const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
-        setDraft(next);
-        setChips((c) => [...c, { kind: "slash", label: cmd.replace(/^\//, "") }]);
-        (it as SlashCmd).run();
-      }
-    } else {
-      const mention = it as MentionItem;
-      if (mention.name === "..") {
-        const parent = parentOfAtQuery(popup.query) ?? "";
-        const next = draft.replace(/[@][^\s]*$/, `@${parent}`);
-        setDraft(next);
-        const nonce = ++nonceRef.current;
-        setPopup({ kind: "at", query: parent, nonce });
-        textareaRef.current?.focus();
-        return;
-      }
-      // ChatGPT models attach mentioned image files directly — thumbnail
-      // preview + vision content part instead of a text mention.
-      if (imageCapable && onPickImage && isImagePath(mention.name)) {
-        onPickImage(resolveImagePath(mention.name, workspaceDir));
-        setPopup(null);
-        textareaRef.current?.focus();
-        return;
-      }
-      const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
-      setDraft(next ? `${next} @${mention.name} ` : `@${mention.name} `);
-      setChips((c) => [...c, { kind: "at", label: mention.name }]);
-      onMentionPicked?.(mention.name);
-    }
-    setPopup(null);
-    textareaRef.current?.focus();
+    setDraft(e.target.value);
   };
 
   const recordSendAndReset = () => {
@@ -475,82 +280,37 @@ export function Composer({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (popup) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActiveIdx((i) => (items.length ? (i + 1) % items.length : 0));
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActiveIdx((i) => (items.length ? (i - 1 + items.length) % items.length : 0));
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        dismiss();
-        return;
-      }
-      if (e.key === "Tab" && popup.kind === "at" && items.length > 0) {
-        // Tab on a directory enters it — replaces `@src` with `@src/`
-        // and re-queries so the popup shows that directory's children.
-        // `..` is the synthetic parent-dir entry (#1019); same shape
-        // but rewrites to the parent path.
-        const it = items[activeIdx];
-        if (it && (it as MentionItem).kind === "dir") {
-          e.preventDefault();
-          const mention = it as MentionItem;
-          if (mention.name === "..") {
-            const parent = parentOfAtQuery(popup.query) ?? "";
-            const next = draft.replace(/[@][^\s]*$/, `@${parent}`);
-            setDraft(next);
-            const nonce = ++nonceRef.current;
-            setPopup({ kind: "at", query: parent, nonce });
-            return;
-          }
-          const dirPath = mention.name.replace(/\/+$/, "");
-          const next = draft.replace(/[@][^\s]*$/, `@${dirPath}/`);
-          setDraft(next);
-          const nonce = ++nonceRef.current;
-          setPopup({ kind: "at", query: `${dirPath}/`, nonce });
-          return;
-        }
-      }
-      if (e.key === "Enter") {
-        if (items.length > 0) {
-          e.preventDefault();
-          pickItem(activeIdx);
-          return;
-        }
-        dismiss();
-      }
+    const ta = textareaRef.current;
+    if (e.key === "ArrowUp" && ta && ta.selectionStart === 0) {
+      e.preventDefault();
+      navigateHistory(-1);
+      return;
     }
-    if (!popup) {
-      const ta = textareaRef.current;
-      if (e.key === "ArrowUp" && ta && ta.selectionStart === 0) {
+    if (e.key === "ArrowDown" && ta && ta.selectionStart === draft.length) {
+      e.preventDefault();
+      navigateHistory(1);
+      return;
+    }
+    if (e.key === "Escape") {
+      if (modelMenuOpen || subagentMenuOpen || effortMenuOpen) {
         e.preventDefault();
-        navigateHistory(-1);
-        return;
-      }
-      if (e.key === "ArrowDown" && ta && ta.selectionStart === draft.length) {
-        e.preventDefault();
-        navigateHistory(1);
+        setModelMenuOpen(false);
+        setSubagentMenuOpen(false);
+        setEffortMenuOpen(false);
         return;
       }
     }
     if (composingRef.current || Date.now() - compositionEndedAtRef.current < 50) return;
-    if (e.key === "Enter" && !e.shiftKey && !popup) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (busy) {
         const text = draft.trim();
         if (text && onQueueWhileBusy) {
           onQueueWhileBusy(text);
-          setChips([]);
         }
       } else if (!disabled && draft.trim()) {
         recordSendAndReset();
         onSend();
-        setChips([]);
       }
     }
   };
@@ -617,11 +377,6 @@ export function Composer({
             </>
           ) : (
             <>
-              <span>
-                <Shortcut keys={["/"]} /> {t("composer.commands")} &nbsp;·&nbsp;{" "}
-                <Shortcut keys={["@"]} /> {t("composer.mentionFiles")}
-                &nbsp;·&nbsp; <Shortcut keys={["mod", "K"]} /> {t("composer.commandPalette")}
-              </span>
               <span className="grow" />
               <ModeSwitch mode={editMode} onChange={onEditModeChange} />
               <span className="hint-sep" />
@@ -634,27 +389,6 @@ export function Composer({
         </div>
 
         <div className="composer">
-          {chips.length > 0 ? (
-            <div className="composer-tags">
-              {chips.map((c, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: chips are removed by index; label-keyed dupes possible
-                <span key={i} className={`chip ${c.kind}`}>
-                  {c.kind === "slash" ? <I.slash size={11} /> : <I.at size={11} />}
-                  <span>{c.label}</span>
-                  <span
-                    className="x"
-                    onClick={() => setChips((cs) => cs.filter((_, j) => j !== i))}
-                    onKeyDown={activationHandler(() =>
-                      setChips((cs) => cs.filter((_, j) => j !== i)),
-                    )}
-                  >
-                    <I.x size={10} />
-                  </span>
-                </span>
-              ))}
-            </div>
-          ) : null}
-
           <textarea
             ref={textareaRef}
             value={draft}
@@ -838,7 +572,6 @@ export function Composer({
                   if (!disabled && draft.trim()) {
                     recordSendAndReset();
                     onSend();
-                    setChips([]);
                   }
                 }}
               >
@@ -846,125 +579,7 @@ export function Composer({
               </button>
             )}
           </div>
-
-          {popup ? (
-            <Popup
-              kind={popup.kind}
-              items={items}
-              activeIdx={activeIdx}
-              onPick={(i) => pickItem(i)}
-              onClose={dismiss}
-              onHover={(i, item) => {
-                setActiveIdx(i);
-                if (popup.kind === "at" && onMentionPreview) {
-                  const path = (item as MentionItem).name;
-                  onMentionPreview(path, popup.nonce);
-                }
-              }}
-            />
-          ) : null}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Popup({
-  kind,
-  items,
-  activeIdx,
-  onPick,
-  onClose,
-  onHover,
-}: {
-  kind: "slash" | "at";
-  items: (SlashCmd | MentionItem)[];
-  activeIdx: number;
-  onPick: (i: number) => void;
-  onClose: () => void;
-  onHover: (i: number, item: SlashCmd | MentionItem) => void;
-}) {
-  const listRef = useRef<HTMLDivElement>(null);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll-follow must re-run per index change — the DOM query hides the read
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      const el = listRef.current?.querySelector<HTMLElement>(`[data-active="true"]`);
-      el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-    });
-  }, [activeIdx]);
-
-  return (
-    <div className="popup" onMouseDown={(e) => e.preventDefault()}>
-      <div className="ph">
-        <span className="tok">{kind === "slash" ? "/" : "@"}</span>
-        <span>{kind === "slash" ? t("composer.slashHeader") : t("composer.atHeader")}</span>
-        <span className="grow" />
-        <span
-          style={{ cursor: "pointer" }}
-          onClick={onClose}
-          onKeyDown={activationHandler(onClose)}
-        >
-          <I.x size={11} />
-        </span>
-      </div>
-      <div className={kind === "at" ? "popup-list at-popup-list" : "popup-list"} ref={listRef}>
-        {items.length === 0 ? (
-          <div
-            style={{
-              padding: "12px 8px",
-              fontSize: 11.5,
-              color: "var(--muted-2)",
-              fontFamily: "Geist Mono, monospace",
-            }}
-          >
-            {t("composer.noMatches")}
-          </div>
-        ) : null}
-        {items.map((it, i) => (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: filtered popup items are a render snapshot
-            key={i}
-            className="popup-item"
-            data-active={i === activeIdx}
-            onClick={() => onPick(i)}
-            onKeyDown={activationHandler(() => onPick(i))}
-            onMouseEnter={() => onHover(i, it)}
-          >
-            <span className="ico">
-              {kind === "slash"
-                ? slashIcon((it as SlashCmd).cmd)
-                : atIcon((it as MentionItem).kind)}
-            </span>
-            <div className="nm">
-              {kind === "slash" ? (
-                <>
-                  <span className="cmd">{(it as SlashCmd).cmd}</span>
-                  <span className="desc">{(it as SlashCmd).desc}</span>
-                </>
-              ) : (
-                <>
-                  <span>{(it as MentionItem).name}</span>
-                  {(it as MentionItem).desc ? (
-                    <div className="desc">{(it as MentionItem).desc}</div>
-                  ) : null}
-                </>
-              )}
-            </div>
-            <span className="kb">{kind === "slash" ? ((it as SlashCmd).kb ?? "") : ""}</span>
-          </div>
-        ))}
-      </div>
-      <div className="popup-foot">
-        <span>
-          <Shortcut keys={["updown"]} /> {t("composer.select")}
-        </span>
-        <span>
-          <Shortcut keys={["enter"]} /> {t("composer.confirm")}
-        </span>
-        <span>
-          <Shortcut keys={["esc"]} /> {t("composer.close")}
-        </span>
       </div>
     </div>
   );
@@ -1000,129 +615,125 @@ function ModelList({
   onRefreshAntigravityModels?: () => void;
 }) {
   const [draft, setDraft] = useState(activeModel);
-  // Group by catalog membership (exact ids), never by name shape — the
-  // Antigravity catalog's entries are offered by the signed-in discovery
-  // group below, and user-declared `models` ids join the general list.
-  const antigravityCatalog = new Set(ANTIGRAVITY_MODELS);
-  const knownModels = [
-    ...KNOWN_MODELS.filter((model) => !antigravityCatalog.has(model)),
-    ...(customModels ?? []),
+  const antigravityGroup = Boolean(antigravityModels && antigravityModels.length > 0);
+  const ollamaGroup = Boolean(ollamaModels && ollamaModels.length > 0);
+
+  type GroupDef = {
+    key: string;
+    title: string;
+    models: readonly string[];
+    icon?: (props: { size?: number }) => React.ReactNode;
+    refresh?: () => void;
+    refreshTitle?: string;
+    error?: string;
+    note?: string;
+  };
+
+  const groups: GroupDef[] = [
+    {
+      key: "deepseek",
+      title: t("composer.modelDeepSeekGroup"),
+      models: SUPPORTED_OFFICIAL_MODELS,
+    },
+    {
+      key: "openai",
+      title: t("composer.modelOpenAIGroup"),
+      models: GPT56_MODELS,
+    },
+    {
+      key: "zai",
+      title: t("composer.modelZaiGroup"),
+      models: ZAI_MODELS,
+    },
+    ...(customModels && customModels.length > 0
+      ? [
+          {
+            key: "custom",
+            title: t("composer.modelCustomGroup"),
+            models: customModels,
+          },
+        ]
+      : []),
+    ...(antigravityGroup || antigravityModelsError
+      ? [
+          {
+            key: "antigravity",
+            title: t("composer.modelAntigravityGroup"),
+            models: antigravityModels ?? [],
+            refresh: onRefreshAntigravityModels,
+            refreshTitle: t("composer.modelAntigravityRefresh"),
+            error: antigravityModelsError
+              ? t("composer.modelAntigravityError", { error: antigravityModelsError })
+              : undefined,
+          },
+        ]
+      : []),
+    ...(ollamaGroup || ollamaModelsError
+      ? [
+          {
+            key: "ollama",
+            title: t("composer.modelOllamaGroup"),
+            models: (ollamaModels ?? []).map((id) => `ollama/${id}`),
+            icon: I.bot,
+            refresh: () => onRefreshOllamaModels?.(true),
+            refreshTitle: t("composer.modelOllamaRefresh"),
+            error:
+              ollamaModelsError && !ollamaGroup && activeModel.startsWith("ollama/")
+                ? t("composer.modelOllamaError", { error: ollamaModelsError })
+                : undefined,
+            note:
+              ollamaHiddenCount && ollamaHiddenCount > 0
+                ? t("composer.modelOllamaHidden", { count: ollamaHiddenCount })
+                : undefined,
+          },
+        ]
+      : []),
   ];
-  const antigravityGroup = antigravityModels && antigravityModels.length > 0;
-  const ollamaGroup = ollamaModels && ollamaModels.length > 0;
+
   return (
     <div className="popup-list model-menu-list">
-      {knownModels.map((m) => (
-        <div
-          key={m}
-          className="popup-item"
-          data-active={m === activeModel}
-          onClick={() => onPick(m)}
-          onKeyDown={activationHandler(() => onPick(m))}
-        >
-          <span className="ico">
-            <I.brain size={12} />
-          </span>
-          <div className="nm">
-            <span className="cmd">{m}</span>
-          </div>
-          {modelAcceptsImages(m, ollamaVisionModels) ? (
-            <span className="badge">vision</span>
-          ) : null}
-        </div>
-      ))}
-      {antigravityGroup || antigravityModelsError ? (
-        <>
-          <div className="model-menu-group">
-            <span className="grow">{t("composer.modelAntigravityGroup")}</span>
-            <button
-              type="button"
-              className="mini-btn"
-              title={t("composer.modelAntigravityRefresh")}
-              onClick={() => onRefreshAntigravityModels?.()}
-            >
-              <I.refresh size={10} />
-            </button>
-          </div>
-          {antigravityModelsError ? (
-            <div className="model-menu-error">
-              {t("composer.modelAntigravityError", { error: antigravityModelsError })}
-            </div>
-          ) : null}
-          {antigravityModels?.map((model) => (
-            <div
-              key={model}
-              className="popup-item"
-              data-active={model === activeModel}
-              onClick={() => onPick(model)}
-              onKeyDown={activationHandler(() => onPick(model))}
-            >
-              <span className="ico">
-                <I.brain size={12} />
-              </span>
-              <div className="nm">
-                <span className="cmd">{model}</span>
-              </div>
-              {modelAcceptsImages(model, ollamaVisionModels) ? (
-                <span className="badge">vision</span>
+      {groups.map((group) => {
+        if (group.models.length === 0 && !group.error) return null;
+        const Icon = group.icon ?? I.brain;
+        return (
+          <Fragment key={group.key}>
+            <div className="model-menu-group">
+              <span className="grow">{group.title}</span>
+              {group.note ? <span className="model-menu-note">{group.note}</span> : null}
+              {group.refresh ? (
+                <button
+                  type="button"
+                  className="mini-btn"
+                  title={group.refreshTitle}
+                  onClick={group.refresh}
+                >
+                  <I.refresh size={10} />
+                </button>
               ) : null}
             </div>
-          ))}
-        </>
-      ) : null}
-      {ollamaGroup || ollamaModelsError ? (
-        <>
-          <div className="model-menu-group">
-            <span className="grow">{t("composer.modelOllamaGroup")}</span>
-            {ollamaHiddenCount && ollamaHiddenCount > 0 ? (
-              <span className="model-menu-note">
-                {t("composer.modelOllamaHidden", { count: ollamaHiddenCount })}
-              </span>
-            ) : null}
-            <button
-              type="button"
-              className="mini-btn"
-              title={t("composer.modelOllamaRefresh")}
-              onClick={() => onRefreshOllamaModels?.(true)}
-            >
-              <I.refresh size={10} />
-            </button>
-          </div>
-          {/* The error only matters when the selector's model IS an Ollama model —
-              a DeepSeek/OpenAI tab with a down local daemon would otherwise
-              show a spurious "Ollama unreachable" line. The Models settings
-              page surfaces it unconditionally. */}
-          {ollamaModelsError && !ollamaGroup && activeModel.startsWith("ollama/") ? (
-            <div className="model-menu-error">
-              {t("composer.modelOllamaError", { error: ollamaModelsError })}
-            </div>
-          ) : null}
-          {ollamaModels && ollamaModels.length > 0
-            ? ollamaModels.map((id) => {
-                const full = `ollama/${id}`;
-                return (
-                  <div
-                    key={full}
-                    className="popup-item"
-                    data-active={full === activeModel}
-                    onClick={() => onPick(full)}
-                    onKeyDown={activationHandler(() => onPick(full))}
-                  >
-                    <span className="ico">
-                      <I.bot size={12} />
-                    </span>
-                    <div className="nm">
-                      <span className="cmd">{full}</span>
-                    </div>
-                    {modelAcceptsImages(full, ollamaVisionModels) ? (
-                      <span className="badge">vision</span>
-                    ) : null}
-                  </div>
-                );
-              })
-            : null}
-        </>
-      ) : null}
+            {group.error ? <div className="model-menu-error">{group.error}</div> : null}
+            {group.models.map((model) => (
+              <div
+                key={model}
+                className="popup-item"
+                data-active={model === activeModel}
+                onClick={() => onPick(model)}
+                onKeyDown={activationHandler(() => onPick(model))}
+              >
+                <span className="ico">
+                  <Icon size={12} />
+                </span>
+                <div className="nm">
+                  <span className="cmd">{model}</span>
+                </div>
+                {modelAcceptsImages(model, ollamaVisionModels) ? (
+                  <span className="badge">vision</span>
+                ) : null}
+              </div>
+            ))}
+          </Fragment>
+        );
+      })}
       <div className="model-menu-custom">
         <input
           className="field mono model-menu-custom-input"
