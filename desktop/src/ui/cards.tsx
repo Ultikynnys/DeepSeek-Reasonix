@@ -816,6 +816,34 @@ export function ErrorCard({
 
 
 
+// ---- Warning / Degeneration ----
+
+export function WarningCard({
+  text,
+  severity = "high",
+}: {
+  text: string;
+  severity?: "low" | "high";
+}) {
+  useLang();
+  const isDegeneration = /degenerat|repetiti/i.test(text);
+  const name = isDegeneration ? t("cards.degenerationName") : t("cards.warningName");
+  return (
+    <Card
+      tone={severity === "low" ? "default" : "warning"}
+      icon={<I.warning size={12} />}
+      kind="warning"
+      name={name}
+      defaultOpen
+      compact
+    >
+      <div className="warning-body" style={{ fontSize: "12px", lineHeight: "1.5", color: "var(--fg)" }}>
+        {text}
+      </div>
+    </Card>
+  );
+}
+
 export const SUBAGENT_TOOLS = new Set([
   "explore",
   "research",

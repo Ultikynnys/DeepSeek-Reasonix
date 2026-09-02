@@ -1199,6 +1199,45 @@ describe("Desktop App reducer — model.final content", () => {
     ]);
   });
 
+  it("attaches degeneration warnings as a warning card segment on the active assistant message", () => {
+    let state = reduce(initialState(), { t: "incoming", event: turnStarted });
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.final",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        content: "Useful text before loop.",
+        toolCalls: [],
+        usage: {},
+        costUsd: 0,
+      },
+    });
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "warning",
+        id: 3,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        text: "Stopped a degenerating model stream after detecting 1024 repeated characters (period 6) in content output.",
+        severity: "high",
+      },
+    });
+    const assistant = next.messages.find((m) => m.kind === "assistant");
+    if (assistant?.kind !== "assistant") throw new Error("no assistant message");
+    expect(assistant.segments).toEqual([
+      { kind: "text", text: "Useful text before loop." },
+      {
+        kind: "warning",
+        id: "w-3",
+        text: "Stopped a degenerating model stream after detecting 1024 repeated characters (period 6) in content output.",
+        severity: "high",
+      },
+    ]);
+  });
+
   it("skips forcedSummary finals — the compaction card renders that content", () => {
     const state = reduce(initialState(), { t: "incoming", event: turnStarted });
     const next = reduce(state, {

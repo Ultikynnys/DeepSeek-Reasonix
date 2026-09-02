@@ -26,6 +26,7 @@ import {
   ShellCard,
   SubagentCard,
   ToolCard,
+  WarningCard,
   extractSubagentDetails,
   extractSubagentResultMeta,
   isSubagentTool,
@@ -218,6 +219,12 @@ export const AssistantMsg = memo(function AssistantMsg({
                 summary={s.summary}
                 error={s.error}
               />
+            );
+          }
+          if (s.kind === "warning") {
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
+              <WarningCard key={i} text={s.text} severity={s.severity} />
             );
           }
           if (s.kind === "image") {

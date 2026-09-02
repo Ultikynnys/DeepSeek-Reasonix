@@ -84,7 +84,7 @@ import {
   themeForStyle,
 } from "./theme";
 import { AboutModal } from "./ui/about";
-import { isSubagentTool, parseEditResult } from "./ui/cards";
+import { WarningCard, isSubagentTool, parseEditResult } from "./ui/cards";
 import { Composer } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
@@ -206,6 +206,7 @@ export type AssistantSegment =
       /** File paths the fold's triage step classified as no longer relevant. */
       droppedFiles?: string[];
     }
+  | { kind: "warning"; id: string; text: string; severity?: "low" | "high" }
   | { kind: "image"; dataUrl: string; mimeType: string };
 
 export type SkillOrigin = {
@@ -955,7 +956,7 @@ function mapLoadedMessages(loaded: LoadedMessage[]): ChatMessage[] {
         ...(m.images ? { images: m.images } : {}),
       };
     }
-    const segments: AssistantSegment[] = m.segments.map((s) => {
+    const segments: AssistantSegment[] = m.segments.map((s, segIdx) => {
       if (s.kind === "tool") {
         return {
           kind: "tool",
@@ -966,6 +967,14 @@ function mapLoadedMessages(loaded: LoadedMessage[]): ChatMessage[] {
           result: s.result,
           ok: s.ok,
           durationMs: 0,
+        };
+      }
+      if (s.kind === "warning") {
+        return {
+          kind: "warning",
+          id: s.id ?? `w-loaded-${i}-${segIdx}`,
+          text: s.text,
+          severity: s.severity ?? "high",
         };
       }
       return s;
@@ -1777,21 +1786,43 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "status":
       return state;
-    case "warning":
-      // High-severity only — eventize already drops "low". Inline divider only.
+    case "warning": {
+      // High-severity only — eventize already drops "low".
       if (ev.severity !== "high") return state;
+      const seg: AssistantSegment = {
+        kind: "warning",
+        id: `w-${ev.id}`,
+        text: ev.text,
+        severity: ev.severity,
+      };
+      let hostIdx = -1;
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        if (state.messages[i]?.kind === "assistant") {
+          hostIdx = i;
+          break;
+        }
+      }
+      if (hostIdx >= 0) {
+        const messages = [...state.messages];
+        const host = messages[hostIdx];
+        if (host && host.kind === "assistant") {
+          messages[hostIdx] = { ...host, segments: [...host.segments, seg] };
+        }
+        return { ...state, messages };
+      }
       return {
         ...state,
         messages: [
           ...state.messages,
           {
-            kind: "warning",
-            id: `w-${ev.id}`,
-            text: ev.text,
-            severity: ev.severity,
+            kind: "assistant",
+            turn: ev.turn ?? 1,
+            segments: [seg],
+            pending: false,
           },
         ],
       };
+    }
     default:
       return state;
   }
@@ -1815,6 +1846,9 @@ function formatConversationMarkdown(messages: ChatMessage[], userLabel: string):
             if (s.kind === "compaction") {
               if (s.state !== "done" || s.beforeMessages === undefined) return "";
               return `> **${t("cards.compactionName")}** — ${s.beforeMessages} → ${s.afterMessages} messages`;
+            }
+            if (s.kind === "warning") {
+              return `> **${t("cards.warningName")}** · ${s.text}`;
             }
             return "";
           })
@@ -2858,13 +2892,7 @@ function TabRuntime({
                     }
                     if (m.kind === "warning") {
                       if (state.settings?.showSystemEvents === false) return null;
-                      return (
-                        <div key={m.id} className="sys-event-row" title={m.text}>
-                          <span className="line" />
-                          <span className="label">{m.text}</span>
-                          <span className="line" />
-                        </div>
-                      );
+                      return <WarningCard key={m.id} text={m.text} severity={m.severity} />;
                     }
                     return null;
                   })}

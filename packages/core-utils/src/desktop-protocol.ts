@@ -293,7 +293,8 @@ export type LoadedSegment =
       args: string;
       result?: string;
       ok?: boolean;
-    };
+    }
+  | { kind: "warning"; id?: string; text: string; severity?: "low" | "high" };
 
 export type LoadedMessage =
   | { kind: "user"; text: string; images?: string[] }
