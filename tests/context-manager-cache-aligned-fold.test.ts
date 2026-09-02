@@ -123,7 +123,9 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     expect(req.messages[0]!.role).toBe("system");
     const trailing = req.messages[req.messages.length - 1]!;
     expect(trailing.role).toBe("user");
-    expect(typeof trailing.content === "string" ? trailing.content : "").toMatch(/Summarize/);
+    expect(typeof trailing.content === "string" ? trailing.content : "").toMatch(
+      /Compact the preceding conversation/,
+    );
 
     // Strip system head + trailing instruction; what remains must equal a prefix of the pre-fold log.
     const middle = req.messages.slice(1, -1);
