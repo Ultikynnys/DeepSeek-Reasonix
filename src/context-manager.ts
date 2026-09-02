@@ -24,12 +24,7 @@ import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
 import type { AppendOnlyLog } from "./memory/runtime.js";
 import { rewriteSession } from "./memory/session.js";
-import {
-  type SessionStats,
-  inputCostUsd,
-  pricingFor,
-  resolveContextTokens,
-} from "./telemetry/stats.js";
+import { type SessionStats, resolveContextTokens } from "./telemetry/stats.js";
 import { IMAGE_DETAIL_LOW_TOKENS, countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ToolSpec, UserContentPart } from "./types.js";
 
@@ -41,8 +36,6 @@ export const HISTORY_FOLD_TAIL_FRACTION = 0.2;
 export const HISTORY_FOLD_AGGRESSIVE_THRESHOLD = 0.78;
 /** Tail budget after an aggressive fold — half the normal one, sacrifices recent context for headroom. */
 export const HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION = 0.1;
-/** Skip the fold if the head wouldn't shrink the log by at least this fraction. */
-export const HISTORY_FOLD_MIN_SAVINGS_FRACTION = 0.3;
 /** Above this fraction we exit the turn with a summary instead of folding (defense in depth). */
 export const FORCE_SUMMARY_THRESHOLD = 0.8;
 /** Turn-start local estimate above this fraction triggers a pre-iter fold — terminal prior
@@ -57,12 +50,6 @@ export const HISTORY_FOLD_SUMMARY_MIN_CHARS = 16;
 // when compaction matters most. The base covers the typical 30-60s summary call at small heads;
 // raised from 15s after real sessions timed out there.
 export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 45_000;
-/** Normal-band folds should pay for themselves over a short horizon; aggressive folds still prioritize headroom. */
-export const HISTORY_FOLD_ECONOMIC_HORIZON_TURNS = 3;
-export const HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_FRACTION = 0.15;
-export const HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_USD = 0.002;
-/** Summary + next-turn cold segment reserve used by fold economics. */
-export const HISTORY_FOLD_SUMMARY_RESERVE_TOKENS = 4096;
 /** Cap the token budget fed to the fold summarizer as a fraction of ctxMax — re-reading
  *  the entire pruned head is the dominant compaction cost (up to ~240k tokens at 300k).
  *  A fold only needs the *recent* essence, so older overflow is trimmed before summarizing. */
@@ -163,62 +150,6 @@ export interface PostUsageDecision {
   tailBudget?: number;
   /** True when this fold is in the 70-85% band — used in user-facing messaging. */
   aggressive?: boolean;
-  /** Cost model for the fold decision — lets UIs explain why a fold ran (or was skipped). */
-  economics?: FoldEconomics;
-}
-
-export interface FoldEconomics {
-  horizonTurns: number;
-  carryInputUsd: number;
-  foldInputUsd: number;
-  savingsUsd: number;
-  savingsFraction: number;
-  worthwhile: boolean;
-}
-
-/** Dollar math behind the normal-band fold: one summary call + cold post-fold segment vs
- *  carrying the warm prefix over a short horizon. Skip when it wouldn't pay for itself;
- *  missing pricing is not evidence against folding (assume worthwhile). */
-export function estimateFoldEconomics(
-  usage: Usage,
-  model: string,
-  tailBudgetTokens: number,
-): FoldEconomics {
-  const pricing = pricingFor(model);
-  if (!pricing) {
-    return {
-      horizonTurns: HISTORY_FOLD_ECONOMIC_HORIZON_TURNS,
-      carryInputUsd: 0,
-      foldInputUsd: 0,
-      savingsUsd: 0,
-      savingsFraction: 0,
-      worthwhile: true,
-    };
-  }
-
-  const horizonTurns = HISTORY_FOLD_ECONOMIC_HORIZON_TURNS;
-  const carryInputUsd = inputCostUsd(model, usage) * horizonTurns;
-  const summaryCallUsd = inputCostUsd(model, usage);
-  const postFoldPromptTokens = Math.min(
-    usage.promptTokens,
-    tailBudgetTokens + HISTORY_FOLD_SUMMARY_RESERVE_TOKENS,
-  );
-  const postFoldColdUsd = (postFoldPromptTokens * pricing.inputCacheMiss) / 1_000_000;
-  const postFoldWarmUsd =
-    ((horizonTurns - 1) * postFoldPromptTokens * pricing.inputCacheHit) / 1_000_000;
-  const foldInputUsd = summaryCallUsd + postFoldColdUsd + postFoldWarmUsd;
-  const savingsUsd = carryInputUsd - foldInputUsd;
-  const savingsFraction = carryInputUsd > 0 ? savingsUsd / carryInputUsd : 0;
-  return {
-    horizonTurns,
-    carryInputUsd,
-    foldInputUsd,
-    savingsUsd,
-    savingsFraction,
-    worthwhile:
-      savingsUsd >= HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_USD &&
-      savingsFraction >= HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_FRACTION,
-  };
 }
 
 export interface FoldResult {
@@ -392,17 +323,11 @@ export class ContextManager {
       };
     }
     if (ratio > HISTORY_FOLD_THRESHOLD) {
-      const tailBudget = Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
-      const economics = estimateFoldEconomics(usage, model, tailBudget);
-      if (!economics.worthwhile) {
-        return { kind: "none", ...base, economics };
-      }
       return {
         kind: "fold",
         ...base,
-        tailBudget,
+        tailBudget: Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION),
         aggressive: false,
-        economics,
       };
     }
     return { kind: "none", ...base };
@@ -459,7 +384,6 @@ export class ContextManager {
     if (all.length === 0) return noop;
 
     const tokenCounts = all.map(countMessageTokens);
-    const totalTokens = tokenCounts.reduce((a, b) => a + b, 0);
 
     let cumTokens = 0;
     let boundary = all.length;
@@ -518,16 +442,6 @@ export class ContextManager {
         cumTokens = 0;
         for (let i = boundary; i < all.length; i++) cumTokens += tokenCounts[i]!;
       }
-    }
-
-    const headTokens = totalTokens - cumTokens;
-    // Only skip a "not worth it" fold when the log is already under the fold
-    // line. Above it, a small head still buys headroom — and a noop here is
-    // exactly what let context climb past the 75% threshold to the 80%
-    // forced-summary guard (the "Nothing to fold" dead-end).
-    const overThreshold = totalTokens > ctxMax * HISTORY_FOLD_THRESHOLD;
-    if (!overThreshold && headTokens < totalTokens * HISTORY_FOLD_MIN_SAVINGS_FRACTION) {
-      return noop;
     }
 
     // Step 2 — prune unused files. read_file results whose path is never
