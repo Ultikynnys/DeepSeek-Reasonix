@@ -67,6 +67,11 @@ describe("codeSystemPrompt", () => {
     expect(CODE_SYSTEM_PROMPT).toMatch(/not a sub-profile/);
   });
 
+  it("strictly forbids silent turn endings and requires reasons to be stated", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/NEVER end a turn silently without explaining why/i);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/Reason must ALWAYS be stated at the end/i);
+  });
+
   it("keeps generated script tests near the script without making workspace-root cwd mandatory", () => {
     expect(CODE_SYSTEM_PROMPT).toMatch(/default.*directory where the script was written/i);
     expect(CODE_SYSTEM_PROMPT).toMatch(/do not assume.*input.*data.*directory.*cwd/i);

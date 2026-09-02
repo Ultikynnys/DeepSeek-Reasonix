@@ -1555,8 +1555,8 @@ export class CacheFirstLoop {
       // NOT appended to the log — there is nothing to show the model), then
       // give up loudly instead of a second silent exit.
       if (
-        assistantContent.length === 0 &&
-        reasoningContent.length === 0 &&
+        assistantContent.trim().length === 0 &&
+        reasoningContent.trim().length === 0 &&
         toolCalls.length === 0
       ) {
         if (!this._emptyResponseRetried) {
@@ -1578,6 +1578,16 @@ export class CacheFirstLoop {
         this._steerQueue.length = 0;
         restoreModelIfNeeded();
         return;
+      }
+
+      // If the model produced reasoning but no content and no tool calls,
+      // promote reasoning to assistant content so the turn never ends silently.
+      if (
+        assistantContent.trim().length === 0 &&
+        toolCalls.length === 0 &&
+        reasoningContent.trim().length > 0
+      ) {
+        assistantContent = reasoningContent.trim();
       }
 
       const { calls: repairedCalls, report } = this.repair.process(

@@ -136,6 +136,26 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.log.length).toBe(1);
   });
 
+  it("promotes reasoning_content to assistantContent when content is empty and no tool calls were made", async () => {
+    const client = makeClient([
+      { content: "", reasoning_content: "I analyzed the status and here is the result: clean." },
+    ]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("status check")) events.push(ev);
+
+    const finals = events.filter((e) => e.role === "assistant_final");
+    expect(finals.length).toBe(1);
+    expect(finals[0]?.content).toBe("I analyzed the status and here is the result: clean.");
+    const done = events.find((e) => e.role === "done");
+    expect(done?.content).toBe("I analyzed the status and here is the result: clean.");
+  });
+
   it("records cache hit telemetry from API usage", async () => {
     const client = makeClient([
       {
