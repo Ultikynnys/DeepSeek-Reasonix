@@ -36,6 +36,7 @@ export {
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
   isAntigravityModel,
+  isUsableAntigravityModel,
   modelAcceptsImages,
 } from "./models.js";
 export type {

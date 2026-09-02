@@ -1,4 +1,9 @@
-import { ANTIGRAVITY_MODELS, KNOWN_MODELS, modelAcceptsImages } from "@reasonix/core-utils";
+import {
+  GPT56_MODELS,
+  SUPPORTED_OFFICIAL_MODELS,
+  ZAI_MODELS,
+  modelAcceptsImages,
+} from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
@@ -1114,36 +1119,51 @@ function PageModels({
 }) {
   const [draft, setDraft] = useState(settings.model);
   useEffect(() => setDraft(settings.model), [settings.model]);
-  // Group by catalog membership (exact ids), never by name shape — the
-  // Antigravity catalog's entries surface via the signed-in discovery list,
-  // and user-declared `models` ids join the general grid.
-  const antigravityCatalog = new Set(ANTIGRAVITY_MODELS);
-  const knownModels = [
-    ...KNOWN_MODELS.filter((model) => !antigravityCatalog.has(model)),
-    ...(settings.customModels ?? []),
+
+  type ModelGroup = {
+    title: string;
+    models: readonly string[];
+  };
+
+  const groups: ModelGroup[] = [
+    { title: t("composer.modelDeepSeekGroup"), models: SUPPORTED_OFFICIAL_MODELS },
+    { title: t("composer.modelOpenAIGroup"), models: GPT56_MODELS },
+    { title: t("composer.modelZaiGroup"), models: ZAI_MODELS },
+    ...(settings.customModels && settings.customModels.length > 0
+      ? [{ title: t("composer.modelCustomGroup"), models: settings.customModels }]
+      : []),
+    ...(settings.antigravityOAuth?.models && settings.antigravityOAuth.models.length > 0
+      ? [{ title: t("composer.modelAntigravityGroup"), models: settings.antigravityOAuth.models }]
+      : []),
   ];
-  const availableModels = [...knownModels, ...(settings.antigravityOAuth?.models ?? [])];
-  const isKnown = availableModels.includes(settings.model);
+
+  const allAvailable = groups.flatMap((g) => g.models);
+  const isKnown = allAvailable.includes(settings.model);
   return (
     <>
       <section className="section">
         <div className="stitle">{t("settings.defaultModelCurrent", { model: settings.model })}</div>
-        <div className="model-grid">
-          {availableModels.map((id) => (
-            <div
-              key={id}
-              className="mcard"
-              data-on={settings.model === id}
-              onClick={() => onSave({ model: id })}
-              onKeyDown={activationHandler(() => onSave({ model: id }))}
-            >
-              <div className="nm">{id}</div>
-              {modelAcceptsImages(id, ollamaVisionModels) ? (
-                <span className="badge">vision</span>
-              ) : null}
+        {groups.map((g) => (
+          <div key={g.title} style={{ marginBottom: 12 }}>
+            <div className="h" style={{ fontWeight: 600, marginBottom: 6 }}>{g.title}</div>
+            <div className="model-grid">
+              {g.models.map((id) => (
+                <div
+                  key={id}
+                  className="mcard"
+                  data-on={settings.model === id}
+                  onClick={() => onSave({ model: id })}
+                  onKeyDown={activationHandler(() => onSave({ model: id }))}
+                >
+                  <div className="nm">{id}</div>
+                  {modelAcceptsImages(id, ollamaVisionModels) ? (
+                    <span className="badge">vision</span>
+                  ) : null}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
         <div className="setting-row" style={{ marginTop: 12 }}>
           <div className="l">
             <div className="n">{t("settings.modelCustom")}</div>

@@ -51,9 +51,32 @@ export const ANTIGRAVITY_MODELS: readonly string[] = [
 /** Compatibility export for existing consumers. */
 export const GEMINI_MODELS = ANTIGRAVITY_MODELS;
 
+/** Drops unusable Antigravity ids: internal chat/tab routing ids, duplicate
+ *  vertex buckets, and legacy Gemini models between 2.0 and 3.1 inclusive. */
+export function isUsableAntigravityModel(modelId: string | undefined | null): boolean {
+  if (typeof modelId !== "string") return false;
+  const trimmed = modelId.trim();
+  if (!trimmed) return false;
+  if (trimmed.endsWith("_vertex")) return false;
+  if (trimmed.startsWith("chat_") || trimmed.startsWith("tab_")) return false;
+
+  const geminiMatch = trimmed.match(/^gemini-(\d+)(?:\.(\d+))?/i);
+  if (geminiMatch) {
+    const major = Number.parseInt(geminiMatch[1]!, 10);
+    const minor = geminiMatch[2] !== undefined ? Number.parseInt(geminiMatch[2], 10) : 0;
+    // Filter legacy models between 2.0 and 3.1 (2.x and 3.0/3.1)
+    if (major === 2 || (major === 3 && minor <= 1)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export function isAntigravityModel(model: string | undefined | null): boolean {
   return (
     typeof model === "string" &&
+    isUsableAntigravityModel(model) &&
     (model.startsWith("gemini-") ||
       model.startsWith("claude-") ||
       model.startsWith("gpt-oss-"))
