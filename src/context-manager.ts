@@ -91,6 +91,24 @@ export const HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS = COMPACTION_RETRY_DELAY_MS;
 // yields zero drops and the fold commits as if the step never ran.
 export const FILE_TRIAGE_TIMEOUT_MS = 20_000;
 export const FILE_TRIAGE_MODEL = "deepseek-v4-flash";
+
+/** Pick a model compatible with the session's active provider for fold
+ *  summarization and file triage. */
+export function compactModelForProvider(activeModel: string): string {
+  const provider = providerForModel(activeModel);
+  switch (provider) {
+    case "openai":
+      return "gpt-5.6-luna";
+    case "zai":
+      return "glm-5.3-flash";
+    case "gemini":
+    case "ollama":
+      return activeModel;
+    default:
+      return "deepseek-v4-flash";
+  }
+}
+
 /** Prepended to fold summary content so the model knows it's a synthesized recap.
  *  Re-export of the shared constant so existing imports keep resolving. */
 export const HISTORY_FOLD_MARKER = COMPACTION_SUMMARY_MARKER;
@@ -672,13 +690,7 @@ export class ContextManager {
     activeModel: string,
     droppedTokens = 0,
   ): Promise<{ content: string; reasoningContent: string; error?: string }> {
-    // Pick a cheap model valid for the current transport: the Codex backend
-    // rejects DeepSeek model names; the DeepSeek endpoint rejects GPT names.
-    // gpt-4o-mini is NOT available through the Codex backend (ChatGPT accounts);
-    // gpt-5.6-luna is the cheapest GPT-5.6 tier that the backend accepts
-    // (Luna < Terra < Sol in cost).
-    const summaryModel =
-      providerForModel(activeModel) === "openai" ? "gpt-5.6-luna" : "deepseek-v4-flash";
+    const summaryModel = compactModelForProvider(activeModel);
     const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
     const agentSystem = this.deps.getSystemPrompt();
     const fewShots = this.deps.getFewShots?.() ?? [];
@@ -801,11 +813,7 @@ export class ContextManager {
         reject(new Error("file-triage-timeout"));
       }, FILE_TRIAGE_TIMEOUT_MS);
     });
-    // gpt-4o-mini is NOT available through the Codex backend (ChatGPT accounts);
-    // gpt-5.6-luna is the cheapest GPT-5.6 tier that the backend accepts
-    // (Luna < Terra < Sol in cost).
-    const triageModel =
-      providerForModel(activeModel) === "openai" ? "gpt-5.6-luna" : FILE_TRIAGE_MODEL;
+    const triageModel = compactModelForProvider(activeModel);
     try {
       const resp = await Promise.race([
         this.deps.client.chat({

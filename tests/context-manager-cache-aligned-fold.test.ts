@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
+import { compactModelForProvider } from "../src/context-manager.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import type { ChatMessage, ToolSpec } from "../src/types.js";
@@ -371,5 +372,51 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     // The triage failure is LOUD — the fold card explains why nothing dropped.
     expect(result.warn).toMatch(/file triage failed/);
     expect(loop.log.entries[0]!.content as string).not.toContain("<files-dropped-from-context>");
+  });
+
+  it("compactModelForProvider maps each provider family to a compatible model", () => {
+    expect(compactModelForProvider("gpt-5.6-sol")).toBe("gpt-5.6-luna");
+    expect(compactModelForProvider("gemini-3.7-flash")).toBe("gemini-3.7-flash");
+    expect(compactModelForProvider("claude-sonnet-4-6-thinking")).toBe(
+      "claude-sonnet-4-6-thinking",
+    );
+    expect(compactModelForProvider("ollama/llama3.1:latest")).toBe("ollama/llama3.1:latest");
+    expect(compactModelForProvider("glm-5.3")).toBe("glm-5.3-flash");
+    expect(compactModelForProvider("deepseek-v4-pro")).toBe("deepseek-v4-flash");
+  });
+
+  it("summary request uses active Antigravity model when running on Gemini provider", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const fetchMock = vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      if (init?.body) {
+        capturedBody = JSON.parse(init.body) as Record<string, unknown>;
+      }
+      return new Response(
+        JSON.stringify({
+          response: {
+            candidates: [{ content: { parts: [{ text: "compact prose summary." }] } }],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    const client = new DeepSeekClient({
+      baseUrl: "https://daily-cloudcode-pa.googleapis.com",
+      allowMissingKey: true,
+      geminiAuthResolver: async () => ({ accessToken: "at", projectId: "p-123" }),
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: SYSTEM_PROMPT, toolSpecs: TOOLS }),
+      model: "gemini-3.7-flash",
+      stream: false,
+    });
+    seedTurns(loop, 8);
+
+    const result = await loop.compactHistory({ keepRecentTokens: 40 });
+    expect(result.folded).toBe(true);
+    expect(capturedBody).toBeDefined();
+    expect(capturedBody!.model).toBe("gemini-3.7-flash");
   });
 });
