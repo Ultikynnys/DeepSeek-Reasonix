@@ -2,7 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -100,17 +100,14 @@ describe("Composer image paste (ChatGPT vision path)", () => {
 });
 
 describe("Composer image pick button (ChatGPT vision path)", () => {
-  const pickButton = (container: HTMLElement) =>
-    container.querySelector(".cf-btn") as HTMLButtonElement;
+  const pickButton = () => screen.findByTitle("Insert file or image");
 
   it("routes a picked PNG to onPickImage when the model is image-capable", async () => {
     const onPickImage = vi.fn();
     const setDraft = vi.fn();
     vi.mocked(open).mockResolvedValue("C:\\shots\\chart.png");
-    const { container } = render(
-      <Composer {...baseProps} setDraft={setDraft} imageCapable onPickImage={onPickImage} />,
-    );
-    fireEvent.click(pickButton(container));
+    render(<Composer {...baseProps} setDraft={setDraft} imageCapable onPickImage={onPickImage} />);
+    fireEvent.click(await pickButton());
     await vi.waitFor(() => expect(onPickImage).toHaveBeenCalledWith("C:\\shots\\chart.png"));
     // The vision path must not fall through to the mention path.
     expect(setDraft).not.toHaveBeenCalled();
@@ -120,10 +117,8 @@ describe("Composer image pick button (ChatGPT vision path)", () => {
     const onPickImage = vi.fn();
     const setDraft = vi.fn();
     vi.mocked(open).mockResolvedValue("C:\\shots\\anim.gif");
-    const { container } = render(
-      <Composer {...baseProps} setDraft={setDraft} imageCapable onPickImage={onPickImage} />,
-    );
-    fireEvent.click(pickButton(container));
+    render(<Composer {...baseProps} setDraft={setDraft} imageCapable onPickImage={onPickImage} />);
+    fireEvent.click(await pickButton());
     await vi.waitFor(() => expect(setDraft).toHaveBeenCalled());
     expect(onPickImage).not.toHaveBeenCalled();
     const updater = setDraft.mock.calls[0]![0] as (cur: string) => string;
@@ -134,7 +129,7 @@ describe("Composer image pick button (ChatGPT vision path)", () => {
     const onPickImage = vi.fn();
     const setDraft = vi.fn();
     vi.mocked(open).mockResolvedValue("/ws/shot.png");
-    const { container } = render(
+    render(
       <Composer
         {...baseProps}
         setDraft={setDraft}
@@ -142,7 +137,7 @@ describe("Composer image pick button (ChatGPT vision path)", () => {
         onPickImage={onPickImage}
       />,
     );
-    fireEvent.click(pickButton(container));
+    fireEvent.click(await pickButton());
     await vi.waitFor(() => expect(setDraft).toHaveBeenCalled());
     expect(onPickImage).not.toHaveBeenCalled();
     const updater = setDraft.mock.calls[0]![0] as (cur: string) => string;
