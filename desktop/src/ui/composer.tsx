@@ -1,4 +1,5 @@
 import {
+  ANTIGRAVITY_MODELS,
   GPT56_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
@@ -618,7 +619,12 @@ function ModelList({
 }) {
   const [draft, setDraft] = useState(activeModel);
   const usableAntigravityModels = antigravityModels
-    ? antigravityModels.filter(isUsableAntigravityModel)
+    ? Array.from(
+        new Set([
+          ...antigravityModels.filter(isUsableAntigravityModel),
+          ...ANTIGRAVITY_MODELS,
+        ]),
+      )
     : undefined;
   const antigravityGroup = Boolean(usableAntigravityModels && usableAntigravityModels.length > 0);
   const ollamaGroup = Boolean(ollamaModels && ollamaModels.length > 0);

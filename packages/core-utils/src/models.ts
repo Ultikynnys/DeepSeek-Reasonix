@@ -43,7 +43,9 @@ export const ZAI_MODELS: readonly string[] = [
 export const ANTIGRAVITY_MODELS: readonly string[] = [
   "gemini-3.6-flash",
   "gemini-3.7-flash",
+  "gemini-3.7-flash-tiered",
   "gemini-3.8-flash",
+  "gemini-3.8-flash-tiered",
   "claude-sonnet-4-6-thinking",
   "claude-opus-4-6-thinking",
   "gpt-oss-120b-medium",

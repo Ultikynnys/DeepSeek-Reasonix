@@ -1,4 +1,5 @@
 import {
+  ANTIGRAVITY_MODELS,
   GPT56_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
@@ -1134,12 +1135,18 @@ function PageModels({
     ...(settings.customModels && settings.customModels.length > 0
       ? [{ title: t("composer.modelCustomGroup"), models: settings.customModels }]
       : []),
-    ...(settings.antigravityOAuth?.models &&
-    settings.antigravityOAuth.models.filter(isUsableAntigravityModel).length > 0
+    ...(settings.antigravityOAuth?.signedIn ||
+    (settings.antigravityOAuth?.models &&
+      settings.antigravityOAuth.models.filter(isUsableAntigravityModel).length > 0)
       ? [
           {
             title: t("composer.modelAntigravityGroup"),
-            models: settings.antigravityOAuth.models.filter(isUsableAntigravityModel),
+            models: Array.from(
+              new Set([
+                ...(settings.antigravityOAuth?.models?.filter(isUsableAntigravityModel) ?? []),
+                ...ANTIGRAVITY_MODELS,
+              ]),
+            ),
           },
         ]
       : []),

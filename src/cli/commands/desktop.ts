@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { stdin } from "node:process";
 import { createInterface } from "node:readline";
 import {
+  ANTIGRAVITY_MODELS,
   MAX_IMAGE_BYTES,
   flattenText,
   isUsableAntigravityModel,
@@ -912,8 +913,15 @@ function emitSettings(tab: Tab): void {
           antigravityOAuth.clientId === ANTIGRAVITY_OAUTH_CLIENT_ID,
         account: antigravityOAuth?.account,
         models: antigravityOAuth?.models
-          ? antigravityOAuth.models.filter(isUsableAntigravityModel)
-          : undefined,
+          ? Array.from(
+              new Set([
+                ...antigravityOAuth.models.filter(isUsableAntigravityModel),
+                ...ANTIGRAVITY_MODELS,
+              ]),
+            )
+          : antigravityOAuth?.accessToken
+            ? [...ANTIGRAVITY_MODELS]
+            : undefined,
         flowError:
           lastAntigravityOAuthError ??
           (antigravityOAuth?.accessToken &&
