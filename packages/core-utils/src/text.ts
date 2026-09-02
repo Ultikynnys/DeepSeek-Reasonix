@@ -43,6 +43,20 @@ export function clipText(text: string, max: number, ellipsis = "…"): string {
   return text.length > max ? `${text.slice(0, max)}${ellipsis}` : text;
 }
 
+/** Clip a one-line index description to fit beside a name, reserving room for the
+ *  name and an optional suffix (e.g. a subagent tag). Shared by the skills and
+ *  memory index lines, which used to reimplement the same budget math. */
+export function clipIndexDescription(
+  description: string,
+  name: string,
+  opts: { suffix?: string; max?: number } = {},
+): string {
+  const { suffix = "", max = 130 } = opts;
+  const safeDesc = description.replace(/\n/g, " ").trim();
+  const budget = max - name.length - suffix.length;
+  return safeDesc.length > budget ? `${safeDesc.slice(0, Math.max(1, budget - 1))}…` : safeDesc;
+}
+
 export interface SanitizeFilenameOptions {
   /** Max length before clamping. Default 64. */
   max?: number;

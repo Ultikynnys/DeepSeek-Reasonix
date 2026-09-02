@@ -29,7 +29,7 @@ export interface StreamModelResult {
   image?: { dataUrl: string; mimeType: string };
   /** Exact-periodic output detected while the provider was still streaming. */
   repetitionStall?: {
-    channel: "content" | "reasoning";
+    channel: "content" | "reasoning" | "tool_call";
     period: number;
     repeatedChars: number;
   };
@@ -47,6 +47,8 @@ export async function* streamModelResponse(
   let repetitionStall: StreamModelResult["repetitionStall"];
   const contentRepetition = new StreamRepetitionDetector();
   const reasoningRepetition = new StreamRepetitionDetector();
+  const toolNameRepetitions = new Map<number, StreamRepetitionDetector>();
+  const toolArgsRepetitions = new Map<number, StreamRepetitionDetector>();
   const stallAbort = new AbortController();
   const requestSignal = AbortSignal.any([signal, stallAbort.signal]);
   const callBuf: Map<number, ToolCall> = new Map();
@@ -115,9 +117,44 @@ export async function* streamModelResponse(
           function: { name: "", arguments: "" },
         };
         if (d.id) cur.id = d.id;
-        if (d.name) cur.function.name = (cur.function.name ?? "") + d.name;
-        if (d.argumentsDelta)
+        if (d.name) {
+          cur.function.name = (cur.function.name ?? "") + d.name;
+          let nameRep = toolNameRepetitions.get(d.index);
+          if (!nameRep) {
+            nameRep = new StreamRepetitionDetector();
+            toolNameRepetitions.set(d.index, nameRep);
+          }
+          const repetition = nameRep.append(d.name);
+          if (repetition) {
+            cur.function.name = cur.function.name.slice(0, repetition.safeLength);
+            repetitionStall = {
+              channel: "tool_call",
+              period: repetition.period,
+              repeatedChars: repetition.repeatedChars,
+            };
+            stallAbort.abort(new Error("Repetitive tool name stream stopped"));
+            break;
+          }
+        }
+        if (d.argumentsDelta) {
           cur.function.arguments = (cur.function.arguments ?? "") + d.argumentsDelta;
+          let argsRep = toolArgsRepetitions.get(d.index);
+          if (!argsRep) {
+            argsRep = new StreamRepetitionDetector();
+            toolArgsRepetitions.set(d.index, argsRep);
+          }
+          const repetition = argsRep.append(d.argumentsDelta);
+          if (repetition) {
+            cur.function.arguments = cur.function.arguments.slice(0, repetition.safeLength);
+            repetitionStall = {
+              channel: "tool_call",
+              period: repetition.period,
+              repeatedChars: repetition.repeatedChars,
+            };
+            stallAbort.abort(new Error("Repetitive tool arguments stream stopped"));
+            break;
+          }
+        }
         if (d.thoughtSignature) cur.thoughtSignature = d.thoughtSignature;
         callBuf.set(d.index, cur);
 

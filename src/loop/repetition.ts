@@ -18,10 +18,66 @@ const LONG_ANCHOR_CHARS = 48;
 const LONG_MIN_REPEATS = 3;
 const MAX_LONG_CANDIDATES = 128;
 
+/** Default adaptive threshold biased towards detecting repeating words and short periods early. */
+function defaultRequiredChars(period: number, minRepeatsOverride?: number): number {
+  if (minRepeatsOverride !== undefined) {
+    return period * minRepeatsOverride;
+  }
+  if (period === 1) {
+    // Single characters (horizontal rules '---', '===', '0000') — divider lines up to ~120 chars are safe.
+    return 160;
+  }
+  if (period === 2) {
+    // 2-char tokens (e.g. '/*', '=-', '..') — allow up to ~48 repeats / 96 chars.
+    return 96;
+  }
+  if (period === 3) {
+    // 3-char tokens (e.g. '../' in deep relative paths) — allow up to ~27 repeats / 80 chars.
+    return 80;
+  }
+  if (period <= 8) {
+    // Short words (4..8 chars like 'test', 'error', 'name', 'true') — 8 repeats, min 64 chars.
+    return Math.max(64, period * 8);
+  }
+  if (period <= 32) {
+    // Word / identifier length (9..32 chars like 'read_file', 'undefined', 'search_content').
+    // Bias towards detecting repeating words early: ~5-6 repeats (min 64 chars).
+    return Math.max(64, period * 5);
+  }
+  if (period <= 128) {
+    // Short phrases / code lines (33..128 chars) — 4 repeats (min 128 chars).
+    return Math.max(128, period * 4);
+  }
+  if (period <= 512) {
+    // Paragraphs / multi-line reasoning blocks (129..512 chars) — 3 repeats (min 256 chars).
+    return Math.max(256, period * 3);
+  }
+  // Large blocks (513..1024 chars) — 2-3 repeats (min 1024 chars).
+  return Math.max(1024, period * 2);
+}
+
+/** Finds the smallest fundamental repeating period of a string unit (e.g. "---" → 1, "abab" → 2). */
+function getFundamentalPeriod(str: string): number {
+  const n = str.length;
+  for (let d = 1; d <= Math.floor(n / 2); d++) {
+    if (n % d === 0) {
+      let isDivisor = true;
+      for (let i = d; i < n; i++) {
+        if (str[i] !== str[i - d]) {
+          isDivisor = false;
+          break;
+        }
+      }
+      if (isDivisor) return d;
+    }
+  }
+  return n;
+}
+
 /** Detects exact-periodic stream suffixes without retaining the full response. */
 export class StreamRepetitionDetector {
-  private readonly minRepeatedChars: number;
-  private readonly minRepeats: number;
+  private readonly minRepeatedChars?: number;
+  private readonly minRepeats?: number;
   private readonly maxPeriod: number;
   private readonly maxBufferChars: number;
   private buffer = "";
@@ -30,13 +86,19 @@ export class StreamRepetitionDetector {
   private totalChars = 0;
 
   constructor(opts: StreamRepetitionDetectorOptions = {}) {
-    this.minRepeatedChars = opts.minRepeatedChars ?? 1024;
-    this.minRepeats = opts.minRepeats ?? 6;
+    this.minRepeatedChars = opts.minRepeatedChars;
+    this.minRepeats = opts.minRepeats;
     this.maxPeriod = opts.maxPeriod ?? 1024;
-    this.maxBufferChars = Math.max(
-      opts.maxBufferChars ?? 32_768,
-      this.minRepeatedChars + this.maxPeriod * this.minRepeats,
-    );
+    const baseMin = opts.minRepeatedChars ?? 1024;
+    const maxPeriodRepeats = (opts.minRepeats ?? 6) * this.maxPeriod;
+    this.maxBufferChars = Math.max(opts.maxBufferChars ?? 32_768, baseMin + maxPeriodRepeats);
+  }
+
+  private requiredChars(period: number): number {
+    if (this.minRepeatedChars !== undefined) {
+      return Math.max(this.minRepeatedChars, period * (this.minRepeats ?? 6));
+    }
+    return defaultRequiredChars(period, this.minRepeats);
   }
 
   append(delta: string): RepetitionDetection | null {
@@ -50,9 +112,9 @@ export class StreamRepetitionDetector {
       this.rawOffsets.push(deltaStart + i);
     }
 
-    const maxPeriod = Math.min(this.maxPeriod, Math.floor(this.buffer.length / this.minRepeats));
+    const maxPeriod = Math.min(this.maxPeriod, Math.floor(this.buffer.length / 2));
     for (let period = 1; period <= maxPeriod; period++) {
-      const required = Math.max(this.minRepeatedChars, period * this.minRepeats);
+      const required = this.requiredChars(period);
       if (this.buffer.length < required) continue;
 
       const checkStart = this.buffer.length - required;
@@ -65,14 +127,27 @@ export class StreamRepetitionDetector {
       }
       if (!periodic) continue;
 
+      const unit = this.buffer.slice(checkStart, checkStart + period);
+      const fundamentalPeriod = getFundamentalPeriod(unit);
+      if (fundamentalPeriod < period) {
+        const fundamentalRequired = this.requiredChars(fundamentalPeriod);
+        if (this.buffer.length < fundamentalRequired) {
+          continue;
+        }
+      }
+
       let runStart = checkStart;
-      while (runStart > 0 && this.buffer[runStart - 1] === this.buffer[runStart - 1 + period]) {
+      const actualPeriod = fundamentalPeriod;
+      while (
+        runStart > 0 &&
+        this.buffer[runStart - 1] === this.buffer[runStart - 1 + actualPeriod]
+      ) {
         runStart--;
       }
       const rawRunStart = this.rawOffsets[runStart];
       if (rawRunStart === undefined) continue;
       return {
-        period,
+        period: actualPeriod,
         repeatedChars: this.totalChars - rawRunStart,
         safeLength: rawRunStart,
       };
@@ -88,7 +163,8 @@ export class StreamRepetitionDetector {
   }
 
   private detectLongBlock(): RepetitionDetection | null {
-    if (this.buffer.length < this.minRepeatedChars || this.buffer.length < LONG_ANCHOR_CHARS * 3) {
+    const minChars = this.minRepeatedChars ?? 1024;
+    if (this.buffer.length < minChars || this.buffer.length < LONG_ANCHOR_CHARS * 3) {
       return null;
     }
     const anchorStart = this.buffer.length - LONG_ANCHOR_CHARS;
@@ -104,7 +180,7 @@ export class StreamRepetitionDetector {
       const runStart = this.buffer.length - repeatedLength;
       if (
         period > this.maxPeriod &&
-        repeatedLength >= this.minRepeatedChars &&
+        repeatedLength >= minChars &&
         runStart >= 0 &&
         this.buffer.slice(runStart, runStart + period) ===
           this.buffer.slice(runStart + period, runStart + period * 2) &&

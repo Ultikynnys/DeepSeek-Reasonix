@@ -1,7 +1,7 @@
 /** Pass order: scavenge → truncation → storm. Schema flatten runs at loop construction, not per-turn. */
 
 import type { ToolCall } from "../types.js";
-import { scavengeToolCalls } from "./scavenge.js";
+import { repairRepeatingToolName, scavengeToolCalls } from "./scavenge.js";
 import { type IsMutating, type IsStormExempt, StormBreaker } from "./storm.js";
 import { repairTruncatedJson } from "./truncation.js";
 
@@ -9,7 +9,7 @@ export { analyzeSchema, flattenSchema, nestArguments } from "./flatten.js";
 export type { FlattenDecision } from "./flatten.js";
 export { repairTruncatedJson } from "./truncation.js";
 export type { TruncationRepairResult } from "./truncation.js";
-export { scavengeToolCalls } from "./scavenge.js";
+export { repairRepeatingToolName, scavengeToolCalls } from "./scavenge.js";
 export type { ScavengeOptions, ScavengeResult } from "./scavenge.js";
 export { StormBreaker } from "./storm.js";
 
@@ -61,6 +61,19 @@ export class ToolCallRepair {
       stormsBroken: 0,
       notes: [],
     };
+
+    // 0. Repair repeating tool names in declared calls (e.g. "read_fileread_file..." → "read_file").
+    for (const call of declaredCalls) {
+      if (call.function?.name && !this.opts.allowedToolNames.has(call.function.name)) {
+        const repaired = repairRepeatingToolName(call.function.name, this.opts.allowedToolNames);
+        if (repaired) {
+          report.notes.push(
+            `[${call.function.name}] repaired repeating tool name to '${repaired}'`,
+          );
+          call.function.name = repaired;
+        }
+      }
+    }
 
     // 1. Scavenge — only add calls whose (name,args) signature is novel.
     // Scan both channels: reasoning (where R1 leaks JSON calls into

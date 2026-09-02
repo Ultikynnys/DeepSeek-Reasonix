@@ -5,12 +5,20 @@ import { readFile as readFileAsync } from "node:fs/promises";
 import { dirname } from "node:path";
 import { messageOf } from "@reasonix/core-utils";
 
+/** Parse + validate a JSON string, returning null on malformed or wrong-shape input. */
+function parseJsonSilently<T>(raw: string, validate: (v: unknown) => v is T): T | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return validate(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Read + parse + validate a JSON file, returning null on any failure (missing, malformed, or wrong shape). */
 export function readJsonFileSilently<T>(path: string, validate: (v: unknown) => v is T): T | null {
   try {
-    const raw = readFileSync(path, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    return validate(parsed) ? parsed : null;
+    return parseJsonSilently(readFileSync(path, "utf8"), validate);
   } catch {
     return null;
   }
@@ -22,9 +30,7 @@ export async function readJsonFileSilentlyAsync<T>(
   validate: (v: unknown) => v is T,
 ): Promise<T | null> {
   try {
-    const raw = await readFileAsync(path, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    return validate(parsed) ? parsed : null;
+    return parseJsonSilently(await readFileAsync(path, "utf8"), validate);
   } catch {
     return null;
   }

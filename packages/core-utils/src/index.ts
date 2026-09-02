@@ -27,7 +27,7 @@ export {
 export type { ImageMention } from "./image-attach.js";
 export { formatBytes } from "./format.js";
 export { messageOf } from "./error.js";
-export { DAY_MS } from "./time.js";
+export { DAY_MS, abortReason, sleep } from "./time.js";
 export {
   ANTIGRAVITY_MODELS,
   GEMINI_MODELS,
@@ -56,6 +56,7 @@ export {
   resolveApprovalPrompt,
 } from "./approval-prompt.js";
 export {
+  clipIndexDescription,
   clipText,
   flattenText,
   redactDiagnosticText,

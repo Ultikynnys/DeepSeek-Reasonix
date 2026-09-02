@@ -1,4 +1,4 @@
-import { messageOf } from "@reasonix/core-utils";
+import { abortReason, messageOf, sleep } from "@reasonix/core-utils";
 
 /** Maximum attempts for a compaction model call, including the first call. */
 export const COMPACTION_MAX_ATTEMPTS = 2;
@@ -73,7 +73,7 @@ export async function withCompactionRetry<T>(opts: CompactionRetryOptions<T>): P
         ) {
           throw err;
         }
-        await waitForCompactionRetry(
+        await sleep(
           retryDelayMs,
           AbortSignal.any([budgetController.signal, ...(opts.signal ? [opts.signal] : [])]),
         );
@@ -111,34 +111,4 @@ export function isRetryableCompactionError(message: string): boolean {
   return /fetch failed|failed to fetch|network|connection|socket|body|terminated|reset|closed|premature|unexpected end|ECONN|EAI_AGAIN|ETIMEDOUT|UND_ERR/i.test(
     trimmed,
   );
-}
-
-function waitForCompactionRetry(ms: number, signal?: AbortSignal): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(abortReason(signal));
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    if (signal) {
-      if (signal.aborted) {
-        onAbort();
-      } else {
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
-    }
-  });
-}
-
-function abortReason(signal: AbortSignal | undefined): Error {
-  const reason = signal?.reason;
-  if (reason instanceof Error) return reason;
-  if (reason && typeof reason === "object" && "message" in reason) {
-    return new Error(String(reason.message));
-  }
-  return new Error(reason === undefined ? "aborted" : String(reason));
 }

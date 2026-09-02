@@ -77,6 +77,18 @@ describe("ToolCallRepair pipeline", () => {
     expect(report.scavenged).toBe(1);
   });
 
+  it("repairs repeating tool names in declared calls", () => {
+    const repair = new ToolCallRepair({
+      allowedToolNames: new Set(["read_file", "write_file"]),
+    });
+    const repeatingName = "read_fileread_fileread_fileread_fileread_file";
+    const declared = [call("c1", repeatingName, '{"path":"src/index.ts"}')];
+    const { calls, report } = repair.process(declared, null);
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.function.name).toBe("read_file");
+    expect(report.notes.some((n) => n.includes("repaired repeating tool name"))).toBe(true);
+  });
+
   it("resetStorm clears the repeat-window so post-reset calls aren't suppressed", () => {
     const repair = new ToolCallRepair({
       allowedToolNames: new Set(["x"]),

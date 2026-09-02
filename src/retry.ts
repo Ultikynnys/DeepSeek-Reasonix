@@ -1,6 +1,6 @@
 /** Client retries initial requests only; loop-level guards handle safe stream/compaction replays. */
 
-import { messageOf } from "@reasonix/core-utils";
+import { messageOf, sleep } from "@reasonix/core-utils";
 
 export interface RetryOptions {
   /** Maximum total attempts (including the first). Default 4. */
@@ -92,21 +92,6 @@ function computeWait(
   // Jitter range [75%, 125%] to spread retries out when many clients hit 429 together.
   const jitter = exp * (0.75 + Math.random() * 0.5);
   return Math.min(Math.max(jitter, 0), cap);
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    if (signal) {
-      const onAbort = () => {
-        clearTimeout(timer);
-        reject(new Error("aborted"));
-      };
-      if (signal.aborted) onAbort();
-      else signal.addEventListener("abort", onAbort, { once: true });
-    }
-  });
 }
 
 function isAbortError(err: unknown): boolean {

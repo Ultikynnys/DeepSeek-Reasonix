@@ -1,9 +1,9 @@
 /** Shell-command hooks; project scope first, then global. Exit 0=pass, 2=block on Pre*, other=warn. */
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { projectHooksTrusted } from "./config.js";
+import { readJsonFileSilently } from "./core/json-file.js";
 import { t } from "./i18n/index.js";
 import { reasonixHome } from "./reasonix-home.js";
 
@@ -93,17 +93,12 @@ export function projectSettingsPath(projectRoot: string): string {
   return join(projectRoot, HOOK_SETTINGS_DIRNAME, HOOK_SETTINGS_FILENAME);
 }
 
+function isHookSettings(v: unknown): v is HookSettings {
+  return !!v && typeof v === "object";
+}
+
 function readSettingsFile(path: string): HookSettings | null {
-  if (!existsSync(path)) return null;
-  try {
-    const raw = readFileSync(path, "utf8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") return parsed as HookSettings;
-  } catch {
-    /* malformed JSON → treat as no hooks; do NOT throw, the user
-     * shouldn't lose the whole CLI to a typo in their settings */
-  }
-  return null;
+  return readJsonFileSilently<HookSettings>(path, isHookSettings);
 }
 
 /** Project hooks fire before global; within a scope, array order. */

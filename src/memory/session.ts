@@ -192,16 +192,18 @@ function isChatMessage(msg: unknown): msg is ChatMessage {
   return !!msg && typeof msg === "object" && "role" in msg;
 }
 
+function parseSessionMessages(raw: string): { messages: ChatMessage[]; hadContent: boolean } {
+  return { messages: parseJsonl(raw, isChatMessage), hadContent: raw.trim().length > 0 };
+}
+
 function readSessionMessages(
   path: string,
 ): { messages: ChatMessage[]; hadContent: boolean } | null {
-  let raw: string;
   try {
-    raw = readFileSync(path, "utf8");
+    return parseSessionMessages(readFileSync(path, "utf8"));
   } catch {
     return null;
   }
-  return { messages: parseJsonl(raw, isChatMessage), hadContent: raw.trim().length > 0 };
 }
 
 /** Async variant of `loadSessionMessages` — used at launch so a multi-tab
@@ -220,13 +222,11 @@ export async function loadSessionMessagesAsync(name: string): Promise<ChatMessag
 async function readSessionMessagesAsync(
   path: string,
 ): Promise<{ messages: ChatMessage[]; hadContent: boolean } | null> {
-  let raw: string;
   try {
-    raw = await readFile(path, "utf8");
+    return parseSessionMessages(await readFile(path, "utf8"));
   } catch {
     return null;
   }
-  return { messages: parseJsonl(raw, isChatMessage), hadContent: raw.trim().length > 0 };
 }
 
 export function appendSessionMessage(name: string, message: ChatMessage): void {

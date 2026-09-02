@@ -12,6 +12,7 @@ import {
 import { accessSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { clipIndexDescription } from "@reasonix/core-utils";
 import { parseFrontmatter } from "./frontmatter.js";
 import { t } from "./i18n/index.js";
 import { truncateWithMarker } from "./memory/read-capped.js";
@@ -411,10 +412,8 @@ function skillDescription(s: Pick<Skill, "name" | "description" | "scope">): str
 
 /** Subagent tag goes AFTER the name in brackets — leading-marker tags get copied into `name` arg verbatim. */
 function skillIndexLine(s: Pick<Skill, "name" | "description" | "runAs" | "scope">): string {
-  const safeDesc = skillDescription(s).replace(/\n/g, " ").trim();
   const tag = s.runAs === "subagent" ? " [🧬 subagent]" : "";
-  const max = 130 - s.name.length - tag.length;
-  const clipped = safeDesc.length > max ? `${safeDesc.slice(0, Math.max(1, max - 1))}…` : safeDesc;
+  const clipped = clipIndexDescription(skillDescription(s), s.name, { suffix: tag });
   return clipped ? `- ${s.name}${tag} — ${clipped}` : `- ${s.name}${tag}`;
 }
 

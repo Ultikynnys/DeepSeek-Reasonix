@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { messageOf } from "@reasonix/core-utils";
+import { clipIndexDescription, messageOf } from "@reasonix/core-utils";
 import {
   type ReasonixConfig,
   loadResolvedSkillPaths,
@@ -135,9 +135,7 @@ function todayIso(): string {
 }
 
 function indexLine(e: Pick<MemoryEntry, "name" | "description">): string {
-  const safeDesc = e.description.replace(/\n/g, " ").trim();
-  const max = 130 - e.name.length;
-  const clipped = safeDesc.length > max ? `${safeDesc.slice(0, Math.max(1, max - 1))}…` : safeDesc;
+  const clipped = clipIndexDescription(e.description, e.name);
   return `- [${e.name}](${e.name}.md) — ${clipped}`;
 }
 

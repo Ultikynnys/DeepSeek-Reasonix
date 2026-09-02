@@ -100,4 +100,23 @@ describe("scavengeToolCalls", () => {
     // fired on the inner JSON we'd see two.
     expect(r.calls.length).toBe(1);
   });
+
+  it("recovers tool names corrupted by repetition stalls", () => {
+    const dsmlAllowed = new Set(["read_file"]);
+    const input =
+      '<｜DSML｜invoke name="read_fileread_fileread_fileread_file"><｜DSML｜parameter name="path" string="true">foo.txt</｜DSML｜parameter></｜DSML｜invoke>';
+    const r = scavengeToolCalls(input, { allowedNames: dsmlAllowed });
+    expect(r.calls.length).toBe(1);
+    expect(r.calls[0]!.function.name).toBe("read_file");
+    expect(JSON.parse(r.calls[0]!.function.arguments)).toEqual({ path: "foo.txt" });
+  });
+
+  it("recovers raw JSON tool calls with repeating tool name", () => {
+    const dsmlAllowed = new Set(["read_file"]);
+    const input = `I will call {"name": "read_fileread_fileread_file", "arguments": {"path": "bar.txt"}}`;
+    const r = scavengeToolCalls(input, { allowedNames: dsmlAllowed });
+    expect(r.calls.length).toBe(1);
+    expect(r.calls[0]!.function.name).toBe("read_file");
+    expect(JSON.parse(r.calls[0]!.function.arguments)).toEqual({ path: "bar.txt" });
+  });
 });

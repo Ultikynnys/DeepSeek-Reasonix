@@ -17,6 +17,39 @@ export interface ScavengeResult {
 /** Bounds the regex input — DSML matchers are O(n²) on adversarial input per CodeQL js/polynomial-redos. */
 const MAX_SCAVENGE_INPUT = 100 * 1024;
 
+/** Recovers tool names corrupted by repetition stalls (e.g. "read_fileread_fileread_file..." → "read_file"). */
+export function repairRepeatingToolName(
+  name: string,
+  allowedNames: ReadonlySet<string>,
+): string | null {
+  if (allowedNames.has(name)) return name;
+  for (const candidate of allowedNames) {
+    if (candidate.length === 0 || name.length <= candidate.length) continue;
+    if (!name.startsWith(candidate)) continue;
+    let pos = 0;
+    let isRepeat = true;
+    while (pos < name.length) {
+      const remaining = name.length - pos;
+      if (remaining >= candidate.length) {
+        if (name.slice(pos, pos + candidate.length) !== candidate) {
+          isRepeat = false;
+          break;
+        }
+        pos += candidate.length;
+      } else {
+        if (candidate.slice(0, remaining) !== name.slice(pos)) {
+          isRepeat = false;
+        }
+        break;
+      }
+    }
+    if (isRepeat && pos >= candidate.length * 2) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 export function scavengeToolCalls(
   reasoningContent: string | null | undefined,
   opts: ScavengeOptions,
@@ -39,14 +72,17 @@ export function scavengeToolCalls(
   // model's intent isn't lost.
   for (const invoke of iterateDsmlInvokes(reasoningContent)) {
     if (out.length >= max) break;
-    if (!opts.allowedNames.has(invoke.name)) continue;
+    const resolvedName = opts.allowedNames.has(invoke.name)
+      ? invoke.name
+      : repairRepeatingToolName(invoke.name, opts.allowedNames);
+    if (!resolvedName) continue;
     out.push({
       function: {
-        name: invoke.name,
+        name: resolvedName,
         arguments: JSON.stringify(invoke.args),
       },
     });
-    notes.push(`scavenged DSML call: ${invoke.name}`);
+    notes.push(`scavenged DSML call: ${resolvedName}`);
   }
 
   // Pattern B: raw JSON objects (the original three shapes). Strip
@@ -160,41 +196,51 @@ function coerceToToolCall(
   if (!parsed || typeof parsed !== "object") return null;
 
   // Pattern 1: { name, arguments }
-  if (typeof parsed.name === "string" && allowedNames.has(parsed.name)) {
-    const args = parsed.arguments;
-    return {
-      function: {
-        name: parsed.name,
-        arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
-      },
-    };
+  if (typeof parsed.name === "string") {
+    const resolvedName = allowedNames.has(parsed.name)
+      ? parsed.name
+      : repairRepeatingToolName(parsed.name, allowedNames);
+    if (resolvedName) {
+      const args = parsed.arguments;
+      return {
+        function: {
+          name: resolvedName,
+          arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
+        },
+      };
+    }
   }
 
   // Pattern 2: OpenAI-style { type: "function", function: { name, arguments } }
-  if (
-    parsed.type === "function" &&
-    parsed.function &&
-    typeof parsed.function.name === "string" &&
-    allowedNames.has(parsed.function.name)
-  ) {
-    const args = parsed.function.arguments;
-    return {
-      type: "function",
-      function: {
-        name: parsed.function.name,
-        arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
-      },
-    };
+  if (parsed.type === "function" && parsed.function && typeof parsed.function.name === "string") {
+    const resolvedName = allowedNames.has(parsed.function.name)
+      ? parsed.function.name
+      : repairRepeatingToolName(parsed.function.name, allowedNames);
+    if (resolvedName) {
+      const args = parsed.function.arguments;
+      return {
+        type: "function",
+        function: {
+          name: resolvedName,
+          arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
+        },
+      };
+    }
   }
 
   // Pattern 3: { tool_name, tool_args } (R1 free-form variant)
-  if (typeof parsed.tool_name === "string" && allowedNames.has(parsed.tool_name)) {
-    return {
-      function: {
-        name: parsed.tool_name,
-        arguments: JSON.stringify(parsed.tool_args ?? {}),
-      },
-    };
+  if (typeof parsed.tool_name === "string") {
+    const resolvedName = allowedNames.has(parsed.tool_name)
+      ? parsed.tool_name
+      : repairRepeatingToolName(parsed.tool_name, allowedNames);
+    if (resolvedName) {
+      return {
+        function: {
+          name: resolvedName,
+          arguments: JSON.stringify(parsed.tool_args ?? {}),
+        },
+      };
+    }
   }
 
   return null;

@@ -1,5 +1,5 @@
 import type { FileHandle } from "node:fs/promises";
-import { createInterface } from "node:readline";
+import { type Interface, createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import iconv from "iconv-lite";
 import { type FileEncoding, decodeFileBuffer } from "../../code/file-encoding.js";
@@ -51,6 +51,23 @@ function decodedStream(
   return { source, decoded: source };
 }
 
+/** Open a decoded readline stream, run `visit`, and always tear down the reader + streams. */
+async function withReadLines<T>(
+  fh: FileHandle,
+  inspection: TextFileInspection,
+  visit: (reader: Interface) => Promise<T>,
+): Promise<T> {
+  const { source, decoded } = decodedStream(fh, inspection);
+  const reader = createInterface({ input: decoded, crlfDelay: Number.POSITIVE_INFINITY });
+  try {
+    return await visit(reader);
+  } finally {
+    reader.close();
+    source.destroy();
+    if (decoded !== source) decoded.destroy();
+  }
+}
+
 export interface ReadLineWindow {
   lines: string[];
   hasMore: boolean;
@@ -64,12 +81,10 @@ export async function readLineWindow(
   startLine: number,
   limit: number,
 ): Promise<ReadLineWindow> {
-  const { source, decoded } = decodedStream(fh, inspection);
-  const reader = createInterface({ input: decoded, crlfDelay: Number.POSITIVE_INFINITY });
-  const lines: string[] = [];
-  let lineNo = 0;
-  let hasMore = false;
-  try {
+  return withReadLines(fh, inspection, async (reader) => {
+    const lines: string[] = [];
+    let lineNo = 0;
+    let hasMore = false;
     for await (const line of reader) {
       lineNo++;
       if (lineNo < startLine) continue;
@@ -80,12 +95,8 @@ export async function readLineWindow(
       hasMore = true;
       break;
     }
-  } finally {
-    reader.close();
-    source.destroy();
-    if (decoded !== source) decoded.destroy();
-  }
-  return { lines, hasMore, linesVisited: lineNo };
+    return { lines, hasMore, linesVisited: lineNo };
+  });
 }
 
 /** Stream every line while retaining only the final `limit` lines. */
@@ -94,22 +105,16 @@ export async function readLineTail(
   inspection: TextFileInspection,
   limit: number,
 ): Promise<{ lines: string[]; totalLines: number }> {
-  const { source, decoded } = decodedStream(fh, inspection);
-  const reader = createInterface({ input: decoded, crlfDelay: Number.POSITIVE_INFINITY });
-  const ring: string[] = [];
-  let totalLines = 0;
-  try {
+  return withReadLines(fh, inspection, async (reader) => {
+    const ring: string[] = [];
+    let totalLines = 0;
     for await (const line of reader) {
       totalLines++;
       ring.push(line);
       if (ring.length > limit) ring.shift();
     }
-  } finally {
-    reader.close();
-    source.destroy();
-    if (decoded !== source) decoded.destroy();
-  }
-  return { lines: ring, totalLines };
+    return { lines: ring, totalLines };
+  });
 }
 
 /** Stream all lines to a callback without retaining the file body. */
@@ -118,18 +123,12 @@ export async function scanTextLines(
   inspection: TextFileInspection,
   visit: (line: string, lineNo: number) => void,
 ): Promise<number> {
-  const { source, decoded } = decodedStream(fh, inspection);
-  const reader = createInterface({ input: decoded, crlfDelay: Number.POSITIVE_INFINITY });
-  let totalLines = 0;
-  try {
+  return withReadLines(fh, inspection, async (reader) => {
+    let totalLines = 0;
     for await (const line of reader) {
       totalLines++;
       visit(line, totalLines);
     }
-  } finally {
-    reader.close();
-    source.destroy();
-    if (decoded !== source) decoded.destroy();
-  }
-  return totalLines;
+    return totalLines;
+  });
 }

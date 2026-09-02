@@ -1255,7 +1255,7 @@ export class CacheFirstLoop {
       let finishReason: string | undefined;
       let image: { dataUrl: string; mimeType: string } | undefined;
       let repetitionStall:
-        | { channel: "content" | "reasoning"; period: number; repeatedChars: number }
+        | { channel: "content" | "reasoning" | "tool_call"; period: number; repeatedChars: number }
         | undefined;
       const callModel = this.model;
 

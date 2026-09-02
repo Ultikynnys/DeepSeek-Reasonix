@@ -72,9 +72,31 @@ describe("StreamRepetitionDetector", () => {
     expect(detect(chunks)?.safeLength).toBe(prefix.length);
   });
 
+  it("detects repeating words early with word-bias", () => {
+    // A word like "read_file" (period 9) should trigger after ~8 repeats (72 chars), not waiting for 1024 chars.
+    const chunks = ["Let me check: ", ...Array.from({ length: 12 }, () => "read_file")];
+    const detector = new StreamRepetitionDetector();
+    let detectedAtChunk = -1;
+    for (let i = 0; i < chunks.length; i++) {
+      const res = detector.append(chunks[i]!);
+      if (res) {
+        detectedAtChunk = i;
+        expect(res.period).toBe(9);
+        expect(res.safeLength).toBe("Let me check: ".length);
+        expect(res.repeatedChars).toBeLessThan(150);
+        break;
+      }
+    }
+    // Should be detected around chunk 8 (72 chars of read_file), well before chunk 12
+    expect(detectedAtChunk).toBeGreaterThanOrEqual(7);
+    expect(detectedAtChunk).toBeLessThanOrEqual(9);
+  });
+
   it("does not flag short repetitions or ordinary prose", () => {
-    expect(detect(["ha".repeat(400)])).toBeNull();
-    expect(detect(["0123456789abcdef".repeat(60)])).toBeNull();
+    expect(detect(["ha".repeat(15)])).toBeNull();
+    expect(detect(["0123456789abcdef".repeat(2)])).toBeNull();
+    expect(detect(["-".repeat(80)])).toBeNull(); // Standard divider line
+    expect(detect(["../".repeat(10)])).toBeNull(); // Deep relative path
     expect(
       detect([
         "The model checked the source folder, compared the files, and explained what was missing.",
@@ -86,6 +108,11 @@ describe("StreamRepetitionDetector", () => {
         `Finding ${i}: inspected artifact ${i * 17}, compared unique path segment ${i * 31}, and recorded distinct evidence ${i * 47}.`,
     ).join("\n");
     expect(detect([largeUniqueProse])).toBeNull();
+  });
+
+  it("detects long repeating cycles", () => {
+    expect(detect(["ha".repeat(400)])).toMatchObject({ period: 2, safeLength: 0 });
+    expect(detect(["0123456789abcdef".repeat(60)])).toMatchObject({ period: 16, safeLength: 0 });
   });
 
   it("keeps memory bounded while preserving absolute safe offsets", () => {
