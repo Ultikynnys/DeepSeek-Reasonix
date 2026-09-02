@@ -4,6 +4,7 @@ import {
   ZAI_MODELS,
   isUsableAntigravityModel,
   modelAcceptsImages,
+  modelDisplayName,
 } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useEffect, useRef, useState } from "react";
@@ -1162,7 +1163,7 @@ function PageModels({
                   onClick={() => onSave({ model: id })}
                   onKeyDown={activationHandler(() => onSave({ model: id }))}
                 >
-                  <div className="nm">{id}</div>
+                  <div className="nm">{modelDisplayName(id)}</div>
                   {modelAcceptsImages(id, ollamaVisionModels) ? (
                     <span className="badge">vision</span>
                   ) : null}

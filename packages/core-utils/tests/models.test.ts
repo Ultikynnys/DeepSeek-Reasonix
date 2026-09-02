@@ -4,9 +4,11 @@ import {
   GEMINI_MODELS,
   GPT56_MODELS,
   KNOWN_MODELS,
+  MODEL_DISPLAY_NAMES,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
   modelAcceptsImages,
+  modelDisplayName,
 } from "../src/models.js";
 
 describe("modelAcceptsImages", () => {
@@ -99,5 +101,24 @@ describe("KNOWN_MODELS", () => {
       ...ZAI_MODELS,
       ...ANTIGRAVITY_MODELS,
     ]);
+  });
+});
+
+describe("modelDisplayName", () => {
+  it("maps gemini-pro-agent to gemini-3.5-pro", () => {
+    expect(modelDisplayName("gemini-pro-agent")).toBe("gemini-3.5-pro");
+    expect(MODEL_DISPLAY_NAMES["gemini-pro-agent"]).toBe("gemini-3.5-pro");
+  });
+
+  it("falls back to the raw model ID when unmapped", () => {
+    expect(modelDisplayName("deepseek-v4-flash")).toBe("deepseek-v4-flash");
+    expect(modelDisplayName("gemini-3.7-flash-tiered")).toBe("gemini-3.7-flash-tiered");
+    expect(modelDisplayName("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+  });
+
+  it("handles null, undefined, and empty string gracefully", () => {
+    expect(modelDisplayName(null)).toBe("");
+    expect(modelDisplayName(undefined)).toBe("");
+    expect(modelDisplayName("")).toBe("");
   });
 });

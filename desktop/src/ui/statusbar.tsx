@@ -1,3 +1,4 @@
+import { modelDisplayName } from "@reasonix/core-utils";
 import { useEffect, useRef, useState } from "react";
 import type { Balance, Settings, UsageStats } from "../App";
 import { t } from "../i18n";
@@ -457,7 +458,7 @@ export function StatusBar({
         onKeyDown={activationHandler(onOpenSettings)}
       >
         <I.brain size={11} style={{ color: "var(--violet)" }} />
-        <span className="v vio">{settings?.model ?? "—"}</span>
+        <span className="v vio">{settings?.model ? modelDisplayName(settings.model) : "—"}</span>
         <span className="v">{settings?.reasoningEffort ?? "high"}</span>
       </span>
       {showBalance ? (

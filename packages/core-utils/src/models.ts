@@ -91,6 +91,17 @@ export const KNOWN_MODELS: readonly string[] = [
   ...ANTIGRAVITY_MODELS,
 ];
 
+/** Friendly display labels for ambiguous or internal model IDs. */
+export const MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  "gemini-pro-agent": "gemini-3.5-pro",
+};
+
+/** Returns the display label for a model id, applying friendly UI mappings. */
+export function modelDisplayName(model: string | undefined | null): string {
+  if (!model) return "";
+  return MODEL_DISPLAY_NAMES[model] ?? model;
+}
+
 /** Model ids that accept image attachments in user messages — the GPT-5.6
  *  family, DeepSeek's vision line, and every Gemini model (natively
  *  multimodal). Drives the composer's paste/drop affordance, the daemon's

@@ -4,6 +4,7 @@ import {
   ZAI_MODELS,
   isUsableAntigravityModel,
   modelAcceptsImages,
+  modelDisplayName,
 } from "@reasonix/core-utils";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -454,7 +455,7 @@ export function Composer({
                 title={t("composer.switchModel")}
               >
                 <I.brain size={12} />
-                <span>{modelLabel}</span>
+                <span>{modelDisplayName(modelLabel)}</span>
                 <I.chev size={10} />
               </button>
               {modelMenuOpen ? (
@@ -486,7 +487,7 @@ export function Composer({
                 title={t("composer.switchSubagentModel")}
               >
                 <I.bot size={12} />
-                <span>{subagentModelLabel}</span>
+                <span>{modelDisplayName(subagentModelLabel)}</span>
                 <I.chev size={10} />
               </button>
               {subagentMenuOpen ? (
@@ -728,7 +729,7 @@ function ModelList({
                   <Icon size={12} />
                 </span>
                 <div className="nm">
-                  <span className="cmd">{model}</span>
+                  <span className="cmd">{modelDisplayName(model)}</span>
                 </div>
                 {modelAcceptsImages(model, ollamaVisionModels) ? (
                   <span className="badge">vision</span>

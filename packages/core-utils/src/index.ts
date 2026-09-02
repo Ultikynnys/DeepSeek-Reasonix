@@ -33,11 +33,13 @@ export {
   GEMINI_MODELS,
   GPT56_MODELS,
   KNOWN_MODELS,
+  MODEL_DISPLAY_NAMES,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
   isAntigravityModel,
   isUsableAntigravityModel,
   modelAcceptsImages,
+  modelDisplayName,
 } from "./models.js";
 export type {
   ConfirmationChoice,
