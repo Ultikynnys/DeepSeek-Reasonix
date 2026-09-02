@@ -422,7 +422,7 @@ describe("fold integration — the prune step", () => {
     expect(cur?.content).not.toContain("pruned");
   });
 
-  it("a noop fold leaves the log untouched — pruning never leaks without a commit", async () => {
+  it("a fold that covers the whole log prunes the head before committing", async () => {
     const client = new DeepSeekClient({
       apiKey: "sk-test",
       fetch: vi.fn(async () =>
@@ -436,8 +436,8 @@ describe("fold integration — the prune step", () => {
     });
     seedTurns(loop, 2);
     // Old unreferenced read + a tiny active exchange — everything fits the
-    // tail budget, so the boundary walk lands at 0 and the fold must noop
-    // without applying the pruning (no log mutation on the noop path).
+    // tail budget, but the fold still folds everything before the most recent
+    // exchange, so the old read is pruned and summarized away.
     loop.log.append({ role: "user", content: "read src/old.ts" });
     loop.log.append({
       role: "assistant",
@@ -454,17 +454,16 @@ describe("fold integration — the prune step", () => {
       role: "tool",
       tool_call_id: "call-old",
       name: "read_file",
-      content: "OLD BODY ".repeat(10),
+      content: "OLD BODY ".repeat(50),
     });
     loop.log.append({ role: "user", content: "hi" });
     loop.log.append({ role: "assistant", content: "hello" });
 
     const result = await loop.compactHistory({ keepRecentTokens: 2000 });
 
-    expect(result.folded).toBe(false);
-    expect(result.prunedFiles).toBeUndefined();
+    expect(result.folded).toBe(true);
+    expect(result.prunedFiles).toBe(1);
     const old = loop.log.entries.find((m) => m.tool_call_id === "call-old");
-    expect(old?.content).toContain("OLD BODY");
-    expect(old?.content).not.toContain("pruned");
+    expect(old).toBeUndefined();
   });
 });

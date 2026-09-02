@@ -412,7 +412,13 @@ export class ContextManager {
       cumTokens = 0;
       for (let i = boundary; i < all.length; i++) cumTokens += tokenCounts[i]!;
     }
-    if (boundary <= 0) return noop;
+    if (boundary <= 0) {
+      // The entire log fits in the tail budget — no "older" content to fold.
+      // But the user asked for compaction, so fold everything before the most
+      // recent exchange to still reduce the context.
+      boundary = lastUserIdx;
+      if (boundary <= 0) return noop;
+    }
     // Preflight-only: refuse when no user landed in tail — the active tool turn
     // would be wiped. Default fold path (post-response) tolerates empty tail so
     // cache-aligned summary tests still exercise the "summarize all" shape.

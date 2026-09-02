@@ -1286,8 +1286,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(entries[entries.length - 1]!.content).toMatch(/answer number 5/);
   });
 
-  it("compactHistory no-ops when head wouldn't shrink log meaningfully", async () => {
-    const client = makeClient([{ content: "summary" }]);
+  it("compactHistory folds everything before the most recent exchange when the tail budget covers the whole log", async () => {
+    const client = makeClient([{ content: "Earlier turns summarized into a brief recap." }]);
     const loop = new CacheFirstLoop({
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
@@ -1298,10 +1298,11 @@ describe("CacheFirstLoop (non-streaming)", () => {
     loop.log.append({ role: "user", content: "q1" });
     loop.log.append({ role: "assistant", content: "a1" });
 
-    // Budget large enough to cover everything → no fold needed.
+    // Budget large enough to cover everything → still folds everything before
+    // the most recent exchange (compaction is never a no-op when there's a head).
     const result = await loop.compactHistory({ keepRecentTokens: 10_000 });
-    expect(result.folded).toBe(false);
-    expect(loop.log.length).toBe(4);
+    expect(result.folded).toBe(true);
+    expect(loop.log.length).toBeLessThan(4);
   });
 
   it("fold proceeds (does not noop) when the log is over the threshold even with a small head", async () => {
