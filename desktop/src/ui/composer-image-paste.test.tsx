@@ -101,7 +101,7 @@ describe("Composer image paste (ChatGPT vision path)", () => {
 
 describe("Composer image pick button (ChatGPT vision path)", () => {
   const pickButton = (container: HTMLElement) =>
-    container.querySelector('button[title="Insert file or image (@ mention)"]') as HTMLButtonElement;
+    container.querySelector(".cf-btn") as HTMLButtonElement;
 
   it("routes a picked PNG to onPickImage when the model is image-capable", async () => {
     const onPickImage = vi.fn();
