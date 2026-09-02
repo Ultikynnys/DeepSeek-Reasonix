@@ -1062,6 +1062,22 @@ function appendTextSegment(
   return [...segments, { kind, text }];
 }
 
+function appendAssistantSegment(
+  messages: ChatMessage[],
+  segment: AssistantSegment,
+  turn = 1,
+): ChatMessage[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const host = messages[i];
+    if (host?.kind === "assistant") {
+      const next = [...messages];
+      next[i] = { ...host, segments: [...host.segments, segment] };
+      return next;
+    }
+  }
+  return [...messages, { kind: "assistant", turn, segments: [segment], pending: false }];
+}
+
 export function applyIncoming(state: State, ev: IncomingEvent): State {
   switch (ev.type) {
     case "user.message": {
@@ -1701,11 +1717,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         }),
       };
     case "compaction.started": {
-      // Compaction card joins the assistant queue like a tool card — attached to
+      // Compaction card joins the assistant queue like a tool card: attached to
       // the LAST assistant message (the running turn for auto folds; the previous
-      // turn for user-triggered /compact while idle). Attaching to the first
-      // assistant message buries the card at the top of the transcript where
-      // nobody sees it. Creates a message if none exists yet.
+      // turn for user-triggered /compact while idle).
       const seg: AssistantSegment = {
         kind: "compaction",
         id: ev.compactionId,
@@ -1714,27 +1728,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ...(ev.kind ? { compactionKind: ev.kind } : {}),
         ...(ev.aggressive ? { aggressive: true } : {}),
       };
-      let hostIdx = -1;
-      for (let i = state.messages.length - 1; i >= 0; i--) {
-        if (state.messages[i]?.kind === "assistant") {
-          hostIdx = i;
-          break;
-        }
-      }
-      if (hostIdx >= 0) {
-        const messages = [...state.messages];
-        const host = messages[hostIdx];
-        if (host && host.kind === "assistant") {
-          messages[hostIdx] = { ...host, segments: [...host.segments, seg] };
-        }
-        return { ...state, messages };
-      }
       return {
         ...state,
-        messages: [
-          ...state.messages,
-          { kind: "assistant", turn: ev.turn, segments: [seg], pending: false },
-        ],
+        messages: appendAssistantSegment(state.messages, seg, ev.turn),
       };
     }
     case "compaction.finished": {
@@ -1795,32 +1791,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         text: ev.text,
         severity: ev.severity,
       };
-      let hostIdx = -1;
-      for (let i = state.messages.length - 1; i >= 0; i--) {
-        if (state.messages[i]?.kind === "assistant") {
-          hostIdx = i;
-          break;
-        }
-      }
-      if (hostIdx >= 0) {
-        const messages = [...state.messages];
-        const host = messages[hostIdx];
-        if (host && host.kind === "assistant") {
-          messages[hostIdx] = { ...host, segments: [...host.segments, seg] };
-        }
-        return { ...state, messages };
-      }
       return {
         ...state,
-        messages: [
-          ...state.messages,
-          {
-            kind: "assistant",
-            turn: ev.turn ?? 1,
-            segments: [seg],
-            pending: false,
-          },
-        ],
+        messages: appendAssistantSegment(state.messages, seg, ev.turn ?? 1),
       };
     }
     default:
