@@ -458,8 +458,9 @@ export class CacheFirstLoop {
   async compactHistory(opts?: {
     keepRecentTokens?: number;
     protectActiveExchange?: boolean;
+    userInitiated?: boolean;
   }): Promise<FoldResult> {
-    return this.context.fold(this.model, opts);
+    return this.context.fold(this.model, { ...opts, userInitiated: opts?.userInitiated ?? true });
   }
 
   /** User-triggered /compact — same compaction card lifecycle as auto folds,
@@ -473,7 +474,7 @@ export class CacheFirstLoop {
       "user",
       "fold",
       undefined,
-      () => this.foldRun({ keepRecentTokens: opts?.keepRecentTokens }),
+      () => this.foldRun({ keepRecentTokens: opts?.keepRecentTokens, userInitiated: true }),
     );
   }
 
@@ -1092,7 +1093,7 @@ export class CacheFirstLoop {
           undefined,
           () => this.foldRun({ requireTailBoundary: true }),
         );
-        if (result.folded) this._foldedThisTurn = true;
+        this._foldedThisTurn = true;
       }
     }
 
@@ -1768,9 +1769,7 @@ export class CacheFirstLoop {
       aggressive,
       () => this.foldRun({ keepRecentTokens: tailBudget, protectActiveExchange: true }),
     );
-    // A failed fold must not suppress another fold decision in this turn. The
-    // result latch is set only after the compaction actually replaced history.
-    if (result.folded) this._foldedThisTurn = true;
+    this._foldedThisTurn = true;
     return result;
   }
 
@@ -1870,6 +1869,7 @@ export class CacheFirstLoop {
     keepRecentTokens?: number;
     protectActiveExchange?: boolean;
     requireTailBoundary?: boolean;
+    userInitiated?: boolean;
   }): Promise<FoldResult> {
     return this.context.fold(this.model, opts);
   }

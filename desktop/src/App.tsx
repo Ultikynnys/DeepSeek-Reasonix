@@ -1757,16 +1757,13 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     }
     case "session.compacted": {
-      // The fold REPLACED the conversation (summary message + preserved tail).
-      // Apply the replacement so the chat reflects the compaction instead of
-      // keeping the stale pre-fold log forever: the summary message carries the
-      // fold marker, so it renders as an expandable compaction card with the
-      // recap, and the "Files in context" list is re-derived (marker drops
-      // included) so the panel count drops exactly like a session reload.
+      // The backend folded the conversation (summary message + preserved tail).
+      // Keep the live UI messages transcript intact so the compaction card
+      // stays at its chronological position in the chat. Re-derive sessionFiles
+      // from the post-fold replacement log.
       const loaded = mapLoadedMessages(ev.replacementMessages);
       return {
         ...state,
-        messages: loaded,
         sessionFiles: deriveSessionFiles(loaded),
       };
     }

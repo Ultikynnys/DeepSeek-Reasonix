@@ -366,6 +366,7 @@ export class ContextManager {
       // the current iter's tool dispatch (the exchange is complete but must
       // survive into the tail so the model still sees the tool results).
       protectActiveExchange?: boolean;
+      userInitiated?: boolean;
     },
   ): Promise<FoldResult> {
     const ctxMax = resolveContextTokens(model, this.ctxMaxOverride);
@@ -412,12 +413,18 @@ export class ContextManager {
       cumTokens = 0;
       for (let i = boundary; i < all.length; i++) cumTokens += tokenCounts[i]!;
     }
+    const isUserOrDirect =
+      opts?.userInitiated ?? (!opts?.protectActiveExchange && !opts?.requireTailBoundary);
     if (boundary <= 0) {
-      // The entire log fits in the tail budget — no "older" content to fold.
-      // But the user asked for compaction, so fold everything before the most
-      // recent exchange to still reduce the context.
-      boundary = lastUserIdx;
-      if (boundary <= 0) return noop;
+      // When the entire log fits in the tail budget, auto-compaction no-ops
+      // to avoid infinite re-folding loops across turns. Only user-initiated
+      // or direct manual compaction folds before the most recent exchange.
+      if (isUserOrDirect) {
+        boundary = lastUserIdx;
+        if (boundary <= 0) return noop;
+      } else {
+        return noop;
+      }
     }
     // Preflight-only: refuse when no user landed in tail — the active tool turn
     // would be wiped. Default fold path (post-response) tolerates empty tail so

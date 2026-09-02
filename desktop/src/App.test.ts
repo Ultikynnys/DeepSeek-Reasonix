@@ -925,11 +925,10 @@ describe("Desktop App reducer — compaction file triage", () => {
     expect(next.sessionFiles).toEqual([{ path: "src/keep.ts", status: "c" }]);
   });
 
-  it("session.compacted swaps the chat to the post-fold conversation and re-derives files", () => {
+  it("session.compacted preserves the live chat transcript and re-derives files", () => {
     const base = {
       ...initialState(),
-      // Pre-fold UI state: old conversation plus a running compaction card —
-      // all of it must be replaced by the kernel's post-fold log.
+      // Pre-fold UI state: old conversation plus a compaction card at turn 1.
       messages: [
         { kind: "user" as const, text: "q1", clientId: "1", turn: 1 },
         {
@@ -1005,14 +1004,10 @@ describe("Desktop App reducer — compaction file triage", () => {
         ],
       },
     });
-    // The stale pre-fold conversation is gone; the folded summary message
-    // (carrying the marker) renders as the compaction card in the thread.
-    expect(next.messages).toHaveLength(4);
-    const summary = next.messages[1];
-    expect(summary?.kind === "assistant" && summary.segments[0]?.kind).toBe("text");
+    // The live chat transcript is preserved with its compaction card in place.
+    expect(next.messages).toEqual(base.messages);
     // Files re-derived from the post-fold log, marker drops applied.
     expect(next.sessionFiles).toEqual([{ path: "src/keep.ts", status: "c" }]);
-    expect(next.messages.at(-1)).toMatchObject({ kind: "assistant", turn: 2 });
   });
 });
 
