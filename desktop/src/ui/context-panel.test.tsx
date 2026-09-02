@@ -167,4 +167,32 @@ describe("ContextPanel files", () => {
     expect(screen.getByText("150 / 300,000")).toBeTruthy();
     expect(screen.getByText("100")).toBeTruthy();
   });
+
+  it("triggers onCompact when clicking the compact button in token header", () => {
+    const onCompact = vi.fn();
+    render(
+      <ContextPanel
+        settings={settings}
+        usage={{ ...usage, reservedTokens: 50, liveLogTokens: 100 }}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onCompact={onCompact}
+      />,
+    );
+
+    const btn = screen.getByTitle("Force context compaction (fold older turns into a summary)");
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn);
+    expect(onCompact).toHaveBeenCalledOnce();
+  });
 });

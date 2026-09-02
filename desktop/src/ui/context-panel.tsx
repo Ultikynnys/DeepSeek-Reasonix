@@ -36,6 +36,7 @@ export function ContextPanel({
   onExportMemories,
   onImportMemories,
   onDismissMemoryResult,
+  onCompact,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -56,6 +57,7 @@ export function ContextPanel({
   onExportMemories: () => void;
   onImportMemories: (json: string) => void;
   onDismissMemoryResult: () => void;
+  onCompact?: () => void;
 }) {
   useLang();
   const [tab, setTab] = useState<Tab>("files");
@@ -114,8 +116,19 @@ export function ContextPanel({
         <div className="ctx-block">
           <div className="h">
             <span>{t("contextPanel.contextTokens")}</span>
-            <span className="right">
+            <span className="right" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {(reserved + used + cached).toLocaleString()} / {ctxMax.toLocaleString()}
+              {onCompact ? (
+                <button
+                  type="button"
+                  className="mini-btn"
+                  title={t("contextPanel.compactBtnTooltip")}
+                  onClick={onCompact}
+                >
+                  <I.archive size={11} />
+                  <span style={{ marginLeft: 3, fontSize: 10.5 }}>{t("contextPanel.compactBtn")}</span>
+                </button>
+              ) : null}
             </span>
           </div>
           <div className="meter">

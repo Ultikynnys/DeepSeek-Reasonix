@@ -2684,6 +2684,7 @@ function TabRuntime({
           onOpenSettings={() => openSettingsAt("general")}
           onCopy={conversationCopy}
           onExport={exportConversation}
+          onCompact={() => sendRpc({ cmd: "compact_history" })}
           onClear={clearConversation}
           hasMessages={state.messages.length > 0}
         />
@@ -3058,6 +3059,7 @@ function TabRuntime({
           onExportMemories={() => sendRpc({ cmd: "memory_export" })}
           onImportMemories={(json) => sendRpc({ cmd: "memory_import", json })}
           onDismissMemoryResult={() => dispatch({ t: "dismiss_memory_result" })}
+          onCompact={() => sendRpc({ cmd: "compact_history" })}
         />
 
         <StatusBar
@@ -3367,6 +3369,7 @@ function TitleBar({
   onOpenSettings,
   onCopy,
   onExport,
+  onCompact,
   onClear,
   hasMessages,
 }: {
@@ -3379,6 +3382,7 @@ function TitleBar({
   onOpenSettings: () => void;
   onCopy: () => void;
   onExport: () => void;
+  onCompact?: () => void;
   onClear: () => void;
   hasMessages: boolean;
 }) {
@@ -3555,6 +3559,23 @@ function TitleBar({
                   </span>
                   <div className="nm">
                     <span>{t("app.titlebar.exportMd")}</span>
+                  </div>
+                </div>
+                <div
+                  className="popup-item"
+                  onClick={closeAnd(() => {
+                    if (hasMessages && onCompact) onCompact();
+                  })}
+                  onKeyDown={activationHandler(() => {
+                    if (hasMessages && onCompact) onCompact();
+                  })}
+                  style={{ opacity: hasMessages ? 1 : 0.5 }}
+                >
+                  <span className="ico">
+                    <I.archive size={12} />
+                  </span>
+                  <div className="nm">
+                    <span>{t("app.titlebar.compactHistory")}</span>
                   </div>
                 </div>
                 <div
