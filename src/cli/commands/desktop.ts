@@ -7,6 +7,7 @@ import { createInterface } from "node:readline";
 import {
   MAX_IMAGE_BYTES,
   flattenText,
+  isUsableAntigravityModel,
   messageOf,
   redactDiagnosticText,
   redactDiagnosticValue,
@@ -912,7 +913,9 @@ function emitSettings(tab: Tab): void {
           !!antigravityOAuth?.accessToken &&
           antigravityOAuth.clientId === ANTIGRAVITY_OAUTH_CLIENT_ID,
         account: antigravityOAuth?.account,
-        models: antigravityOAuth?.models,
+        models: antigravityOAuth?.models
+          ? antigravityOAuth.models.filter(isUsableAntigravityModel)
+          : undefined,
         flowError:
           lastAntigravityOAuthError ??
           (antigravityOAuth?.accessToken &&

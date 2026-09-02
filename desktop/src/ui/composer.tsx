@@ -2,6 +2,7 @@ import {
   GPT56_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
+  isUsableAntigravityModel,
   modelAcceptsImages,
 } from "@reasonix/core-utils";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
@@ -615,7 +616,10 @@ function ModelList({
   onRefreshAntigravityModels?: () => void;
 }) {
   const [draft, setDraft] = useState(activeModel);
-  const antigravityGroup = Boolean(antigravityModels && antigravityModels.length > 0);
+  const usableAntigravityModels = antigravityModels
+    ? antigravityModels.filter(isUsableAntigravityModel)
+    : undefined;
+  const antigravityGroup = Boolean(usableAntigravityModels && usableAntigravityModels.length > 0);
   const ollamaGroup = Boolean(ollamaModels && ollamaModels.length > 0);
 
   type GroupDef = {
@@ -659,7 +663,7 @@ function ModelList({
           {
             key: "antigravity",
             title: t("composer.modelAntigravityGroup"),
-            models: antigravityModels ?? [],
+            models: usableAntigravityModels ?? [],
             refresh: onRefreshAntigravityModels,
             refreshTitle: t("composer.modelAntigravityRefresh"),
             error: antigravityModelsError

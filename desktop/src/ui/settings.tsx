@@ -2,6 +2,7 @@ import {
   GPT56_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
+  isUsableAntigravityModel,
   modelAcceptsImages,
 } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -1132,8 +1133,14 @@ function PageModels({
     ...(settings.customModels && settings.customModels.length > 0
       ? [{ title: t("composer.modelCustomGroup"), models: settings.customModels }]
       : []),
-    ...(settings.antigravityOAuth?.models && settings.antigravityOAuth.models.length > 0
-      ? [{ title: t("composer.modelAntigravityGroup"), models: settings.antigravityOAuth.models }]
+    ...(settings.antigravityOAuth?.models &&
+    settings.antigravityOAuth.models.filter(isUsableAntigravityModel).length > 0
+      ? [
+          {
+            title: t("composer.modelAntigravityGroup"),
+            models: settings.antigravityOAuth.models.filter(isUsableAntigravityModel),
+          },
+        ]
       : []),
   ];
 

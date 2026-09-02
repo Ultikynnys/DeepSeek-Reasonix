@@ -20,7 +20,7 @@ function endpointFor(model: string): ModelEndpointInfo {
   // OpenAI provider via the `models` config (the daemon resolved it).
   if (model === "gpt-4o-custom")
     return { provider: "openai", baseUrl: "https://api.openai.com/v1" };
-  if (model === "gpt-oss-120b-medium" || model === "gemini-2.5-pro" || model === "chat_20706")
+  if (model === "gpt-oss-120b-medium" || model === "gemini-3.6-flash" || model === "gemini-3.7-flash")
     return { provider: "gemini", baseUrl: "https://daily-cloudcode-pa.googleapis.com" };
   return { provider: "deepseek", baseUrl: "https://api.deepseek.com" };
 }
@@ -75,7 +75,7 @@ const OLLAMA_QUOTA: OllamaQuota = {
 
 const ANTIGRAVITY_QUOTA: AntigravityQuota = {
   plan: { tierId: "free-tier", name: "Antigravity" },
-  windows: [{ modelId: "gemini-2.5-pro", usedFraction: 0.1, resetTime: "2026-09-01T13:37:06Z" }],
+  windows: [{ modelId: "gemini-3.6-flash", usedFraction: 0.1, resetTime: "2026-09-01T13:37:06Z" }],
   turnUsedPct: 0.4,
   fetchedAt: 0,
 };
@@ -134,7 +134,7 @@ describe("StatusBar quota display", () => {
   });
 
   it("hides the peak/off-peak chip on Antigravity (Gemini) tabs", () => {
-    renderBar({ settings: { model: "gemini-2.5-pro" } as Settings });
+    renderBar({ settings: { model: "gemini-3.6-flash" } as Settings });
     expect(screen.queryByText(/off-peak|peak/)).toBeNull();
     expect(screen.queryByText(/1x|2x/)).toBeNull();
   });
@@ -328,7 +328,7 @@ describe("StatusBar quota display", () => {
 
   it("shows only quota percentages for an Antigravity tab", () => {
     renderBar({
-      settings: { model: "gemini-2.5-pro" } as Settings,
+      settings: { model: "gemini-3.6-flash" } as Settings,
       antigravityQuota: ANTIGRAVITY_QUOTA,
       usage: { totalCostUsd: 1.5, lastCallCostUsd: 0.25 } as unknown as UsageStats,
     });
@@ -342,7 +342,7 @@ describe("StatusBar quota display", () => {
 
   it("shows an em dash for the Antigravity chip when no quota data exists", () => {
     renderBar({
-      settings: { model: "chat_20706" } as Settings,
+      settings: { model: "gemini-3.7-flash" } as Settings,
       antigravityQuota: null,
     });
     expect(screen.getByText("plan usage")).toBeTruthy();

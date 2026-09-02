@@ -10,6 +10,7 @@ import {
   KNOWN_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
+  isUsableAntigravityModel,
 } from "@reasonix/core-utils";
 import { z } from "zod";
 import { atomicWriteSync, tmpSiblingPath } from "./core/atomic-write.js";
@@ -71,7 +72,7 @@ export function providerForModel(
   const mapped = cfg.models?.[id]?.provider;
   if (isModelProvider(mapped)) return mapped;
   // 2. Server-discovered Antigravity models.
-  if (cfg.antigravityOAuth?.models?.includes(id)) return "gemini";
+  if (isUsableAntigravityModel(id) && cfg.antigravityOAuth?.models?.includes(id)) return "gemini";
   // 3. Curated catalogs — exact id membership.
   for (const catalog of CATALOG_PROVIDERS) {
     if (catalog.ids.has(id)) return catalog.provider;
@@ -89,9 +90,12 @@ export function isKnownModelId(model: string, path: string = defaultConfigPath()
   const id = model.trim();
   if (!id) return false;
   const cfg = readConfig(path);
+  const antigravityMatch = Boolean(
+    isUsableAntigravityModel(id) && cfg.antigravityOAuth?.models?.includes(id),
+  );
   return (
     Boolean(cfg.models?.[id]) ||
-    Boolean(cfg.antigravityOAuth?.models?.includes(id)) ||
+    antigravityMatch ||
     KNOWN_MODEL_IDS.has(id) ||
     id.startsWith("ollama/")
   );
@@ -686,6 +690,18 @@ function sanitizeModelsField(cfg: Record<string, unknown>, filePath: string): vo
   else cfg.models = undefined;
 }
 
+/** Validate Antigravity OAuth models — delegates to `isUsableAntigravityModel`. */
+function sanitizeAntigravityOAuthField(cfg: Record<string, unknown>): void {
+  const raw = cfg.antigravityOAuth;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+  const oauth = raw as Record<string, unknown>;
+  if (Array.isArray(oauth.models)) {
+    oauth.models = oauth.models.filter(
+      (m): m is string => typeof m === "string" && isUsableAntigravityModel(m),
+    );
+  }
+}
+
 export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
   let fd: number | undefined;
   try {
@@ -715,6 +731,7 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
         sanitizeStringArrayField(cfg, segments, path);
       }
       sanitizeModelsField(cfg, path);
+      sanitizeAntigravityOAuthField(cfg);
       const result = cfg as ReasonixConfig;
       _configCache.set(path, { mtimeMs: st.mtimeMs, cfg: result });
       return result;
@@ -1322,7 +1339,11 @@ export function saveAntigravityOAuth(
   path: string = defaultConfigPath(),
 ): void {
   const cfg = readConfig(path);
-  cfg.antigravityOAuth = creds;
+  const models = creds.models?.filter(isUsableAntigravityModel);
+  cfg.antigravityOAuth = {
+    ...creds,
+    ...(models !== undefined ? { models } : {}),
+  };
   writeConfig(cfg, path);
 }
 
@@ -1664,7 +1685,7 @@ export function saveModel(model: string, path: string = defaultConfigPath()): vo
  *  quota buckets (`retrieveUserQuota`), i.e. it is genuinely usable even though
  *  it is not in the static built-in catalog. */
 function isDiscoveredAntigravityModel(cfg: ReasonixConfig, model: string): boolean {
-  return Boolean(cfg.antigravityOAuth?.models?.includes(model));
+  return Boolean(isUsableAntigravityModel(model) && cfg.antigravityOAuth?.models?.includes(model));
 }
 
 export function loadWorkspaceDir(path: string = defaultConfigPath()): string | undefined {

@@ -464,7 +464,8 @@ export async function resolveGeminiAuth(
   if (!projectId) {
     projectId = await onboardAntigravity(accessToken);
   }
-  if (creds && (!creds.projectId || !creds.models?.length)) {
+  const usableModels = creds?.models?.filter(isUsableAntigravityModel);
+  if (creds && (!creds.projectId || !usableModels?.length)) {
     const models = (await fetchAntigravityModels(accessToken, projectId)).map(({ id }) => id);
     saveAntigravityOAuth({ ...creds, projectId, models }, path);
   }

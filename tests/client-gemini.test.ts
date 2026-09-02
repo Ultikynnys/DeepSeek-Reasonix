@@ -295,7 +295,7 @@ describe("gemini payload", () => {
     }) as unknown as typeof fetch;
     const client = geminiClient(fetch);
 
-    await client.chat({ model: "chat_20706", messages: [{ role: "user", content: "hi" }] });
+    await client.chat({ model: "gemini-3.7-flash", messages: [{ role: "user", content: "hi" }] });
 
     expect((captured as { request: Record<string, unknown> }).request).not.toHaveProperty(
       "generationConfig",

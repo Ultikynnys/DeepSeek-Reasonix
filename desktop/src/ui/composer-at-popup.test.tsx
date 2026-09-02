@@ -36,16 +36,16 @@ function renderComposer(props?: Partial<React.ComponentProps<typeof Composer>>) 
 }
 
 describe("desktop Composer model catalog", () => {
-  it("shows only the signed-in account's discovered Antigravity models", () => {
+  it("shows only the signed-in account's discovered Antigravity models and filters unusable ones", () => {
     const { container } = renderComposer({
-      antigravityModels: ["gemini-account-model", "claude-account-model", "chat_20706"],
+      antigravityModels: ["gemini-account-model", "claude-account-model", "chat_20706", "gemini-2.5-pro"],
     });
     fireEvent.click(container.querySelector(".model-pill")!);
     const text = container.querySelector(".model-menu-list")?.textContent ?? "";
     expect(text).toContain("Google Antigravity");
     expect(text).toContain("gemini-account-model");
     expect(text).toContain("claude-account-model");
-    expect(text).toContain("chat_20706");
+    expect(text).not.toContain("chat_20706");
     expect(text).not.toContain("gemini-2.5-pro");
   });
 
@@ -118,7 +118,7 @@ describe("desktop Composer model catalog", () => {
 
   it("subagent menu shares the backend-generated Ollama and Gemini models with the main agent", () => {
     const ollamaModels = ["llama3.1:latest", "qwen3:32b", "llava"];
-    const antigravityModels = ["gemini-2.5-pro", "gemini-2.5-flash", "claude-3-5-sonnet"];
+    const antigravityModels = ["gemini-3.6-flash", "gemini-3.7-flash", "claude-3-5-sonnet"];
     const { container } = renderComposer({
       subagentModelLabel: "deepseek-v4-flash",
       ollamaModels,

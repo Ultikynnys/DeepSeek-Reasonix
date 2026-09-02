@@ -405,13 +405,13 @@ describe("config", () => {
             refreshToken: "rt",
             clientId: "cid",
             expiresAt: 1,
-            models: ["chat_20706", "tab_4x_fx_safari_01"],
+            models: ["custom-discovered-gemini", "gemini-3.7-flash-preview"],
           },
         },
         path,
       );
-      expect(providerForModel("chat_20706", path)).toBe("gemini");
-      expect(providerForModel("tab_4x_fx_safari_01", path)).toBe("gemini");
+      expect(providerForModel("custom-discovered-gemini", path)).toBe("gemini");
+      expect(providerForModel("gemini-3.7-flash-preview", path)).toBe("gemini");
       // Undiscovered chat-shaped ids stay on the default family — the shape
       // alone proves nothing.
       expect(providerForModel("chat_99999", path)).toBe("deepseek");
@@ -521,15 +521,15 @@ describe("config", () => {
           accessToken: "at",
           refreshToken: "rt",
           expiresAt: Date.now() + 60_000,
-          models: ["gemini-3.5-flash-low", "chat_20706", "tab_flash_lite_preview"],
+          models: ["gemini-3.5-flash-low", "custom-discovered-model"],
         },
         path,
       );
       saveModel("gemini-3.5-flash-low", path);
       expect(loadModel(path)).toBe("gemini-3.5-flash-low");
-      saveModel("chat_20706", path);
-      expect(loadModel(path)).toBe("chat_20706");
-      expect(readConfig(path).model).toBe("chat_20706");
+      saveModel("custom-discovered-model", path);
+      expect(loadModel(path)).toBe("custom-discovered-model");
+      expect(readConfig(path).model).toBe("custom-discovered-model");
       // An unsupported id still rejects even with a signed-in Antigravity account.
       expect(() => saveModel("gpt-4o-mini", path)).toThrow(/Unsupported model/);
     });
@@ -624,7 +624,7 @@ describe("config", () => {
           expiresAt: 123,
           account: "u@example.com",
           projectId: "proj-1",
-          models: ["gemini-3.1-pro-high", "claude-sonnet-4-6-thinking"],
+          models: ["gemini-3.6-flash", "claude-sonnet-4-6-thinking"],
         },
         path,
       );
@@ -634,10 +634,58 @@ describe("config", () => {
         expiresAt: 123,
         account: "u@example.com",
         projectId: "proj-1",
-        models: ["gemini-3.1-pro-high", "claude-sonnet-4-6-thinking"],
+        models: ["gemini-3.6-flash", "claude-sonnet-4-6-thinking"],
       });
       clearAntigravityOAuth(path);
       expect(readConfig(path).antigravityOAuth).toBeUndefined();
+    });
+
+    it("readConfig and saveAntigravityOAuth sanitize unusable Antigravity model ids", () => {
+      // Direct write simulates raw/legacy config containing unusable models
+      writeConfig(
+        {
+          antigravityOAuth: {
+            accessToken: "at",
+            refreshToken: "rt",
+            expiresAt: 123,
+            models: [
+              "chat_20706",
+              "chat_23310",
+              "tab_flash_lite_preview",
+              "gemini-2.5-pro",
+              "gemini-2.5-flash",
+              "gemini-3.1-pro-high",
+              "gemini-3.6-flash",
+              "claude-opus-4-6-thinking",
+            ],
+          },
+        },
+        path,
+      );
+      expect(readConfig(path).antigravityOAuth?.models).toEqual([
+        "gemini-3.6-flash",
+        "claude-opus-4-6-thinking",
+      ]);
+
+      // saveAntigravityOAuth also filters unusable models before writing
+      saveAntigravityOAuth(
+        {
+          accessToken: "at",
+          refreshToken: "rt",
+          expiresAt: 123,
+          models: [
+            "chat_20706",
+            "gemini-2.5-flash",
+            "gemini-3.7-flash",
+            "claude-sonnet-4-6-thinking",
+          ],
+        },
+        path,
+      );
+      expect(readConfig(path).antigravityOAuth?.models).toEqual([
+        "gemini-3.7-flash",
+        "claude-sonnet-4-6-thinking",
+      ]);
     });
 
     it("unified Antigravity ids route to the Cloud Code base URL", () => {
