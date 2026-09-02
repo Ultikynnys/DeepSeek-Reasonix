@@ -9,7 +9,7 @@ import { DEFAULT_MAX_RESULT_CHARS, DEFAULT_MAX_RESULT_TOKENS } from "./mcp/regis
 import { ContextManager, type FoldResult, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
-import { dispatchToolCallsChunked } from "./loop/dispatch.js";
+import { contentPartsToString, dispatchToolCallsChunked } from "./loop/dispatch.js";
 import {
   errorMeta,
   formatLoopError,
@@ -113,18 +113,6 @@ function buildUserContent(
     parts.push({ type: "image_url", image_url: { url: d.url, detail: "low" } });
   }
   return parts;
-}
-
-/** Collapse a content-parts tool result to a display string for string-typed
- *  consumers (hooks, LoopEvent.content). Image parts are noted, not dumped. */
-function contentPartsToString(parts: UserContentPart[]): string {
-  const text = parts
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
-    .map((p) => p.text)
-    .join("\n");
-  const imageCount = parts.filter((p) => p.type === "image_url").length;
-  const imageNote = imageCount > 0 ? `\n[${imageCount} image(s) attached]` : "";
-  return `${text}${imageNote}`.trim();
 }
 
 export {
@@ -1086,7 +1074,7 @@ export class CacheFirstLoop {
       if (turnStart.ratio > TURN_START_FOLD_THRESHOLD) {
         // Compaction card lifecycle — same queue as tool cards, emitted through
         // the ONE compactionEvents helper every compaction form shares.
-        const result = yield* this.compactionEvents(
+        yield* this.compactionEvents(
           `compaction-${++this._compactionSeq}`,
           "auto-context-pressure",
           "fold",

@@ -2,6 +2,7 @@
 
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
+import { formatBytes } from "@reasonix/core-utils";
 import { looksLikeAbsoluteSystemPath, pathIsUnder } from "@reasonix/core-utils/path-utils";
 import picomatch from "picomatch";
 import { grammarForPath } from "../code-query/grammar-map.js";
@@ -18,7 +19,6 @@ import {
   readSubdirMemoryContent,
 } from "../memory/subdir.js";
 import type { ToolCallContext, ToolRegistry } from "../tools.js";
-import { looksBinary } from "./fs/binary.js";
 import {
   applyDeleteLineRange,
   applyDeleteRange,
@@ -99,13 +99,6 @@ function isLikelyBinaryByName(name: string): boolean {
   const dot = name.lastIndexOf(".");
   if (dot < 0) return false;
   return BINARY_EXTENSIONS.has(name.slice(dot).toLowerCase());
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
 }
 
 export function registerFilesystemTools(

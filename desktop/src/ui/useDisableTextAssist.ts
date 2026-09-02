@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { isMacPlatform } from "./shortcut";
 
 const TEXT_INPUT_SELECTOR =
   'input, textarea, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]';
@@ -9,11 +10,6 @@ function getTextAssistAttrs() {
     autoCapitalize: "off" as const,
     spellCheck: false as const,
   };
-}
-
-function isMacPlatform() {
-  if (typeof document === "undefined") return false;
-  return document.documentElement.dataset.platform === "macos";
 }
 
 function applyTextAssistAttrs(element: Element) {

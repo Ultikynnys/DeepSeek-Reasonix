@@ -706,16 +706,6 @@ export class DeepSeekClient {
     }
   }
 
-  /** True for api.deepseek.com / *.deepseek.com — the only hosts that get
-   *  DeepSeek-branded error prefixes and balance probes. */
-  private _isDeepSeekEndpoint(): boolean {
-    try {
-      return new URL(this.baseUrl).hostname.toLowerCase().endsWith(".deepseek.com");
-    } catch {
-      return false;
-    }
-  }
-
   /** Provider brand persisted in thrown HTTP errors and consumed by formatLoopError. */
   private _errorPrefix(model: string): string {
     if (this.geminiMode) return "Antigravity";

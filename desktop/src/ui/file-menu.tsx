@@ -5,8 +5,8 @@ import { I } from "../icons";
 
 type MenuItem = { label: string; icon: React.ReactNode; onSelect: () => void };
 
-/** Clamp a context menu anchored at (x, y) inside the viewport, keeping an 8px margin. */
-function useClampedMenuPosition(
+/** Clamp a popover/menu anchored at (x, y) inside the viewport, keeping an 8px margin. */
+export function useClampedPopupPosition(
   ref: { current: HTMLDivElement | null },
   anchor: { x: number; y: number },
   pos: { left: number; top: number },
@@ -47,7 +47,7 @@ export function FileMenu({
     left: anchor.x,
     top: anchor.y,
   });
-  useClampedMenuPosition(ref, anchor, pos, setPos);
+  useClampedPopupPosition(ref, anchor, pos, setPos);
 
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {

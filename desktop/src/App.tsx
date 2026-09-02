@@ -9,6 +9,7 @@ import {
   parseFilesDroppedMarker,
   redactDiagnosticText,
   redactDiagnosticValue,
+  sanitizeFilename,
 } from "@reasonix/core-utils";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -1836,18 +1837,8 @@ function formatConversationMarkdown(messages: ChatMessage[], userLabel: string):
     .join("\n\n---\n\n");
 }
 
-function sanitizeFilename(name: string): string {
-  return (
-    name
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: strip C0 control chars from filenames — that's the point
-      .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
-      .replace(/^\.+/, "")
-      .slice(0, 200) || "session"
-  );
-}
-
 function defaultExportFilename(session: string): string {
-  const safe = sanitizeFilename(session);
+  const safe = sanitizeFilename(session, { max: 200, fallback: "session", allowCjk: true });
   return `${safe}.md`;
 }
 

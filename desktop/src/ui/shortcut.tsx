@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 export type ShortcutKey = "mod" | "shift" | "enter" | "tab" | "esc" | "updown" | string;
 
-function isMacPlatform(): boolean {
+export function isMacPlatform(): boolean {
   if (typeof document === "undefined") return false;
   return document.documentElement.dataset.platform === "macos";
 }

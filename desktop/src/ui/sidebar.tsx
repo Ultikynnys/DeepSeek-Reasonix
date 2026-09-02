@@ -5,6 +5,7 @@ import type { SessionInfo } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { ExternalSessionApp, ExternalSessionSource } from "../protocol";
+import { useClampedPopupPosition } from "./file-menu";
 import { activationHandler } from "./keyboard";
 import { Shortcut } from "./shortcut";
 
@@ -400,28 +401,6 @@ export function Sidebar({
       ) : null}
     </aside>
   );
-}
-
-/** Clamp a popover anchored at (x, y) inside the viewport, keeping an 8px margin; re-runs whenever the anchor or its position moves. */
-function useClampedPopupPosition(
-  ref: { current: HTMLDivElement | null },
-  anchor: { x: number; y: number },
-  pos: { left: number; top: number },
-  setPos: (next: { left: number; top: number }) => void,
-): void {
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const pad = 8;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = anchor.x;
-    let top = anchor.y;
-    if (left + rect.width + pad > vw) left = Math.max(pad, vw - rect.width - pad);
-    if (top + rect.height + pad > vh) top = Math.max(pad, vh - rect.height - pad);
-    if (left !== pos.left || top !== pos.top) setPos({ left, top });
-  }, [ref.current, anchor.x, anchor.y, pos.left, pos.top, setPos]);
 }
 
 function SessionConfirmPopover({

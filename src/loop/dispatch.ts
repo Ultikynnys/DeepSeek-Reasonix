@@ -35,7 +35,7 @@ function readParallelMax(): number {
 
 /** Collapse a content-parts tool result to a display string for the string-typed
  *  LoopEvent.content (UI renderer). Image parts are noted, not dumped. */
-function contentPartsToString(parts: UserContentPart[]): string {
+export function contentPartsToString(parts: UserContentPart[]): string {
   const text = parts
     .filter((p): p is { type: "text"; text: string } => p.type === "text")
     .map((p) => p.text)

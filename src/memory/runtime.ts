@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
 import {
   type PrefixDiagnosticHashes,
   prefixDiagnosticHashes,
+  stableHash,
 } from "../telemetry/cache-diagnostics.js";
 import type { ChatMessage, ToolSpec } from "../types.js";
 
@@ -9,10 +9,6 @@ export interface ImmutablePrefixOptions {
   system: string;
   toolSpecs?: readonly ToolSpec[];
   fewShots?: readonly ChatMessage[];
-}
-
-function shortHash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
 }
 
 function toolName(spec: ToolSpec): string {
@@ -143,7 +139,7 @@ export class ImmutablePrefix {
   }
 
   private computeFingerprint(): string {
-    return shortHash({
+    return stableHash({
       system: this.system,
       tools: this._toolSpecs,
       shots: this.fewShots,

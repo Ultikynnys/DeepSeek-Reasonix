@@ -80,7 +80,6 @@ import {
   DEFAULT_ZAI_CHAT_URL,
   anyProviderConfigured,
   bridgeEndpointEnv,
-  defaultConfigPath,
   deriveNativeOllamaOrigin,
   isOpenAIStandardEndpoint,
   isPlausibleKey,
@@ -154,7 +153,6 @@ import {
   fetchAntigravityModels,
   fetchAntigravityQuota,
   onboardAntigravity,
-  resolveAntigravityToken,
   resolveGeminiAuth,
   signOutAntigravity,
 } from "../../antigravity-oauth.js";
