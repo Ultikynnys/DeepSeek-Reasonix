@@ -1,6 +1,5 @@
 /** Read/write preserves the file's original encoding so edit_file on GB18030 (CN Windows) or UTF-8-BOM files doesn't silently convert or fail SEARCH on mangled decode (issue #1445). */
 
-import { promises as fsp, readFileSync, writeFileSync } from "node:fs";
 import iconv from "iconv-lite";
 
 export type FileEncoding = "utf8" | "utf8-bom" | "gb18030";
@@ -39,24 +38,4 @@ export function encodeFile(text: string, encoding: FileEncoding): Buffer {
     return Buffer.concat([UTF8_BOM, Buffer.from(text, "utf8")]);
   }
   return iconv.encode(text, "gb18030");
-}
-
-export function readTextFileSmartSync(path: string): DecodedFile {
-  return decodeFileBuffer(readFileSync(path));
-}
-
-export async function readTextFileSmart(path: string): Promise<DecodedFile> {
-  return decodeFileBuffer(await fsp.readFile(path));
-}
-
-export function writeTextFileSmartSync(path: string, text: string, encoding: FileEncoding): void {
-  writeFileSync(path, encodeFile(text, encoding));
-}
-
-export async function writeTextFileSmart(
-  path: string,
-  text: string,
-  encoding: FileEncoding,
-): Promise<void> {
-  await fsp.writeFile(path, encodeFile(text, encoding));
 }

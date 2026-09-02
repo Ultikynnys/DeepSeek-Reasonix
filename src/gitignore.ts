@@ -52,7 +52,7 @@ export function ignoredByLayers(
   isDir: boolean,
 ): boolean {
   for (const layer of layers) {
-    const rel = path.relative(layer.dirAbs, abs).split(path.sep).join("/");
+    const rel = path.relative(layer.dirAbs, abs).replaceAll("\\", "/");
     if (!rel || rel.startsWith("..")) continue;
     if (layer.ig.ignores(isDir ? `${rel}/` : rel)) return true;
   }

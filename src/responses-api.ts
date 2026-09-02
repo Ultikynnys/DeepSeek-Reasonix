@@ -1,7 +1,7 @@
 /** OpenAI Responses API (v1/responses) conversion for chatgpt.com's codex
  *  backend, which 400-rejects chat-completions payloads. */
 
-import type { ChatMessage, ChatRequestOptions, ToolCall } from "./types.js";
+import type { ChatMessage, ChatRequestOptions } from "./types.js";
 
 export interface ResponsesInputItem {
   type: string;
@@ -128,69 +128,4 @@ export function buildResponsesPayload(
     payload.reasoning = { effort: opts.reasoningEffort, summary: "concise" };
   }
   return payload;
-}
-
-export interface ParsedResponsesOutput {
-  content: string;
-  reasoningContent: string | null;
-  toolCalls: ToolCall[];
-}
-
-/** Non-streaming Responses envelope → the client's ChatResponse shape. */
-export function parseResponsesOutput(data: unknown): ParsedResponsesOutput {
-  const output = (data as { output?: unknown })?.output;
-  if (!Array.isArray(output)) return { content: "", reasoningContent: null, toolCalls: [] };
-  let content = "";
-  let reasoning = "";
-  const toolCalls: ToolCall[] = [];
-  for (const rawItem of output) {
-    if (!rawItem || typeof rawItem !== "object") continue;
-    const item = rawItem as {
-      type?: unknown;
-      content?: unknown;
-      summary?: unknown;
-      name?: unknown;
-      arguments?: unknown;
-      call_id?: unknown;
-    };
-    if (item.type === "message" && Array.isArray(item.content)) {
-      for (const part of item.content) {
-        if (
-          part &&
-          typeof part === "object" &&
-          (part as { type?: string }).type === "output_text" &&
-          typeof (part as { text?: unknown }).text === "string"
-        ) {
-          content += (part as { text: string }).text;
-        }
-      }
-    } else if (item.type === "reasoning" && Array.isArray(item.summary)) {
-      for (const part of item.summary) {
-        if (
-          part &&
-          typeof part === "object" &&
-          (part as { type?: string }).type === "summary_text" &&
-          typeof (part as { text?: unknown }).text === "string"
-        ) {
-          reasoning += (part as { text: string }).text;
-        }
-      }
-    } else if (item.type === "function_call") {
-      toolCalls.push({
-        id: typeof item.call_id === "string" ? item.call_id : undefined,
-        type: "function",
-        function: {
-          name: typeof item.name === "string" ? item.name : "",
-          arguments: typeof item.arguments === "string" ? item.arguments : "",
-        },
-      });
-    }
-  }
-  return { content, reasoningContent: reasoning || null, toolCalls };
-}
-
-/** Error envelope of an HTTP-200 Responses body (e.g. { error: { message } }). */
-export function responsesErrorFromData(data: unknown): string | null {
-  const err = (data as { error?: { message?: unknown } })?.error;
-  return err && typeof err.message === "string" ? err.message : null;
 }
