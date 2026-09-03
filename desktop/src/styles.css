@@ -4353,6 +4353,72 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   opacity: 0.6;
 }
 
+.voice-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  position: relative;
+}
+.voice-btn:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.voice-btn.recording {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  animation: pulse-voice 1.5s infinite;
+}
+.voice-btn.transcribing {
+  background: var(--panel-2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.voice-btn.transcribing svg {
+  animation: spin-voice 1s linear infinite;
+}
+.voice-btn:disabled {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--muted-2);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.voice-error-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: var(--danger);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes pulse-voice {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  50% { transform: scale(1.05); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+@keyframes spin-voice {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* hint row above composer */
 .hint-row {
   display: flex;

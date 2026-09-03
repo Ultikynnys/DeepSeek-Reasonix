@@ -27,6 +27,8 @@ import { DEFAULT_COMPOSER_ROWS, applyComposerTextareaAutosize } from "./composer
 import { activationHandler } from "./keyboard";
 import { TimerSpan } from "./live";
 import { Shortcut } from "./shortcut";
+import { AudioRecorder } from "../voice/audio-recorder";
+import { speechTranscriber } from "../voice/transcriber";
 export type { EditMode, ReasoningEffort };
 
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
@@ -293,6 +295,64 @@ export function Composer({
       } else if (browseIdx === 0) {
         setBrowseIdx(-1);
         setDraft(savedDraftRef.current);
+      }
+    }
+  };
+
+  const [voiceState, setVoiceState] = useState<"idle" | "recording" | "transcribing">("idle");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recorderRef = useRef<AudioRecorder | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (recorderRef.current?.recording) {
+        recorderRef.current.cancel();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!voiceError) return;
+    const timer = setTimeout(() => setVoiceError(null), 4000);
+    return () => clearTimeout(timer);
+  }, [voiceError]);
+
+  const handleToggleVoice = async () => {
+    if (disabled || busy) return;
+    setVoiceError(null);
+
+    if (voiceState === "recording") {
+      const recorder = recorderRef.current;
+      if (!recorder) return;
+      setVoiceState("transcribing");
+      try {
+        const { audioData } = await recorder.stop();
+        recorderRef.current = null;
+        const { text } = await speechTranscriber.transcribe(audioData);
+        if (text) {
+          setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+          textareaRef.current?.focus();
+        }
+      } catch (err) {
+        const msg = (err as Error).message;
+        setVoiceError(msg);
+      } finally {
+        setVoiceState("idle");
+      }
+      return;
+    }
+
+    if (voiceState === "idle") {
+      try {
+        const recorder = new AudioRecorder();
+        recorderRef.current = recorder;
+        await recorder.start();
+        setVoiceState("recording");
+      } catch (err) {
+        recorderRef.current = null;
+        const msg = (err as Error).message;
+        setVoiceError(msg);
+        setVoiceState("idle");
       }
     }
   };
@@ -581,6 +641,34 @@ export function Composer({
             >
               <I.play size={11} />
               <span>{t("composer.proceed")}</span>
+            </button>
+            <button
+              type="button"
+              className={`voice-btn ${voiceState === "recording" ? "recording" : ""} ${voiceState === "transcribing" ? "transcribing" : ""}`}
+              disabled={disabled || busy || voiceState === "transcribing"}
+              onClick={handleToggleVoice}
+              title={
+                voiceError
+                  ? t("composer.voiceError", { error: voiceError })
+                  : voiceState === "recording"
+                    ? t("composer.voiceRecording")
+                    : voiceState === "transcribing"
+                      ? t("composer.voiceTranscribing")
+                      : t("composer.voiceInput")
+              }
+            >
+              {voiceState === "recording" ? (
+                <I.stop size={13} />
+              ) : voiceState === "transcribing" ? (
+                <I.refresh size={13} />
+              ) : (
+                <I.mic size={13} />
+              )}
+              {voiceError ? (
+                <div className="voice-error-tooltip">
+                  {voiceError}
+                </div>
+              ) : null}
             </button>
             {busy ? (
               <button

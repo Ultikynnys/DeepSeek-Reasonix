@@ -62,4 +62,7 @@ export default defineConfig({
     minify: "esbuild",
     sourcemap: true,
   },
+  optimizeDeps: {
+    exclude: ["@xenova/transformers"],
+  },
 });

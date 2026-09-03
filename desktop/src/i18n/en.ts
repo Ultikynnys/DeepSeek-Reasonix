@@ -70,6 +70,10 @@ export const en = {
     imageAttachFailed: "Couldn't attach the image",
     imageRequiresVision:
       "This model can't receive images. Switch to a vision-capable model (gpt-* or deepseek-v4-flash-vision-exp) to attach pasted images.",
+    voiceInput: "Voice input",
+    voiceRecording: "Listening... Click to stop and transcribe",
+    voiceTranscribing: "Transcribing audio...",
+    voiceError: "Voice input failed: {error}",
   },
   dragDrop: {
     overlay: "Drop files to attach",
