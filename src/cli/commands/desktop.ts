@@ -1727,7 +1727,7 @@ function loadSessionIntoTab(
   // Rebind model + effort to the conversation's stored pair before the
   // runtime rebuild, so the loop is constructed with the right model.
   restoreSessionModelPrefs(tab, meta);
-  if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
+  tab.runtime = tab.toolset && tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
   const loadedMessages = buildLoadedMessages(records);
   if (loadedMessages.length === 0) {
     let sizeBytes = 0;
@@ -3153,7 +3153,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       hasSemanticSearch: toolset.semantic.enabled,
       modelId: tab.currentModel,
     });
-    if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
+    tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
     void settleTabSemantic(tab, target, toolset);
     void emitSessions(tab);
     emitSettings(tab);
@@ -3824,8 +3824,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             void emitBalance(tab);
             continue;
           }
-          tab.runtime = buildRuntimeFor(tab);
-          emit({ type: "$ready" }, tab.id);
+          tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+          if (tab.runtime) emit({ type: "$ready" }, tab.id);
           emitSettings(tab);
           void emitBalance(tab);
         }
@@ -4244,7 +4244,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         subagentModel: tab.currentSubagentModel,
       });
       persistOpenTabs();
-      if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
+      tab.runtime = tab.toolset && tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
       void emitSessions(tab);
       emitTabDiagnostic(tab, "session.new-chat.completed", undefined, "info");
       return;
@@ -4270,9 +4270,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               // model flip. A tab that booted un-credentialed has a null
               // runtime — it must be built here, not just rebuilt.
               for (const t of tabs.values()) {
-                if (t.toolset && tabHasCredential(t)) {
-                  t.runtime = buildRuntimeFor(t);
-                  emit({ type: "$ready" }, t.id);
+                if (t.toolset) {
+                  t.runtime = tabCurrentModelUsable(t) ? buildRuntimeFor(t) : null;
+                  if (t.runtime) emit({ type: "$ready" }, t.id);
                 }
               }
               emitSettings(tab);
@@ -4345,9 +4345,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               // model flip. A tab that booted un-credentialed has a null
               // runtime — it must be built here, not just rebuilt.
               for (const t of tabs.values()) {
-                if (t.toolset && tabHasCredential(t)) {
-                  t.runtime = buildRuntimeFor(t);
-                  emit({ type: "$ready" }, t.id);
+                if (t.toolset) {
+                  t.runtime = tabCurrentModelUsable(t) ? buildRuntimeFor(t) : null;
+                  if (t.runtime) emit({ type: "$ready" }, t.id);
                 }
               }
               emitSettings(tab);
@@ -4408,9 +4408,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         // tab ready. A tab that booted un-credentialed has a null runtime — it
         // must be built here, not just rebuilt.
         for (const t of tabs.values()) {
-          if (t.toolset && tabHasCredential(t)) {
-            t.runtime = buildRuntimeFor(t);
-            emit({ type: "$ready" }, t.id);
+          if (t.toolset) {
+            t.runtime = tabCurrentModelUsable(t) ? buildRuntimeFor(t) : null;
+            if (t.runtime) emit({ type: "$ready" }, t.id);
           }
         }
         emitSettings(tab);

@@ -365,6 +365,7 @@ describe("config", () => {
       expect(providerForModel("gpt-oss-120b-medium")).toBe("gemini");
       expect(providerForModel("claude-sonnet-4-6-thinking")).toBe("gemini");
       expect(providerForModel("gemini-3.7-flash")).toBe("gemini");
+      expect(providerForModel("gemini-3.5-flash-low")).toBe("gemini");
       expect(providerForModel("glm-5.3-flash")).toBe("zai");
       expect(providerForModel("deepseek-v4-flash")).toBe("deepseek");
       expect(providerForModel(undefined)).toBe("deepseek");
@@ -412,7 +413,7 @@ describe("config", () => {
       );
       expect(providerForModel("custom-discovered-gemini", path)).toBe("gemini");
       expect(providerForModel("gemini-3.7-flash-preview", path)).toBe("gemini");
-      // Undiscovered chat-shaped ids stay on the default family — the shape
+      // Undiscovered chat-shaped ids stay on the default family: the shape
       // alone proves nothing.
       expect(providerForModel("chat_99999", path)).toBe("deepseek");
     });
@@ -530,6 +531,21 @@ describe("config", () => {
       saveModel("custom-discovered-model", path);
       expect(loadModel(path)).toBe("custom-discovered-model");
       expect(readConfig(path).model).toBe("custom-discovered-model");
+      expect(readConfig(path).models).toEqual({
+        "gemini-3.5-flash-low": { provider: "gemini" },
+        "custom-discovered-model": { provider: "gemini" },
+      });
+      saveAntigravityOAuth(
+        {
+          accessToken: "at",
+          refreshToken: "rt",
+          expiresAt: Date.now() + 60_000,
+          models: ["different-current-model"],
+        },
+        path,
+      );
+      expect(providerForModel("custom-discovered-model", path)).toBe("gemini");
+      expect(loadModel(path)).toBe("custom-discovered-model");
       // An unsupported id still rejects even with a signed-in Antigravity account.
       expect(() => saveModel("gpt-4o-mini", path)).toThrow(/Unsupported model/);
     });

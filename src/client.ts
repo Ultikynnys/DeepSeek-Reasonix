@@ -437,7 +437,7 @@ export class DeepSeekClient {
       !opts.allowMissingKey
     ) {
       throw new Error(
-        "No API key: set DEEPSEEK_API_KEY (deepseek-* models) or OPENAI_API_KEY (gpt-* models) in .env, or pass apiKey to DeepSeekClient.",
+        "No authentication configured for the resolved model endpoint. Configure that provider's credentials or pass an authentication resolver to DeepSeekClient.",
       );
     }
     this.apiKey = apiKey ?? "";

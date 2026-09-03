@@ -259,7 +259,7 @@ describe("DeepSeekClient with OpenAI GPT-5.6 payloads", () => {
     delete process.env.DEEPSEEK_API_KEY;
     try {
       expect(() => new DeepSeekClient({ baseUrl: "https://api.openai.com/v1" })).toThrow(
-        /No API key/,
+        "No authentication configured for the resolved model endpoint",
       );
     } finally {
       if (prev === undefined) {

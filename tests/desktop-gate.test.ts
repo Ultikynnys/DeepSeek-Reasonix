@@ -36,6 +36,7 @@ describe("desktop setup gate (#welcome)", () => {
   const deepseekTab: TabStub = { currentModel: "deepseek-v4-flash" };
   const gptTab: TabStub = { currentModel: "gpt-5.6-sol" };
   const ollamaTab: TabStub = { currentModel: "ollama/llama3.1:latest" };
+  const antigravityTab: TabStub = { currentModel: "gemini-3.5-flash-low" };
 
   it("fresh install (no credentials) is gated on every provider", () => {
     // No DeepSeek key, no OpenAI credential, no explicit Ollama endpoint/key.
@@ -51,6 +52,20 @@ describe("desktop setup gate (#welcome)", () => {
     writeConfigFor({ apiKey: "sk-deepseek-gate-test-123" });
     expect(tabHasCredential(deepseekTab as never)).toBe(true);
     expect(tabCurrentModelUsable(deepseekTab as never)).toBe(true);
+  });
+
+  it("Antigravity OAuth runs its models without any API key", () => {
+    writeConfigFor({
+      antigravityOAuth: {
+        accessToken: "google-access-token",
+        refreshToken: "google-refresh-token",
+        expiresAt: Date.now() + 60_000,
+        models: ["gemini-3.5-flash-low"],
+      },
+    });
+    expect(tabHasCredential(antigravityTab as never)).toBe(true);
+    expect(tabCurrentModelUsable(antigravityTab as never)).toBe(true);
+    expect(tabCurrentModelUsable(deepseekTab as never)).toBe(false);
   });
 
   it("an OpenAI key unblocks a ChatGPT-only install even on the default DeepSeek tab", () => {

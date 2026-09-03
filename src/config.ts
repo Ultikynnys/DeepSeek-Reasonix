@@ -1667,17 +1667,24 @@ export function saveModel(model: string, path: string = defaultConfigPath()): vo
   // Custom-endpoint owners set their own namespace — validation is on them.
   const cfg = readConfig(path);
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
+  const discoveredAntigravity = isDiscoveredAntigravityModel(cfg, trimmed);
   const accepted =
     SUPPORTED_MODELS.includes(trimmed) ||
     Boolean(cfg.models?.[trimmed]) ||
     providerForModel(trimmed, path) === "ollama" ||
-    isDiscoveredAntigravityModel(cfg, trimmed);
+    discoveredAntigravity;
   if (!customEndpoint && !accepted) {
     throw new Error(
       `Unsupported model "${trimmed}". Official endpoints only accept: ${SUPPORTED_MODELS.join(", ")}. Set a custom baseUrl to use other models.`,
     );
   }
   cfg.model = trimmed;
+  // Discovery is positive endpoint evidence. Persist it in the existing
+  // authoritative provider map so session restores remain correctly routed if
+  // Google's current discovery response later changes.
+  if (discoveredAntigravity) {
+    cfg.models = { ...(cfg.models ?? {}), [trimmed]: { provider: "gemini" } };
+  }
   writeConfig(cfg, path);
 }
 

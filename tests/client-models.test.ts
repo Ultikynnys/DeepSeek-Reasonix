@@ -200,7 +200,7 @@ describe("DeepSeekClient ollama provider (keyless + prefix strip)", () => {
     delete process.env.DEEPSEEK_API_KEY;
     try {
       expect(() => new DeepSeekClient({ baseUrl: "http://localhost:11434/v1" })).toThrow(
-        /No API key/,
+        "No authentication configured for the resolved model endpoint",
       );
     } finally {
       if (saved === undefined) {

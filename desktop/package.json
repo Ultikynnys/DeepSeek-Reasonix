@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:tauri": "npm --prefix .. run build && vite",
     "dev:browser": "node scripts/dev-browser.mjs",
     "build": "tsc && vite build",
+    "build:tauri": "npm --prefix .. run build && npm run build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "tauri": "tauri",
