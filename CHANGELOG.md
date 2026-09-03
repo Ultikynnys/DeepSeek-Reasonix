@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Added — `gemini-3.8-flash` and `gemini-3.8-flash-tiered` in the Antigravity catalog.**
+
+- Gemini 3.8 Flash is now GA (released 2026-09-02). Both `gemini-3.8-flash` and `gemini-3.8-flash-tiered` are re-added to the static `ANTIGRAVITY_MODELS` catalog so the desktop pickers offer them and `providerForModel` routes them to the Cloud Code wire format.
+
 **Changed — model provider resolution is evidence-based; a model name never implies its provider.**
 
 - `providerForModel` no longer infers the provider from the id's name shape (`gpt-` → OpenAI, `glm-` → Z.AI, Antigravity prefixes). It now resolves from positive evidence, in order: an explicit `models` config mapping, the signed-in Antigravity account's server-discovered ids, exact-id membership in the built-in vendor catalogs, the `ollama/` addressing scheme, and finally the documented DeepSeek-compatible default.

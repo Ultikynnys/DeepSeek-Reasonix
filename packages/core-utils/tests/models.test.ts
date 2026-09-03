@@ -34,7 +34,9 @@ describe("modelAcceptsImages", () => {
   it("recognizes live Antigravity model ids and rejects internal chat/tab IDs", async () => {
     const { isAntigravityModel } = await import("../src/models.js");
     expect(isAntigravityModel("gemini-3.7-flash")).toBe(true);
+    expect(isAntigravityModel("gemini-3.7-flash-tiered")).toBe(true);
     expect(isAntigravityModel("gemini-3.8-flash")).toBe(true);
+    expect(isAntigravityModel("gemini-3.8-flash-tiered")).toBe(true);
     expect(isAntigravityModel("claude-sonnet-4-6")).toBe(true);
     expect(isAntigravityModel("gpt-oss-120b-medium")).toBe(true);
     expect(isAntigravityModel("chat_20706")).toBe(false);

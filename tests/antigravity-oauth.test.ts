@@ -356,6 +356,11 @@ describe("antigravity-oauth", () => {
               resetTime: "2026-09-01T13:37:06Z",
             },
             { modelId: "gemini-3.7-flash-tiered_vertex", remainingFraction: 0.8 },
+            {
+              modelId: "gemini-3.8-flash-tiered",
+              remainingFraction: 0.6,
+              resetTime: "2026-09-01T13:37:06Z",
+            },
             { modelId: "gemini-2.5-pro", remainingFraction: 0.5 },
             { modelId: "gemini-3.1-pro-high", remainingFraction: 0.7 },
             { modelId: "chat_20706", remainingFraction: 1 },
@@ -370,6 +375,11 @@ describe("antigravity-oauth", () => {
       {
         modelId: "gemini-3.7-flash-tiered",
         usedFraction: 0.2,
+        resetTime: "2026-09-01T13:37:06Z",
+      },
+      {
+        modelId: "gemini-3.8-flash-tiered",
+        usedFraction: 0.4,
         resetTime: "2026-09-01T13:37:06Z",
       },
     ]);
