@@ -1099,17 +1099,31 @@ export class DeepSeekClient {
     opts: ChatRequestOptions,
     projectId?: string,
   ): Record<string, unknown> {
-    const contents: Array<Record<string, unknown>> = [];
+    const contents: Array<{
+      role: "user" | "model";
+      parts: Array<Record<string, unknown>>;
+    }> = [];
     let systemInstruction: string | undefined;
+    // Gemini requires alternating user/model content turns. Keep all parts for
+    // adjacent same-role messages in one content, including a functionResponse
+    // followed by the next user instruction during compaction.
+    const pushContent = (role: "user" | "model", parts: Array<Record<string, unknown>>): void => {
+      if (parts.length === 0) return;
+      const previous = contents.at(-1);
+      if (previous?.role === role) {
+        previous.parts.push(...parts);
+        return;
+      }
+      contents.push({ role, parts });
+    };
     // Consecutive tool messages (results of one parallel assistant turn) must
     // be coalesced into a single `user` content with one functionResponse per
-    // result. Gemini rejects a `role: "function"` content and rejects duplicate
-    // consecutive roles; Google's own client emits one combined user turn.
+    // result. Gemini rejects a `role: "function"` content.
     let pendingFunctionResponses: Array<Record<string, unknown>> = [];
     const pendingCallIdsByName = new Map<string, string[]>();
     const flushFunctionResponses = (): void => {
       if (pendingFunctionResponses.length === 0) return;
-      contents.push({ role: "user", parts: pendingFunctionResponses });
+      pushContent("user", pendingFunctionResponses);
       pendingFunctionResponses = [];
     };
     for (const msg of opts.messages) {
@@ -1134,7 +1148,7 @@ export class DeepSeekClient {
             }
           }
           // Gemini rejects contents with zero parts; drop them defensively.
-          if (parts.length > 0) contents.push({ role: "user", parts });
+          pushContent("user", parts);
           break;
         }
         case "assistant": {
@@ -1165,7 +1179,7 @@ export class DeepSeekClient {
             if (tc.thoughtSignature) part.thoughtSignature = tc.thoughtSignature;
             parts.push(part);
           }
-          if (parts.length > 0) contents.push({ role: "model", parts });
+          pushContent("model", parts);
           break;
         }
         case "tool": {

@@ -267,6 +267,71 @@ describe("gemini payload", () => {
     ]);
   });
 
+  it("merges a tool response and trailing compaction instruction into one user turn", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "summary" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-2.5-flash",
+      messages: [
+        { role: "user", content: "read the file" },
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call-read",
+              function: { name: "read_file", arguments: '{"path":"src/client.ts"}' },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          name: "read_file",
+          tool_call_id: "call-read",
+          content: "file contents",
+        },
+        { role: "user", content: "Summarize the conversation for compaction." },
+      ],
+    });
+
+    const contents = (captured as { request: { contents: unknown[] } }).request.contents;
+    expect(contents).toEqual([
+      { role: "user", parts: [{ text: "read the file" }] },
+      {
+        role: "model",
+        parts: [
+          {
+            functionCall: {
+              id: "call-read",
+              name: "read_file",
+              args: { path: "src/client.ts" },
+            },
+          },
+        ],
+      },
+      {
+        role: "user",
+        parts: [
+          {
+            functionResponse: {
+              id: "call-read",
+              name: "read_file",
+              response: { result: "file contents" },
+            },
+          },
+          { text: "Summarize the conversation for compaction." },
+        ],
+      },
+    ]);
+  });
+
   it("skips user contents with zero parts", async () => {
     let captured: unknown = null;
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
