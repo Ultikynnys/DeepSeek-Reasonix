@@ -59,7 +59,7 @@ interface PausePayloadMap {
     /** Directory prefix that would be persisted if the user picks "always allow". */
     allowPrefix: string;
   };
-  plan_proposed: { plan: string; steps?: unknown[]; summary?: string };
+  plan_proposed: { plan: string; steps?: unknown[]; summary?: string; callId?: string };
   plan_checkpoint: {
     stepId: string;
     title?: string;

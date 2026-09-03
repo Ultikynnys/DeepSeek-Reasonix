@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("./Toast", () => ({
-  Toast: () => null,
-  ToastStack: () => null,
-}));
 vi.mock("./Markdown", () => ({
   WorkspaceProvider: ({ children }: { children?: unknown }) => children ?? null,
 }));
@@ -38,7 +34,7 @@ vi.mock("./theme", () => ({
   themeForStyle: vi.fn(() => "dark"),
 }));
 
-import { reduce } from "./App";
+import { activePlanForMessage, reduce } from "./App";
 import type { ModelTurnStartedEvent } from "./protocol";
 import { getThreadMaxWidth } from "./ui/thread-layout";
 
@@ -208,8 +204,12 @@ describe("Desktop App reducer — usage", () => {
     expect(next.busy).toBe(false);
     const assistant = next.messages.find((m) => m.kind === "assistant");
     expect(assistant?.pending).toBe(false);
-    const error = next.messages.find((m) => m.kind === "error");
-    expect(error?.message).toBe("SSE body read failed: terminated");
+    const error = next.messages.find((m) => m.kind === "notice" && m.severity === "error");
+    expect(error).toMatchObject({
+      kind: "notice",
+      text: "SSE body read failed: terminated",
+      severity: "error",
+    });
   });
 
   it("settles every unresolved tool card when the conversation stops", () => {
@@ -1277,7 +1277,7 @@ describe("Desktop App reducer — OpenAI OAuth flow state", () => {
       event: { type: "$error", message: "OAuth sign-in failed: access_denied" },
     });
     expect(next.oauthWaiting).toBe(false);
-    expect(next.messages.at(-1)).toMatchObject({ kind: "error" });
+    expect(next.messages.at(-1)).toMatchObject({ kind: "notice", severity: "error" });
   });
 
   it("unrelated $error keeps oauthWaiting", () => {
@@ -1548,6 +1548,80 @@ describe("Desktop App reducer — subagent progress", () => {
           tools: [{ callId: "child", name: "read_file", status: "done" }],
         },
       ],
+    });
+  });
+});
+
+describe("Desktop App reducer — plan timeline anchor", () => {
+  it("selects the active plan only for its original submit_plan message", () => {
+    const plan = {
+      plan: "Implement the timeline",
+      steps: [],
+      completedStepIds: [],
+      stepResults: {},
+      callId: "plan-call-42",
+    };
+    const before = {
+      kind: "assistant" as const,
+      turn: 1,
+      pending: false,
+      segments: [{ kind: "text" as const, text: "before" }],
+    };
+    const anchored = {
+      kind: "assistant" as const,
+      turn: 2,
+      pending: false,
+      segments: [
+        {
+          kind: "tool" as const,
+          callId: "plan-call-42",
+          name: "submit_plan",
+          args: "{}",
+          startedAt: 1,
+        },
+      ],
+    };
+    const after = {
+      kind: "assistant" as const,
+      turn: 3,
+      pending: false,
+      segments: [{ kind: "text" as const, text: "after" }],
+    };
+
+    expect(activePlanForMessage(before, plan)).toBeUndefined();
+    expect(activePlanForMessage(anchored, plan)).toBe(plan);
+    expect(activePlanForMessage(after, plan)).toBeUndefined();
+  });
+
+  it("preserves the submit_plan call id when an approved plan becomes active", () => {
+    let state = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$plan_required",
+        id: 7,
+        plan: "Implement the timeline",
+        summary: "Chronological plan",
+        callId: "plan-call-42",
+        steps: [
+          {
+            id: "step-1",
+            title: "Anchor the card",
+            action: "Render it at the submit_plan segment.",
+          },
+        ],
+      },
+    });
+
+    state = reduce(state, {
+      t: "resolve_plan",
+      id: 7,
+      verdict: { type: "approve" },
+    });
+
+    expect(state.activePlan).toMatchObject({
+      callId: "plan-call-42",
+      plan: "Implement the timeline",
+      completedStepIds: [],
     });
   });
 });

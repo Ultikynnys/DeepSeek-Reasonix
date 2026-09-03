@@ -24,7 +24,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
 import { memo, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { ToastStack } from "./Toast";
 import { WorkspaceProvider } from "./Markdown";
 import { type AbortDraftSource, nextAbortDraftCandidate, restoreAbortedDraft } from "./abort-draft";
 import { formatBytes } from "./format";
@@ -35,7 +34,7 @@ import {
   type ApprovalSnapshot,
   deriveDesktopNotifications,
   dispatchDesktopNotifications,
-  shouldShowCompletionToast,
+  shouldAppendCompletionNotice,
 } from "./notifications";
 import {
   type AntigravityQuota,
@@ -85,7 +84,13 @@ import {
   themeForStyle,
 } from "./theme";
 import { AboutModal } from "./ui/about";
-import { WarningCard, isSubagentTool, parseEditResult } from "./ui/cards";
+import {
+  NoticeCard,
+  type NoticeSeverity,
+  isSubagentTool,
+  noticeName,
+  parseEditResult,
+} from "./ui/cards";
 import { Composer } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
@@ -102,14 +107,12 @@ import {
 } from "./ui/startup-failure";
 import { StatusBar } from "./ui/statusbar";
 import {
-  ActivePlanTaskCard,
   AssistantMsg,
   CheckpointApprovalCard,
   ChoiceApprovalCard,
   ConfirmApprovalCard,
   PathAccessApprovalCard,
   PlanApprovalCard,
-  PlanBanner,
   RevisionApprovalCard,
   TurnDivider,
   UserMsg,
@@ -230,9 +233,7 @@ export type ChatMessage =
       segments: AssistantSegment[];
       pending: boolean;
     }
-  | { kind: "status"; text: string }
-  | { kind: "warning"; id: string; text: string; severity: "low" | "high" }
-  | { kind: "error"; message: string; id: string; recoverable?: boolean };
+  | { kind: "notice"; id: string; text: string; severity: NoticeSeverity };
 
 export type PendingConfirm = {
   id: number;
@@ -265,6 +266,8 @@ export type PendingPlan = {
   plan: string;
   summary?: string;
   steps?: PlanStep[];
+  /** Stable submit_plan tool call that anchors live progress in the chat timeline. */
+  callId?: string;
   /** YOLO auto-approval window (ms) — the card auto-picks the first option at expiry. */
   countdownMs?: number;
 };
@@ -275,6 +278,8 @@ export type ActivePlan = {
   steps: PlanStep[];
   completedStepIds: string[];
   stepResults: Record<string, string>;
+  /** Stable submit_plan tool call that anchors live progress in the chat timeline. */
+  callId?: string;
 };
 
 export type PendingCheckpoint = {
@@ -516,10 +521,8 @@ type Action =
   | { t: "resolve_plan"; id: number; verdict: PlanVerdict }
   | { t: "resolve_checkpoint"; id: number; verdict: CheckpointVerdict }
   | { t: "resolve_revision"; id: number; verdict: RevisionVerdict }
-  | { t: "dismiss_plan" }
   | { t: "dismiss_memory_result" }
   | { t: "dismiss_memory_export" }
-  | { t: "dismiss_error"; id: string }
   | { t: "mention_results"; results: MentionResults }
   | { t: "mention_preview"; preview: MentionPreviewState }
   | { t: "enqueue_send"; text: string }
@@ -531,7 +534,7 @@ type Action =
   | { t: "codex_quota_refreshing" }
   | { t: "ollama_quota_refreshing" }
   | { t: "antigravity_quota_refreshing" }
-  | { t: "push_status"; text: string };
+  | { t: "push_notice"; text: string; severity?: NoticeSeverity };
 
 function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
   const {
@@ -563,10 +566,10 @@ function nextMessageTurn(messages: ChatMessage[]): number {
   return lastTurn + 1;
 }
 
-let _errSeq = 0;
-function nextErrorId(): string {
-  _errSeq += 1;
-  return `err-${Date.now().toString(36)}-${_errSeq}`;
+let noticeSequence = 0;
+function nextNoticeId(): string {
+  noticeSequence += 1;
+  return `notice-${Date.now().toString(36)}-${noticeSequence}`;
 }
 
 export function reduce(state: State, action: Action): State {
@@ -615,9 +618,10 @@ export function reduce(state: State, action: Action): State {
         messages: [
           ...state.messages,
           {
-            kind: "error",
-            message: `reasonix exited (code ${action.code ?? "?"})`,
-            id: nextErrorId(),
+            kind: "notice",
+            text: `reasonix exited (code ${action.code ?? "?"})`,
+            severity: "error",
+            id: nextNoticeId(),
           },
         ],
       };
@@ -720,6 +724,7 @@ export function reduce(state: State, action: Action): State {
           steps: pendingSteps ?? [],
           completedStepIds: [],
           stepResults: {},
+          callId: removed.callId,
         };
       }
       return {
@@ -750,17 +755,10 @@ export function reduce(state: State, action: Action): State {
         activePlan,
       };
     }
-    case "dismiss_plan":
-      return { ...state, activePlan: null };
     case "dismiss_memory_result":
       return { ...state, memoryResult: null };
     case "dismiss_memory_export":
       return { ...state, memoryExport: null };
-    case "dismiss_error":
-      return {
-        ...state,
-        messages: state.messages.filter((m) => !(m.kind === "error" && m.id === action.id)),
-      };
     case "mention_results":
       return { ...state, mentionResults: action.results };
     case "mention_preview":
@@ -774,8 +772,19 @@ export function reduce(state: State, action: Action): State {
       };
     case "shift_queued_send":
       return { ...state, queuedSends: state.queuedSends.slice(1) };
-    case "push_status":
-      return { ...state, messages: [...state.messages, { kind: "status", text: action.text }] };
+    case "push_notice":
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "notice",
+            id: nextNoticeId(),
+            text: action.text,
+            severity: action.severity ?? "info",
+          },
+        ],
+      };
   }
 }
 
@@ -853,6 +862,21 @@ function DiffStats({ stats }: { stats: FileStats }) {
   );
 }
 
+export function activePlanForMessage(
+  message: ChatMessage,
+  activePlan: ActivePlan | null,
+): ActivePlan | undefined {
+  if (!activePlan?.callId || message.kind !== "assistant") return undefined;
+  return message.segments.some(
+    (segment) =>
+      segment.kind === "tool" &&
+      segment.name === "submit_plan" &&
+      segment.callId === activePlan.callId,
+  )
+    ? activePlan
+    : undefined;
+}
+
 /** Memoized assistant row — props are stable for unchanged messages, so a
  *  streaming frame re-renders only the changed row; countFileStats runs for
  *  that row alone, not the whole transcript. */
@@ -860,6 +884,7 @@ const AssistantRow = memo(function AssistantRow({
   m,
   model,
   pendingConfirms,
+  activePlan,
   onApproveConfirm,
   onRejectConfirm,
   onAlwaysAllowConfirm,
@@ -868,6 +893,7 @@ const AssistantRow = memo(function AssistantRow({
   m: Extract<ChatMessage, { kind: "assistant" }>;
   model?: string;
   pendingConfirms: PendingConfirm[];
+  activePlan?: ActivePlan;
   onApproveConfirm: (id: number) => void;
   onRejectConfirm: (id: number) => void;
   onAlwaysAllowConfirm: (id: number, prefix: string) => void;
@@ -885,6 +911,7 @@ const AssistantRow = memo(function AssistantRow({
         onAlwaysAllowConfirm={onAlwaysAllowConfirm}
         onStopTool={onStopTool}
         pendingConfirms={pendingConfirms}
+        activePlan={activePlan}
       />
       {stats ? <DiffStats stats={stats} /> : null}
     </>
@@ -1034,11 +1061,7 @@ function zeroUsage(): UsageStats {
 
 /** Fold a measured plan-window delta (percentage points) into the session's
  *  per-provider quota usage. Native unit only — never converted to dollars. */
-function applyQuotaDelta(
-  usage: UsageStats,
-  provider: string,
-  usedPct: number | null,
-): UsageStats {
+function applyQuotaDelta(usage: UsageStats, provider: string, usedPct: number | null): UsageStats {
   if (usedPct === null || usedPct <= 0) return usage;
   const prev = usage.costByProvider?.[provider];
   const prevPct = prev && prev.kind === "quota" ? (prev.quotaUsedPct ?? 0) : 0;
@@ -1187,6 +1210,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
             plan: ev.plan,
             summary: ev.summary,
             countdownMs: ev.countdownMs,
+            callId: ev.callId,
             ...(steps ? { steps } : {}),
           },
         ],
@@ -1252,12 +1276,14 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         messages: [
           ...state.messages,
           {
-            kind: "status",
+            kind: "notice",
+            id: nextNoticeId(),
             text: t("sidebarPanel.importResult", {
               imported: ev.imported,
               skipped: ev.skipped,
               failed: ev.failed,
             }),
+            severity: ev.failed > 0 ? "warning" : "success",
           },
         ],
       };
@@ -1380,8 +1406,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         // The provider comes from the resolved endpoint, never the model name.
         codexQuota: ev.modelEndpoint?.provider === "openai" ? state.codexQuota : null,
         ollamaQuota: ev.modelEndpoint?.provider === "ollama" ? state.ollamaQuota : null,
-        antigravityQuota:
-          ev.modelEndpoint?.provider === "gemini" ? state.antigravityQuota : null,
+        antigravityQuota: ev.modelEndpoint?.provider === "gemini" ? state.antigravityQuota : null,
       };
     }
     case "$session_loaded": {
@@ -1434,21 +1459,21 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         messages: [
           ...state.messages,
           {
-            kind: "error",
-            message: `Session "${ev.name}" loaded with no messages (${sizeNote}). The file ~/.reasonix/sessions/${ev.name}.jsonl exists but couldn't be parsed — start a new chat or restore from .jsonl.bak if you have one.`,
-            id: nextErrorId(),
+            kind: "notice",
+            text: `Session "${ev.name}" loaded with no messages (${sizeNote}). The file ~/.reasonix/sessions/${ev.name}.jsonl exists but couldn't be parsed — start a new chat or restore from .jsonl.bak if you have one.`,
+            severity: "error",
+            id: nextNoticeId(),
           },
         ],
       };
     }
     case "$error":
     case "error": {
-      // Kernel-level errors carry a `recoverable` flag — true for
+      // Kernel-level errors carry a `recoverable` flag: true for
       // storm-repair / repeat-loop warnings the loop already worked
-      // around, false for hard failures. The desktop renders both as
-      // dismissable cards but uses softer tone for the recoverable
-      // ones so a session full of self-repaired loops doesn't look
-      // like everything's on fire (#1456-followup).
+      // around, false for hard failures. The desktop keeps both in the
+      // timeline but uses a softer tone for recoverable errors so a session
+      // full of self-repaired loops does not look like everything failed.
       const recoverable = ev.type === "error" ? ev.recoverable : false;
       // Loop has returned (any error path ends the turn); flip the still-
       // streaming assistant message to settled so the UI doesn't keep
@@ -1465,7 +1490,12 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         oauthWaiting: ev.message.includes("OAuth") ? false : state.oauthWaiting,
         messages: [
           ...settled,
-          { kind: "error", message: ev.message, id: nextErrorId(), recoverable },
+          {
+            kind: "notice",
+            text: ev.message,
+            id: nextNoticeId(),
+            severity: recoverable ? "warning" : "error",
+          },
         ],
       };
     }
@@ -1629,8 +1659,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
               .map((segment, index) => ({ segment, index }))
               .filter(
                 ({ segment }) =>
-                  segment.kind === "tool" &&
-                  isSubagentTool(segment.name, segment.args),
+                  segment.kind === "tool" && isSubagentTool(segment.name, segment.args),
               );
             if (candidates.length === 1) host = candidates[0]?.index ?? -1;
           }
@@ -1671,7 +1700,11 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
             model: ev.model ?? previous?.model,
             phase: ev.phase ?? previous?.phase,
             status:
-              ev.action === "end" ? (ev.error ? "failed" : "done") : (previous?.status ?? "running"),
+              ev.action === "end"
+                ? ev.error
+                  ? "failed"
+                  : "done"
+                : (previous?.status ?? "running"),
             iter: ev.iter ?? previous?.iter,
             elapsedMs: ev.elapsedMs ?? previous?.elapsedMs,
             contextTokens: ev.contextTokens ?? previous?.contextTokens,
@@ -1779,7 +1812,15 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return {
         ...state,
         busy: false,
-        messages: [...state.messages, { kind: "status", text: `≫ btw\n${ev.answer}` }],
+        messages: [
+          ...state.messages,
+          {
+            kind: "notice",
+            id: nextNoticeId(),
+            text: `≫ btw\n${ev.answer}`,
+            severity: "info",
+          },
+        ],
       };
     case "status":
       return state;
@@ -1830,7 +1871,7 @@ function formatConversationMarkdown(messages: ChatMessage[], userLabel: string):
           .join("\n\n");
         return `### Reasonix\n\n${body}`;
       }
-      if (m.kind === "error") return `### Error\n\n${m.message}`;
+      if (m.kind === "notice") return `### ${noticeName(m.severity)}\n\n${m.text}`;
       return "";
     })
     .filter(Boolean)
@@ -1985,14 +2026,6 @@ function TabRuntime({
   const [pendingImages, setPendingImages] = useState<
     Array<{ id: string; thumbnail: string; wire: UserImageAttachment }>
   >([]);
-  type ToastItem = { id: number; msg: string; severity?: "error" | "warning" | "info" | "success"; yolo?: boolean };
-  let toastNextId = 0;
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const pushToast = useCallback((msg: string, opts?: { severity?: ToastItem["severity"]; yolo?: boolean; duration?: number }) => {
-    const id = ++toastNextId;
-    setToasts((prev) => [...prev, { id, msg, severity: opts?.severity, yolo: opts?.yolo }]);
-    window.setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), opts?.duration ?? 3000);
-  }, []);
   const [splashOn, setSplashOn] = useState<boolean>(() => shouldShowSplash());
   const [wdOpen, setWdOpen] = useState(false);
   const [wdAnchor, setWdAnchor] = useState<
@@ -2112,9 +2145,9 @@ function TabRuntime({
     }
   }, [clearAbortDraft, saveSettings, state.settings?.workspaceDir]);
 
-  const flashToast = useCallback((msg: string, opts?: { severity?: "error" | "warning" | "info" | "success"; yolo?: boolean; duration?: number }) => {
-    pushToast(msg, opts);
-  }, [pushToast]);
+  const appendNotice = useCallback((text: string, severity: NoticeSeverity = "info") => {
+    dispatch({ t: "push_notice", text, severity });
+  }, []);
 
   // Vision attachments (gpt-* + DeepSeek vision models): paste carries bytes
   // from the webview; picked/dropped files ship a path the daemon reads.
@@ -2139,10 +2172,10 @@ function TabRuntime({
         ]);
       } catch (err) {
         console.error("[reasonix frontend] clipboard image attach failed", err);
-        flashToast(t("composer.imageAttachFailed"));
+        appendNotice(t("composer.imageAttachFailed"), "error");
       }
     },
-    [flashToast],
+    [appendNotice],
   );
   const attachPickedImage = useCallback((path: string) => {
     setPendingImages((prev) => [
@@ -2161,21 +2194,21 @@ function TabRuntime({
   const applyReasoningEffort = useCallback(
     (reasoningEffort: Settings["reasoningEffort"]) => {
       applySettingsPatch({ reasoningEffort });
-      flashToast(t("app.toast.effortSwitched", { effort: reasoningEffort }));
+      appendNotice(t("app.toast.effortSwitched", { effort: reasoningEffort }));
     },
-    [applySettingsPatch, flashToast],
+    [applySettingsPatch, appendNotice],
   );
 
   const applyEditMode = useCallback(
     (mode: Settings["editMode"]) => {
       applySettingsPatch({ editMode: mode });
       if (mode === "yolo") {
-        flashToast(t("app.yolo.toast"), { yolo: true, duration: 3000 });
+        appendNotice(t("app.yolo.toast"), "warning");
       } else {
-        flashToast(t("app.toast.modeSwitched", { mode: mode.toUpperCase() }));
+        appendNotice(t("app.toast.modeSwitched", { mode: mode.toUpperCase() }));
       }
     },
-    [applySettingsPatch, flashToast],
+    [applySettingsPatch, appendNotice],
   );
 
   const dropActiveRef = useRef(active);
@@ -2364,14 +2397,14 @@ function TabRuntime({
       })
       .then((focused) => {
         if (
-          shouldShowCompletionToast({
+          shouldAppendCompletionNotice({
             wasBusy,
             isBusy: state.busy,
             busyDurationMs,
             focused,
           })
         ) {
-          flashToast(t("app.toast.taskComplete"), { duration: 2400 });
+          appendNotice(t("app.toast.taskComplete"), "success");
         }
         const notifications = deriveDesktopNotifications({
           previous: previousSnapshot,
@@ -2389,7 +2422,7 @@ function TabRuntime({
         });
       });
   }, [
-    flashToast,
+    appendNotice,
     state.busy,
     state.pendingChoices,
     state.pendingCheckpoints,
@@ -2624,7 +2657,7 @@ function TabRuntime({
     const userLabel = t("app.exportUserLabel");
     const md = formatConversationMarkdown(state.messages, userLabel);
     if (!md) {
-      flashToast(t("app.toast.emptySession"));
+      appendNotice(t("app.toast.emptySession"));
       return;
     }
     try {
@@ -2636,23 +2669,23 @@ function TabRuntime({
       });
       if (!path) return;
       await invoke("write_text_file", { path, content: md });
-      flashToast(t("app.toast.exportedMd"));
+      appendNotice(t("app.toast.exportedMd"), "success");
     } catch (err) {
       console.error("[reasonix frontend] export failed", err);
-      flashToast(t("app.toast.exportFailed", { error: String(err) }));
+      appendNotice(t("app.toast.exportFailed", { error: String(err) }), "error");
     }
-  }, [state.messages, session, flashToast]);
+  }, [state.messages, session, appendNotice]);
 
   const conversationCopy = useCallback(() => {
     const userLabel = t("app.exportUserLabel");
     const md = formatConversationMarkdown(state.messages, userLabel);
     if (!md) {
-      flashToast(t("app.toast.emptySession"));
+      appendNotice(t("app.toast.emptySession"));
       return;
     }
     void navigator.clipboard.writeText(md);
-    flashToast(t("app.toast.copiedMd"));
-  }, [state.messages, flashToast]);
+    appendNotice(t("app.toast.copiedMd"), "success");
+  }, [state.messages, appendNotice]);
 
   return (
     <WorkspaceProvider value={{ dir: state.settings?.workspaceDir }}>
@@ -2768,169 +2801,117 @@ function TabRuntime({
                 <div className="thread-inner" ref={threadInnerRef}>
                   {active ? (
                     <>
-                  {state.activePlan ? (
-                    <>
-                      <PlanBanner
-                        plan={state.activePlan}
-                        onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
-                      />
-                      <ActivePlanTaskCard plan={state.activePlan} />
-                    </>
-                  ) : null}
+                      {state.messages.length === 0 ? (
+                        <EmptyState
+                          onPick={(text) => send(text)}
+                          workspaceDir={state.settings?.workspaceDir}
+                        />
+                      ) : null}
 
-                  {state.messages.length === 0 ? (
-                    <EmptyState
-                      onPick={(text) => send(text)}
-                      workspaceDir={state.settings?.workspaceDir}
-                    />
-                  ) : null}
+                      {state.messages.map((m, i) => {
+                        if (m.kind === "user") {
+                          const dividerLabel = `turn ${m.turn}`;
+                          const prev = state.messages[i - 1];
+                          const needsDivider = !prev || prev.kind === "user";
+                          return (
+                            <div key={`u-${m.turn}`} data-turn={m.turn}>
+                              {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
+                              <UserMsg text={m.text} images={m.images} skill={m.skill} />
+                            </div>
+                          );
+                        }
+                        if (m.kind === "assistant") {
+                          return (
+                            <div key={`a-${m.turn}`}>
+                              <AssistantRow
+                                m={m}
+                                model={state.model}
+                                pendingConfirms={state.pendingConfirms}
+                                activePlan={activePlanForMessage(m, state.activePlan)}
+                                onApproveConfirm={onApproveConfirm}
+                                onRejectConfirm={onRejectConfirm}
+                                onAlwaysAllowConfirm={onAlwaysAllowConfirm}
+                                onStopTool={onStopTool}
+                              />
+                            </div>
+                          );
+                        }
+                        if (m.kind === "notice") {
+                          return <NoticeCard key={m.id} text={m.text} severity={m.severity} />;
+                        }
+                        return null;
+                      })}
 
-                  {state.messages.map((m, i) => {
-                    if (m.kind === "user") {
-                      const dividerLabel = `turn ${m.turn}`;
-                      const prev = state.messages[i - 1];
-                      const needsDivider = !prev || prev.kind === "user";
-                      return (
-                        <div key={`u-${m.turn}`} data-turn={m.turn}>
-                          {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
-                          <UserMsg
-                            text={m.text}
-                            images={m.images}
-                            skill={m.skill}
-                          />
-                        </div>
-                      );
-                    }
-                    if (m.kind === "assistant") {
-                      return (
-                        <div key={`a-${m.turn}`}>
-                          <AssistantRow
-                            m={m}
-                            model={state.model}
-                            pendingConfirms={state.pendingConfirms}
-                            onApproveConfirm={onApproveConfirm}
-                            onRejectConfirm={onRejectConfirm}
-                            onAlwaysAllowConfirm={onAlwaysAllowConfirm}
-                            onStopTool={onStopTool}
-                          />
-                        </div>
-                      );
-                    }
-                    if (m.kind === "error") {
-                      const toneVar = m.recoverable ? "var(--tone-warn)" : "var(--tone-err)";
-                      const bgVar = m.recoverable
-                        ? "var(--warn-soft, var(--danger-soft))"
-                        : "var(--danger-soft)";
-                      const labelKey = m.recoverable ? "app.warningLabel" : "app.errorLabel";
-                      return (
+                      {/* Pending approvals */}
+                      {state.pendingPlans.map((p) => (
+                        <PlanApprovalCard
+                          key={`pp-${p.id}`}
+                          p={p}
+                          onApprove={() => resolvePlan(p.id, { type: "approve" })}
+                          onRefine={() => resolvePlan(p.id, { type: "refine" })}
+                          onCancel={() => resolvePlan(p.id, { type: "cancel" })}
+                        />
+                      ))}
+                      {state.pendingCheckpoints.map((c) => (
+                        <CheckpointApprovalCard
+                          key={`cp-${c.id}`}
+                          c={c}
+                          onContinue={() => resolveCheckpoint(c.id, { type: "continue" })}
+                          onRevise={() => resolveCheckpoint(c.id, { type: "revise" })}
+                          onStop={() => resolveCheckpoint(c.id, { type: "stop" })}
+                        />
+                      ))}
+                      {state.pendingRevisions.map((r) => (
+                        <RevisionApprovalCard
+                          key={`rv-${r.id}`}
+                          r={r}
+                          onAccept={() => resolveRevision(r.id, { type: "accepted" })}
+                          onReject={() => resolveRevision(r.id, { type: "rejected" })}
+                        />
+                      ))}
+                      {state.pendingConfirms.map((c) => (
+                        <ConfirmApprovalCard
+                          key={`cc-${c.id}`}
+                          prompt={c.prompt}
+                          onAllow={() => resolveConfirm(c.id, { type: "run_once" })}
+                          onAlwaysAllow={(prefix) =>
+                            resolveConfirm(c.id, { type: "always_allow", prefix })
+                          }
+                          onDeny={() => resolveConfirm(c.id, { type: "deny" })}
+                        />
+                      ))}
+                      {state.pendingPathAccess.map((p) => (
+                        <PathAccessApprovalCard
+                          key={`pa-${p.id}`}
+                          prompt={p.prompt}
+                          onAllow={() => resolvePathAccess(p.id, { type: "run_once" })}
+                          onAlwaysAllow={(prefix) =>
+                            resolvePathAccess(p.id, { type: "always_allow", prefix })
+                          }
+                          onDeny={() => resolvePathAccess(p.id, { type: "deny" })}
+                        />
+                      ))}
+                      {state.pendingChoices.map((c) => (
+                        <ChoiceApprovalCard
+                          key={`ch-${c.id}`}
+                          c={c}
+                          onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })}
+                          onCancel={() => resolveChoice(c.id, { type: "cancel" })}
+                        />
+                      ))}
+
+                      {!backendConnected ? (
                         <div
-                          key={m.id}
-                          className="warn-card"
-                          style={{ borderColor: toneVar, background: bgVar, position: "relative" }}
+                          style={{
+                            padding: 12,
+                            color: "var(--muted)",
+                            fontFamily: "Geist Mono, monospace",
+                            fontSize: 11,
+                          }}
                         >
-                          <span className="ico" style={{ color: toneVar }}>
-                            <I.warning size={16} />
-                          </span>
-                          <div style={{ flex: 1 }}>
-                            <div className="tt">{t(labelKey)}</div>
-                            <div className="ds">{m.message}</div>
-                          </div>
-                          <button
-                            type="button"
-                            className="warn-card-dismiss"
-                            title={t("app.dismissError")}
-                            onClick={() => dispatch({ t: "dismiss_error", id: m.id })}
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: toneVar,
-                              cursor: "pointer",
-                              padding: "4px",
-                              alignSelf: "flex-start",
-                            }}
-                          >
-                            <I.x size={14} />
-                          </button>
+                          {t("app.connecting")}
                         </div>
-                      );
-                    }
-                    if (m.kind === "warning") {
-                      if (state.settings?.showSystemEvents === false) return null;
-                      return <WarningCard key={m.id} text={m.text} severity={m.severity} />;
-                    }
-                    return null;
-                  })}
-
-                  {/* Pending approvals */}
-                  {state.pendingPlans.map((p) => (
-                    <PlanApprovalCard
-                      key={`pp-${p.id}`}
-                      p={p}
-                      onApprove={() => resolvePlan(p.id, { type: "approve" })}
-                      onRefine={() => resolvePlan(p.id, { type: "refine" })}
-                      onCancel={() => resolvePlan(p.id, { type: "cancel" })}
-                    />
-                  ))}
-                  {state.pendingCheckpoints.map((c) => (
-                    <CheckpointApprovalCard
-                      key={`cp-${c.id}`}
-                      c={c}
-                      onContinue={() => resolveCheckpoint(c.id, { type: "continue" })}
-                      onRevise={() => resolveCheckpoint(c.id, { type: "revise" })}
-                      onStop={() => resolveCheckpoint(c.id, { type: "stop" })}
-                    />
-                  ))}
-                  {state.pendingRevisions.map((r) => (
-                    <RevisionApprovalCard
-                      key={`rv-${r.id}`}
-                      r={r}
-                      onAccept={() => resolveRevision(r.id, { type: "accepted" })}
-                      onReject={() => resolveRevision(r.id, { type: "rejected" })}
-                    />
-                  ))}
-                  {state.pendingConfirms.map((c) => (
-                    <ConfirmApprovalCard
-                      key={`cc-${c.id}`}
-                      prompt={c.prompt}
-                      onAllow={() => resolveConfirm(c.id, { type: "run_once" })}
-                      onAlwaysAllow={(prefix) =>
-                        resolveConfirm(c.id, { type: "always_allow", prefix })
-                      }
-                      onDeny={() => resolveConfirm(c.id, { type: "deny" })}
-                    />
-                  ))}
-                  {state.pendingPathAccess.map((p) => (
-                    <PathAccessApprovalCard
-                      key={`pa-${p.id}`}
-                      prompt={p.prompt}
-                      onAllow={() => resolvePathAccess(p.id, { type: "run_once" })}
-                      onAlwaysAllow={(prefix) =>
-                        resolvePathAccess(p.id, { type: "always_allow", prefix })
-                      }
-                      onDeny={() => resolvePathAccess(p.id, { type: "deny" })}
-                    />
-                  ))}
-                  {state.pendingChoices.map((c) => (
-                    <ChoiceApprovalCard
-                      key={`ch-${c.id}`}
-                      c={c}
-                      onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })}
-                      onCancel={() => resolveChoice(c.id, { type: "cancel" })}
-                    />
-                  ))}
-
-                  {!backendConnected ? (
-                    <div
-                      style={{
-                        padding: 12,
-                        color: "var(--muted)",
-                        fontFamily: "Geist Mono, monospace",
-                        fontSize: 11,
-                      }}
-                    >
-                      {t("app.connecting")}
-                    </div>
-                  ) : null}
+                      ) : null}
                     </>
                   ) : null}
                 </div>
@@ -2990,11 +2971,11 @@ function TabRuntime({
                 onRefreshAntigravityModels={onRefreshAntigravityModels}
                 onModelChange={(model) => {
                   applySettingsPatch({ model });
-                  flashToast(t("app.toast.modelSwitched", { model }));
+                  appendNotice(t("app.toast.modelSwitched", { model }));
                 }}
                 onSubagentModelChange={(model) => {
                   applySettingsPatch({ subagentModel: model });
-                  flashToast(t("app.toast.subagentModelSwitched", { model }));
+                  appendNotice(t("app.toast.subagentModelSwitched", { model }));
                 }}
                 onEffortChange={applyReasoningEffort}
                 editMode={state.settings?.editMode ?? "review"}
@@ -3011,12 +2992,7 @@ function TabRuntime({
                 onRemoveImage={removePendingImage}
                 imageCapable={imageCapable}
                 onPasteImage={attachPastedImage}
-                onImageRejected={() =>
-                  flashToast(t("composer.imageRequiresVision"), {
-                    severity: "warning",
-                    duration: 5000,
-                  })
-                }
+                onImageRejected={() => appendNotice(t("composer.imageRequiresVision"), "warning")}
                 onPickImage={attachPickedImage}
               />
             </>
@@ -3197,8 +3173,6 @@ function TabRuntime({
             onClose={() => dispatch({ t: "dismiss_memory_export" })}
           />
         ) : null}
-
-        <ToastStack items={toasts} />
 
         {splashOn ? <Splash onDone={() => setSplashOn(false)} /> : null}
       </div>
@@ -3918,16 +3892,13 @@ function NeedsSetupView({
   // addressing scheme); a model name never implies its provider, so it never
   // picks the tab. Unknown resolutions start on the neutral DeepSeek tab and
   // the user chooses.
-  const [provider, setProvider] = useState<"deepseek" | "openai" | "ollama">(
-    () =>
-      modelEndpoint?.provider === "openai"
-        ? "openai"
-        : modelEndpoint?.provider === "ollama" ||
-            (modelEndpoint === undefined &&
-              typeof model === "string" &&
-              model.startsWith("ollama/"))
-          ? "ollama"
-          : "deepseek",
+  const [provider, setProvider] = useState<"deepseek" | "openai" | "ollama">(() =>
+    modelEndpoint?.provider === "openai"
+      ? "openai"
+      : modelEndpoint?.provider === "ollama" ||
+          (modelEndpoint === undefined && typeof model === "string" && model.startsWith("ollama/"))
+        ? "ollama"
+        : "deepseek",
   );
   const tabs: { id: "deepseek" | "openai" | "ollama"; label: string }[] = [
     { id: "deepseek", label: t("app.setup.providerDeepSeek") },
@@ -4118,20 +4089,11 @@ function UpdateOverlay({
 
 type TabMeta = { id: string; workspaceDir?: string; busy?: boolean };
 
-type GlobalToast = { id: number; msg: string; severity?: "error" | "warning" | "info" | "success" };
-let globalToastId = 0;
-
 export function App() {
   const [tabs, setTabs] = useState<TabMeta[]>([]);
   const [backendConnected, setBackendConnected] = useState(false);
   const [activeTabId, setActiveTabId] = useState<string>("");
   const [startupFailure, setStartupFailure] = useState<StartupFailureState | null>(null);
-  const [globalToasts, setGlobalToasts] = useState<GlobalToast[]>([]);
-  const pushGlobalToast = useCallback((msg: string, severity?: GlobalToast["severity"]) => {
-    const id = ++globalToastId;
-    setGlobalToasts((prev) => [...prev, { id, msg, severity }]);
-    window.setTimeout(() => setGlobalToasts((prev) => prev.filter((t) => t.id !== id)), severity === "error" ? 6000 : 3500);
-  }, []);
   // App-global Ollama catalog — the backend fetches it once at launch and
   // broadcasts it tabId-less, so every tab renders the same shared list
   // instead of per-tab copies.
@@ -4164,14 +4126,11 @@ export function App() {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
 
-  const requestOllamaModels = useCallback(
-    (force?: boolean) => {
-      rpcSend({ tabId: activeTabIdRef.current, cmd: "ollama_models_list", force }).catch((err) =>
-        console.error("ollama_models_list failed", err),
-      );
-    },
-    [],
-  );
+  const requestOllamaModels = useCallback((force?: boolean) => {
+    rpcSend({ tabId: activeTabIdRef.current, cmd: "ollama_models_list", force }).catch((err) =>
+      console.error("ollama_models_list failed", err),
+    );
+  }, []);
 
   const requestAntigravityModels = useCallback(() => {
     rpcSend({
@@ -4419,18 +4378,25 @@ export function App() {
             if (ev.type === "$diagnostic") {
               const diagnostic = ev as DesktopDiagnosticEvent & { tabId?: string };
               const prefix = `[reasonix ${diagnostic.source}] ${diagnostic.event}`;
-              const safeMessage = diagnostic.message ? redactDiagnosticText(diagnostic.message) : undefined;
+              const safeMessage = diagnostic.message
+                ? redactDiagnosticText(diagnostic.message)
+                : undefined;
               const payload = {
                 ...diagnostic,
                 ...(safeMessage ? { message: safeMessage } : {}),
                 ...(diagnostic.details
-                  ? { details: redactDiagnosticValue(diagnostic.details) as Record<string, unknown> }
+                  ? {
+                      details: redactDiagnosticValue(diagnostic.details) as Record<string, unknown>,
+                    }
                   : {}),
                 ...(diagnostic.tabId ? { tabId: diagnostic.tabId } : {}),
               };
               if (safeMessage) payload.message = safeMessage;
               if (diagnostic.details) {
-                payload.details = redactDiagnosticValue(diagnostic.details) as Record<string, unknown>;
+                payload.details = redactDiagnosticValue(diagnostic.details) as Record<
+                  string,
+                  unknown
+                >;
               }
               if (diagnostic.level === "error") console.error(prefix, payload);
               else if (diagnostic.level === "warn") console.warn(prefix, payload);
@@ -4572,13 +4538,6 @@ export function App() {
             const target = tabId;
             if (target) {
               flushTabDeltas(target);
-              // Surface errors / warnings as global toasts so they're never hidden
-              if (ev.type === "$error" || ev.type === "error") {
-                pushGlobalToast(ev.message, "error");
-              }
-              if (ev.type === "warning") {
-                pushGlobalToast(ev.text, "warning");
-              }
               if (ev.type === "$mention_results") {
                 deliverToTab(target, {
                   t: "mention_results",
@@ -4631,9 +4590,7 @@ export function App() {
               code: e.payload.code,
               stderrLines: startupStderrRef.current.length,
             });
-            setStartupFailure(
-              coerceStartupFailure(exitError, startupStderrRef.current),
-            );
+            setStartupFailure(coerceStartupFailure(exitError, startupStderrRef.current));
           }
           for (const dispatch of dispatchersRef.current.values()) {
             dispatch({ t: "rpc_exit", code: e.payload.code });
@@ -4680,20 +4637,29 @@ export function App() {
 
   const openTab = useCallback(() => {
     rpcSend({ cmd: "tab_open" }).catch((err) => {
-      const msg = `Failed to open new tab: ${messageOf(err)}`;
-      pushGlobalToast(msg, "error");
+      const target = activeTabIdRef.current || tabsRef.current[0]?.id;
+      if (target) {
+        deliverToTab(target, {
+          t: "push_notice",
+          text: `Failed to open new tab: ${messageOf(err)}`,
+          severity: "error",
+        });
+      }
     });
-  }, [pushGlobalToast]);
+  }, [deliverToTab]);
 
   const closeTab = useCallback(
     (id: string) => {
       if (tabs.length <= 1) return;
       rpcSend({ cmd: "tab_close", tabId: id }).catch((err) => {
-        const msg = `Failed to close tab: ${messageOf(err)}`;
-        pushGlobalToast(msg, "error");
+        deliverToTab(id, {
+          t: "push_notice",
+          text: `Failed to close tab: ${messageOf(err)}`,
+          severity: "error",
+        });
       });
     },
-    [tabs.length, pushGlobalToast],
+    [tabs.length, deliverToTab],
   );
 
   useEffect(() => {
@@ -4818,7 +4784,6 @@ export function App() {
           onDismiss={() => setPendingUpdate(null)}
         />
       ) : null}
-      <ToastStack items={globalToasts} />
     </>
   );
 }

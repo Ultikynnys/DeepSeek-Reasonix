@@ -1,5 +1,5 @@
 import { type ReactNode, memo, useContext, useMemo, useState } from "react";
-import { Markdown, WorkspaceContext, revealInExplorer, resolveAgainstWorkspace } from "../Markdown";
+import { Markdown, WorkspaceContext, resolveAgainstWorkspace, revealInExplorer } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import { FileMenu } from "./file-menu";
@@ -67,13 +67,7 @@ function OpenFileButton({ path, label }: { path: string; label: string }) {
         <I.link size={12} />
         <span>{label}</span>
       </button>
-      {menu ? (
-        <FileMenu
-          anchor={menu}
-          abs={abs}
-          onClose={() => setMenu(null)}
-        />
-      ) : null}
+      {menu ? <FileMenu anchor={menu} abs={abs} onClose={() => setMenu(null)} /> : null}
     </>
   );
 }
@@ -600,14 +594,7 @@ export function ToolCard({
           {engine ? <span className="pill-tag ok">{engine}</span> : null}
         </>
       }
-      headRight={
-        fileRef ? (
-          <OpenFileButton
-            path={fileRef.path}
-            label={fileRef.path}
-          />
-        ) : undefined
-      }
+      headRight={fileRef ? <OpenFileButton path={fileRef.path} label={fileRef.path} /> : undefined}
     >
       <div className="tool-call">
         {args ? (
@@ -790,33 +777,64 @@ export function DiffCard({
   );
 }
 
-// ---- Error ----
+// ---- Timeline notices ----
 
-export function ErrorCard({
-  message,
-  hint,
-  code,
-}: { message: string; hint?: ReactNode; code?: string }) {
+export type NoticeSeverity = "info" | "success" | "warning" | "error";
+
+export function noticeName(severity: NoticeSeverity): string {
+  switch (severity) {
+    case "success":
+      return t("cards.successName");
+    case "warning":
+      return t("cards.warningName");
+    case "error":
+      return t("cards.errorName");
+    default:
+      return t("cards.noticeName");
+  }
+}
+
+export function NoticeCard({
+  text,
+  severity = "info",
+  name,
+}: {
+  text: string;
+  severity?: NoticeSeverity;
+  name?: string;
+}) {
   useLang();
+  const tone: Tone =
+    severity === "error"
+      ? "danger"
+      : severity === "warning"
+        ? "warning"
+        : severity === "success"
+          ? "success"
+          : "accent";
+  const icon =
+    severity === "success" ? (
+      <I.check size={12} />
+    ) : severity === "info" ? (
+      <I.zap size={12} />
+    ) : (
+      <I.warning size={12} />
+    );
   return (
     <Card
-      tone="danger"
-      icon={<I.warning size={12} />}
-      kind="error"
-      name={t("cards.errorName")}
-      meta={code ? <span className="pill-tag err">{code}</span> : null}
+      tone={tone}
+      icon={icon}
+      kind={severity}
+      name={name ?? noticeName(severity)}
+      defaultOpen
+      compact
     >
-      <div className="error-body">
-        <div className="msg-err">{message}</div>
-        {hint ? <div className="hint">{hint}</div> : null}
+      <div className="notice-body" data-severity={severity}>
+        {text}
       </div>
     </Card>
   );
 }
-
-
-
-// ---- Warning / Degeneration ----
 
 export function WarningCard({
   text,
@@ -825,22 +843,13 @@ export function WarningCard({
   text: string;
   severity?: "low" | "high";
 }) {
-  useLang();
   const isDegeneration = /degenerat|repetiti/i.test(text);
-  const name = isDegeneration ? t("cards.degenerationName") : t("cards.warningName");
   return (
-    <Card
-      tone={severity === "low" ? "default" : "warning"}
-      icon={<I.warning size={12} />}
-      kind="warning"
-      name={name}
-      defaultOpen
-      compact
-    >
-      <div className="warning-body" style={{ fontSize: "12px", lineHeight: "1.5", color: "var(--fg)" }}>
-        {text}
-      </div>
-    </Card>
+    <NoticeCard
+      text={text}
+      severity={severity === "low" ? "info" : "warning"}
+      name={isDegeneration ? t("cards.degenerationName") : undefined}
+    />
   );
 }
 
@@ -914,7 +923,11 @@ export function extractSubagentResultMeta(result?: string): SubagentResultMeta {
     const out: SubagentResultMeta = {};
     if (typeof parsed.cost_usd === "number") out.costUsd = parsed.cost_usd;
     if (typeof parsed.model === "string") out.model = parsed.model;
-    if (parsed.billing_kind === "usd" || parsed.billing_kind === "quota" || parsed.billing_kind === "none") {
+    if (
+      parsed.billing_kind === "usd" ||
+      parsed.billing_kind === "quota" ||
+      parsed.billing_kind === "none"
+    ) {
       out.billingKind = parsed.billing_kind;
     }
     if (typeof parsed.quota_used_pct === "number") out.quotaUsedPct = parsed.quota_used_pct;
@@ -981,7 +994,9 @@ export function SubagentCard({
       meta={
         <>
           {models.length > 0 ? <span className="meta-model">{models.join(" + ")}</span> : null}
-          {contexts.length > 0 ? <span className="meta-context">ctx {contexts.join(" / ")}</span> : null}
+          {contexts.length > 0 ? (
+            <span className="meta-context">ctx {contexts.join(" / ")}</span>
+          ) : null}
           {billingMeta ? <span className="meta-cost">{billingMeta}</span> : null}
           <span>
             {done} / {runs.length} {t("cards.subagentDoneProgress")}
@@ -1020,13 +1035,18 @@ export function SubagentCard({
               </div>
               {run.tools.map((tool) => (
                 <div className="role" key={tool.callId} title={tool.args}>
-                  {tool.status === "running" ? "↳ …" : tool.status === "failed" ? "↳ ✕" : "↳ ✓"} {tool.name}
+                  {tool.status === "running" ? "↳ …" : tool.status === "failed" ? "↳ ✕" : "↳ ✓"}{" "}
+                  {tool.name}
                   {tool.args ? ` ${tool.args}` : ""}
                 </div>
               ))}
               <div className="role">
-                {run.toolReadChars !== undefined ? `${run.toolReadChars.toLocaleString()} read chars` : ""}
-                {run.outputChars !== undefined ? ` · ${run.outputChars.toLocaleString()} output chars` : ""}
+                {run.toolReadChars !== undefined
+                  ? `${run.toolReadChars.toLocaleString()} read chars`
+                  : ""}
+                {run.outputChars !== undefined
+                  ? ` · ${run.outputChars.toLocaleString()} output chars`
+                  : ""}
                 {run.reasoningChars !== undefined
                   ? ` · ${run.reasoningChars.toLocaleString()} reasoning chars`
                   : ""}

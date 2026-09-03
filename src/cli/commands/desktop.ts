@@ -3326,7 +3326,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // plan_proposed auto-approved in yolo — clear any prior plan state and
       // track step count so $step_completed progress-to-clear still works.
       if (req.kind === "plan_proposed") {
-        const payload = req.payload as { plan: string; steps?: { id: string }[]; summary?: string };
+        const payload = req.payload as {
+          plan: string;
+          steps?: { id: string }[];
+          summary?: string;
+          callId?: string;
+        };
         if (tab) {
           tab.completedStepIds.clear();
           tab.planTotalSteps = payload.steps?.length ?? 0;
@@ -3417,7 +3422,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (req.kind === "plan_proposed") {
-      const payload = req.payload as { plan: string; steps?: PlanStep[]; summary?: string };
+      const payload = req.payload as {
+        plan: string;
+        steps?: PlanStep[];
+        summary?: string;
+        callId?: string;
+      };
       if (tab) {
         tab.completedStepIds.clear();
         tab.planTotalSteps = payload.steps?.length ?? 0;
@@ -3429,6 +3439,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           plan: payload.plan,
           steps: payload.steps,
           summary: payload.summary,
+          callId: payload.callId,
           ...(countdownMs !== undefined ? { countdownMs } : {}),
         },
         tabId,

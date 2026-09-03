@@ -84,18 +84,23 @@ function makeState(): AppState {
   };
 }
 
-describe("desktop push_status action (#1370)", () => {
-  it("appends a status message to the transcript", () => {
-    // Empty `/btw` used to silently drop the keystroke (#1370). The send()
-    // handler now dispatches push_status with the usage hint so the user
-    // sees what's expected instead of staring at an unchanged screen.
+describe("desktop timeline notices", () => {
+  it("appends notice cards in dispatch order without shifting unrelated state", () => {
     const state = makeState();
-    const next = reduce(state, { t: "push_status", text: "▸ /btw <question>" });
-    expect(next.messages.at(-1)).toEqual({
-      kind: "status",
-      text: "▸ /btw <question>",
+    let next = reduce(state, { t: "push_notice", text: "Model switched" });
+    next = reduce(next, {
+      t: "push_notice",
+      text: "Vision is unavailable",
+      severity: "warning",
     });
-    // No other state should shift.
+    next = reduce(next, { t: "push_notice", text: "Export failed", severity: "error" });
+
+    expect(next.messages).toMatchObject([
+      { kind: "notice", text: "Model switched", severity: "info" },
+      { kind: "notice", text: "Vision is unavailable", severity: "warning" },
+      { kind: "notice", text: "Export failed", severity: "error" },
+    ]);
+    expect(new Set(next.messages.map((message) => message.kind))).toEqual(new Set(["notice"]));
     expect(next.busy).toBe(state.busy);
     expect(next.ready).toBe(state.ready);
   });
@@ -111,44 +116,16 @@ describe("desktop $btw_result reducer (#1470)", () => {
       event: { type: "$btw_result", question: "what year is it?", answer: "2026." },
     });
     expect(next.busy).toBe(false);
-    expect(next.messages.at(-1)).toEqual({
-      kind: "status",
+    expect(next.messages.at(-1)).toMatchObject({
+      kind: "notice",
       text: "≫ btw\n2026.",
+      severity: "info",
     });
   });
 });
 
-describe("desktop dismiss_error reducer (recoverable / hard error parity)", () => {
-  it("removes the targeted error by id, leaves other messages untouched", () => {
-    const base = makeState();
-    const state: AppState = {
-      ...base,
-      messages: [
-        { kind: "status", text: "hello" },
-        { kind: "error", message: "first", id: "err-a", recoverable: true },
-        { kind: "error", message: "second", id: "err-b", recoverable: false },
-      ],
-    };
-    const next = reduce(state, { t: "dismiss_error", id: "err-a" });
-    expect(next.messages).toEqual([
-      { kind: "status", text: "hello" },
-      { kind: "error", message: "second", id: "err-b", recoverable: false },
-    ]);
-  });
-
-  it("is a no-op when the id doesn't match any error", () => {
-    const base = makeState();
-    const state: AppState = {
-      ...base,
-      messages: [{ kind: "error", message: "only one", id: "err-x" }],
-    };
-    const next = reduce(state, { t: "dismiss_error", id: "does-not-exist" });
-    expect(next.messages).toEqual(state.messages);
-  });
-});
-
-describe("desktop error events carry recoverable flag from kernel events (#1456-followup)", () => {
-  it("kernel error with recoverable=true produces a recoverable=true chat message", () => {
+describe("desktop error notice severity", () => {
+  it("renders a recoverable kernel error as a warning notice", () => {
     const state = makeState();
     const next = reduce(state, {
       t: "incoming",
@@ -161,25 +138,24 @@ describe("desktop error events carry recoverable flag from kernel events (#1456-
         recoverable: true,
       },
     });
-    const last = next.messages.at(-1);
-    expect(last?.kind).toBe("error");
-    if (last?.kind === "error") {
-      expect(last.recoverable).toBe(true);
-      expect(typeof last.id).toBe("string");
-    }
+    expect(next.messages.at(-1)).toMatchObject({
+      kind: "notice",
+      text: "repeat-loop guard tripped",
+      severity: "warning",
+    });
   });
 
-  it("$error protocol event treats hard errors as non-recoverable", () => {
+  it("renders a hard protocol error as an error notice", () => {
     const state = makeState();
     const next = reduce(state, {
       t: "incoming",
       event: { type: "$error", message: "rpc died" },
     });
-    const last = next.messages.at(-1);
-    expect(last?.kind).toBe("error");
-    if (last?.kind === "error") {
-      expect(last.recoverable).toBe(false);
-    }
+    expect(next.messages.at(-1)).toMatchObject({
+      kind: "notice",
+      text: "rpc died",
+      severity: "error",
+    });
   });
 });
 

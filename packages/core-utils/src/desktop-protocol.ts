@@ -88,6 +88,8 @@ export interface PlanRequiredEvent {
   plan: string;
   steps?: unknown[];
   summary?: string;
+  /** Stable submit_plan tool call that anchors live progress in the chat timeline. */
+  callId?: string;
   /** YOLO auto-approval window (ms) — the card auto-picks the first option at expiry. */
   countdownMs?: number;
 }

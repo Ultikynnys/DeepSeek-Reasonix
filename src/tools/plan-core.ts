@@ -169,7 +169,7 @@ function registerSubmitPlan(registry: ToolRegistry, opts: PlanToolOptions): void
       // Block until the user approves, refines, or cancels
       const verdict = await (ctx?.confirmationGate ?? pauseGate).ask({
         kind: "plan_proposed",
-        payload: { plan, steps, summary },
+        payload: { plan, steps, summary, callId: ctx?.callId },
       });
       const fb = verdict.feedback?.trim();
       if (verdict.type === "approve") {

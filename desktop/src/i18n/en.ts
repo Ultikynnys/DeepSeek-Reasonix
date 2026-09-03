@@ -541,6 +541,8 @@ export const en = {
     showInExplorer: "Show in file explorer",
     errorName: "Error",
     warningName: "Warning",
+    noticeName: "Notice",
+    successName: "Success",
     degenerationName: "Degeneration detected",
     subagentDone: "Done",
     subagentFailed: "Failed",

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { COMPLETION_NOTIFY_MIN_MS, shouldShowCompletionToast } from "./notifications";
+import { COMPLETION_NOTIFY_MIN_MS, shouldAppendCompletionNotice } from "./notifications";
 
 describe("desktop completion feedback", () => {
-  it("shows in-window feedback when a long task completes while focused", () => {
+  it("appends in-window feedback when a long task completes while focused", () => {
     expect(
-      shouldShowCompletionToast({
+      shouldAppendCompletionNotice({
         wasBusy: true,
         isBusy: false,
         busyDurationMs: COMPLETION_NOTIFY_MIN_MS,
@@ -13,9 +13,9 @@ describe("desktop completion feedback", () => {
     ).toBe(true);
   });
 
-  it("does not show in-window feedback for short tasks", () => {
+  it("does not append in-window feedback for short tasks", () => {
     expect(
-      shouldShowCompletionToast({
+      shouldAppendCompletionNotice({
         wasBusy: true,
         isBusy: false,
         busyDurationMs: COMPLETION_NOTIFY_MIN_MS - 1,

@@ -3689,8 +3689,6 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   grid-template-columns: 1fr;
 }
 
-
-
 .tool-call {
   padding: 10px 14px 12px;
   font-family: "Geist Mono", monospace;
@@ -4073,23 +4071,18 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   font-size: inherit;
 }
 
-/* ---- Error card ---- */
+/* ---- Timeline notice card ---- */
 
-.error-body {
-  padding: 12px 14px;
+.notice-body {
+  padding: 10px 12px;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-.error-body .msg-err {
+.notice-body[data-severity="error"] {
   color: var(--danger);
-  font-family: inherit;
-  font-size: 14px;
-  background: var(--danger-soft);
-  padding: 8px 10px;
-  border-radius: 6px;
-}
-.error-body .hint {
-  margin-top: 8px;
-  font-size: 14px;
-  color: var(--fg-2);
 }
 
 .startup-failure {
@@ -5361,12 +5354,7 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 .skel-line {
   height: 9px;
   border-radius: 4px;
-  background: linear-gradient(
-    90deg,
-    var(--panel) 0%,
-    var(--card-hover) 50%,
-    var(--panel) 100%
-  );
+  background: linear-gradient(90deg, var(--panel) 0%, var(--card-hover) 50%, var(--panel) 100%);
   animation: skel-shimmer 1.6s ease-in-out infinite;
 }
 @keyframes skel-shimmer {
@@ -7962,25 +7950,6 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   color: oklch(100% 0 0);
 }
 
-/* YOLO toast variant */
-.toast-yolo {
-  border-color: var(--tone-err);
-  box-shadow: 0 0 0 1px oklch(68% 0.2 25 / 0.18), var(--shadow-lg);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.toast-yolo-badge {
-  font-weight: 700;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--tone-err);
-  color: oklch(99% 0 0);
-  flex-shrink: 0;
-}
-
 .composer textarea:focus {
   outline: none;
 }
@@ -7993,93 +7962,6 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   .mode-switch .ms-seg {
     padding: 4px 7px;
   }
-}
-
-/* ============================================================
-   Toast — transient notification pill
-   ============================================================ */
-.toast {
-  position: fixed;
-  right: 20px;
-  bottom: 48px;
-  background: var(--card);
-  border: 1px solid var(--border-strong);
-  color: var(--fg);
-  padding: 7px 12px;
-  border-radius: 999px;
-  font-family: inherit;
-  font-size: 14px;
-  box-shadow: var(--shadow-lg);
-  z-index: 200;
-  animation: toast-rise 0.18s ease-out;
-  pointer-events: none;
-  white-space: nowrap;
-}
-@keyframes toast-rise {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* Toast stack — multiple notifications */
-.toast-stack {
-  position: fixed;
-  right: 20px;
-  bottom: 48px;
-  z-index: 200;
-  display: flex;
-  flex-direction: column-reverse;
-  gap: 8px;
-  pointer-events: none;
-}
-.toast-item {
-  background: var(--card);
-  border: 1px solid var(--border-strong);
-  color: var(--fg);
-  padding: 7px 14px;
-  border-radius: 999px;
-  font-family: inherit;
-  font-size: 13px;
-  box-shadow: var(--shadow-lg);
-  animation: toast-rise 0.2s ease-out;
-  pointer-events: auto;
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 480px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.toast-item .toast-icon {
-  flex-shrink: 0;
-  font-size: 12px;
-  line-height: 1;
-}
-.toast-item .toast-msg {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.toast-error {
-  border-color: var(--tone-err);
-  background: oklch(30% 0.05 25 / 0.95);
-  color: oklch(90% 0.03 25);
-}
-.toast-warning {
-  border-color: var(--tone-warn);
-  background: oklch(50% 0.05 85 / 0.95);
-  color: oklch(98% 0.02 85);
-}
-.toast-info {
-  border-color: var(--accent);
-}
-.toast-success {
-  border-color: oklch(65% 0.12 145);
 }
 
 /* ============================================================
@@ -8667,21 +8549,6 @@ html[data-platform="macos"] .splash {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
-  }
-}
-
-.toast {
-  animation: toast-rise 0.25s ease-out;
-}
-
-@keyframes toast-fall {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(12px);
   }
 }
 

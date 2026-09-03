@@ -20,8 +20,6 @@ import {
   AssistantText,
   CompactionCard,
   DiffCard,
-  PlanCardView,
-  type PlanItem,
   ReasoningCard,
   ShellCard,
   SubagentCard,
@@ -147,6 +145,7 @@ export const AssistantMsg = memo(function AssistantMsg({
   onAlwaysAllowConfirm,
   onStopTool,
   pendingConfirms,
+  activePlan,
 }: {
   segments: AssistantSegment[];
   pending: boolean;
@@ -157,6 +156,7 @@ export const AssistantMsg = memo(function AssistantMsg({
   onAlwaysAllowConfirm: (id: number, prefix: string) => void;
   onStopTool: () => void;
   pendingConfirms: PendingConfirm[];
+  activePlan?: ActivePlan;
 }) {
   const [copied, setCopied] = useState(false);
   const content = segments
@@ -308,6 +308,13 @@ export const AssistantMsg = memo(function AssistantMsg({
               />
             );
           }
+          if (
+            s.name === "submit_plan" &&
+            activePlan?.callId !== undefined &&
+            s.callId === activePlan.callId
+          ) {
+            return <ActivePlanTaskCard key={s.callId} plan={activePlan} />;
+          }
           if (s.result && (s.name === "edit_file" || s.name === "multi_edit")) {
             const files = parseEditResult(s.result);
             return files.length > 0 ? (
@@ -373,63 +380,6 @@ function extractCommand(args: string): string | undefined {
     // ignore
   }
   return undefined;
-}
-
-export function PlanBanner({
-  plan,
-  onDismiss,
-}: {
-  plan: ActivePlan;
-  onDismiss?: () => void;
-}) {
-  useLang();
-  const total = plan.steps.length || 1;
-  const done = plan.completedStepIds.length;
-  const pct = (done / total) * 100;
-  const current = plan.steps.find((s) => !plan.completedStepIds.includes(s.id));
-  return (
-    <div className="plan-banner">
-      <span className="ico">
-        <I.list size={14} />
-      </span>
-      <div className="body">
-        <div className="t">
-          {t("thread.planRunning", { step: Math.min(done + 1, total), total })}
-          {current ? ` — ${current.title}` : ""}
-        </div>
-        <div className="s">{plan.plan}</div>
-      </div>
-      <div className="prog">
-        <div className="meter-mini">
-          <span style={{ width: `${pct}%` }} />
-        </div>
-        {onDismiss ? (
-          <button type="button" onClick={onDismiss}>
-            {t("thread.collapse")}
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-export function ActivePlanCard({ plan }: { plan: ActivePlan }) {
-  useLang();
-  const done = new Set(plan.completedStepIds);
-  const items: PlanItem[] = plan.steps.map((s) => {
-    let status: PlanItem["status"];
-    if (done.has(s.id)) status = "done";
-    else if (s === plan.steps.find((x) => !done.has(x.id))) status = "active";
-    else status = "todo";
-    return {
-      id: s.id,
-      status,
-      text: s.title,
-      tool: s.action,
-      note: s.risk ? `${t("thread.risk")}: ${s.risk}` : undefined,
-    };
-  });
-  return <PlanCardView items={items} title={t("thread.activePlan")} />;
 }
 
 // ---- Approval bindings ----

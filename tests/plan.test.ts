@@ -13,11 +13,15 @@ import {
 /** A PauseGate that auto-resolves with a pre-configured choice.  */
 class AutoGate extends PauseGate {
   private _choice: ConfirmationChoice | { type: string };
+  lastAsk: { kind: string; payload?: unknown } | null = null;
+
   constructor(choice: ConfirmationChoice | { type: string }) {
     super();
     this._choice = choice;
   }
-  override ask(_opts: { kind: string; payload?: unknown }): Promise<any> {
+
+  override ask(opts: { kind: string; payload?: unknown }): Promise<any> {
+    this.lastAsk = opts;
     return Promise.resolve(this._choice);
   }
 }
@@ -226,6 +230,22 @@ describe("registerPlanTool + submit_plan", () => {
     );
     expect(out).toBe("plan approved");
     expect(submitted).toEqual(["# Plan"]);
+  });
+
+  it("carries the stable tool call id through to the plan approval request", async () => {
+    const reg = new ToolRegistry();
+    registerPlanTool(reg);
+    const gate = new AutoGate({ type: "approve" });
+
+    await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan" }), {
+      callId: "plan-call-42",
+      confirmationGate: gate,
+    });
+
+    expect(gate.lastAsk).toMatchObject({
+      kind: "plan_proposed",
+      payload: { plan: "# Plan", callId: "plan-call-42" },
+    });
   });
 
   it("omits summary when blank / whitespace-only", async () => {

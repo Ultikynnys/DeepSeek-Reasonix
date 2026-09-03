@@ -108,7 +108,7 @@ export function deriveDesktopNotifications(args: {
   return notifications;
 }
 
-export function shouldShowCompletionToast(args: {
+export function shouldAppendCompletionNotice(args: {
   wasBusy: boolean;
   isBusy: boolean;
   busyDurationMs: number;
