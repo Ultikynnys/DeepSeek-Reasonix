@@ -18,6 +18,7 @@ import { createLogger } from "./logging.js";
 import { showPayloadContextLength } from "./ollama-model-map.js";
 import { buildResponsesPayload } from "./responses-api.js";
 import { type RetryOptions, fetchWithRetry } from "./retry.js";
+import { DEFAULT_CONTEXT_TOKENS } from "./telemetry/stats.js";
 import { estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
 
@@ -1420,16 +1421,19 @@ export class DeepSeekClient {
   }
 
   /** num_ctx for an Ollama request: explicit option > config/env > a lazy
-   *  `/api/show` probe (cached, fail-soft) — so server and compaction agree. */
-  private async resolveOllamaNumCtx(opts: ChatRequestOptions): Promise<number | undefined> {
+   *  `/api/show` probe (cached, fail-soft) > DEFAULT_CONTEXT_TOKENS (128K) — so
+   *  server and compaction agree on the default context window. */
+  private async resolveOllamaNumCtx(opts: ChatRequestOptions): Promise<number> {
     if (opts.ollama?.numCtx !== undefined) return opts.ollama.numCtx;
     const configured = loadOllamaNumCtx();
     if (configured !== undefined) return configured;
     const cached = this.ollamaContextCache.get(opts.model);
-    if (cached && Date.now() - cached.at < OLLAMA_SHOW_PROBE_TTL_MS) return cached.contextTokens;
+    if (cached && Date.now() - cached.at < OLLAMA_SHOW_PROBE_TTL_MS) {
+      return cached.contextTokens ?? DEFAULT_CONTEXT_TOKENS;
+    }
     const contextTokens = await this.probeOllamaContextLength(opts.model);
     this.ollamaContextCache.set(opts.model, { at: Date.now(), contextTokens });
-    return contextTokens;
+    return contextTokens ?? DEFAULT_CONTEXT_TOKENS;
   }
 
   /** GET {origin}/api/show — the model's max context length, not the runner's

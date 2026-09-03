@@ -558,7 +558,7 @@ describe("ollama num_ctx learning", () => {
     expect(showCalls).toHaveLength(1);
   });
 
-  it("falls back to no num_ctx when /api/show is unavailable", async () => {
+  it("falls back to DEFAULT_CONTEXT_TOKENS (131072) when /api/show is unavailable", async () => {
     // biome-ignore lint/performance/noDelete: test needs the env unset
     delete process.env.OLLAMA_NUM_CTX;
     let capturedInit: RequestInit | undefined;
@@ -583,6 +583,7 @@ describe("ollama num_ctx learning", () => {
     });
     const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
     expect(body.options).toEqual({
+      num_ctx: 131072,
       repeat_penalty: 1.3,
       frequency_penalty: 0.5,
       presence_penalty: 0.4,
