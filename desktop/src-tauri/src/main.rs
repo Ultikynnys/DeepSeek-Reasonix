@@ -125,18 +125,18 @@ fn git_status(root: String) -> Result<Vec<GitStatusEntry>, String> {
 }
 
 /// Search `root` (bounded, skipping hidden entries and well-known noise
-/// dirs) for a file whose basename matches `name` (case-insensitive).
-/// Returns the first match — used to resolve bare chat references like
-/// `web.ts` to their real location under the workspace.
-fn find_by_basename(root: &Path, name: &str) -> Option<String> {
+/// dirs) for files whose basename matches `name` (case-insensitive).
+fn find_by_basename(root: &Path, name: &str) -> Vec<String> {
     const MAX_DEPTH: u32 = 6;
     const MAX_VISITED: usize = 20_000;
+    const MAX_MATCHES: usize = 20;
     let mut queue: std::collections::VecDeque<(std::path::PathBuf, u32)> =
         std::collections::VecDeque::new();
     queue.push_back((root.to_path_buf(), 0));
+    let mut matches = Vec::new();
     let mut visited = 0usize;
     while let Some((dir, depth)) = queue.pop_front() {
-        if depth > MAX_DEPTH || visited >= MAX_VISITED {
+        if depth > MAX_DEPTH || visited >= MAX_VISITED || matches.len() >= MAX_MATCHES {
             continue;
         }
         let entries = match std::fs::read_dir(&dir) {
@@ -144,6 +144,9 @@ fn find_by_basename(root: &Path, name: &str) -> Option<String> {
             Err(_) => continue,
         };
         for entry in entries.flatten() {
+            if visited >= MAX_VISITED || matches.len() >= MAX_MATCHES {
+                break;
+            }
             visited += 1;
             let entry_name = entry.file_name();
             let name_str = entry_name.to_string_lossy();
@@ -154,18 +157,24 @@ fn find_by_basename(root: &Path, name: &str) -> Option<String> {
             if file_type.is_dir() {
                 queue.push_back((entry.path(), depth + 1));
             } else if file_type.is_file() && name_str.eq_ignore_ascii_case(name) {
-                return Some(entry.path().to_string_lossy().into_owned());
+                matches.push(entry.path().to_string_lossy().into_owned());
             }
         }
     }
-    None
+    matches.sort();
+    matches
 }
 
-/// Resolve a file reference to a path that actually exists: absolute paths
-/// pass through, relative paths join the workspace, and a path that still
-/// doesn't exist falls back to a basename search under the workspace (chat
-/// references are often bare names like `web.ts`).
-fn resolve_existing(path: &str, workspace: Option<&str>) -> String {
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum WorkspaceFileResolution {
+    Exact { path: String },
+    Unique { path: String },
+    Ambiguous { paths: Vec<String> },
+    NotFound,
+}
+
+fn resolve_workspace_file_impl(path: &str, workspace: Option<&str>) -> WorkspaceFileResolution {
     let candidate = if Path::new(path).is_absolute() {
         path.to_string()
     } else if let Some(ws) = workspace {
@@ -174,16 +183,104 @@ fn resolve_existing(path: &str, workspace: Option<&str>) -> String {
         path.to_string()
     };
     if std::fs::metadata(&candidate).is_ok() {
-        return candidate;
+        return WorkspaceFileResolution::Exact { path: candidate };
     }
-    if let Some(ws) = workspace {
-        if let Some(base) = Path::new(&candidate).file_name().and_then(|n| n.to_str()) {
-            if let Some(found) = find_by_basename(Path::new(ws), base) {
-                return found;
+    let Some(ws) = workspace else {
+        return WorkspaceFileResolution::NotFound;
+    };
+    let Some(base) = Path::new(path).file_name().and_then(|name| name.to_str()) else {
+        return WorkspaceFileResolution::NotFound;
+    };
+    match find_by_basename(Path::new(ws), base).as_slice() {
+        [] => WorkspaceFileResolution::NotFound,
+        [path] => WorkspaceFileResolution::Unique { path: path.clone() },
+        paths => WorkspaceFileResolution::Ambiguous {
+            paths: paths.to_vec(),
+        },
+    }
+}
+
+#[tauri::command]
+fn resolve_workspace_file(
+    path: String,
+    workspace: Option<String>,
+) -> Result<WorkspaceFileResolution, String> {
+    Ok(resolve_workspace_file_impl(&path, workspace.as_deref()))
+}
+
+/// Resolve an existing path for legacy reveal callers. Ambiguous basename
+/// matches deliberately do not resolve to an arbitrary file.
+fn resolve_existing(path: &str, workspace: Option<&str>) -> String {
+    match resolve_workspace_file_impl(path, workspace) {
+        WorkspaceFileResolution::Exact { path } | WorkspaceFileResolution::Unique { path } => path,
+        WorkspaceFileResolution::Ambiguous { .. } | WorkspaceFileResolution::NotFound => {
+            if Path::new(path).is_absolute() {
+                path.to_string()
+            } else if let Some(ws) = workspace {
+                Path::new(ws).join(path).to_string_lossy().into_owned()
+            } else {
+                path.to_string()
             }
         }
     }
-    candidate
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WorkspaceFileResolution, resolve_workspace_file_impl};
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn fixture() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock before epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("reasonix-file-resolution-{nonce}"));
+        std::fs::create_dir_all(root.join("one")).expect("create one");
+        std::fs::create_dir_all(root.join("two")).expect("create two");
+        root
+    }
+
+    #[test]
+    fn resolves_exact_and_unique_workspace_files() {
+        let root = fixture();
+        let exact = root.join("one").join("exact.qci");
+        let unique = root.join("two").join("unique.qci");
+        std::fs::write(&exact, "exact").expect("write exact");
+        std::fs::write(&unique, "unique").expect("write unique");
+        let workspace = root.to_string_lossy();
+
+        assert!(matches!(
+            resolve_workspace_file_impl("one/exact.qci", Some(&workspace)),
+            WorkspaceFileResolution::Exact { path } if PathBuf::from(&path) == exact
+        ));
+        assert!(matches!(
+            resolve_workspace_file_impl("unique.qci", Some(&workspace)),
+            WorkspaceFileResolution::Unique { path } if PathBuf::from(&path) == unique
+        ));
+
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn reports_ambiguous_and_missing_workspace_files() {
+        let root = fixture();
+        std::fs::write(root.join("one").join("shared.qci"), "one").expect("write one");
+        std::fs::write(root.join("two").join("shared.qci"), "two").expect("write two");
+        let workspace = root.to_string_lossy();
+
+        assert!(matches!(
+            resolve_workspace_file_impl("shared.qci", Some(&workspace)),
+            WorkspaceFileResolution::Ambiguous { paths } if paths.len() == 2
+        ));
+        assert!(matches!(
+            resolve_workspace_file_impl("missing.qci", Some(&workspace)),
+            WorkspaceFileResolution::NotFound
+        ));
+
+        std::fs::remove_dir_all(root).expect("remove fixture");
+    }
 }
 
 /// Reveal a file or directory in the OS file explorer: a file opens its
@@ -318,6 +415,7 @@ fn main() {
             rpc_send,
             rpc_kill,
             record_frontend_diagnostic,
+            resolve_workspace_file,
             reveal_in_explorer,
             open_with_dialog,
             list_workspace_tree,

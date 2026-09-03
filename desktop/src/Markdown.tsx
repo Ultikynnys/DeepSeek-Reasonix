@@ -9,6 +9,9 @@ import {
   isValidElement,
   memo,
   useContext,
+  useEffect,
+  useId,
+  useRef,
   useState,
 } from "react";
 import ReactMarkdown from "react-markdown";
@@ -63,22 +66,31 @@ const KNOWN_EXTS =
   "ts|tsx|mts|cts|js|jsx|mjs|cjs|py|pyi|rs|go|json|jsonc|md|mdx|css|scss|less|html|htm|xml|svg|yaml|yml|toml|sh|bash|zsh|fish|sql|rb|java|kt|swift|c|cpp|cc|cxx|h|hpp|hxx|cs|php|lua|dart|ex|exs|erl|hs|clj|cljs|zig|vue|svelte|graphql|gql|proto";
 const PATH_SEG = "[\\w.@()+~%#=-]+";
 const FILE_NAME_SOURCE = `${PATH_SEG}\\.(?:${KNOWN_EXTS})`;
-const FILE_REF_SOURCE = [
-  `[A-Za-z]:[\\\\/](?:${PATH_SEG}[\\\\/])*${FILE_NAME_SOURCE}`,
-  `/(?:${PATH_SEG}[\\\\/])*${FILE_NAME_SOURCE}`,
-  `(?:\\.{1,2}[\\\\/])?(?:${PATH_SEG}[\\\\/])+${FILE_NAME_SOURCE}`,
-  FILE_NAME_SOURCE,
+const GENERIC_FILE_NAME_SOURCE = `${PATH_SEG}\\.[A-Za-z0-9_-]{1,16}`;
+function fileRefSource(fileNameSource: string): string {
+  return [
+    `[A-Za-z]:[\\\\/](?:${PATH_SEG}[\\\\/])*${fileNameSource}`,
+    `/(?:${PATH_SEG}[\\\\/])*${fileNameSource}`,
+    `(?:\\.{1,2}[\\\\/])?(?:${PATH_SEG}[\\\\/])+${fileNameSource}`,
+    fileNameSource,
+  ].join("|");
+}
+const FILE_REF_SOURCE = fileRefSource(FILE_NAME_SOURCE);
+const GENERIC_FILE_REF_SOURCE = fileRefSource(GENERIC_FILE_NAME_SOURCE);
+const GENERIC_PATH_SOURCE = [
+  `[A-Za-z]:[\\\\/](?:${PATH_SEG}[\\\\/])*${GENERIC_FILE_NAME_SOURCE}`,
+  `/(?:${PATH_SEG}[\\\\/])*${GENERIC_FILE_NAME_SOURCE}`,
+  `(?:\\.{1,2}[\\\\/])?(?:${PATH_SEG}[\\\\/])+${GENERIC_FILE_NAME_SOURCE}`,
 ].join("|");
-const LINE_REF_SOURCE = "(?::(\\d+(?::\\d+)?(?:-\\d+)?))?";
-// No lookbehind here — Tauri's WKWebView on macOS Monterey (Safari < 16.4)
-// can't parse `(?<=...)` and the whole bundle fails to load with an
-// "invalid group specifier name" error. Capture the leading char as
-// group 1 instead and let splitFilePaths skip past it. Issue #1209.
+const LINE_VALUE_SOURCE = "\\d+(?::\\d+)?(?:-\\d+)?";
+// No lookbehind here: Tauri's WKWebView on macOS Monterey (Safari < 16.4)
+// cannot parse it. Generic extensions require a line suffix in prose to
+// avoid turning ordinary dotted words into file references.
 const FILE_PATH_RE = new RegExp(
-  `(^|[\\s\`'"(\\[])(${FILE_REF_SOURCE})${LINE_REF_SOURCE}(?=[\\s.,;!?\\]\\)'"\`]|$)`,
+  `(^|[\\s\`'"(\\[])((?:${FILE_REF_SOURCE}|${GENERIC_PATH_SOURCE})(?::${LINE_VALUE_SOURCE})?|(?:${GENERIC_FILE_REF_SOURCE}):${LINE_VALUE_SOURCE})(?=[\\s.,;!?\\]\\)'"\`]|$)`,
   "g",
 );
-const EXACT_FILE_REF_RE = new RegExp(`^(${FILE_REF_SOURCE})${LINE_REF_SOURCE}$`);
+const EXACT_FILE_REF_RE = new RegExp(`^(${GENERIC_FILE_REF_SOURCE})(?::(${LINE_VALUE_SOURCE}))?$`);
 
 type ParsedFileRef = { path: string; line?: string };
 
@@ -119,59 +131,125 @@ function parseFileHref(value: string): ParsedFileRef | null {
   return { ...parsed, line: parsed.line ?? hashLine };
 }
 
+type WorkspaceFileResolution =
+  | { status: "exact" | "unique"; path: string }
+  | { status: "ambiguous"; paths: string[] }
+  | { status: "not_found" };
+
 function FilePill({ path, line }: { path: string; line?: string }) {
   useLang();
   const ctx = useContext(WorkspaceContext);
-  const [done, setDone] = useState<"open" | "copy" | null>(null);
+  const [done, setDone] = useState<"open" | "copy" | "not-found" | null>(null);
+  const [matches, setMatches] = useState<string[]>([]);
+  const wrapperRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const firstMatchRef = useRef<HTMLButtonElement>(null);
+  const matchesId = useId();
   const display = line ? `${path}:${line}` : path;
-  const openInExplorer = async () => {
-    try {
-      const abs = resolveAgainstWorkspace(path, ctx.dir);
-      await revealInExplorer(abs, ctx.dir);
-      setDone("open");
-      setTimeout(() => setDone(null), 1200);
-    } catch {
-      try {
-        await navigator.clipboard.writeText(display);
-        setDone("copy");
-        setTimeout(() => setDone(null), 1200);
-      } catch {
-        /* ignore */
+  const showDone = (state: "open" | "copy" | "not-found") => {
+    setDone(state);
+    if (state !== "not-found") setTimeout(() => setDone(null), 1200);
+  };
+  useEffect(() => {
+    if (matches.length === 0) return;
+    firstMatchRef.current?.focus();
+    const dismiss = (event: PointerEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) setMatches([]);
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMatches([]);
+        triggerRef.current?.focus();
       }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [matches]);
+  const revealResolved = async (resolved: string) => {
+    await revealInExplorer(resolved);
+    setMatches([]);
+    showDone("open");
+  };
+  const openInExplorer = async () => {
+    if (matches.length > 0) {
+      setMatches([]);
+      return;
+    }
+    setDone(null);
+    try {
+      const result = await invoke<WorkspaceFileResolution>("resolve_workspace_file", {
+        path,
+        workspace: ctx.dir ?? null,
+      });
+      if (result.status === "exact" || result.status === "unique") {
+        await revealResolved(result.path);
+      } else if (result.status === "ambiguous") {
+        setMatches(result.paths);
+        setDone(null);
+      } else {
+        setMatches([]);
+        showDone("not-found");
+      }
+    } catch {
+      setMatches([]);
+      showDone("not-found");
     }
   };
   const copyOnly = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
       await navigator.clipboard.writeText(display);
-      setDone("copy");
-      setTimeout(() => setDone(null), 1200);
+      showDone("copy");
     } catch {
       /* ignore */
     }
   };
   return (
-    <button
-      type="button"
-      className={`file-pill ${done ? "done" : ""}`}
-      onClick={openInExplorer}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        void copyOnly(e);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
+    <span className="file-pill-wrap" ref={wrapperRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`file-pill ${done ? `done ${done}` : ""}`}
+        onClick={openInExplorer}
+        aria-expanded={matches.length > 0}
+        aria-controls={matches.length > 0 ? matchesId : undefined}
+        onContextMenu={(e) => {
           e.preventDefault();
-          void openInExplorer();
+          void copyOnly(e);
+        }}
+        title={
+          done === "not-found" ? t("markdown.fileNotFound", { path }) : t("markdown.filePillTitle")
         }
-      }}
-      title={t("markdown.filePillTitle")}
-    >
-      <FileText size={10} className="file-pill-icon" />
-      <span className="file-pill-path">{path}</span>
-      {line && <span className="file-pill-line">:{line}</span>}
-      {done && <Check size={10} className="file-pill-check" />}
-    </button>
+      >
+        <FileText size={10} className="file-pill-icon" />
+        <span className="file-pill-path">{path}</span>
+        {line && <span className="file-pill-line">:{line}</span>}
+        {(done === "open" || done === "copy") && <Check size={10} className="file-pill-check" />}
+      </button>
+      <output className="sr-only" aria-live="polite">
+        {done === "not-found" ? t("markdown.fileNotFound", { path }) : ""}
+      </output>
+      {matches.length > 0 && (
+        <span id={matchesId} className="file-pill-matches">
+          <span className="file-pill-matches-label">{t("markdown.selectWorkspaceFile")}</span>
+          {matches.map((match, index) => (
+            <button
+              key={match}
+              ref={index === 0 ? firstMatchRef : undefined}
+              type="button"
+              title={match}
+              onClick={() => revealResolved(match)}
+            >
+              {match}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -182,12 +260,16 @@ function splitFilePaths(text: string): ReactNode[] | string {
   let m: RegExpExecArray | null = FILE_PATH_RE.exec(text);
   while (m !== null) {
     const prefix = m[1] ?? "";
-    const path = m[2]!;
-    const line = m[3];
+    const reference = m[2]!;
+    const parsed = parseFileRef(reference);
     const pillStart = m.index + prefix.length;
     if (pillStart > last) out.push(text.slice(last, pillStart));
-    out.push(<FilePill key={`fp-${pillStart}`} path={path} line={line} />);
-    last = pillStart + path.length + (line ? line.length + 1 : 0);
+    if (parsed) {
+      out.push(<FilePill key={`fp-${pillStart}`} path={parsed.path} line={parsed.line} />);
+    } else {
+      out.push(reference);
+    }
+    last = pillStart + reference.length;
     m = FILE_PATH_RE.exec(text);
   }
   if (out.length === 0) return text;

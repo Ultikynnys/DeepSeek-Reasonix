@@ -3050,6 +3050,21 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 
 /* ---- File pills (inline clickable file paths in markdown) ---- */
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.file-pill-wrap {
+  position: relative;
+  display: inline;
+}
 .file-pill {
   display: inline-flex;
   align-items: center;
@@ -3075,6 +3090,46 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .file-pill.done {
   color: var(--success);
   background: transparent;
+}
+.file-pill.done.not-found {
+  color: var(--danger);
+}
+.file-pill-matches {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  width: max-content;
+  max-width: min(560px, 80vw);
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: var(--shadow-md);
+}
+.file-pill-matches-label {
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.file-pill-matches button {
+  overflow: hidden;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font-family: "Geist Mono", monospace;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.file-pill-matches button:hover {
+  background: var(--accent-soft);
 }
 .file-pill-icon {
   opacity: 0.6;

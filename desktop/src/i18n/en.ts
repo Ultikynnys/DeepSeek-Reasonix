@@ -348,6 +348,8 @@ export const en = {
   },
   markdown: {
     filePillTitle: "click to show in file explorer · right-click to copy",
+    fileNotFound: "File not found in workspace: {path}",
+    selectWorkspaceFile: "Select a workspace file",
     externalLinkTitle: "open {href} in browser",
     localLinkTitle: "open {href}",
     copy: "copy",
