@@ -2792,7 +2792,6 @@ function TabRuntime({
             setWdOpen(true);
           }}
           onOpenSettings={() => openSettingsAt("general")}
-          onOpenRules={() => openSettingsAt("rules")}
           onOpenAbout={() => setAboutOpen(true)}
         />
 

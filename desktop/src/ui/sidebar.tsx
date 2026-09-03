@@ -67,7 +67,6 @@ export function Sidebar({
   onRenameSession,
   onOpenWorkdir,
   onOpenSettings,
-  onOpenRules,
   onOpenAbout,
 }: {
   sessions: SessionInfo[];
@@ -80,7 +79,6 @@ export function Sidebar({
   onRenameSession: (name: string, title: string) => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
   onOpenSettings: () => void;
-  onOpenRules: () => void;
   onOpenAbout: () => void;
 }) {
   useLang();
@@ -350,12 +348,6 @@ export function Sidebar({
       </div>
 
       <div className="side-foot">
-        <div className="row" onClick={onOpenRules} onKeyDown={activationHandler(onOpenRules)}>
-          <span className="ico">
-            <I.shield size={13} />
-          </span>
-          <span>{t("sidebarPanel.approvalRules")}</span>
-        </div>
         <div className="row" onClick={onOpenAbout} onKeyDown={activationHandler(onOpenAbout)}>
           <span className="ico">
             <I.help size={13} />
