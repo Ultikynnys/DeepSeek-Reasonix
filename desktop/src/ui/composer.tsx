@@ -114,7 +114,7 @@ export function Composer({
 }: {
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
-  onSend: () => void;
+  onSend: (text?: string) => void;
   onAbort: () => void;
   disabled?: boolean;
   busy?: boolean;
@@ -258,6 +258,21 @@ export function Composer({
     historyRef.current.push(trimmed);
     if (historyRef.current.length > 100) historyRef.current.shift();
     setBrowseIdx(-1);
+  };
+
+  const handleProceed = () => {
+    if (disabled || busy) return;
+    const trimmed = draft.trim();
+    if (trimmed) {
+      historyRef.current.push(trimmed);
+    }
+    historyRef.current.push("proceed");
+    if (historyRef.current.length > 100) {
+      historyRef.current.splice(0, historyRef.current.length - 100);
+    }
+    setBrowseIdx(-1);
+    setDraft("");
+    onSend("proceed");
   };
 
   const navigateHistory = (dir: -1 | 1) => {
@@ -557,6 +572,16 @@ export function Composer({
                 </MenuPop>
               ) : null}
             </div>
+            <button
+              type="button"
+              className="quick-proceed-btn"
+              disabled={disabled || busy}
+              onClick={handleProceed}
+              title={t("composer.quickProceedTitle")}
+            >
+              <I.play size={11} />
+              <span>{t("composer.proceed")}</span>
+            </button>
             {busy ? (
               <button
                 type="button"
@@ -620,10 +645,7 @@ function ModelList({
   const [draft, setDraft] = useState(activeModel);
   const usableAntigravityModels = antigravityModels
     ? Array.from(
-        new Set([
-          ...antigravityModels.filter(isUsableAntigravityModel),
-          ...ANTIGRAVITY_MODELS,
-        ]),
+        new Set([...antigravityModels.filter(isUsableAntigravityModel), ...ANTIGRAVITY_MODELS]),
       )
     : undefined;
   const antigravityGroup = Boolean(usableAntigravityModels && usableAntigravityModels.length > 0);

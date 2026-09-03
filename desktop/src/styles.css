@@ -4272,6 +4272,39 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   opacity: 1;
 }
 
+.quick-proceed-btn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.quick-proceed-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.quick-proceed-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.quick-proceed-btn:disabled {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--muted-2);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 /* hint row above composer */
 .hint-row {
   display: flex;
@@ -7752,6 +7785,9 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 .composer-foot .send-btn {
   flex-shrink: 0;
 }
+.composer-foot .quick-proceed-btn {
+  flex-shrink: 0;
+}
 .composer-foot .grow {
   flex: 1;
   min-width: 4px;
@@ -7792,6 +7828,12 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 @container composer (max-width: 420px) {
   .composer-foot .model-pill {
     max-width: 100px;
+  }
+  .composer-foot .quick-proceed-btn {
+    padding: 0 8px;
+  }
+  .composer-foot .quick-proceed-btn span {
+    display: none;
   }
 }
 

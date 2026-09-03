@@ -48,6 +48,8 @@ export const en = {
     sendNow: "send now",
     queue: "queue",
     interrupt: "stop",
+    proceed: "Proceed",
+    quickProceedTitle: "Quick send 'proceed'",
     insertFile: "Insert file or image",
     switchModel: "Switch model",
     switchSubagentModel: "Switch subagent model",
@@ -156,7 +158,8 @@ export const en = {
     budgetHint: "USD per session. Empty = no cap.",
     budgetPlaceholder: "no cap",
     contextWindow: "Context window",
-    contextWindowHint: "Tokens the agent keeps in memory before compacting. 300000–1000000; values above the current model's max context length are clamped to it. Empty = model default (300000).",
+    contextWindowHint:
+      "Tokens the agent keeps in memory before compacting. 300000–1000000; values above the current model's max context length are clamped to it. Empty = model default (300000).",
     contextWindowPlaceholder: "default (300000)",
     webSearchEngine: "search engine",
     webSearchEngineBing: "bing — default, works from CN without proxy",
@@ -266,7 +269,8 @@ export const en = {
     ollamaModelsHint: "Fetched live from the endpoint — pick one to use it.",
     ollamaModelsRefresh: "Refresh",
     ollamaModelsError: "Couldn't fetch models — {error}",
-    ollamaSubscription: "{count} models require an Ollama subscription (plan: {plan}). Upgrade at ollama.com to unlock them.",
+    ollamaSubscription:
+      "{count} models require an Ollama subscription (plan: {plan}). Upgrade at ollama.com to unlock them.",
     ollamaPlan: "Ollama plan: {plan}",
     effortSection: "Reasoning effort",
     ctxWindow: "Context",
@@ -582,8 +586,7 @@ export const en = {
     codexLeft: "left",
     thisTurnQuotaTitle: "This turn used {pct}% of the weekly Codex quota",
     ollamaQuota: "plan usage",
-    ollamaQuotaTitle:
-      "Weekly plan usage {left}% left · session {session}% left · click to refresh",
+    ollamaQuotaTitle: "Weekly plan usage {left}% left · session {session}% left · click to refresh",
     ollamaTurnQuotaTitle: "This turn used {pct}% of the session usage",
     ollamaNoData:
       "Ollama usage · no data — set an API key in Settings → Models to see plan usage · click to retry",

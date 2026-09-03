@@ -2950,7 +2950,7 @@ function TabRuntime({
               <Composer
                 draft={draft}
                 setDraft={setDraft}
-                onSend={() => send()}
+                onSend={(text) => send(text)}
                 onAbort={abort}
                 disabled={!state.ready}
                 busy={state.busy}
