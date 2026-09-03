@@ -195,4 +195,76 @@ describe("ContextPanel files", () => {
     fireEvent.click(btn);
     expect(onCompact).toHaveBeenCalledOnce();
   });
+
+  it("renders custom approval rules and allows removing them", () => {
+    const onRemoveRule = vi.fn();
+    render(
+      <ContextPanel
+        settings={{
+          ...settings,
+          shellAllowed: ["git status", "cargo test"],
+          pathAllowed: ["/opt/sdk"],
+        }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onRemoveRule={onRemoveRule}
+      />,
+    );
+
+    // Switch to Rules tab
+    fireEvent.click(screen.getByText("Rules"));
+
+    expect(screen.getByText("git status")).toBeTruthy();
+    expect(screen.getByText("cargo test")).toBeTruthy();
+    expect(screen.getByText("/opt/sdk")).toBeTruthy();
+
+    const removeBtn = screen.getByRole("button", { name: "Remove rule: git status" });
+    fireEvent.click(removeBtn);
+    expect(onRemoveRule).toHaveBeenCalledWith("shell", "git status");
+  });
+
+  it("allows adding a new rule via the form", () => {
+    const onAddRule = vi.fn();
+    render(
+      <ContextPanel
+        settings={settings}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onAddRule={onAddRule}
+      />,
+    );
+
+    // Switch to Rules tab
+    fireEvent.click(screen.getByText("Rules"));
+
+    const input = screen.getByRole("textbox", { name: "Rule pattern" });
+    fireEvent.change(input, { target: { value: "npm run build" } });
+
+    const addBtn = screen.getByRole("button", { name: "Add Rule" });
+    fireEvent.click(addBtn);
+
+    expect(onAddRule).toHaveBeenCalledWith("shell", "npm run build");
+  });
 });

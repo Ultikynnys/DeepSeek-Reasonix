@@ -37,6 +37,8 @@ export function ContextPanel({
   onImportMemories,
   onDismissMemoryResult,
   onCompact,
+  onAddRule,
+  onRemoveRule,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -58,6 +60,8 @@ export function ContextPanel({
   onImportMemories: (json: string) => void;
   onDismissMemoryResult: () => void;
   onCompact?: () => void;
+  onAddRule?: (ruleType: "shell" | "path", pattern: string) => void;
+  onRemoveRule?: (ruleType: "shell" | "path", pattern: string) => void;
 }) {
   useLang();
   const [tab, setTab] = useState<Tab>("files");
@@ -193,7 +197,13 @@ export function ContextPanel({
               onDismissResult={onDismissMemoryResult}
             />
           )}
-          {tab === "rules" && <CtxRules settings={settings} />}
+          {tab === "rules" && (
+            <CtxRules
+              settings={settings}
+              onAddRule={onAddRule}
+              onRemoveRule={onRemoveRule}
+            />
+          )}
         </PanelErrorBoundary>
       </div>
     </aside>
@@ -593,7 +603,18 @@ function CtxMemory({
   );
 }
 
-function CtxRules({ settings }: { settings: Settings | null }) {
+function CtxRules({
+  settings,
+  onAddRule,
+  onRemoveRule,
+}: {
+  settings: Settings | null;
+  onAddRule?: (ruleType: "shell" | "path", pattern: string) => void;
+  onRemoveRule?: (ruleType: "shell" | "path", pattern: string) => void;
+}) {
+  const [ruleType, setRuleType] = useState<"shell" | "path">("shell");
+  const [pattern, setPattern] = useState("");
+
   const editMode = settings?.editMode ?? "review";
   const items: { p: string; allow: boolean; desc: string }[] =
     editMode === "yolo"
@@ -617,23 +638,130 @@ function CtxRules({ settings }: { settings: Settings | null }) {
             },
           ]
         : [{ p: "*", allow: false, desc: t("contextPanel.ruleReview") }];
+
+  const shellRules = settings?.shellAllowed ?? [];
+  const pathRules = settings?.pathAllowed ?? [];
+  const totalCustom = shellRules.length + pathRules.length;
+
+  const handleAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = pattern.trim();
+    if (!trimmed || !onAddRule) return;
+    onAddRule(ruleType, trimmed);
+    setPattern("");
+  };
+
   return (
-    <div className="ctx-block">
-      <div className="h">
-        <span>{t("contextPanel.autoApproveTitle")}</span>
-        <span className="right">{editMode}</span>
-      </div>
-      {items.map((r) => (
-        <div className="rule" key={r.p}>
-          <div className="top">
-            <span className={`pat ${r.allow ? "" : "deny"}`}>{r.p}</span>
-            <span className={`sw ${r.allow ? "" : "deny"}`}>
-              {r.allow ? t("contextPanel.allow") : t("contextPanel.ask")}
-            </span>
-          </div>
-          <div className="desc">{r.desc}</div>
+    <>
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.autoApproveTitle")}</span>
+          <span className="right">{editMode}</span>
         </div>
-      ))}
-    </div>
+        {items.map((r) => (
+          <div className="rule" key={r.p}>
+            <div className="top">
+              <span className={`pat ${r.allow ? "" : "deny"}`}>{r.p}</span>
+              <span className={`sw ${r.allow ? "" : "deny"}`}>
+                {r.allow ? t("contextPanel.allow") : t("contextPanel.ask")}
+              </span>
+            </div>
+            <div className="desc">{r.desc}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="ctx-block" style={{ marginTop: 14 }}>
+        <div className="h">
+          <span>{t("contextPanel.customRulesTitle")}</span>
+          <span className="right">{totalCustom}</span>
+        </div>
+
+        {shellRules.map((r) => (
+          <div className="rule" key={`shell-${r}`}>
+            <div className="top">
+              <span className="pat">{r}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span className="sw">{t("contextPanel.allow")}</span>
+                {onRemoveRule && (
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    title={t("contextPanel.deleteRuleTooltip")}
+                    aria-label={`Remove rule: ${r}`}
+                    onClick={() => onRemoveRule("shell", r)}
+                  >
+                    <I.trash size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="desc">{t("contextPanel.ruleTypeShell")}</div>
+          </div>
+        ))}
+
+        {pathRules.map((r) => (
+          <div className="rule" key={`path-${r}`}>
+            <div className="top">
+              <span className="pat">{r}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span className="sw">{t("contextPanel.allow")}</span>
+                {onRemoveRule && (
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    title={t("contextPanel.deleteRuleTooltip")}
+                    aria-label={`Remove rule: ${r}`}
+                    onClick={() => onRemoveRule("path", r)}
+                  >
+                    <I.trash size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="desc">{t("contextPanel.ruleTypePath")}</div>
+          </div>
+        ))}
+
+        {totalCustom === 0 && (
+          <div style={{ color: "var(--muted)", fontSize: 12, padding: "4px 0" }}>
+            {t("contextPanel.noCustomRules")}
+          </div>
+        )}
+
+        {onAddRule && (
+          <form className="rule-composer" onSubmit={handleAdd}>
+            <div className="rule-composer-row">
+              <select
+                className="rule-select"
+                value={ruleType}
+                onChange={(e) => setRuleType(e.target.value as "shell" | "path")}
+                aria-label="Rule type"
+              >
+                <option value="shell">{t("contextPanel.ruleTypeShell")}</option>
+                <option value="path">{t("contextPanel.ruleTypePath")}</option>
+              </select>
+              <input
+                type="text"
+                className="rule-input"
+                placeholder={t("contextPanel.rulePatternPlaceholder")}
+                value={pattern}
+                onChange={(e) => setPattern(e.target.value)}
+                aria-label="Rule pattern"
+              />
+              <button
+                type="submit"
+                className="btn small"
+                disabled={!pattern.trim()}
+                title={t("contextPanel.addRuleBtn")}
+                aria-label={t("contextPanel.addRuleBtn")}
+              >
+                <I.plus size={12} />
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </>
   );
 }

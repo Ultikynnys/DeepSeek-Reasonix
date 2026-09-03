@@ -1,10 +1,35 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+
+let resolveTranscribe: ((res: { text: string }) => void) | null = null;
+
+vi.mock("../voice/audio-recorder", () => {
+  return {
+    AudioRecorder: vi.fn().mockImplementation(() => ({
+      recording: true,
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue({ audioData: new Float32Array(100), durationSeconds: 1 }),
+      cancel: vi.fn(),
+    })),
+  };
+});
+
+vi.mock("../voice/transcriber", () => {
+  return {
+    speechTranscriber: {
+      transcribe: vi.fn().mockImplementation(() => {
+        return new Promise<{ text: string }>((resolve) => {
+          resolveTranscribe = resolve;
+        });
+      }),
+    },
+  };
+});
 
 afterEach(cleanup);
 
@@ -34,13 +59,62 @@ describe("Composer Voice Input Button", () => {
     expect(voiceBtn.classList.contains("recording")).toBe(false);
   });
 
-  it("disables voice button when composer is disabled or busy", () => {
+  it("disables voice button when composer is disabled, but keeps it enabled when busy for queueing", async () => {
     const { rerender } = render(<Composer {...baseProps} disabled={true} />);
     let voiceBtn = screen.getByTitle("Voice input") as HTMLButtonElement;
     expect(voiceBtn.disabled).toBe(true);
 
+    // When conversation is active (busy=true), voice input remains enabled so users can queue voice messages
     rerender(<Composer {...baseProps} busy={true} />);
     voiceBtn = screen.getByTitle("Voice input") as HTMLButtonElement;
+    expect(voiceBtn.disabled).toBe(false);
+
+    // Can start recording while busy
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+    expect(voiceBtn.classList.contains("recording")).toBe(true);
+  });
+
+  it("shows circular throbber as processing indicator when finished talking and transcribing", async () => {
+    render(<Composer {...baseProps} />);
+
+    const voiceBtn = screen.getByTitle("Voice input") as HTMLButtonElement;
+    expect(voiceBtn.querySelector(".voice-throbber")).toBeNull();
+
+    // Start recording
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+
+    expect(voiceBtn.classList.contains("recording")).toBe(true);
+
+    // Stop recording (finished talking) -> enters transcribing state
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+
+    expect(voiceBtn.classList.contains("transcribing")).toBe(true);
     expect(voiceBtn.disabled).toBe(true);
+    expect(voiceBtn.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByTitle("Transcribing audio...")).toBeTruthy();
+
+    const throbber = voiceBtn.querySelector(".voice-throbber");
+    expect(throbber).toBeTruthy();
+    expect(throbber?.classList.contains("spin")).toBe(true);
+    expect(throbber?.classList.contains("processing-indicator")).toBe(true);
+    expect(throbber?.getAttribute("role")).toBe("status");
+    expect(throbber?.getAttribute("aria-label")).toBe("Transcribing audio...");
+
+    // Complete transcription
+    await act(async () => {
+      if (resolveTranscribe) {
+        resolveTranscribe({ text: "testing audio transcription" });
+      }
+    });
+
+    expect(voiceBtn.classList.contains("transcribing")).toBe(false);
+    expect(voiceBtn.getAttribute("aria-busy")).toBe("false");
+    expect(voiceBtn.querySelector(".voice-throbber")).toBeNull();
   });
 });

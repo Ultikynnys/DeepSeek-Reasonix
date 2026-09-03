@@ -400,6 +400,8 @@ export type Settings = {
     /** Last OAuth flow failure — drives the status-bar Gemini auth chip until the next successful sign-in. */
     flowError?: string;
   };
+  shellAllowed?: string[];
+  pathAllowed?: string[];
   version: string;
 };
 
@@ -423,6 +425,11 @@ type MentionPreviewState = {
   path: string;
   head: string;
   totalLines: number;
+};
+
+export type QueuedSend = {
+  text: string;
+  images?: { id: string; thumbnail: string; wire?: UserImageAttachment }[];
 };
 
 type State = {
@@ -478,7 +485,7 @@ type State = {
   /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
   activeSkill: SkillOrigin | null;
   /** Messages typed while busy=true — auto-sent FIFO once the current turn completes. Cleared on `clear`, `rpc_exit`, `session_loaded`. */
-  queuedSends: string[];
+  queuedSends: QueuedSend[];
   /** Populated by $retry_result — component useEffect reads and sets composer draft. */
   retryText?: string;
   retryNonce: number;
@@ -525,7 +532,7 @@ type Action =
   | { t: "dismiss_memory_export" }
   | { t: "mention_results"; results: MentionResults }
   | { t: "mention_preview"; preview: MentionPreviewState }
-  | { t: "enqueue_send"; text: string }
+  | { t: "enqueue_send"; send?: QueuedSend | string; text?: string }
   | { t: "dequeue_send"; index: number }
   | { t: "shift_queued_send" }
   | { t: "settings_patch"; patch: SettingsPatch }
@@ -763,8 +770,15 @@ export function reduce(state: State, action: Action): State {
       return { ...state, mentionResults: action.results };
     case "mention_preview":
       return { ...state, mentionPreview: action.preview };
-    case "enqueue_send":
-      return { ...state, queuedSends: [...state.queuedSends, action.text] };
+    case "enqueue_send": {
+      const item: QueuedSend =
+        action.send !== undefined
+          ? typeof action.send === "string"
+            ? { text: action.send }
+            : action.send
+          : { text: action.text ?? "" };
+      return { ...state, queuedSends: [...state.queuedSends, item] };
+    }
     case "dequeue_send":
       return {
         ...state,
@@ -2122,6 +2136,16 @@ function TabRuntime({
     (spec: string) => sendRpc({ cmd: "mcp_specs_remove", spec }),
     [sendRpc],
   );
+  const addRule = useCallback(
+    (ruleType: "shell" | "path", pattern: string) =>
+      sendRpc({ cmd: "rule_add", ruleType, pattern }),
+    [sendRpc],
+  );
+  const removeRule = useCallback(
+    (ruleType: "shell" | "path", pattern: string) =>
+      sendRpc({ cmd: "rule_remove", ruleType, pattern }),
+    [sendRpc],
+  );
   const newChat = useCallback(() => {
     clearAbortDraft();
     sendRpc({ cmd: "new_chat" });
@@ -2274,23 +2298,41 @@ function TabRuntime({
   }, [state.settings?.workspaceDir, state.settings?.model, attachPickedImage, ollamaVisionModels]);
 
   const send = useCallback(
-    (override?: string) => {
-      const text = (override ?? draft).trim();
-      if ((!text && pendingImages.length === 0) || !state.ready || state.busy) return;
+    (override?: string | QueuedSend) => {
+      let text = draft.trim();
+      let sendImages: UserImageAttachment[] = pendingImages.map((im) => im.wire);
+      let sendImageUrls: string[] = pendingImages.map((im) => im.thumbnail);
+
+      if (override !== undefined) {
+        if (typeof override === "string") {
+          text = override.trim();
+        } else {
+          text = override.text.trim();
+          if (override.images && override.images.length > 0) {
+            sendImages = override.images
+              .map((im) => im.wire)
+              .filter((w): w is UserImageAttachment => Boolean(w));
+            sendImageUrls = override.images.map((im) => im.thumbnail);
+          } else {
+            sendImages = [];
+            sendImageUrls = [];
+          }
+        }
+      }
+
+      if ((!text && sendImages.length === 0) || !state.ready || state.busy) return;
 
       const clientId = `c-${Date.now()}`;
-      const images = pendingImages.map((im) => im.wire);
-      const imageUrls = pendingImages.map((im) => im.thumbnail);
       // ChatGPT models: typed `@path` image mentions get an optimistic echo —
       // stripped tokens + asset-protocol icons — while the daemon still
       // receives the original text and does the real conversion server-side.
       // Without this the live chat shows the raw @path until session reload.
       let echoText = text;
-      let echoImages = imageUrls;
+      let echoImages = sendImageUrls;
       if (imageCapable) {
         const typed = typedMentionImages(text, state.settings?.workspaceDir);
         echoText = typed.text;
-        if (typed.images.length > 0) echoImages = [...imageUrls, ...typed.images];
+        if (typed.images.length > 0) echoImages = [...sendImageUrls, ...typed.images];
       }
       recordAbortDraft("user_input", text);
       dispatch({
@@ -2299,9 +2341,11 @@ function TabRuntime({
         clientId,
         images: echoImages.length > 0 ? echoImages : undefined,
       });
-      sendRpc({ cmd: "user_input", text, images: images.length > 0 ? images : undefined });
-      setPendingImages([]);
-      if (!override) setDraft("");
+      sendRpc({ cmd: "user_input", text, images: sendImages.length > 0 ? sendImages : undefined });
+      if (override === undefined) {
+        setPendingImages([]);
+        setDraft("");
+      }
     },
     [
       draft,
@@ -2982,9 +3026,10 @@ function TabRuntime({
                 onEditModeChange={applyEditMode}
                 workspaceDir={state.settings?.workspaceDir}
                 queuedSends={state.queuedSends}
-                onQueueWhileBusy={(text) => {
-                  dispatch({ t: "enqueue_send", text });
+                onQueueWhileBusy={(text, images) => {
+                  dispatch({ t: "enqueue_send", send: { text, images } });
                   setDraft("");
+                  setPendingImages([]);
                 }}
                 onDequeueSend={(index) => dispatch({ t: "dequeue_send", index })}
                 onSendNow={() => sendRpc({ cmd: "abort" })}
@@ -3025,6 +3070,8 @@ function TabRuntime({
           onImportMemories={(json) => sendRpc({ cmd: "memory_import", json })}
           onDismissMemoryResult={() => dispatch({ t: "dismiss_memory_result" })}
           onCompact={() => sendRpc({ cmd: "compact_history" })}
+          onAddRule={addRule}
+          onRemoveRule={removeRule}
         />
 
         <StatusBar
@@ -3156,6 +3203,8 @@ function TabRuntime({
             onExportMemories={() => sendRpc({ cmd: "memory_export" })}
             onImportMemories={(json) => sendRpc({ cmd: "memory_import", json })}
             onDismissMemoryResult={() => dispatch({ t: "dismiss_memory_result" })}
+            onAddRule={addRule}
+            onRemoveRule={removeRule}
           />
         ) : null}
 

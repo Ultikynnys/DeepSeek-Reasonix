@@ -22,7 +22,7 @@ import type React from "react";
 import { type TKey, t } from "../i18n";
 import { I } from "../icons";
 import { isImagePath, resolveImagePath } from "../image-attach";
-import type { EditMode, ReasoningEffort } from "../protocol";
+import type { EditMode, ReasoningEffort, UserImageAttachment } from "../protocol";
 import { DEFAULT_COMPOSER_ROWS, applyComposerTextareaAutosize } from "./composer-sizing";
 import { activationHandler } from "./keyboard";
 import { TimerSpan } from "./live";
@@ -30,6 +30,13 @@ import { Shortcut } from "./shortcut";
 import { AudioRecorder } from "../voice/audio-recorder";
 import { speechTranscriber } from "../voice/transcriber";
 export type { EditMode, ReasoningEffort };
+
+export type QueuedSendItem =
+  | string
+  | {
+      text: string;
+      images?: { id: string; thumbnail: string; wire?: UserImageAttachment }[];
+    };
 
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
 
@@ -154,14 +161,17 @@ export function Composer({
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   workspaceDir?: string;
   /** Messages typed while busy=true; rendered as removable chips above the textarea and auto-drained FIFO on turn-complete. */
-  queuedSends?: string[];
-  /** Called when the user presses Enter while busy with a non-empty draft. Owns clearing the draft. */
-  onQueueWhileBusy?: (text: string) => void;
+  queuedSends?: QueuedSendItem[];
+  /** Called when the user presses Enter while busy with a non-empty draft or pending images. Owns clearing the draft and images. */
+  onQueueWhileBusy?: (
+    text: string,
+    images?: { id: string; thumbnail: string; wire?: UserImageAttachment }[],
+  ) => void;
   onDequeueSend?: (index: number) => void;
   /** Sends the whole queue immediately — the app aborts the running turn so the drain fires on turn-complete. */
   onSendNow?: () => void;
   /** Vision attachments queued for the next send (ChatGPT models only). */
-  pendingImages?: { id: string; thumbnail: string }[];
+  pendingImages?: { id: string; thumbnail: string; wire?: UserImageAttachment }[];
   onRemoveImage?: (id: string) => void;
   /** True when the active model accepts image content (gpt-*). */
   imageCapable?: boolean;
@@ -318,7 +328,7 @@ export function Composer({
   }, [voiceError]);
 
   const handleToggleVoice = async () => {
-    if (disabled || busy) return;
+    if (disabled) return;
     setVoiceError(null);
 
     if (voiceState === "recording") {
@@ -383,10 +393,11 @@ export function Composer({
       e.preventDefault();
       if (busy) {
         const text = draft.trim();
-        if (text && onQueueWhileBusy) {
-          onQueueWhileBusy(text);
+        const hasPendingImages = pendingImages && pendingImages.length > 0;
+        if ((text || hasPendingImages) && onQueueWhileBusy) {
+          onQueueWhileBusy(text, hasPendingImages ? [...pendingImages] : undefined);
         }
-      } else if (!disabled && draft.trim()) {
+      } else if (!disabled && (draft.trim() || (pendingImages && pendingImages.length > 0))) {
         recordSendAndReset();
         onSend();
       }
@@ -413,21 +424,46 @@ export function Composer({
             <span className="composer-queued-label">
               {t("composer.queueCount", { n: queuedSends.length })}
             </span>
-            {queuedSends.map((text, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: queue is dequeue-by-index; chips are text-only leaves
-              <span key={i} className="composer-queue-chip" title={text}>
-                <span className="text">{text}</span>
-                {onDequeueSend ? (
-                  <span
-                    className="x"
-                    onClick={() => onDequeueSend(i)}
-                    onKeyDown={activationHandler(() => onDequeueSend(i))}
-                  >
-                    <I.x size={10} />
-                  </span>
-                ) : null}
-              </span>
-            ))}
+            {queuedSends.map((raw, i) => {
+              const item = typeof raw === "string" ? { text: raw } : raw;
+              const text = item.text;
+              const images = item.images;
+              const hasImages = Boolean(images && images.length > 0);
+              const tooltip = [
+                text,
+                hasImages && images ? `(${images.length} image${images.length > 1 ? "s" : ""})` : null,
+              ]
+                .filter(Boolean)
+                .join(" ");
+
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: queue is dequeue-by-index; chips are text-only leaves
+                <span key={i} className="composer-queue-chip" title={tooltip}>
+                  {hasImages && images ? (
+                    <span className="composer-queue-chip-images">
+                      {images.map((im) => (
+                        <img
+                          key={im.id}
+                          src={im.thumbnail}
+                          alt=""
+                          className="composer-queue-chip-img"
+                        />
+                      ))}
+                    </span>
+                  ) : null}
+                  {text ? <span className="text">{text}</span> : null}
+                  {onDequeueSend ? (
+                    <span
+                      className="x"
+                      onClick={() => onDequeueSend(i)}
+                      onKeyDown={activationHandler(() => onDequeueSend(i))}
+                    >
+                      <I.x size={10} />
+                    </span>
+                  ) : null}
+                </span>
+              );
+            })}
             {onSendNow ? (
               <button type="button" className="composer-queued-send" onClick={onSendNow}>
                 <I.send size={11} />
@@ -645,7 +681,8 @@ export function Composer({
             <button
               type="button"
               className={`voice-btn ${voiceState === "recording" ? "recording" : ""} ${voiceState === "transcribing" ? "transcribing" : ""}`}
-              disabled={disabled || busy || voiceState === "transcribing"}
+              disabled={disabled || voiceState === "transcribing"}
+              aria-busy={voiceState === "transcribing"}
               onClick={handleToggleVoice}
               title={
                 voiceError
@@ -660,7 +697,12 @@ export function Composer({
               {voiceState === "recording" ? (
                 <I.stop size={13} />
               ) : voiceState === "transcribing" ? (
-                <I.refresh size={13} />
+                <span
+                  className="spin voice-throbber processing-indicator"
+                  role="status"
+                  aria-label={t("composer.voiceTranscribing")}
+                  aria-live="polite"
+                />
               ) : (
                 <I.mic size={13} />
               )}

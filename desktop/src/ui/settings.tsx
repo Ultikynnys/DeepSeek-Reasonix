@@ -121,6 +121,8 @@ export function SettingsModal({
   onExportMemories,
   onImportMemories,
   onDismissMemoryResult,
+  onAddRule,
+  onRemoveRule,
 }: {
   settings: SettingsType;
   balance: Balance | null;
@@ -143,6 +145,8 @@ export function SettingsModal({
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
   memoryResult: { ok: boolean; message: string } | null;
+  onAddRule?: (ruleType: "shell" | "path", pattern: string) => void;
+  onRemoveRule?: (ruleType: "shell" | "path", pattern: string) => void;
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
   onSaveApiKey: (key: string) => void;
@@ -313,7 +317,14 @@ export function SettingsModal({
                 onDismissResult={onDismissMemoryResult}
               />
             )}
-            {page === "rules" && <PageRules settings={settings} onSave={onSave} />}
+            {page === "rules" && (
+              <PageRules
+                settings={settings}
+                onSave={onSave}
+                onAddRule={onAddRule}
+                onRemoveRule={onRemoveRule}
+              />
+            )}
             {page === "billing" && (
               <PageBilling balance={balance} usage={usage} currency={currency} />
             )}
@@ -1663,10 +1674,29 @@ function PageMemory({
 function PageRules({
   settings,
   onSave,
+  onAddRule,
+  onRemoveRule,
 }: {
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
+  onAddRule?: (ruleType: "shell" | "path", pattern: string) => void;
+  onRemoveRule?: (ruleType: "shell" | "path", pattern: string) => void;
 }) {
+  const [ruleType, setRuleType] = useState<"shell" | "path">("shell");
+  const [pattern, setPattern] = useState("");
+
+  const shellRules = settings.shellAllowed ?? [];
+  const pathRules = settings.pathAllowed ?? [];
+  const totalCustom = shellRules.length + pathRules.length;
+
+  const handleAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = pattern.trim();
+    if (!trimmed || !onAddRule) return;
+    onAddRule(ruleType, trimmed);
+    setPattern("");
+  };
+
   return (
     <>
       <section className="section">
@@ -1700,10 +1730,100 @@ function PageRules({
             borderRadius: 10,
             fontSize: 12,
             color: "var(--muted)",
+            marginBottom: 12,
           }}
         >
           {t("settings.ruleAutoApprovalHint")}
         </div>
+
+        {totalCustom > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {shellRules.map((r) => (
+              <div className="rule" key={`shell-${r}`}>
+                <div className="top">
+                  <span className="pat">{r}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span className="sw">{t("contextPanel.allow")}</span>
+                    {onRemoveRule && (
+                      <button
+                        type="button"
+                        className="mini-btn"
+                        title={t("settings.deleteRuleTooltip")}
+                        aria-label={`Remove rule: ${r}`}
+                        onClick={() => onRemoveRule("shell", r)}
+                      >
+                        <I.trash size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="desc">{t("settings.ruleTypeShell")}</div>
+              </div>
+            ))}
+            {pathRules.map((r) => (
+              <div className="rule" key={`path-${r}`}>
+                <div className="top">
+                  <span className="pat">{r}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span className="sw">{t("contextPanel.allow")}</span>
+                    {onRemoveRule && (
+                      <button
+                        type="button"
+                        className="mini-btn"
+                        title={t("settings.deleteRuleTooltip")}
+                        aria-label={`Remove rule: ${r}`}
+                        onClick={() => onRemoveRule("path", r)}
+                      >
+                        <I.trash size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="desc">{t("settings.ruleTypePath")}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {totalCustom === 0 && (
+          <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 12 }}>
+            {t("settings.noCustomRules")}
+          </div>
+        )}
+
+        {onAddRule && (
+          <form className="rule-composer" onSubmit={handleAdd}>
+            <div className="rule-composer-row">
+              <select
+                className="rule-select"
+                value={ruleType}
+                onChange={(e) => setRuleType(e.target.value as "shell" | "path")}
+                aria-label="Rule type"
+              >
+                <option value="shell">{t("settings.ruleTypeShell")}</option>
+                <option value="path">{t("settings.ruleTypePath")}</option>
+              </select>
+              <input
+                type="text"
+                className="rule-input"
+                placeholder={t("settings.rulePatternPlaceholder")}
+                value={pattern}
+                onChange={(e) => setPattern(e.target.value)}
+                aria-label="Rule pattern"
+              />
+              <button
+                type="submit"
+                className="btn small"
+                disabled={!pattern.trim()}
+                title={t("settings.addRule")}
+                aria-label={t("settings.addRule")}
+              >
+                <I.plus size={12} />
+                <span style={{ marginLeft: 4 }}>{t("settings.addRule")}</span>
+              </button>
+            </div>
+          </form>
+        )}
       </section>
     </>
   );

@@ -79,6 +79,8 @@ import {
   DEFAULT_MODEL,
   DEFAULT_OLLAMA_CHAT_URL,
   DEFAULT_ZAI_CHAT_URL,
+  addProjectPathAllowed,
+  addProjectShellAllowed,
   anyProviderConfigured,
   bridgeEndpointEnv,
   deriveNativeOllamaOrigin,
@@ -100,6 +102,8 @@ import {
   loadOllamaApiKey,
   loadOllamaEndpoint,
   loadPerplexityApiKey,
+  loadProjectPathAllowed,
+  loadProjectShellAllowed,
   loadReasoningEffort,
   loadRecentWorkspaces,
   loadResolvedSkillPaths,
@@ -113,6 +117,8 @@ import {
   pushRecentWorkspace,
   readConfig,
   webSearchEngine as readWebSearchEngine,
+  removeProjectPathAllowed,
+  removeProjectShellAllowed,
   saveAntigravityOAuth,
   saveApiKey,
   saveBaseUrl,
@@ -929,6 +935,8 @@ function emitSettings(tab: Tab): void {
             ? "Google authentication changed. Sign in again to enable Gemini free-tier quota."
             : undefined),
       },
+      shellAllowed: loadProjectShellAllowed(tab.rootDir),
+      pathAllowed: loadProjectPathAllowed(tab.rootDir),
       version: VERSION,
     },
     tab.id,
@@ -4023,6 +4031,42 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           details: { specChars: msg.spec.length, ...tabDiagnosticState(tab) },
         });
         emit({ type: "$error", message: `mcp_specs_remove: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "rule_add") {
+      const pattern = msg.pattern.trim();
+      if (!pattern) {
+        emit({ type: "$error", message: "rule_add: pattern is empty" }, tab.id);
+        return;
+      }
+      try {
+        if (msg.ruleType === "shell") {
+          addProjectShellAllowed(tab.rootDir, pattern);
+        } else if (msg.ruleType === "path") {
+          addProjectPathAllowed(tab.rootDir, pattern);
+        }
+        emitSettings(tab);
+      } catch (err) {
+        emit({ type: "$error", message: `rule_add: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "rule_remove") {
+      const pattern = msg.pattern.trim();
+      if (!pattern) {
+        emit({ type: "$error", message: "rule_remove: pattern is empty" }, tab.id);
+        return;
+      }
+      try {
+        if (msg.ruleType === "shell") {
+          removeProjectShellAllowed(tab.rootDir, pattern);
+        } else if (msg.ruleType === "path") {
+          removeProjectPathAllowed(tab.rootDir, pattern);
+        }
+        emitSettings(tab);
+      } catch (err) {
+        emit({ type: "$error", message: `rule_remove: ${(err as Error).message}` }, tab.id);
       }
       return;
     }

@@ -419,6 +419,10 @@ export interface SettingsEvent {
     /** Last OAuth flow failure — drives the status-bar Gemini auth chip until the next successful sign-in. */
     flowError?: string;
   };
+  /** Auto-approved shell command prefixes for the current project. */
+  shellAllowed?: string[];
+  /** Auto-approved outside-sandbox directory prefixes for the current project. */
+  pathAllowed?: string[];
   version: string;
 }
 
@@ -691,6 +695,8 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mcp_specs_get" }
   | { cmd: "mcp_specs_add"; spec: string }
   | { cmd: "mcp_specs_remove"; spec: string }
+  | { cmd: "rule_add"; ruleType: "shell" | "path"; pattern: string }
+  | { cmd: "rule_remove"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "skills_get" }
   | { cmd: "skill_run"; name: string; args?: string }
   | { cmd: "jobs_list" }

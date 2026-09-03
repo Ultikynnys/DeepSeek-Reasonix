@@ -10,6 +10,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 // registers, so unmount between tests to keep queries unambiguous.
 afterEach(cleanup);
 
+import type { QueuedSendItem } from "./composer";
 import { Composer } from "./composer";
 
 const baseProps = {
@@ -31,7 +32,7 @@ function renderQueued({
   onDequeueSend,
   onSendNow,
 }: {
-  queuedSends?: string[];
+  queuedSends?: QueuedSendItem[];
   onDequeueSend?: (index: number) => void;
   onSendNow?: () => void;
 }) {
@@ -89,5 +90,50 @@ describe("Composer queued-sends row", () => {
   it("renders nothing when the queue is empty", () => {
     renderQueued({ queuedSends: [] });
     expect(screen.queryByText(/queued \d/)).toBeNull();
+  });
+
+  it("renders image thumbnails inside the queued chip when a message has images", () => {
+    renderQueued({
+      queuedSends: [
+        {
+          text: "describe this diagram",
+          images: [
+            { id: "img-1", thumbnail: "data:image/png;base64,ABC" },
+            { id: "img-2", thumbnail: "data:image/png;base64,DEF" },
+          ],
+        },
+      ],
+    });
+
+    const chip = document.querySelector(".composer-queue-chip");
+    expect(chip).toBeTruthy();
+    expect(chip?.getAttribute("title")).toBe("describe this diagram (2 images)");
+
+    const images = chip?.querySelectorAll(".composer-queue-chip-img");
+    expect(images?.length).toBe(2);
+    expect(images?.[0]?.getAttribute("src")).toBe("data:image/png;base64,ABC");
+    expect(images?.[1]?.getAttribute("src")).toBe("data:image/png;base64,DEF");
+    expect(screen.getByText("describe this diagram")).toBeTruthy();
+  });
+
+  it("forwards pending images to onQueueWhileBusy when pressing Enter while busy", () => {
+    const onQueueWhileBusy = vi.fn();
+    const pendingImages = [{ id: "img-1", thumbnail: "data:image/png;base64,ABC" }];
+
+    render(
+      <Composer
+        {...baseProps}
+        busy={true}
+        draft="check this image"
+        pendingImages={pendingImages}
+        onQueueWhileBusy={onQueueWhileBusy}
+      />,
+    );
+
+    const textarea = document.querySelector("textarea")!;
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+
+    expect(onQueueWhileBusy).toHaveBeenCalledTimes(1);
+    expect(onQueueWhileBusy).toHaveBeenCalledWith("check this image", pendingImages);
   });
 });
