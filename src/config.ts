@@ -387,22 +387,22 @@ export interface ReasonixConfig {
   ollamaNumCtx?: number;
   /** Repeat penalty (`repeat_penalty`) for Ollama models. Higher values (e.g.
    *  1.3-1.5) penalize token repetition more aggressively, reducing doom
-   *  loops. Ollama's server default is 1.1. Env OLLAMA_REPEAT_PENALTY overrides. */
+   *  loops. Defaults to 1.3 (server default 1.1). Env OLLAMA_REPEAT_PENALTY overrides. */
   ollamaRepeatPenalty?: number;
   /** Frequency penalty (`frequency_penalty`) for Ollama models. Penalizes tokens
-   *  proportional to how often they've appeared so far. Default 0. Env
-   *  OLLAMA_FREQUENCY_PENALTY overrides. */
+   *  proportional to how often they've appeared so far. Defaults to 0.5 (server default 0).
+   *  Env OLLAMA_FREQUENCY_PENALTY overrides. */
   ollamaFrequencyPenalty?: number;
   /** Presence penalty (`presence_penalty`) for Ollama models. Penalizes tokens
-   *  that have appeared at all (binary). Default 0. Env OLLAMA_PRESENCE_PENALTY
-   *  overrides. */
+   *  that have appeared at all (binary). Defaults to 0.4 (server default 0).
+   *  Env OLLAMA_PRESENCE_PENALTY overrides. */
   ollamaPresencePenalty?: number;
   /** Top-K sampling (`top_k`) for Ollama models. Limits the next-token pool
-   *  to the top K candidates. Ollama's server default is 40. Env OLLAMA_TOP_K
+   *  to the top K candidates. Defaults to 40 (server default 40). Env OLLAMA_TOP_K
    *  overrides. */
   ollamaTopK?: number;
   /** Repeat penalty window (`repeat_last_n`) for Ollama models. How many tokens
-   *  back to consider for the repeat penalty. Ollama's server default is 64.
+   *  back to consider for the repeat penalty. Defaults to 128 (server default 64).
    *  Env OLLAMA_REPEAT_LAST_N overrides. */
   ollamaRepeatLastN?: number;
   /** Brave Search API key. Falls back to BRAVE_SEARCH_API_KEY env var. Free 2000/mo signup at https://brave.com/search/api/ */
@@ -622,49 +622,57 @@ export function loadOllamaNumCtx(path: string = defaultConfigPath()): number | u
   return undefined;
 }
 
-/** Ollama repeat penalty — env OLLAMA_REPEAT_PENALTY > config > undefined (server default 1.1). */
-export function loadOllamaRepeatPenalty(path: string = defaultConfigPath()): number | undefined {
+/** Default sampling penalties for Ollama models — stops doom loops and repetitive
+ *  attractor states at the logits level before they burn turns. */
+export const DEFAULT_OLLAMA_REPEAT_PENALTY = 1.3;
+export const DEFAULT_OLLAMA_FREQUENCY_PENALTY = 0.5;
+export const DEFAULT_OLLAMA_PRESENCE_PENALTY = 0.4;
+export const DEFAULT_OLLAMA_TOP_K = 40;
+export const DEFAULT_OLLAMA_REPEAT_LAST_N = 128;
+
+/** Ollama repeat penalty — env OLLAMA_REPEAT_PENALTY > config > 1.3 default. */
+export function loadOllamaRepeatPenalty(path: string = defaultConfigPath()): number {
   const env = process.env.OLLAMA_REPEAT_PENALTY?.trim();
   if (env && Number.isFinite(Number(env))) return Number(env);
   const cfg = readConfig(path).ollamaRepeatPenalty;
   if (typeof cfg === "number" && Number.isFinite(cfg)) return cfg;
-  return undefined;
+  return DEFAULT_OLLAMA_REPEAT_PENALTY;
 }
 
-/** Ollama frequency penalty — env OLLAMA_FREQUENCY_PENALTY > config > undefined (server default 0). */
-export function loadOllamaFrequencyPenalty(path: string = defaultConfigPath()): number | undefined {
+/** Ollama frequency penalty — env OLLAMA_FREQUENCY_PENALTY > config > 0.5 default. */
+export function loadOllamaFrequencyPenalty(path: string = defaultConfigPath()): number {
   const env = process.env.OLLAMA_FREQUENCY_PENALTY?.trim();
   if (env && Number.isFinite(Number(env))) return Number(env);
   const cfg = readConfig(path).ollamaFrequencyPenalty;
   if (typeof cfg === "number" && Number.isFinite(cfg)) return cfg;
-  return undefined;
+  return DEFAULT_OLLAMA_FREQUENCY_PENALTY;
 }
 
-/** Ollama presence penalty — env OLLAMA_PRESENCE_PENALTY > config > undefined (server default 0). */
-export function loadOllamaPresencePenalty(path: string = defaultConfigPath()): number | undefined {
+/** Ollama presence penalty — env OLLAMA_PRESENCE_PENALTY > config > 0.4 default. */
+export function loadOllamaPresencePenalty(path: string = defaultConfigPath()): number {
   const env = process.env.OLLAMA_PRESENCE_PENALTY?.trim();
   if (env && Number.isFinite(Number(env))) return Number(env);
   const cfg = readConfig(path).ollamaPresencePenalty;
   if (typeof cfg === "number" && Number.isFinite(cfg)) return cfg;
-  return undefined;
+  return DEFAULT_OLLAMA_PRESENCE_PENALTY;
 }
 
-/** Ollama top-K — env OLLAMA_TOP_K > config > undefined (server default 40). */
-export function loadOllamaTopK(path: string = defaultConfigPath()): number | undefined {
+/** Ollama top-K — env OLLAMA_TOP_K > config > 40 default. */
+export function loadOllamaTopK(path: string = defaultConfigPath()): number {
   const env = process.env.OLLAMA_TOP_K?.trim();
   if (env && /^\d+$/.test(env)) return Number(env);
   const cfg = readConfig(path).ollamaTopK;
   if (typeof cfg === "number" && Number.isFinite(cfg) && cfg >= 0) return Math.floor(cfg);
-  return undefined;
+  return DEFAULT_OLLAMA_TOP_K;
 }
 
-/** Ollama repeat-last-N window — env OLLAMA_REPEAT_LAST_N > config > undefined (server default 64). */
-export function loadOllamaRepeatLastN(path: string = defaultConfigPath()): number | undefined {
+/** Ollama repeat-last-N window — env OLLAMA_REPEAT_LAST_N > config > 128 default. */
+export function loadOllamaRepeatLastN(path: string = defaultConfigPath()): number {
   const env = process.env.OLLAMA_REPEAT_LAST_N?.trim();
   if (env && /^-?\d+$/.test(env)) return Number(env);
   const cfg = readConfig(path).ollamaRepeatLastN;
   if (typeof cfg === "number" && Number.isFinite(cfg)) return Math.floor(cfg);
-  return undefined;
+  return DEFAULT_OLLAMA_REPEAT_LAST_N;
 }
 
 /** Brave Search API key — env > config > undefined. Free 2000/mo signup at https://brave.com/search/api/ */

@@ -101,7 +101,16 @@ describe("ollama native payload", () => {
     const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
     expect(body.model).toBe("qwen3:32b");
     expect(body.keep_alive).toBe("30m");
-    expect(body.options).toEqual({ num_predict: 200, temperature: 0.5, num_ctx: 8192 });
+    expect(body.options).toEqual({
+      num_predict: 200,
+      temperature: 0.5,
+      num_ctx: 8192,
+      repeat_penalty: 1.3,
+      frequency_penalty: 0.5,
+      presence_penalty: 0.4,
+      top_k: 40,
+      repeat_last_n: 128,
+    });
   });
 
   it("converts image parts to native images and tool-call args to objects", async () => {
@@ -203,7 +212,7 @@ describe("ollama native payload", () => {
     delete process.env.OLLAMA_REPEAT_LAST_N;
   });
 
-  it("omits penalty options from payload when not configured", async () => {
+  it("uses anti-loop default penalty options in payload when unconfigured", async () => {
     // Ensure no env vars leak into this test.
     // biome-ignore lint/performance/noDelete: restore exact env state
     delete process.env.OLLAMA_REPEAT_PENALTY;
@@ -234,11 +243,11 @@ describe("ollama native payload", () => {
     });
     const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
     const options = (body.options ?? {}) as Record<string, unknown>;
-    expect(options.repeat_penalty).toBeUndefined();
-    expect(options.frequency_penalty).toBeUndefined();
-    expect(options.presence_penalty).toBeUndefined();
-    expect(options.top_k).toBeUndefined();
-    expect(options.repeat_last_n).toBeUndefined();
+    expect(options.repeat_penalty).toBe(1.3);
+    expect(options.frequency_penalty).toBe(0.5);
+    expect(options.presence_penalty).toBe(0.4);
+    expect(options.top_k).toBe(40);
+    expect(options.repeat_last_n).toBe(128);
   });
 
   it("maps thinking/effort to native think and responseFormat to format json", async () => {
@@ -538,7 +547,14 @@ describe("ollama num_ctx learning", () => {
       messages: [{ role: "user", content: "hi" }],
     });
     expect(capturedBodies).toHaveLength(2);
-    expect(capturedBodies[0]!.options).toEqual({ num_ctx: 131072 });
+    expect(capturedBodies[0]!.options).toEqual({
+      num_ctx: 131072,
+      repeat_penalty: 1.3,
+      frequency_penalty: 0.5,
+      presence_penalty: 0.4,
+      top_k: 40,
+      repeat_last_n: 128,
+    });
     expect(showCalls).toHaveLength(1);
   });
 
@@ -566,6 +582,12 @@ describe("ollama num_ctx learning", () => {
       messages: [{ role: "user", content: "hi" }],
     });
     const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
-    expect(body.options).toBeUndefined();
+    expect(body.options).toEqual({
+      repeat_penalty: 1.3,
+      frequency_penalty: 0.5,
+      presence_penalty: 0.4,
+      top_k: 40,
+      repeat_last_n: 128,
+    });
   });
 });
