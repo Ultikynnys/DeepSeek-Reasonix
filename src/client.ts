@@ -2,8 +2,13 @@ import { type EventSourceMessage, createParser } from "eventsource-parser";
 import { ANTIGRAVITY_CLOUD_CODE_URL, antigravityHeaders } from "./antigravity-oauth.js";
 import {
   deriveNativeOllamaOrigin,
+  loadOllamaFrequencyPenalty,
   loadOllamaKeepAlive,
   loadOllamaNumCtx,
+  loadOllamaPresencePenalty,
+  loadOllamaRepeatLastN,
+  loadOllamaRepeatPenalty,
+  loadOllamaTopK,
   loadRateLimit,
   providerForModel,
   resolveBaseUrlEnv,
@@ -679,6 +684,20 @@ export class DeepSeekClient {
     if (opts.maxTokens !== undefined) options.num_predict = opts.maxTokens;
     if (opts.temperature !== undefined) options.temperature = opts.temperature;
     if (ollamaNumCtx !== undefined) options.num_ctx = ollamaNumCtx;
+    // Sampling penalty options — reduce doom loops by penalizing repetition at
+    // the logits level. Each resolves per-request override > config/env > omit
+    // (server defaults: repeat_penalty 1.1, frequency_penalty 0,
+    // presence_penalty 0, top_k 40, repeat_last_n 64).
+    const repeatPenalty = opts.ollama?.repeatPenalty ?? loadOllamaRepeatPenalty();
+    if (repeatPenalty !== undefined) options.repeat_penalty = repeatPenalty;
+    const frequencyPenalty = opts.ollama?.frequencyPenalty ?? loadOllamaFrequencyPenalty();
+    if (frequencyPenalty !== undefined) options.frequency_penalty = frequencyPenalty;
+    const presencePenalty = opts.ollama?.presencePenalty ?? loadOllamaPresencePenalty();
+    if (presencePenalty !== undefined) options.presence_penalty = presencePenalty;
+    const topK = opts.ollama?.topK ?? loadOllamaTopK();
+    if (topK !== undefined) options.top_k = topK;
+    const repeatLastN = opts.ollama?.repeatLastN ?? loadOllamaRepeatLastN();
+    if (repeatLastN !== undefined) options.repeat_last_n = repeatLastN;
     const payload: Record<string, unknown> = {
       // `ollama/<id>` namespacing is client-side routing — the server wants the raw id.
       model: opts.model.replace(/^ollama\//, ""),

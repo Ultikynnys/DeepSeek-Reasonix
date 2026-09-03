@@ -40,6 +40,7 @@ import {
 } from "./loop/shrink.js";
 import { streamModelResponse } from "./loop/streaming.js";
 import {
+  extractThinkingTags,
   isThinkingModeModel,
   stripHallucinatedToolMarkup,
   thinkingModeForModel,
@@ -1590,11 +1591,31 @@ export class CacheFirstLoop {
         assistantContent = reasoningContent.trim();
       }
 
+      // If the model leaked literal <think> tags into content (common with local
+      // Ollama DeepSeek R1/Distill models when using native chat transport), extract
+      // them into reasoningContent so they don't corrupt history or cause tag doom loops.
+      if (assistantContent.includes("<think>") || assistantContent.includes("</think>")) {
+        const { content: cleanContent, extractedReasoning } = extractThinkingTags(assistantContent);
+        assistantContent = cleanContent;
+        if (extractedReasoning) {
+          reasoningContent = reasoningContent
+            ? `${reasoningContent}\n\n${extractedReasoning}`
+            : extractedReasoning;
+        }
+      }
+
       const { calls: repairedCalls, report } = this.repair.process(
         toolCalls,
         reasoningContent || null,
         assistantContent || null,
       );
+
+      // Strip any hallucinated/scavenged tool markup (DSML envelopes, <function_calls>,
+      // loose invoke blocks) from assistantContent before persisting into history,
+      // preventing the model from seeing its own raw tool tags and looping on them.
+      if (assistantContent.includes("DSML") || assistantContent.includes("<function_calls>")) {
+        assistantContent = stripHallucinatedToolMarkup(assistantContent);
+      }
 
       this.appendAndPersist(
         buildAssistantMessage(assistantContent, repairedCalls, callModel, reasoningContent, image),

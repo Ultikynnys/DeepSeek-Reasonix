@@ -161,6 +161,86 @@ describe("ollama native payload", () => {
     });
   });
 
+  it("forwards repeat_penalty, frequency_penalty, presence_penalty, top_k, repeat_last_n when configured via env", async () => {
+    process.env.OLLAMA_REPEAT_PENALTY = "1.3";
+    process.env.OLLAMA_FREQUENCY_PENALTY = "0.5";
+    process.env.OLLAMA_PRESENCE_PENALTY = "0.4";
+    process.env.OLLAMA_TOP_K = "50";
+    process.env.OLLAMA_REPEAT_LAST_N = "128";
+    let capturedInit: RequestInit | undefined;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      capturedInit = init as RequestInit;
+      return new Response(JSON.stringify(nativeChatResponse()), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    await client.chat({
+      model: "ollama/qwen3:32b",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
+    const options = body.options as Record<string, unknown>;
+    expect(options.repeat_penalty).toBe(1.3);
+    expect(options.frequency_penalty).toBe(0.5);
+    expect(options.presence_penalty).toBe(0.4);
+    expect(options.top_k).toBe(50);
+    expect(options.repeat_last_n).toBe(128);
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_REPEAT_PENALTY;
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_FREQUENCY_PENALTY;
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_PRESENCE_PENALTY;
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_TOP_K;
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_REPEAT_LAST_N;
+  });
+
+  it("omits penalty options from payload when not configured", async () => {
+    // Ensure no env vars leak into this test.
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_REPEAT_PENALTY;
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_FREQUENCY_PENALTY;
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_PRESENCE_PENALTY;
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_TOP_K;
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_REPEAT_LAST_N;
+    let capturedInit: RequestInit | undefined;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      capturedInit = init as RequestInit;
+      return new Response(JSON.stringify(nativeChatResponse()), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    await client.chat({
+      model: "ollama/qwen3:32b",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
+    const options = (body.options ?? {}) as Record<string, unknown>;
+    expect(options.repeat_penalty).toBeUndefined();
+    expect(options.frequency_penalty).toBeUndefined();
+    expect(options.presence_penalty).toBeUndefined();
+    expect(options.top_k).toBeUndefined();
+    expect(options.repeat_last_n).toBeUndefined();
+  });
+
   it("maps thinking/effort to native think and responseFormat to format json", async () => {
     let capturedInit: RequestInit | undefined;
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {

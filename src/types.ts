@@ -109,5 +109,20 @@ export interface ChatRequestOptions {
     numCtx?: number;
     /** Model residency after the turn. Unset → config/env, then "30m". */
     keepAlive?: string;
+    /** Repeat penalty (`repeat_penalty`). Higher values penalize repetition more
+     *  aggressively. Unset → config/env, then server default (1.1). */
+    repeatPenalty?: number;
+    /** Frequency penalty (`frequency_penalty`). Penalizes tokens proportional to
+     *  how often they appeared. Unset → config/env, then server default (0). */
+    frequencyPenalty?: number;
+    /** Presence penalty (`presence_penalty`). Penalizes tokens that appeared at
+     *  all (binary). Unset → config/env, then server default (0). */
+    presencePenalty?: number;
+    /** Top-K sampling (`top_k`). Limits the candidate pool. Unset → config/env,
+     *  then server default (40). */
+    topK?: number;
+    /** Repeat penalty lookback window (`repeat_last_n`). How many tokens back
+     *  to consider. Unset → config/env, then server default (64). */
+    repeatLastN?: number;
   };
 }

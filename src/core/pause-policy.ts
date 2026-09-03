@@ -4,7 +4,7 @@ import type { EditMode } from "../config.js";
 import type { PauseRequest } from "./pause-gate.js";
 
 /** YOLO interactive gates wait this long before auto-selecting the first option. */
-export const YOLO_PLAN_COUNTDOWN_MS = 10_000;
+export const YOLO_PLAN_COUNTDOWN_MS = 30_000;
 
 /** Mirrors shell.ts's allowAll bypass: only review still pauses on checkpoints. */
 export function shouldAutoResolveCheckpoint(editMode: EditMode): boolean {

@@ -7,6 +7,7 @@ import {
   healLoadedMessagesByTokens,
   stripHallucinatedToolMarkup,
 } from "../src/loop.js";
+import { extractThinkingTags } from "../src/loop/thinking.js";
 import type { ChatMessage } from "../src/types.js";
 
 describe("formatLoopError", () => {
@@ -493,5 +494,53 @@ describe("stripHallucinatedToolMarkup", () => {
   it("returns empty string when ALL content was hallucinated markup", () => {
     const input = "<｜DSML｜function_calls>garbage</｜DSML｜function_calls>";
     expect(stripHallucinatedToolMarkup(input)).toBe("");
+  });
+
+  it("strips loose DSML invoke blocks without outer function_calls envelope", () => {
+    const input =
+      'Answer before call.\n<｜DSML｜invoke name="read_file"><｜DSML｜parameter name="path" string="true">a.ts</｜DSML｜parameter></｜DSML｜invoke>\nAnswer after call.';
+    const out = stripHallucinatedToolMarkup(input);
+    expect(out).toContain("Answer before call.");
+    expect(out).toContain("Answer after call.");
+    expect(out).not.toContain("DSML");
+    expect(out).not.toContain("read_file");
+  });
+});
+
+describe("extractThinkingTags", () => {
+  it("extracts closed <think>...</think> tags and returns cleaned content", () => {
+    const input = "<think>Let me ponder this problem first.</think>Here is the solution.";
+    const result = extractThinkingTags(input);
+    expect(result.content).toBe("Here is the solution.");
+    expect(result.extractedReasoning).toBe("Let me ponder this problem first.");
+  });
+
+  it("extracts multiple <think> blocks and joins them with newlines", () => {
+    const input =
+      "<think>First thought.</think>Interim text.<think>Second thought.</think>Final answer.";
+    const result = extractThinkingTags(input);
+    expect(result.content).toBe("Interim text.Final answer.");
+    expect(result.extractedReasoning).toBe("First thought.\n\nSecond thought.");
+  });
+
+  it("handles unclosed trailing <think> tags gracefully", () => {
+    const input = "Done with step 1.\n<think>Now thinking about step 2...";
+    const result = extractThinkingTags(input);
+    expect(result.content).toBe("Done with step 1.");
+    expect(result.extractedReasoning).toBe("Now thinking about step 2...");
+  });
+
+  it("strips stray closing </think> tags", () => {
+    const input = "</think>Just normal content here.";
+    const result = extractThinkingTags(input);
+    expect(result.content).toBe("Just normal content here.");
+    expect(result.extractedReasoning).toBeNull();
+  });
+
+  it("returns null reasoning and original content when no tags exist", () => {
+    const input = "Plain message without any tags.";
+    const result = extractThinkingTags(input);
+    expect(result.content).toBe(input);
+    expect(result.extractedReasoning).toBeNull();
   });
 });

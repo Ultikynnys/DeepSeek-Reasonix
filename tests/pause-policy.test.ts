@@ -22,6 +22,10 @@ function makeListener(opts: { yolo?: boolean }, configEditMode: "review" | "auto
 }
 
 describe("autoResolveVerdict (yolo mode)", () => {
+  it("uses a 30-second manual override window for interactive gates", () => {
+    expect(YOLO_PLAN_COUNTDOWN_MS).toBe(30_000);
+  });
+
   it("auto-continues plan_checkpoint when opts.yolo is true even if config says review", async () => {
     const gate = new PauseGate();
     let bridged = false;
@@ -146,7 +150,7 @@ describe("autoResolveVerdict (yolo mode)", () => {
     expect(bridgedReqId).not.toBeNull();
   });
 
-  it("counts down before auto-approving plan_proposed with --yolo — the host gets a 10s window to override", async () => {
+  it("counts down before auto-approving plan_proposed with --yolo — the host gets a 30s window to override", async () => {
     vi.useFakeTimers();
     try {
       const gate = new PauseGate();

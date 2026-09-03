@@ -23,6 +23,9 @@ describe("isThinkingModeModel", () => {
   it("deepseek-v4-pro → true (default thinking)", () => {
     expect(isThinkingModeModel("deepseek-v4-pro")).toBe(true);
   });
+  it("ollama/deepseek-v4-flash:0731 → true (Ollama hosted tagged v4 models)", () => {
+    expect(isThinkingModeModel("ollama/deepseek-v4-flash:0731")).toBe(true);
+  });
   it("deepseek-chat → false (non-thinking compat alias)", () => {
     expect(isThinkingModeModel("deepseek-chat")).toBe(false);
   });
@@ -40,6 +43,7 @@ describe("thinkingModeForModel", () => {
   it("v4 models → enabled (docs default)", () => {
     expect(thinkingModeForModel("deepseek-v4-flash")).toBe("enabled");
     expect(thinkingModeForModel("deepseek-v4-pro")).toBe("enabled");
+    expect(thinkingModeForModel("ollama/deepseek-v4-flash:0731")).toBe("enabled");
   });
   it("unknown models → undefined (let server decide)", () => {
     expect(thinkingModeForModel("gpt-4")).toBeUndefined();
