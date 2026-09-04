@@ -51,9 +51,3 @@ export const MCP_CATALOG: CatalogEntry[] = [
     note: "useful for debugging your Reasonix setup",
   },
 ];
-
-export function mcpCommandFor(entry: CatalogEntry): string {
-  const pkg = entry.package;
-  const tail = entry.userArgs ? ` ${entry.userArgs}` : "";
-  return `--mcp "${entry.name}=npx -y ${pkg}${tail}"`;
-}

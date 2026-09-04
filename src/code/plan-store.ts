@@ -256,28 +256,6 @@ export function isPlanComplete(state: PlanStateOnDisk): boolean {
   return state.completedStepIds.length >= state.steps.length;
 }
 
-export interface PlanArchiveWithSession extends PlanArchiveSummary {
-  sessionName: string;
-}
-
-/** Cross-session enumeration in a single dir scan — used by the dashboard plans panel where the per-session loop was O(N×M) and timed out for users with hundreds of sessions. */
-export function listAllPlanArchives(): PlanArchiveWithSession[] {
-  const suffix = ".done.json";
-  const planMarker = ".plan.";
-  const out: PlanArchiveWithSession[] = [];
-  for (const { sessionName, full } of scanArchives(sessionsDir(), (name) => {
-    if (!name.endsWith(suffix)) return null;
-    const planIdx = name.indexOf(planMarker);
-    return planIdx > 0 ? name.slice(0, planIdx) : null;
-  })) {
-    const parsed = parsePlanArchiveFile(full);
-    if (!parsed) continue;
-    out.push({ ...archiveSummaryFromParsed(parsed, full), sessionName });
-  }
-  out.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
-  return out;
-}
-
 /** Defensive: rebuild step entries, filtering malformed ones so a partially corrupted file still yields a usable subset. */
 function sanitizeSteps(raw: unknown): PlanStep[] {
   if (!Array.isArray(raw)) return [];

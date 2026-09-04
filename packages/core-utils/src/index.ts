@@ -58,6 +58,7 @@ export {
 export {
   clipIndexDescription,
   clipText,
+  escapeHtml,
   flattenText,
   redactDiagnosticText,
   redactDiagnosticValue,

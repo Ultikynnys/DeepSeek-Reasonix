@@ -116,19 +116,3 @@ export async function readLineTail(
     return { lines: ring, totalLines };
   });
 }
-
-/** Stream all lines to a callback without retaining the file body. */
-export async function scanTextLines(
-  fh: FileHandle,
-  inspection: TextFileInspection,
-  visit: (line: string, lineNo: number) => void,
-): Promise<number> {
-  return withReadLines(fh, inspection, async (reader) => {
-    let totalLines = 0;
-    for await (const line of reader) {
-      totalLines++;
-      visit(line, totalLines);
-    }
-    return totalLines;
-  });
-}

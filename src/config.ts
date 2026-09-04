@@ -624,11 +624,11 @@ export function loadOllamaNumCtx(path: string = defaultConfigPath()): number | u
 
 /** Default sampling penalties for Ollama models — stops doom loops and repetitive
  *  attractor states at the logits level before they burn turns. */
-export const DEFAULT_OLLAMA_REPEAT_PENALTY = 1.3;
-export const DEFAULT_OLLAMA_FREQUENCY_PENALTY = 0.5;
-export const DEFAULT_OLLAMA_PRESENCE_PENALTY = 0.4;
-export const DEFAULT_OLLAMA_TOP_K = 40;
-export const DEFAULT_OLLAMA_REPEAT_LAST_N = 128;
+const DEFAULT_OLLAMA_REPEAT_PENALTY = 1.3;
+const DEFAULT_OLLAMA_FREQUENCY_PENALTY = 0.5;
+const DEFAULT_OLLAMA_PRESENCE_PENALTY = 0.4;
+const DEFAULT_OLLAMA_TOP_K = 40;
+const DEFAULT_OLLAMA_REPEAT_LAST_N = 128;
 
 /** Ollama repeat penalty — env OLLAMA_REPEAT_PENALTY > config > 1.3 default. */
 export function loadOllamaRepeatPenalty(path: string = defaultConfigPath()): number {
@@ -821,45 +821,6 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
     }
   }
   return {};
-}
-
-/** Whether the dashboard auto-starts. Default true; only false when explicitly set in config. */
-export function loadDashboardEnabled(
-  noConfig = false,
-  path: string = defaultConfigPath(),
-): boolean {
-  if (noConfig) return true;
-  const v = readConfig(path).dashboard?.enabled;
-  return v !== false;
-}
-
-/** Get-or-mint a 32-byte hex dashboard token, persisting on first call so subsequent CLI boots reuse it (URLs survive restarts). Returns the existing token if it's already ≥16 chars. */
-export function ensureDashboardToken(path: string = defaultConfigPath()): string {
-  const cfg = readConfig(path);
-  const existing = cfg.dashboard?.token?.trim();
-  if (existing && existing.length >= 16) return existing;
-  const minted = randomBytes(32).toString("hex");
-  const next: ReasonixConfig = { ...cfg, dashboard: { ...cfg.dashboard, token: minted } };
-  writeConfig(next, path);
-  return minted;
-}
-
-/** Persist the actual port the server bound to so the next boot reuses it (and falls back to ephemeral if it's taken). */
-export function saveDashboardPort(port: number, path: string = defaultConfigPath()): void {
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return;
-  const cfg = readConfig(path);
-  if (cfg.dashboard?.port === port) return;
-  const next: ReasonixConfig = { ...cfg, dashboard: { ...cfg.dashboard, port } };
-  writeConfig(next, path);
-}
-
-/** Wipe the persisted dashboard token — next boot mints a fresh one. Used by `/dashboard reset-token`. */
-export function clearDashboardToken(path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  if (!cfg.dashboard?.token) return;
-  const { token: _drop, ...rest } = cfg.dashboard;
-  const next: ReasonixConfig = { ...cfg, dashboard: rest };
-  writeConfig(next, path);
 }
 
 export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPath()): void {
@@ -1153,11 +1114,6 @@ export function loadMouseWheelRows(path: string = defaultConfigPath()): number |
   const raw = readConfig(path).mouseWheelRows;
   if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1) return undefined;
   return Math.min(raw, 10);
-}
-
-export function loadHistoryScrollMode(path: string = defaultConfigPath()): HistoryScrollMode {
-  const raw = readConfig(path).historyScrollMode;
-  return raw === "native" || raw === "app" || raw === "auto" ? raw : "auto";
 }
 
 export function loadToolRateLimit(
@@ -1649,11 +1605,6 @@ export function editModeHintShown(path: string = defaultConfigPath()): boolean {
   return readConfig(path).editModeHintShown === true;
 }
 
-/** True when the mouse-tracking + clipboard tip has been shown. */
-export function mouseClipboardHintShown(path: string = defaultConfigPath()): boolean {
-  return readConfig(path).mouseClipboardHintShown === true;
-}
-
 /** Unknown / missing fall back to "high" — the only value every OpenAI-compatible endpoint accepts (vLLM rejects "max"). */
 export function loadReasoningEffort(path: string = defaultConfigPath()): ReasoningEffort {
   const v = readConfig(path).reasoningEffort;
@@ -1948,14 +1899,6 @@ export function markEditModeHintShown(path: string = defaultConfigPath()): void 
   const cfg = readConfig(path);
   if (cfg.editModeHintShown === true) return;
   cfg.editModeHintShown = true;
-  writeConfig(cfg, path);
-}
-
-/** Mark the mouse + clipboard tip as shown. */
-export function markMouseClipboardHintShown(path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  if (cfg.mouseClipboardHintShown === true) return;
-  cfg.mouseClipboardHintShown = true;
   writeConfig(cfg, path);
 }
 

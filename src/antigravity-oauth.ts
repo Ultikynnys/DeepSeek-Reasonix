@@ -2,7 +2,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { type Server, createServer } from "node:http";
-import { isUsableAntigravityModel } from "@reasonix/core-utils";
+import { escapeHtml, isUsableAntigravityModel } from "@reasonix/core-utils";
 import {
   type AntigravityOAuthCreds,
   clearAntigravityOAuth,
@@ -58,7 +58,7 @@ export function antigravityUserinfoUrl(): string {
   return envOr(ANTIGRAVITY_DEFAULT_USERINFO_URL, "ANTIGRAVITY_USERINFO_URL");
 }
 
-export function randomOAuthState(): string {
+function randomOAuthState(): string {
   return randomBytes(24).toString("hex");
 }
 
@@ -480,10 +480,6 @@ export interface OAuthFlow {
   /** Resolves with exchanged tokens; rejects on error / cancel / timeout. */
   done: Promise<AntigravityOAuthCreds>;
   cancel: () => void;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
 const SUCCESS_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Signed in</title></head>

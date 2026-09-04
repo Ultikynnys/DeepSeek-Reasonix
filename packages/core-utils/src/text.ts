@@ -85,3 +85,8 @@ export function sanitizeFilename(name: string, opts: SanitizeFilenameOptions = {
   cleaned = cleaned.slice(0, max);
   return cleaned || fallback;
 }
+
+/** Escape HTML special characters (&, <, >, ", ') as numeric character entities. */
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}

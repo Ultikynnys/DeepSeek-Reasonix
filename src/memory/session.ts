@@ -311,10 +311,6 @@ const sessionDirectoryIndex = new SessionDirectoryIndex<SessionMeta>(
   join(reasonixHome(), "cache", "session-directory-index.json"),
 );
 
-export function invalidateSessionDirectoryIndex(): void {
-  sessionDirectoryIndex.invalidate();
-}
-
 export function listSessionsForWorkspaceAsync(workspace: string): {
   value: Promise<SessionInfo[]>;
   cache: "hit" | "refresh" | "inflight";
