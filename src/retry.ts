@@ -1,6 +1,7 @@
 /** Client retries initial requests only; loop-level guards handle safe stream/compaction replays. */
 
 import { messageOf, sleep } from "@reasonix/core-utils";
+import { RETRYABLE_HTTP_STATUSES } from "./core/retry-shared.js";
 
 export interface RetryOptions {
   /** Maximum total attempts (including the first). Default 4. */
@@ -23,7 +24,7 @@ export interface RetryInfo {
   waitMs: number;
 }
 
-const DEFAULT_RETRYABLE_STATUSES = [408, 429, 500, 502, 503, 504] as const;
+const DEFAULT_RETRYABLE_STATUSES = RETRYABLE_HTTP_STATUSES;
 
 export async function fetchWithRetry(
   fetchFn: typeof fetch,

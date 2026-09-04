@@ -1,6 +1,7 @@
 import { messageOf } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "./client.js";
 import { type EditMode, type ReasoningEffort, providerForModel } from "./config.js";
+import { tryParseJson } from "./core/parse-json.js";
 import type { PauseGate } from "./core/pause-gate.js";
 import { pauseGate as defaultPauseGate } from "./core/pause-gate.js";
 import { type ResolvedHook, runHooks } from "./hooks.js";
@@ -621,12 +622,15 @@ export class CacheFirstLoop {
     const def = this.tools.get(name);
     if (!def) return false;
     let args: Record<string, unknown> = {};
-    try {
-      args = JSON.parse(call.function?.arguments ?? "{}") ?? {};
-    } catch (err) {
+    const parsed = tryParseJson(call.function?.arguments ?? "{}");
+    if (parsed.ok) {
+      args = (parsed.value ?? {}) as Record<string, unknown>;
+    } else {
       // Malformed args → fall through to the static flag below; the
       // dynamic check would've thrown anyway. But LOG the corrupt payload.
-      process.stderr.write(`reasonix: malformed tool call arguments — ${messageOf(err)}\n`);
+      process.stderr.write(
+        `reasonix: malformed tool call arguments — ${messageOf(parsed.error)}\n`,
+      );
     }
     return !isReadOnlyTool(def, args);
   }

@@ -8,6 +8,7 @@ import {
   providerForModel,
   resolveBaseUrlEnv,
 } from "./config.js";
+import { tryParseJson } from "./core/parse-json.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { createLogger } from "./logging.js";
 import { showPayloadContextLength } from "./ollama-model-map.js";
@@ -136,12 +137,9 @@ function toNativeOllamaMessage(msg: ChatMessage): Record<string, unknown> {
  *  malformed input as an empty object rather than dropping the call. */
 function parseToolCallArguments(raw: string | undefined): unknown {
   if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
+  const parsed = tryParseJson(raw);
+  if (!parsed.ok) return {};
+  return parsed.value && typeof parsed.value === "object" ? parsed.value : {};
 }
 
 /** The inverse — native responses hand tool-call arguments back as objects;

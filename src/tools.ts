@@ -1,3 +1,4 @@
+import { tryParseJson } from "./core/parse-json.js";
 import type { PauseGate } from "./core/pause-gate.js";
 import { truncateForModel, truncateForModelByTokens } from "./mcp/registry.js";
 import { analyzeSchema, flattenSchema, nestArguments } from "./repair/flatten.js";
@@ -226,19 +227,22 @@ export class ToolRegistry {
     }
     const rawFingerprint = rawFingerprintArgs(argumentsRaw);
     let args: Record<string, unknown>;
-    try {
-      args =
-        typeof argumentsRaw === "string"
-          ? argumentsRaw.trim()
-            ? (JSON.parse(argumentsRaw) ?? {})
-            : {}
-          : (argumentsRaw ?? {});
-    } catch (err) {
-      return this._noteMalformed(
-        name,
-        rawFingerprint,
-        `invalid tool arguments JSON: ${(err as Error).message}`,
-      );
+    if (typeof argumentsRaw === "string") {
+      if (!argumentsRaw.trim()) {
+        args = {};
+      } else {
+        const parsed = tryParseJson(argumentsRaw);
+        if (!parsed.ok) {
+          return this._noteMalformed(
+            name,
+            rawFingerprint,
+            `invalid tool arguments JSON: ${(parsed.error as Error).message}`,
+          );
+        }
+        args = (parsed.value ?? {}) as Record<string, unknown>;
+      }
+    } else {
+      args = (argumentsRaw ?? {}) as Record<string, unknown>;
     }
 
     // Re-nest dot-notation args back to the original shape, but only when

@@ -1,4 +1,5 @@
 import { abortReason, messageOf, sleep } from "@reasonix/core-utils";
+import { isRetryableHttpStatus } from "../core/retry-shared.js";
 
 /** Maximum attempts for a compaction model call, including the first call. */
 export const COMPACTION_MAX_ATTEMPTS = 2;
@@ -140,7 +141,7 @@ export function isRetryableCompactionError(message: string): boolean {
 
   const status = /^(?:DeepSeek|Upstream) (\d{3}):/.exec(trimmed)?.[1];
   if (status !== undefined) {
-    return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
+    return isRetryableHttpStatus(Number(status));
   }
 
   // Only replay recognizable transport/body failures. A local programming or

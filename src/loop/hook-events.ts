@@ -1,12 +1,10 @@
+import { tryParseJson } from "../core/parse-json.js";
 import { type HookOutcome, formatHookOutcomeMessage } from "../hooks.js";
 import type { LoopEvent } from "./types.js";
 
 export function safeParseToolArgs(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
+  const parsed = tryParseJson(raw);
+  return parsed.ok ? parsed.value : raw;
 }
 
 /** Format non-pass hook outcomes as `LoopEvent`s of role `warning`. */
