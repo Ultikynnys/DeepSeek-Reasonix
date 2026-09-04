@@ -17,7 +17,6 @@ import type {
   MemoryDetail,
   MemoryEntryInfo,
   SettingsPatch,
-  SkillInfo,
 } from "../protocol";
 import {
   FONT_FAMILY,
@@ -54,7 +53,6 @@ export type PageId =
   | "general"
   | "models"
   | "mcp"
-  | "skills"
   | "memory"
   | "rules"
   | "billing"
@@ -64,7 +62,6 @@ const PAGE_META: ReadonlyArray<{ id: PageId; icon: keyof typeof I }> = [
   { id: "general", icon: "cog" },
   { id: "models", icon: "brain" },
   { id: "mcp", icon: "wrench" },
-  { id: "skills", icon: "zap" },
   { id: "memory", icon: "bookmark" },
   { id: "rules", icon: "shield" },
   { id: "billing", icon: "coin" },
@@ -89,7 +86,6 @@ export function SettingsModal({
   initialPage,
   mcpSpecs,
   mcpBridged,
-  skills,
   memory,
   memoryDetail,
   memoryResult,
@@ -141,7 +137,6 @@ export function SettingsModal({
   initialPage?: PageId;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
-  skills: SkillInfo[];
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
   memoryResult: { ok: boolean; message: string } | null;
@@ -303,7 +298,6 @@ export function SettingsModal({
                 onRemove={onRemoveMcpSpec}
               />
             )}
-            {page === "skills" && <PageSkills skills={skills} />}
             {page === "memory" && (
               <PageMemory
                 entries={memory}
@@ -1451,65 +1445,6 @@ function PageMCP({
         </div>
       </section>
     </>
-  );
-}
-
-function PageSkills({ skills }: { skills: SkillInfo[] }) {
-  return (
-    <section className="section">
-      <div className="stitle">{t("settings.skillsLoaded", { count: skills.length })}</div>
-      {skills.length === 0 ? (
-        <div
-          style={{
-            padding: 16,
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            fontSize: 12,
-            color: "var(--muted)",
-          }}
-        >
-          {t("settings.skillsEmpty")}
-        </div>
-      ) : (
-        skills.map((s) => (
-          <div className="scard" key={`${s.scope}:${s.name}`}>
-            <div className="top">
-              <span className="ico">
-                <I.zap size={14} />
-              </span>
-              <div>
-                <div className="nm">
-                  <span
-                    style={{
-                      fontFamily: "Geist Mono, monospace",
-                      color: "var(--accent)",
-                    }}
-                  >
-                    /{s.name}
-                  </span>
-                </div>
-                <div className="sub">
-                  {s.scope} · {s.runAs}
-                  {s.model ? ` · ${s.model}` : ""}
-                </div>
-              </div>
-            </div>
-            <div className="desc">{s.description}</div>
-            <div
-              style={{
-                fontFamily: "Geist Mono, monospace",
-                fontSize: 10.5,
-                color: "var(--muted-2)",
-                marginTop: 4,
-              }}
-            >
-              {s.path}
-            </div>
-          </div>
-        ))
-      )}
-    </section>
   );
 }
 

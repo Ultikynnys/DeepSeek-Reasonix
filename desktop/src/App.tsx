@@ -3229,7 +3229,6 @@ function TabRuntime({
             initialPage={settingsPage}
             mcpSpecs={state.mcpSpecs}
             mcpBridged={state.mcpBridged}
-            skills={state.skills}
             memory={state.memory}
             memoryDetail={state.memoryDetail}
             memoryResult={state.memoryResult}

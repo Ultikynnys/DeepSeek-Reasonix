@@ -5836,7 +5836,7 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 }
 
 /* ============================================================
-   Settings modal — General / Models / MCP / Skills / Memory / Rules / Billing / Shortcuts
+   Settings modal: General / Models / MCP / Memory / Rules / Billing / Shortcuts
    ============================================================ */
 
 .settings-mask {

@@ -214,8 +214,6 @@ export const en = {
     pageModelsDesc: "Default model & sampling parameters",
     pageMcpLabel: "MCP Servers",
     pageMcpDesc: "Manage MCP protocol tool servers",
-    pageSkillsLabel: "Skills",
-    pageSkillsDesc: "Reusable prompt sets for / commands",
     pageMemoryLabel: "Memory",
     pageMemoryDesc: "CLAUDE.md / AGENTS.md injection",
     pageRulesLabel: "Approval Rules",
@@ -291,10 +289,6 @@ export const en = {
     mcpSpecLabel: "Spec string",
     mcpSpecFormat: "Format: <code>name=command args</code> or <code>name=https://host/sse</code>",
     mcpAdd: "Add",
-    // Skills
-    skillsLoaded: "Loaded · {count} · invoke via / commands",
-    skillsEmpty:
-      "No skills available. Create SKILL.md under ~/.reasonix/skills/ or .reasonix/skills/ in your project root.",
     // Memory
     memorySection: "Long-term memory",
     memoryDesc:
