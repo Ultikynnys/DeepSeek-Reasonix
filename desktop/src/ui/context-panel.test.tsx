@@ -541,4 +541,61 @@ describe("ContextPanel files", () => {
     fireEvent.click(screen.getByText("Tools"));
     expect(screen.getByTestId("ollama-generation-settings")).toBeTruthy();
   });
+
+  it("renders Auto-compaction toggle in Tools section and updates setting", () => {
+    const onSaveSettings = vi.fn();
+    render(
+      <ContextPanel
+        settings={{ ...settings, disableAutoCompaction: false }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onSaveSettings={onSaveSettings}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    expect(screen.getByText("Auto-compaction")).toBeTruthy();
+    const enabledBtn = screen.getByRole("button", { name: "Enabled" });
+    const disabledBtn = screen.getByRole("button", { name: "Disabled" });
+
+    expect(enabledBtn.getAttribute("data-on")).toBe("true");
+    expect(disabledBtn.getAttribute("data-on")).toBe("false");
+
+    fireEvent.click(disabledBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({ disableAutoCompaction: true });
+  });
+
+  it("displays auto-compaction disabled indicator in context meter legend when active", () => {
+    render(
+      <ContextPanel
+        settings={{ ...settings, disableAutoCompaction: true }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("auto-compaction disabled")).toBeTruthy();
+  });
 });

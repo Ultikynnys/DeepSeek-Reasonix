@@ -150,18 +150,26 @@ export function ContextPanel({
             <span className="used" style={{ width: `${usedPct}%` }} />
             {/* Auto-compaction limits (context-manager.ts): fold 75% / forced summary 80% */}
             <span
-              className="meter-tick fold"
-              style={{ left: "75%" }}
-              title={t("contextPanel.foldTick", {
-                tokens: fmtCompact(ctxMax * 0.75),
-              })}
+              className={`meter-tick fold ${settings?.disableAutoCompaction ? "disabled" : ""}`}
+              style={{ left: "75%", opacity: settings?.disableAutoCompaction ? 0.3 : undefined }}
+              title={
+                settings?.disableAutoCompaction
+                  ? t("contextPanel.autoCompactionDisabledTooltip")
+                  : t("contextPanel.foldTick", {
+                      tokens: fmtCompact(ctxMax * 0.75),
+                    })
+              }
             />
             <span
-              className="meter-tick force"
-              style={{ left: "80%" }}
-              title={t("contextPanel.forceTick", {
-                tokens: fmtCompact(ctxMax * 0.8),
-              })}
+              className={`meter-tick force ${settings?.disableAutoCompaction ? "disabled" : ""}`}
+              style={{ left: "80%", opacity: settings?.disableAutoCompaction ? 0.3 : undefined }}
+              title={
+                settings?.disableAutoCompaction
+                  ? t("contextPanel.autoCompactionDisabledTooltip")
+                  : t("contextPanel.forceTick", {
+                      tokens: fmtCompact(ctxMax * 0.8),
+                    })
+              }
             />
           </div>
           <div className="legend">
@@ -182,10 +190,12 @@ export function ContextPanel({
             </span>
             <span className="l">
               <span className="sw z" />
-              {t("contextPanel.compactionAt", {
-                fold: fmtCompact(ctxMax * 0.75),
-                force: fmtCompact(ctxMax * 0.8),
-              })}
+              {settings?.disableAutoCompaction
+                ? t("contextPanel.compactionDisabled")
+                : t("contextPanel.compactionAt", {
+                    fold: fmtCompact(ctxMax * 0.75),
+                    force: fmtCompact(ctxMax * 0.8),
+                  })}
             </span>
           </div>
         </div>
@@ -815,6 +825,35 @@ function CtxTools({
             <span>50</span>
             <span>100</span>
           </div>
+        </div>
+      </div>
+
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.autoCompaction")}</span>
+          <span className="right">
+            <div className="seg-ctrl" style={{ fontSize: "10.5px" }}>
+              <button
+                type="button"
+                data-on={!settings?.disableAutoCompaction}
+                onClick={() => onSaveSettings?.({ disableAutoCompaction: false })}
+              >
+                {t("contextPanel.autoCompactionEnabled")}
+              </button>
+              <button
+                type="button"
+                data-on={!!settings?.disableAutoCompaction}
+                onClick={() => onSaveSettings?.({ disableAutoCompaction: true })}
+              >
+                {t("contextPanel.autoCompactionDisabled")}
+              </button>
+            </div>
+          </span>
+        </div>
+        <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>
+          {settings?.disableAutoCompaction
+            ? t("contextPanel.autoCompactionDisabledDesc")
+            : t("contextPanel.autoCompactionEnabledDesc")}
         </div>
       </div>
 

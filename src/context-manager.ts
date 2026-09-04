@@ -165,6 +165,8 @@ export interface ContextManagerDeps {
   onLogRewrite?: () => void;
   /** User-configured context-window cap override (tokens). Undefined = per-model default (see resolveContextTokens). */
   ctxMaxOverride?: number;
+  /** When true, automatic compaction decisions (auto-fold, forced-summary) return "none". */
+  disableAutoCompaction?: boolean;
 }
 
 export type PostUsageDecisionKind = "none" | "fold" | "exit-with-summary";
@@ -272,8 +274,12 @@ export class ContextManager {
    *  change re-scales every fold threshold without rebuilding the runtime. */
   ctxMaxOverride: number | undefined;
 
+  /** When true, automatic compaction decisions (auto-fold, forced-summary) return "none". */
+  disableAutoCompaction: boolean;
+
   constructor(private deps: ContextManagerDeps) {
     this.ctxMaxOverride = deps.ctxMaxOverride;
+    this.disableAutoCompaction = Boolean(deps.disableAutoCompaction);
     deps.log.onAppend((msg) => {
       if (this.logTokenTotal !== null) this.logTokenTotal += this.countMessageTokensCached(msg);
     });
@@ -309,6 +315,11 @@ export class ContextManager {
     alreadyFoldedThisTurn: boolean,
   ): PostUsageDecision {
     const ctxMax = resolveContextTokens(model, this.ctxMaxOverride);
+    if (this.disableAutoCompaction) {
+      const promptTokens = usage ? usage.promptTokens : this.getLogTokens();
+      const ratio = promptTokens / ctxMax;
+      return { kind: "none", promptTokens, ctxMax, ratio };
+    }
     if (!usage) {
       // Missing provider usage is not evidence that the request was small. Use
       // the live log as a conservative lower bound so dropped usage chunks
@@ -410,6 +421,7 @@ export class ContextManager {
       afterMessages: all.length,
       summaryChars: 0,
     };
+    if (this.disableAutoCompaction && !opts?.userInitiated) return noop;
     if (all.length === 0) return noop;
 
     const tokenCounts = all.map(countMessageTokens);

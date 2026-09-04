@@ -168,6 +168,8 @@ export interface CacheFirstLoopOptions {
   /** Host hook fired at the start of every compaction so live background
    *  shells can be force-cancelled before history is replaced. */
   onPreCompaction?: () => void | Promise<void>;
+  /** When true, disables all automatic compaction sources (turn-start folds, post-response folds, context guards). Manual compaction remains enabled. */
+  disableAutoCompaction?: boolean;
 }
 
 export interface ReconfigurableOptions {
@@ -181,6 +183,8 @@ export interface ReconfigurableOptions {
   ctxMaxOverride?: number | null;
   /** Per-turn iteration cap; undefined = keep current, `null` = reset to default (50). */
   maxIterPerTurn?: number | null;
+  /** When true, disable all automatic compaction (auto-fold, turn-start fold, forced summary). Manual compaction remains available. */
+  disableAutoCompaction?: boolean | null;
 }
 
 export interface LoopAbortOptions {
@@ -331,6 +335,8 @@ export class CacheFirstLoop {
   private _compactionSeq = 0;
   /** True while a compaction is in flight — blocks new tool dispatch. */
   private _compacting = false;
+  /** When true, all automatic compaction sources are disabled. */
+  private _disableAutoCompaction: boolean;
   /** Host hook that force-cancels background jobs before compaction. */
   private readonly _onPreCompaction: (() => void | Promise<void>) | null;
 
@@ -350,6 +356,11 @@ export class CacheFirstLoop {
     return this._compacting;
   }
 
+  /** When true, automatic compaction from all sources is disabled. */
+  get disableAutoCompaction(): boolean {
+    return this._disableAutoCompaction;
+  }
+
   constructor(opts: CacheFirstLoopOptions) {
     this.client = opts.client;
     this.prefix = opts.prefix;
@@ -359,6 +370,7 @@ export class CacheFirstLoop {
     this.maxOutputTokens = opts.maxOutputTokens;
     this.maxIterPerTurn = opts.maxIterPerTurn ?? CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN;
     this._getEditMode = opts.getEditMode;
+    this._disableAutoCompaction = Boolean(opts.disableAutoCompaction);
     this.budgetUsd =
       typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
     this.ctxMaxOverride = opts.ctxMaxOverride;
@@ -437,6 +449,7 @@ export class CacheFirstLoop {
       stats: this.stats,
       sessionName: this.sessionName,
       ctxMaxOverride: this.ctxMaxOverride,
+      disableAutoCompaction: this._disableAutoCompaction,
       getCurrentTurn: () => this._turn,
       getSystemPrompt: () => this.prefix.system,
       getToolSpecs: () => this.prefix.toolSpecs,
@@ -578,6 +591,11 @@ export class CacheFirstLoop {
     }
     if (opts.maxIterPerTurn !== undefined) {
       this.maxIterPerTurn = opts.maxIterPerTurn ?? CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN;
+    }
+    if (opts.disableAutoCompaction !== undefined) {
+      const v = Boolean(opts.disableAutoCompaction);
+      this._disableAutoCompaction = v;
+      this.context.disableAutoCompaction = v;
     }
   }
 
@@ -1077,7 +1095,7 @@ export class CacheFirstLoop {
         this.prefix.toolSpecs,
         this.model,
       );
-      if (turnStart.ratio > TURN_START_FOLD_THRESHOLD) {
+      if (!this._disableAutoCompaction && turnStart.ratio > TURN_START_FOLD_THRESHOLD) {
         // Compaction card lifecycle — same queue as tool cards, emitted through
         // the ONE compactionEvents helper every compaction form shares.
         yield* this.compactionEvents(
@@ -1238,20 +1256,22 @@ export class CacheFirstLoop {
 
       const requestBudget = this.context.requestBudget(messages, toolSpecs, this.model);
       if (!requestBudget.fits) {
-        yield {
-          turn: this._turn,
-          role: "warning",
-          severity: "high",
-          content: t("loop.forcingSummary", {
-            before: requestBudget.estimateTokens.toLocaleString(),
-            ctxMax: requestBudget.ctxMax.toLocaleString(),
-            pct: Math.round(requestBudget.ratio * 100),
-          }),
-        };
-        yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "context-guard");
-        restoreModelIfNeeded();
-        this._steerQueue.length = 0;
-        return;
+        if (!this._disableAutoCompaction) {
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "high",
+            content: t("loop.forcingSummary", {
+              before: requestBudget.estimateTokens.toLocaleString(),
+              ctxMax: requestBudget.ctxMax.toLocaleString(),
+              pct: Math.round(requestBudget.ratio * 100),
+            }),
+          };
+          yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "context-guard");
+          restoreModelIfNeeded();
+          this._steerQueue.length = 0;
+          return;
+        }
       }
 
       let assistantContent = "";
@@ -1548,7 +1568,15 @@ export class CacheFirstLoop {
           severity: "high",
           content: t("loop.reasoningLoop"),
         };
-        yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
+        if (!this._disableAutoCompaction) {
+          yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
+        } else {
+          yield {
+            turn: this._turn,
+            role: "done",
+            content: assistantContent || t("loop.reasoningLoop"),
+          };
+        }
         restoreModelIfNeeded();
         this._steerQueue.length = 0;
         return;
@@ -1693,9 +1721,9 @@ export class CacheFirstLoop {
       // then force compaction — neither finishes" stall). ContextManager clamps
       // the fold boundary to the last user exchange (protectActiveExchange) so
       // the completed tool results survive into the tail.
-      const foldPlan = decision.kind === "fold" ? decision : null;
+      const foldPlan = !this._disableAutoCompaction && decision.kind === "fold" ? decision : null;
       const compactionId = foldPlan ? `compaction-${++this._compactionSeq}` : null;
-      if (decision.kind === "exit-with-summary") {
+      if (!this._disableAutoCompaction && decision.kind === "exit-with-summary") {
         const before = decision.promptTokens;
         const ctxMax = decision.ctxMax;
         yield {
@@ -1735,9 +1763,17 @@ export class CacheFirstLoop {
           continue;
         }
         if (allSuppressed) {
-          // Same compaction card lifecycle as the context-guard path — the
-          // stuck-state force-summary is also a compaction action.
-          yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
+          if (!this._disableAutoCompaction) {
+            // Same compaction card lifecycle as the context-guard path — the
+            // stuck-state force-summary is also a compaction action.
+            yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
+          } else {
+            yield {
+              turn: this._turn,
+              role: "done",
+              content: assistantContent || t("loop.stormStuck"),
+            };
+          }
           restoreModelIfNeeded();
           this._steerQueue.length = 0;
           return;
@@ -1810,6 +1846,14 @@ export class CacheFirstLoop {
     aggressive: boolean | undefined,
     run: () => Promise<FoldResult> | AsyncGenerator<LoopEvent, FoldResult, void>,
   ): AsyncGenerator<LoopEvent, FoldResult, void> {
+    if (this._disableAutoCompaction && reason !== "user") {
+      return {
+        folded: false,
+        beforeMessages: this.log.length,
+        afterMessages: this.log.length,
+        summaryChars: 0,
+      };
+    }
     const beforeMessages = this.log.length;
     // Cancel live work FIRST and hold the dispatch lock for the whole summary:
     // no background shell, subagent, or tool may be running — or started — while

@@ -453,6 +453,8 @@ export interface SettingsEvent {
   maxIterPerTurn?: number | null;
   /** Explicit config override; null means environment/default resolution is active. */
   maxIterPerTurnOverride?: number | null;
+  /** When true, all automatic compaction sources (turn-start folds, post-response folds, context guards) are disabled. Only manual compaction runs. */
+  disableAutoCompaction?: boolean;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -696,6 +698,8 @@ export interface SettingsPatch {
   contextTokens?: number | null;
   /** Per-turn iteration cap, clamped to [50, 100]; null/undefined = default (50). */
   maxIterPerTurn?: number | null;
+  /** Disable automatic compaction from all sources except the manual button. */
+  disableAutoCompaction?: boolean;
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;

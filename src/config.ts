@@ -338,6 +338,8 @@ export interface ReasonixConfig {
    *  [128000, 1000000] at load; the effective cap is also clamped to the model's max
    *  context length (resolveContextTokens), so a value above it is reduced internally. */
   contextTokens?: number;
+  /** When true, disable all automatic compaction (turn-start auto-fold, post-response fold, context guards). Manual compaction remains available. */
+  disableAutoCompaction?: boolean;
   /** Default workspace root for the desktop client. CLI uses cwd. */
   workspaceDir?: string;
   /** Last N workspace paths the desktop client has opened, most recent first. */
@@ -1707,6 +1709,21 @@ export function saveCustomQuickSends(list: QuickSend[], path: string = defaultCo
     ...q,
     shorthand: enforceQuickSendShorthand(q.shorthand || q.label),
   }));
+  writeConfig(cfg, path);
+}
+
+/** True when the user has disabled all automatic compaction sources. Defaults to false. */
+export function loadDisableAutoCompaction(path: string = defaultConfigPath()): boolean {
+  return Boolean(readConfig(path).disableAutoCompaction);
+}
+
+/** Persist whether automatic compaction is disabled. */
+export function saveDisableAutoCompaction(
+  disabled: boolean,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.disableAutoCompaction = disabled;
   writeConfig(cfg, path);
 }
 

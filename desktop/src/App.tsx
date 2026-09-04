@@ -359,6 +359,8 @@ export type Settings = {
   maxIterPerTurn?: number | null;
   /** Explicit config override; null means environment/default resolution is active. */
   maxIterPerTurnOverride?: number | null;
+  /** When true, all automatic compaction sources are disabled. */
+  disableAutoCompaction?: boolean;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -1624,6 +1626,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           quickSends: ev.quickSends,
           budgetUsd: ev.budgetUsd,
           contextTokens: ev.contextTokens ?? null,
+          maxIterPerTurn: ev.maxIterPerTurn ?? null,
+          maxIterPerTurnOverride: ev.maxIterPerTurnOverride ?? null,
+          disableAutoCompaction: ev.disableAutoCompaction ?? false,
           baseUrl: ev.baseUrl,
           apiKeyPrefix: ev.apiKeyPrefix,
           workspaceDir: ev.workspaceDir,

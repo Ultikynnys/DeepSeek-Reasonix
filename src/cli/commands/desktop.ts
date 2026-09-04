@@ -92,6 +92,7 @@ import {
   loadContextTokens,
   loadCustomQuickSends,
   loadDesktopOpenTabs,
+  loadDisableAutoCompaction,
   loadEditMode,
   loadEndpoint,
   loadEndpointForModel,
@@ -129,6 +130,7 @@ import {
   saveContextTokens,
   saveCustomQuickSends,
   saveDesktopOpenTabs,
+  saveDisableAutoCompaction,
   saveEditMode,
   saveMaxIterPerTurn,
   saveModel,
@@ -909,6 +911,7 @@ function emitSettings(tab: Tab): void {
       maxIterPerTurn: tab.runtime?.loop.maxIterPerTurn ?? loadMaxIterPerTurn(),
       maxIterPerTurnOverride:
         typeof config.maxIterPerTurn === "number" ? config.maxIterPerTurn : null,
+      disableAutoCompaction: tab.runtime?.loop.disableAutoCompaction ?? loadDisableAutoCompaction(),
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
       workspaceDir: tab.rootDir,
@@ -2324,6 +2327,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     reasoningEffort,
     maxIterPerTurn: loadMaxIterPerTurn(),
     maxOutputTokens: loadMaxOutputTokens(),
+    disableAutoCompaction: loadDisableAutoCompaction(),
     // Plan-based providers (Codex OAuth, cloud Ollama, Antigravity) record
     // quota % not invented dollars — same billing resolution the subagent path
     // uses, so main-loop and subagent turns agree on the native unit.
@@ -4572,6 +4576,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           const next = loadMaxIterPerTurn();
           for (const openTab of tabs.values()) {
             openTab.runtime?.loop.configure({ maxIterPerTurn: next });
+            emitSettings(openTab);
+          }
+        }
+        if (msg.disableAutoCompaction !== undefined) {
+          saveDisableAutoCompaction(msg.disableAutoCompaction);
+          const next = loadDisableAutoCompaction();
+          for (const openTab of tabs.values()) {
+            openTab.runtime?.loop.configure({ disableAutoCompaction: next });
             emitSettings(openTab);
           }
         }
