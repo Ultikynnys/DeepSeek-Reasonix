@@ -573,16 +573,35 @@ function OllamaNumberField({
   onSaveSettings?: (patch: SettingsPatch) => void;
 }) {
   const [draft, setDraft] = useState(value === undefined ? "" : String(value));
-  useEffect(() => setDraft(value === undefined ? "" : String(value)), [value]);
+  const [editing, setEditing] = useState(false);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // A live $settings round-trip updates `value`: only bleed it back into the
+  // draft while the field is idle so an in-progress edit isn't clobbered.
+  useEffect(() => {
+    if (!editing) setDraft(value === undefined ? "" : String(value));
+  }, [value, editing]);
+
+  useEffect(() => () => clearTimeout(commitTimer.current), []);
+
+  // Save `raw` as a number if it parses to a complete, in-range value. Returns
+  // true on success so callers can tell a committed value from a mid-keystroke
+  // draft (e.g. a trailing "." or lone "-") that must not be persisted.
+  const commitValue = (raw: string): boolean => {
+    const trimmed = raw.trim();
+    if (!/^-?\d*\.?\d+$/.test(trimmed)) return false;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed < field.min || parsed > field.max) return false;
+    onSaveSettings?.({ ollamaGeneration: { [field.key]: parsed } });
+    return true;
+  };
 
   const commit = () => {
-    if (!draft.trim()) return;
-    const parsed = Number(draft);
-    if (!Number.isFinite(parsed) || parsed < field.min || parsed > field.max) {
+    clearTimeout(commitTimer.current);
+    // Invalid/empty on blur: revert to the last good value, don't persist junk.
+    if (!commitValue(draft) && draft.trim()) {
       setDraft(value === undefined ? "" : String(value));
-      return;
     }
-    onSaveSettings?.({ ollamaGeneration: { [field.key]: parsed } });
   };
 
   return (
@@ -597,8 +616,18 @@ function OllamaNumberField({
           step={field.step}
           placeholder={t("contextPanel.ollamaModelDefault")}
           aria-label={t(field.labelKey)}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commit}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            // Commit a beat after the last keystroke so spinners and typed
+            // values persist immediately without saving partial input.
+            clearTimeout(commitTimer.current);
+            commitTimer.current = setTimeout(() => commitValue(event.target.value), 150);
+          }}
+          onFocus={() => setEditing(true)}
+          onBlur={() => {
+            setEditing(false);
+            commit();
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
           }}
@@ -628,7 +657,19 @@ function OllamaGenerationControls({
   const values = settings.ollamaGeneration;
   const overrides = settings.ollamaGenerationOverrides;
   const [keepAlive, setKeepAlive] = useState(values?.keepAlive ?? "30m");
-  useEffect(() => setKeepAlive(values?.keepAlive ?? "30m"), [values?.keepAlive]);
+  const [keepAliveEditing, setKeepAliveEditing] = useState(false);
+  const keepAliveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    if (!keepAliveEditing) setKeepAlive(values?.keepAlive ?? "30m");
+  }, [values?.keepAlive, keepAliveEditing]);
+  useEffect(() => () => clearTimeout(keepAliveTimer.current), []);
+
+  const commitKeepAlive = () => {
+    clearTimeout(keepAliveTimer.current);
+    const value = keepAlive.trim();
+    if (value) onSaveSettings?.({ ollamaGeneration: { keepAlive: value } });
+    else setKeepAlive(values?.keepAlive ?? "30m");
+  };
 
   const fields = (advanced: boolean) =>
     OLLAMA_NUMBER_FIELDS.filter((field) => Boolean(field.advanced) === advanced).map((field) => (
@@ -677,11 +718,18 @@ function OllamaGenerationControls({
                 value={keepAlive}
                 aria-label={t("contextPanel.ollamaKeepAlive")}
                 list="ollama-keep-alive-options"
-                onChange={(event) => setKeepAlive(event.target.value)}
+                onChange={(event) => {
+                  setKeepAlive(event.target.value);
+                  clearTimeout(keepAliveTimer.current);
+                  keepAliveTimer.current = setTimeout(() => {
+                    const value = event.target.value.trim();
+                    if (value) onSaveSettings?.({ ollamaGeneration: { keepAlive: value } });
+                  }, 150);
+                }}
+                onFocus={() => setKeepAliveEditing(true)}
                 onBlur={() => {
-                  const value = keepAlive.trim();
-                  if (value) onSaveSettings?.({ ollamaGeneration: { keepAlive: value } });
-                  else setKeepAlive(values?.keepAlive ?? "30m");
+                  setKeepAliveEditing(false);
+                  commitKeepAlive();
                 }}
               />
               {overrides?.keepAlive !== undefined ? (

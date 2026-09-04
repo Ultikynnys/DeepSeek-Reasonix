@@ -429,6 +429,47 @@ describe("ContextPanel files", () => {
     expect(onSaveSettings).toHaveBeenCalledWith({ ollamaGeneration: { temperature: null } });
   });
 
+  it("saves a sampling value immediately on change, without waiting for blur", () => {
+    const onSaveSettings = vi.fn();
+    render(
+      <ContextPanel
+        settings={{
+          ...settings,
+          modelEndpoint: { provider: "ollama", baseUrl: "http://localhost:11434" },
+          subagentModelEndpoint: { provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+          ollamaGeneration: { temperature: 0.5, keepAlive: "30m" },
+          ollamaGenerationOverrides: {},
+        }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onSaveSettings={onSaveSettings}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    vi.useFakeTimers();
+    try {
+      const temp = screen.getByRole("spinbutton", { name: "Temperature" });
+      // Change without blurring — the value should persist on its own.
+      fireEvent.change(temp, { target: { value: "0.7" } });
+      vi.advanceTimersByTime(200);
+      expect(onSaveSettings).toHaveBeenCalledWith({ ollamaGeneration: { temperature: 0.7 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("renders 5 Ollama sampling preset buttons and applies presets on click", () => {
     const onSaveSettings = vi.fn();
     render(
