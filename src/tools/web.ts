@@ -71,8 +71,8 @@ const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 const DEFAULT_TOPK = 5;
 /** Timeout applied to every outbound search request — a blocked/slow engine must not hang the research step forever. */
 const SEARCH_TIMEOUT_MS = 15_000;
-/** Bytes cap applied before `resp.text()` — char cap can't fire until the body is fully buffered. */
-const FETCH_MAX_BYTES = 10 * 1024 * 1024;
+/** Bytes cap applied before `resp.text()`: capped at 2.5 MB to avoid excessive bandwidth usage on metered or poor connections. */
+const FETCH_MAX_BYTES = Math.floor(2.5 * 1024 * 1024);
 // Real-browser UA. Most search backends gate obvious scraper UAs; a stock
 // Chrome string clears the fast-path block.
 const USER_AGENT =

@@ -373,6 +373,7 @@ export function projectSubagentEvent(ev: SubagentEvent): SubagentProgressPayload
     ...(ev.iter !== undefined ? { iter: ev.iter } : {}),
     ...(ev.elapsedMs !== undefined ? { elapsedMs: ev.elapsedMs } : {}),
     ...(ev.contextTokens !== undefined ? { contextTokens: ev.contextTokens } : {}),
+    ...(ev.thought ? { thought: redactDesktopDiagnosticMessage(ev.thought, 500) } : {}),
     ...(ev.maxToolIters !== undefined ? { maxToolIters: ev.maxToolIters } : {}),
     ...(ev.maxElapsedMs !== undefined ? { maxElapsedMs: ev.maxElapsedMs } : {}),
     ...(ev.budgetExhausted ? { budgetExhausted: ev.budgetExhausted } : {}),
@@ -3283,7 +3284,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // the boot dir before construction, and rotate `first` to the next
   // surviving tab when its source closes.
   let shuttingDown = false;
-  /** 60s quota poll — assigned below after tab restore, cleared on shutdown. */
+  /** Periodic quota poll: assigned below after tab restore, cleared on shutdown. */
   let quotaTimer: ReturnType<typeof setInterval> | undefined = undefined;
   async function gracefulShutdown(): Promise<void> {
     if (shuttingDown) return;
@@ -3690,12 +3691,24 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   first = bootstrapTab(opts.dir ?? savedTabs[0]?.dir, startupTab);
   const pendingRestores = savedTabs.filter((t) => t !== startupTab);
   lastActiveTabId = first.id;
-  // Account-wide quotas change underneath us (other devices, window resets) —
+  // Account-wide quotas change underneath us (other devices, window resets) -
   // poll so the statusbar chips are never stale. Skipped mid-turn so the
   // $turn_complete fetch stays the authoritative turn-cost measurement.
+  // Polling uses a 5-minute interval and pauses after 15 minutes of idle
+  // time to conserve bandwidth on metered and poor connections.
+  const QUOTA_POLL_INTERVAL_MS = 5 * 60 * 1000;
+  const QUOTA_POLL_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+  let lastUserActivityAt = Date.now();
   let quotaPolling = false;
   quotaTimer = setInterval(() => {
     if (quotaPolling) return;
+    if (Date.now() - lastUserActivityAt > QUOTA_POLL_IDLE_TIMEOUT_MS) {
+      emitDiagnostic("quota.poll.skipped", {
+        reason: "user-idle",
+        idleMs: Date.now() - lastUserActivityAt,
+      });
+      return;
+    }
     for (const t of tabs.values()) {
       if (t.aborter) {
         emitTabDiagnostic(t, "quota.poll.skipped", { reason: "turn-in-progress" });
@@ -3710,17 +3723,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       });
       return;
     }
-    emitTabDiagnostic(tab, "quota.poll.started", { intervalMs: 60_000 });
+    emitTabDiagnostic(tab, "quota.poll.started", { intervalMs: QUOTA_POLL_INTERVAL_MS });
     quotaPolling = true;
     void Promise.allSettled([
-      emitCodexQuota(tab, { force: true }),
+      emitCodexQuota(tab, { force: false }),
       emitOllamaQuota(tab),
       emitAntigravityQuota(tab),
     ]).finally(() => {
       quotaPolling = false;
       emitTabDiagnostic(tab, "quota.poll.completed");
     });
-  }, 60_000);
+  }, QUOTA_POLL_INTERVAL_MS);
 
   const rl = createInterface({ input: stdin });
   emit({ type: "$connected" });
@@ -3730,6 +3743,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     persistOpenTabs();
   });
   rl.on("line", (line) => {
+    lastUserActivityAt = Date.now();
     const trimmed = line.trim();
     if (!trimmed) return;
     let msg: InMessage;
