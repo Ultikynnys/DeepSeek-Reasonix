@@ -283,33 +283,27 @@ export async function searchContent(
     }
   }
 
-  const walk = async (dir: string): Promise<void> => {
-    if (truncated) return;
-    throwIfAborted(args.signal);
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (truncated) return;
-      throwIfAborted(args.signal);
-      if (checkDeadline()) return;
-      if (e.isDirectory()) {
-        if (!includeDeps && ctx.skipDirNames.has(e.name)) continue;
-        await walk(pathMod.join(dir, e.name));
-        continue;
-      }
-      if (!e.isFile()) continue;
-      const full = pathMod.join(dir, e.name);
-      if (ctx.nameMatch && !ctx.nameMatch(e.name, displayRel(ctx.rootDir, full))) continue;
-      if (ctx.isBinaryByName(e.name)) continue;
+  await walkDir(
+    startAbs,
+    {
+      includeDeps,
+      skipDirNames: ctx.skipDirNames,
+      signal: args.signal,
+      label: "search",
+      shouldStop: () => truncated || checkDeadline(),
+    },
+    async (entry): Promise<boolean> => {
+      if (truncated) return false;
+      if (checkDeadline()) return false;
+      const full = entry.full;
+      if (ctx.nameMatch && !ctx.nameMatch(entry.dirent.name, displayRel(ctx.rootDir, full)))
+        return true;
+      if (ctx.isBinaryByName(entry.dirent.name)) return true;
       let fh: import("node:fs/promises").FileHandle;
       try {
         fh = await fs.open(full, "r");
       } catch {
-        continue;
+        return true;
       }
       let raw: Buffer;
       try {
@@ -317,16 +311,16 @@ export async function searchContent(
         const st = await fh.stat();
         if (st.size > 2 * 1024 * 1024) {
           await fh.close();
-          continue;
+          return true;
         }
         raw = await fh.readFile();
       } catch {
         await fh.close().catch(() => {});
-        continue;
+        return true;
       }
       await fh.close();
       throwIfAborted(args.signal);
-      if (looksBinary(raw)) continue;
+      if (looksBinary(raw)) return true;
       const text = raw.toString("utf8");
       const rel = displayRel(ctx.rootDir, full);
       let hits: number[];
@@ -347,13 +341,13 @@ export async function searchContent(
           // pattern is pathological — skip it and keep walking.
           if (reason.includes("aborted")) throw err;
           regexSkippedFiles.push({ rel, reason });
-          continue;
+          return true;
         }
       } else {
         const haystack = caseSensitive ? text : text.toLowerCase();
         if (haystack.indexOf(needle) === -1) {
           scanned++;
-          continue;
+          return true;
         }
         lines = text.split(/\r?\n/);
         hits = [];
@@ -363,12 +357,12 @@ export async function searchContent(
         }
       }
       scanned++;
-      if (hits.length === 0) continue;
+      if (hits.length === 0) return true;
       fileHitCounts.set(rel, hits.length);
 
       if (summaryMode) {
-        if (!pushLine(`${rel}: ${hits.length} match${hits.length === 1 ? "" : "es"}`)) return;
-        continue;
+        if (!pushLine(`${rel}: ${hits.length} match${hits.length === 1 ? "" : "es"}`)) return false;
+        return true;
       }
 
       const printable = Math.min(hits.length, MAX_HITS_PER_FILE);
@@ -377,27 +371,27 @@ export async function searchContent(
 
       if (ctxLines === 0) {
         for (const li of printableHits) {
-          if (truncated) return;
+          if (truncated) return false;
           const line = lines[li]!;
           const display = line.length > 200 ? `${line.slice(0, 200)}…` : line;
-          if (!pushLine(`${rel}:${li + 1}: ${display}`)) return;
+          if (!pushLine(`${rel}:${li + 1}: ${display}`)) return false;
         }
       } else {
         const hitSet = new Set(printableHits);
         let prevWindowEnd = -2;
         for (const li of printableHits) {
-          if (truncated) return;
+          if (truncated) return false;
           const winStart = Math.max(0, li - ctxLines);
           const winEnd = Math.min(lines.length - 1, li + ctxLines);
           if (winStart > prevWindowEnd + 1 && prevWindowEnd >= 0) {
-            if (!pushLine("--")) return;
+            if (!pushLine("--")) return false;
           }
           const realStart = winStart > prevWindowEnd + 1 ? winStart : prevWindowEnd + 1;
           for (let i = realStart; i <= winEnd; i++) {
             const line = lines[i]!;
             const display = line.length > 200 ? `${line.slice(0, 200)}…` : line;
             const sep = hitSet.has(i) ? ":" : "-";
-            if (!pushLine(`${rel}:${i + 1}${sep} ${display}`)) return;
+            if (!pushLine(`${rel}:${i + 1}${sep} ${display}`)) return false;
           }
           prevWindowEnd = winEnd;
         }
@@ -409,13 +403,14 @@ export async function searchContent(
             `[${rel}: ${omittedFromFile} more match${omittedFromFile === 1 ? "" : "es"} in this file — re-grep with a tighter pattern or use read_file to see them]`,
           )
         )
-          return;
+          return false;
       }
 
       maybeEnterSummaryMode();
-    }
-  };
-  await walk(startAbs);
+      return true;
+    },
+  );
+
   if (regexSkippedFiles.length > 0) {
     pushLine(
       `[regex timed out on ${regexSkippedFiles.length} file${regexSkippedFiles.length === 1 ? "" : "s"} — pattern may have catastrophic backtracking; first: ${regexSkippedFiles[0]!.rel}]`,

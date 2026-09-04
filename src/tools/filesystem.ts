@@ -101,6 +101,17 @@ function isLikelyBinaryByName(name: string): boolean {
   return BINARY_EXTENSIONS.has(name.slice(dot).toLowerCase());
 }
 
+/** Parse a "A-B" range string into 1-based start/end. `totalLines` clamps the
+ *  end; without it the end is the raw requested end (streaming reads clamp
+ *  against actual size). Shared by read_file's compact and streaming paths. */
+function parseLineRange(range: string, totalLines?: number): { start: number; end: number } {
+  const [rawStart, rawEnd] = range.split("-").map((s) => Number.parseInt(s, 10));
+  const start = Math.max(1, rawStart ?? 1);
+  const requestedEnd = Math.max(start, rawEnd ?? totalLines ?? start);
+  const end = totalLines === undefined ? requestedEnd : Math.min(totalLines, requestedEnd);
+  return { start, end };
+}
+
 export function registerFilesystemTools(
   registry: ToolRegistry,
   opts: FilesystemToolsOptions,
@@ -282,9 +293,7 @@ export function registerFilesystemTools(
           if (lines.length > 0 && lines[lines.length - 1] === "") lines = lines.slice(0, -1);
           const totalLines = lines.length;
           if (typeof args.range === "string" && /^\d+\s*-\s*\d+$/.test(args.range)) {
-            const [rawStart, rawEnd] = args.range.split("-").map((s) => Number.parseInt(s, 10));
-            const start = Math.max(1, rawStart ?? 1);
-            const end = Math.min(totalLines, Math.max(start, rawEnd ?? totalLines));
+            const { start, end } = parseLineRange(args.range, totalLines);
             return withSubdirMemory(
               abs,
               `[range ${start}-${end} of ${totalLines} lines]\n${lines.slice(start - 1, end).join("\n")}`,
@@ -312,15 +321,13 @@ export function registerFilesystemTools(
         // range wins over head/tail. Stop one line after the requested window
         // so reading 20 lines from a huge file does not scan to EOF.
         if (typeof args.range === "string" && /^\d+\s*-\s*\d+$/.test(args.range)) {
-          const [rawStart, rawEnd] = args.range.split("-").map((s) => Number.parseInt(s, 10));
-          const start = Math.max(1, rawStart ?? 1);
-          const requestedEnd = Math.max(start, rawEnd ?? start);
-          const window = await readLineWindow(fh, inspection, start, requestedEnd - start + 1);
-          const end = window.lines.length === 0 ? start : start + window.lines.length - 1;
+          const { start, end } = parseLineRange(args.range);
+          const window = await readLineWindow(fh, inspection, start, end - start + 1);
+          const actualEnd = window.lines.length === 0 ? start : start + window.lines.length - 1;
           const suffix = window.hasMore ? "; more lines below" : "; EOF";
           return withSubdirMemory(
             abs,
-            `[range ${start}-${end}${suffix}]\n${window.lines.join("\n")}`,
+            `[range ${start}-${actualEnd}${suffix}]\n${window.lines.join("\n")}`,
           );
         }
         if (typeof args.head === "number" && args.head > 0) {

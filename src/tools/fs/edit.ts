@@ -6,6 +6,17 @@ import { displayRel } from "./rel.js";
 /** Marker substring in the gate-reject message so tools.ts's repeat-rejection tracker spots a 2nd identical unread-edit and switches to the sharper "stop retrying" hint. */
 const READ_BEFORE_EDIT_MARKER = "read_file first";
 
+/** Read + decode a file in one step — the shared front of every edit tool. */
+async function readAndDecode(abs: string): Promise<{ text: string; encoding: FileEncoding }> {
+  const buf = await fs.readFile(abs);
+  return decodeFileBuffer(buf);
+}
+
+/** Encode + write a file in one step — the shared back of every edit tool. */
+function writeAndEncode(abs: string, text: string, encoding: FileEncoding): Promise<void> {
+  return fs.writeFile(abs, encodeFile(text, encoding));
+}
+
 export async function applyEdit(
   rootDir: string,
   abs: string,
@@ -20,8 +31,7 @@ export async function applyEdit(
       `edit_file: ${displayRel(rootDir, abs)} was not read this session — ${READ_BEFORE_EDIT_MARKER} so your SEARCH matches the bytes on disk.`,
     );
   }
-  const beforeBuf = await fs.readFile(abs);
-  const { text: before, encoding } = decodeFileBuffer(beforeBuf);
+  const { text: before, encoding } = await readAndDecode(abs);
   const le = lineEndingOf(before);
   const m = locateSingleMatch(before, args.search, args.replace, le);
   if ("failure" in m) {
@@ -34,7 +44,7 @@ export async function applyEdit(
   const { adaptedSearch, adaptedReplace, firstIdx } = m.match;
   const after =
     before.slice(0, firstIdx) + adaptedReplace + before.slice(firstIdx + adaptedSearch.length);
-  await fs.writeFile(abs, encodeFile(after, encoding));
+  await writeAndEncode(abs, after, encoding);
   const rel = displayRel(rootDir, abs);
   const header = `edited ${rel} (${adaptedSearch.length}→${adaptedReplace.length} chars)`;
   const startLine = before.slice(0, firstIdx).split(/\r?\n/).length;
@@ -114,9 +124,8 @@ export async function applyDeleteRange(
       `delete_range: ${displayRel(rootDir, abs)} was not read this session — ${READ_BEFORE_EDIT_MARKER} so anchors match the bytes on disk.`,
     );
   }
-  const beforeBuf = await fs.readFile(abs);
-  const { text: before, encoding } = decodeFileBuffer(beforeBuf);
-  const le = before.includes("\r\n") ? "\r\n" : "\n";
+  const { text: before, encoding } = await readAndDecode(abs);
+  const le = lineEndingOf(before);
   const patch = computeDeleteRangePatchFromText(before, {
     ...args,
     start_anchor: args.start_anchor.replace(/\r?\n/g, le),
@@ -125,7 +134,7 @@ export async function applyDeleteRange(
   const rel = displayRel(rootDir, abs);
   if (patch.noopReason) return `delete_range: no-op for ${rel} — ${patch.noopReason}`;
   const after = `${before.slice(0, patch.startIndex)}${patch.replace}${before.slice(patch.endIndex)}`;
-  await fs.writeFile(abs, encodeFile(after, encoding));
+  await writeAndEncode(abs, after, encoding);
   return `delete_range: deleted ${patch.deletedChars} chars from ${rel}\n${renderEditDiff(patch.search, patch.replace, patch.startLine)}`;
 }
 
@@ -171,13 +180,12 @@ export async function applyDeleteLineRange(
       `${toolName}: ${displayRel(rootDir, abs)} was not read this session — ${READ_BEFORE_EDIT_MARKER} so deletion matches the bytes on disk.`,
     );
   }
-  const beforeBuf = await fs.readFile(abs);
-  const { text: before, encoding } = decodeFileBuffer(beforeBuf);
+  const { text: before, encoding } = await readAndDecode(abs);
   const patch = computeDeleteLineRangePatchFromText(before, startLine, endLine);
   const rel = displayRel(rootDir, abs);
   if (patch.noopReason) return `${toolName}: no-op for ${rel} — ${patch.noopReason}`;
   const after = `${before.slice(0, patch.startIndex)}${patch.replace}${before.slice(patch.endIndex)}`;
-  await fs.writeFile(abs, encodeFile(after, encoding));
+  await writeAndEncode(abs, after, encoding);
   return `${toolName}: deleted lines ${startLine}-${endLine} from ${rel}\n${renderEditDiff(patch.search, patch.replace, patch.startLine)}`;
 }
 
@@ -324,8 +332,7 @@ export async function applyMultiEdit(
       let before: string;
       let encoding: FileEncoding;
       try {
-        const buf = await fs.readFile(e.abs);
-        ({ text: before, encoding } = decodeFileBuffer(buf));
+        ({ text: before, encoding } = await readAndDecode(e.abs));
       } catch (err) {
         throw new Error(
           `multi_edit: edit #${i + 1} cannot read ${rel}: ${(err as Error).message} (no edits applied)`,
@@ -360,13 +367,13 @@ export async function applyMultiEdit(
   try {
     for (const [abs, state] of filesByPath) {
       attempted.push({ abs, before: state.before, encoding: state.encoding });
-      await fs.writeFile(abs, encodeFile(state.buf, state.encoding));
+      await writeAndEncode(abs, state.buf, state.encoding);
     }
   } catch (writeErr) {
     const rollbackFailures: string[] = [];
     for (const item of [...attempted].reverse()) {
       try {
-        await fs.writeFile(item.abs, encodeFile(item.before, item.encoding));
+        await writeAndEncode(item.abs, item.before, item.encoding);
       } catch (restoreErr) {
         rollbackFailures.push(`${displayRel(rootDir, item.abs)}: ${(restoreErr as Error).message}`);
       }
