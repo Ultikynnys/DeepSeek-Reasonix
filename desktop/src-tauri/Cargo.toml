@@ -1,6 +1,6 @@
 [package]
 name = "reasonix-desktop"
-version = "0.53.193"
+version = "0.53.194"
 edition = "2021"
 publish = false
 
