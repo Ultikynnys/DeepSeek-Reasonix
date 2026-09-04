@@ -30,6 +30,8 @@ describe("resolveContextTokens", () => {
       DEEPSEEK_CONTEXT_TOKENS["deepseek-v4-flash"],
     );
     expect(resolveContextTokens("gpt-5.6-sol")).toBe(300_000);
+    expect(resolveContextTokens("gemini-3.8-flash-tiered")).toBe(1_000_000);
+    expect(resolveContextTokens("gemini-3.7-flash")).toBe(1_000_000);
   });
 
   it("falls back to DEFAULT_CONTEXT_TOKENS for unknown models", () => {

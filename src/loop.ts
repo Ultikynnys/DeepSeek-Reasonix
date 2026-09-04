@@ -68,6 +68,7 @@ import {
   SessionStats,
   type TurnStats,
   billingKindForModel,
+  resolveContextTokens,
 } from "./telemetry/stats.js";
 import { countTokensBounded } from "./tokenizer.js";
 import { ToolRegistry, isReadOnlyTool } from "./tools.js";
@@ -2020,8 +2021,8 @@ export class CacheFirstLoop {
       model: this.model,
       maxOutputTokens: this.maxOutputTokens,
       getSystemPrompt: () => this.prefix.system,
-      canSend: (messages) =>
-        this.context.requestBudget(messages, this.prefix.toolSpecs, this.model).fits,
+      ctxMax: resolveContextTokens(this.model, this.ctxMaxOverride),
+      canSend: (messages) => this.context.requestBudget(messages, null, this.model).fits,
     };
   }
 

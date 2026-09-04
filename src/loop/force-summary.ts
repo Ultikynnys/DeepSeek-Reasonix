@@ -1,7 +1,13 @@
 import { COMPACTION_SUMMARY_MARKER, messageOf } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "../client.js";
+import {
+  HISTORY_FOLD_SUMMARY_HEAD_FRACTION,
+  HISTORY_FOLD_SUMMARY_MIN_HEAD_TOKENS,
+  trimMessageWindow,
+} from "../context-manager.js";
+import { pruneUnusedFileReads } from "../file-prune.js";
 import { t } from "../i18n/index.js";
-import type { TurnStats } from "../telemetry/stats.js";
+import { type TurnStats, resolveContextTokens } from "../telemetry/stats.js";
 import { countTokensBounded } from "../tokenizer.js";
 import type { ChatMessage } from "../types.js";
 import { buildFoldSummaryInstruction, extractPinnedConstraints } from "./compaction-prompt.js";
@@ -45,6 +51,8 @@ export interface ForceSummaryContext {
   getSystemPrompt: () => string;
   /** Final guard supplied by the loop; a force-summary request must not exceed the model budget. */
   canSend?: (messages: ChatMessage[]) => boolean;
+  /** Effective context ceiling (tokens) for bounding the summarizer input. */
+  ctxMax?: number;
 }
 
 export async function* forceSummaryAfterIterLimit(
@@ -54,17 +62,50 @@ export async function* forceSummaryAfterIterLimit(
   try {
     // Status bridges the silence — summary call is non-streaming, 30-60s typical.
     yield { turn: ctx.turn, role: "status", content: t("summary.status") };
-    const messages = ctx.buildMessages();
+    const rawMessages = ctx.buildMessages();
+
+    // 1. Separate prefix (system) messages from log messages.
+    const prefixMessages = rawMessages.filter((m) => m.role === "system");
+    const logMessages = rawMessages.filter((m) => m.role !== "system");
+
+    // 2. Prune unused file reads so dead file contents do not inflate the summary prompt.
+    const pruned = pruneUnusedFileReads(logMessages);
+
+    // 3. Bound the messages fed to the summarizer so the summary request fits within
+    // the model's context budget instead of blowing past it (context-guard triggers
+    // precisely when context >= 80% or exceeds budget).
+    const ctxMax = ctx.ctxMax ?? resolveContextTokens(ctx.model);
+    let messagesToSummarize = pruned.messages;
+    let droppedTokens = 0;
+    if (ctxMax > 0) {
+      const summaryBudget = Math.max(
+        HISTORY_FOLD_SUMMARY_MIN_HEAD_TOKENS,
+        Math.floor(ctxMax * HISTORY_FOLD_SUMMARY_HEAD_FRACTION),
+      );
+      const trimmed = trimMessageWindow(pruned.messages, summaryBudget);
+      messagesToSummarize = trimmed.messages;
+      droppedTokens = trimmed.droppedTokens;
+    }
+
+    let instruction = buildFoldSummaryInstruction([]);
+    if (droppedTokens > 0) {
+      instruction += `\n\n(Note: the oldest ${droppedTokens} tokens of conversation were trimmed before summarization: summarize only the context shown.)`;
+    }
+
     // The force summary now REPLACES the whole log, so it must be a
     // conversation recap that preserves the original objective, negative
     // constraints, decisions, and open todos — not just a turn-scoped
     // "what did I learn" blurb. Reuse the fold's instruction for parity.
     // `stripHallucinatedToolMarkup` below still catches any tool-call/DSML
     // markup the model hallucinates despite the plain-prose directive.
-    messages.push({
-      role: "user",
-      content: buildFoldSummaryInstruction([]),
-    });
+    const messages: ChatMessage[] = [
+      ...prefixMessages,
+      ...messagesToSummarize,
+      {
+        role: "user",
+        content: instruction,
+      },
+    ];
     if (ctx.canSend && !ctx.canSend(messages)) {
       throw new Error("forced-summary request exceeds the model context budget");
     }

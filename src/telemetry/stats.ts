@@ -59,6 +59,15 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
   "gpt-5.6-sol": 300_000,
   "gpt-5.6-terra": 300_000,
   "gpt-5.6-luna": 300_000,
+  // Google Antigravity Gemini and Claude models: 1M token window.
+  "gemini-3.5-flash-low": 1_000_000,
+  "gemini-3.6-flash": 1_000_000,
+  "gemini-3.7-flash": 1_000_000,
+  "gemini-3.7-flash-tiered": 1_000_000,
+  "gemini-3.8-flash": 1_000_000,
+  "gemini-3.8-flash-tiered": 1_000_000,
+  "claude-sonnet-4-6-thinking": 1_000_000,
+  "claude-opus-4-6-thinking": 1_000_000,
 };
 
 /** Lower bound of the user-configurable `contextTokens` setting. */

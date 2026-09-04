@@ -219,4 +219,82 @@ describe("compaction model-call deadlines", () => {
     expect(result.droppedFiles).toBeUndefined();
     expect(log.length).toBe(1);
   });
+
+  it("forceSummaryAfterIterLimit succeeds when raw context exceeds the model budget by trimming messages", async () => {
+    const replaceLog = vi.fn();
+    let capturedRequest: any = null;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      geminiAuthResolver: async () => ({ accessToken: "test-token", projectId: "test-project" }),
+      fetch: vi.fn(async (_url: unknown, init?: RequestInit) => {
+        capturedRequest = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            response: {
+              candidates: [
+                {
+                  content: {
+                    parts: [{ text: "Compacted summary of the conversation." }],
+                  },
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as unknown as typeof fetch,
+    });
+
+    // Create a large conversation log (~30K tokens)
+    const bigContent = "large chunk of tool output or file content with many words. ".repeat(100);
+    const messages: ChatMessage[] = [];
+    for (let i = 0; i < 30; i++) {
+      messages.push({ role: "user", content: `Turn ${i} user request` });
+      messages.push({ role: "assistant", content: `Turn ${i} response with ${bigContent}` });
+    }
+
+    // Model context budget is 20,000 tokens (less than the 30K+ token conversation)
+    const ctxMax = 20_000;
+    const ctx: ForceSummaryContext = {
+      client,
+      buildMessages: () => messages,
+      replaceLog,
+      recordStats: (() => ({})) as unknown as ForceSummaryContext["recordStats"],
+      turn: 1,
+      model: "gemini-3.8-flash-tiered",
+      getSystemPrompt: () => "system prompt",
+      ctxMax,
+      canSend: (msgs) => {
+        // canSend verifies the request does not exceed the model context budget
+        const total = msgs.reduce(
+          (acc, m) => acc + (typeof m.content === "string" ? m.content.length / 4 : 0),
+          0,
+        );
+        return total <= ctxMax;
+      },
+    };
+
+    const events: LoopEvent[] = [];
+    for await (const ev of forceSummaryAfterIterLimit(ctx, { reason: "context-guard" })) {
+      events.push(ev);
+    }
+
+    // Verify it did not fail with ForceSummaryFailed
+    expect(events.some((e) => e.role === "error")).toBe(false);
+    expect(replaceLog).toHaveBeenCalledTimes(1);
+    const committed = replaceLog.mock.calls[0]![0] as ChatMessage;
+    const text = typeof committed.content === "string" ? committed.content : "";
+    expect(text).toContain("CONVERSATION HISTORY SUMMARY");
+    expect(text).toContain("Compacted summary of the conversation.");
+
+    // The sent request messages should be trimmed to fit within the budget
+    expect(capturedRequest).toBeDefined();
+    // For Gemini Antigravity, request body carries request.contents
+    const sentContents = capturedRequest.request?.contents as Array<{
+      role: string;
+      parts: unknown[];
+    }>;
+    expect(sentContents).toBeDefined();
+    expect(sentContents.length).toBeLessThan(messages.length);
+  });
 });

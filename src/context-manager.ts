@@ -106,7 +106,7 @@ const SKILL_PIN_REGEX = /<skill-pin name="([^"]+)">\n[\s\S]*?\n<\/skill-pin>/g;
 
 /** Keep the most-recent messages fitting within `budgetTokens`, aligned to a turn boundary
  *  so tool calls/results are not orphaned. Returns kept slice plus dropped token count. */
-function trimMessageWindow(
+export function trimMessageWindow(
   messages: ChatMessage[],
   budgetTokens: number,
 ): { messages: ChatMessage[]; droppedTokens: number } {
@@ -661,7 +661,11 @@ export class ContextManager {
     const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
     const agentSystem = this.deps.getSystemPrompt();
     const fewShots = this.deps.getFewShots?.() ?? [];
-    const tools = this.deps.getToolSpecs?.() ?? [];
+    // Only DeepSeek benefits from tool-spec caching across the summary call.
+    // Non-DeepSeek providers (like Gemini in AUTO mode) risk hallucinating tool calls
+    // or triggering strict function-calling constraints during plain text summarization.
+    const tools =
+      providerForModel(activeModel) === "deepseek" ? (this.deps.getToolSpecs?.() ?? []) : [];
     let instruction = buildFoldSummaryInstruction(pinnedSkillNames);
     if (droppedTokens > 0) {
       instruction += `\n\n(Note: the oldest ${droppedTokens} tokens of conversation were trimmed before summarization — summarize only the context shown.)`;
