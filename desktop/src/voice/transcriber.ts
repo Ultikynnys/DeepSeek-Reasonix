@@ -51,6 +51,51 @@ type ASRPipeline = (
 
 type TransformersEnv = typeof import("@xenova/transformers").env;
 
+const ONNX_NOISE_MARKER = Symbol.for("reasonix.onnxNoiseSuppressed");
+
+/**
+ * Suppresses repetitive ONNX Runtime graph-optimizer noise.
+ * During model loading, ONNX Runtime logs hundreds of "Removing initializer"
+ * warnings for unused graph nodes, which floods the browser developer console.
+ */
+export function suppressOnnxOptimizerNoise(): void {
+  if (typeof console === "undefined") return;
+
+  if (console.warn && !(console.warn as unknown as Record<symbol, unknown>)[ONNX_NOISE_MARKER]) {
+    const originalWarn = console.warn;
+    const filteredWarn = (...args: unknown[]) => {
+      const first = args[0];
+      if (
+        typeof first === "string" &&
+        (first.includes("CleanUnusedInitializersAndNodeArgs") ||
+          (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
+      ) {
+        return;
+      }
+      originalWarn.apply(console, args);
+    };
+    (filteredWarn as unknown as Record<symbol, unknown>)[ONNX_NOISE_MARKER] = true;
+    console.warn = filteredWarn;
+  }
+
+  if (console.log && !(console.log as unknown as Record<symbol, unknown>)[ONNX_NOISE_MARKER]) {
+    const originalLog = console.log;
+    const filteredLog = (...args: unknown[]) => {
+      const first = args[0];
+      if (
+        typeof first === "string" &&
+        (first.includes("CleanUnusedInitializersAndNodeArgs") ||
+          (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
+      ) {
+        return;
+      }
+      originalLog.apply(console, args);
+    };
+    (filteredLog as unknown as Record<symbol, unknown>)[ONNX_NOISE_MARKER] = true;
+    console.log = filteredLog;
+  }
+}
+
 /**
  * Applies the Transformers.js environment configuration used for in-app
  * transcription.
@@ -60,6 +105,7 @@ type TransformersEnv = typeof import("@xenova/transformers").env;
  * session allocation errors during Seq2Seq encoder/decoder construction.
  */
 function configureTransformersEnv(env: TransformersEnv): void {
+  suppressOnnxOptimizerNoise();
   env.allowRemoteModels = true;
   env.allowLocalModels = false;
   env.backends.onnx.wasm.wasmPaths = "/wasm/";

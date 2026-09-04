@@ -22,7 +22,7 @@ vi.mock("@xenova/transformers", () => ({
   env: mockEnv,
 }));
 
-import { speechTranscriber } from "./transcriber";
+import { speechTranscriber, suppressOnnxOptimizerNoise } from "./transcriber";
 
 describe("LocalSpeechTranscriber", () => {
   beforeEach(() => {
@@ -87,5 +87,25 @@ describe("LocalSpeechTranscriber", () => {
       "Xenova/whisper-small.en",
       expect.objectContaining({ quantized: true }),
     );
+  });
+
+  it("suppresses ONNX Runtime graph optimizer noise while preserving real warnings", () => {
+    const originalWarn = console.warn;
+    const warnSpy = vi.fn();
+    console.warn = warnSpy;
+
+    suppressOnnxOptimizerNoise();
+
+    // ONNX optimizer noise should be dropped:
+    console.warn(
+      "2026-09-05 00:04:11.843900 [W:onnxruntime:, graph.cc:3490 CleanUnusedInitializersAndNodeArgs] Removing initializer '/model/decoder/layers.8/encoder_attn_layer_norm/Constant_1_output_0'. It is not used by any node and should be removed from the model.",
+    );
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    // Legitimate warnings should still be emitted:
+    console.warn("User microphone input is clipping.");
+    expect(warnSpy).toHaveBeenCalledWith("User microphone input is clipping.");
+
+    console.warn = originalWarn;
   });
 });
