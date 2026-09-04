@@ -595,7 +595,7 @@ export function Composer({
 
             <span className="grow" />
 
-            <div ref={modelWrapRef} style={{ position: "relative" }}>
+            <div ref={modelWrapRef} className="model-pill-wrap">
               <button
                 type="button"
                 className="model-pill"
@@ -627,7 +627,7 @@ export function Composer({
                 </MenuPop>
               ) : null}
             </div>
-            <div ref={subagentWrapRef} style={{ position: "relative" }}>
+            <div ref={subagentWrapRef} className="model-pill-wrap">
               <button
                 type="button"
                 className="model-pill subagent-pill"
@@ -659,7 +659,7 @@ export function Composer({
                 </MenuPop>
               ) : null}
             </div>
-            <div ref={effortWrapRef} style={{ position: "relative" }}>
+            <div ref={effortWrapRef} className="model-pill-wrap">
               <button
                 type="button"
                 className="model-pill effort-pill"

@@ -4376,6 +4376,21 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   max-width: 110px;
 }
 
+/* Model/submodel/effort pills live in a shrinkable wrapper so long names
+   truncate (ellipsis) instead of pushing the foot's right-side buttons
+   outside the composer card. The wrapper is the flex item of .composer-foot
+   and must be able to shrink (min-width: 0); the pill shrinks with it. */
+.composer-foot .model-pill-wrap {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-shrink: 1;
+}
+.composer-foot .model-pill-wrap > .model-pill {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .send-btn {
   width: 30px;
   height: 30px;
