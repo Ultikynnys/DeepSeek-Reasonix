@@ -11,9 +11,6 @@ export const PEAK_HOURS_UTC: readonly { start: number; end: number }[] = [
   { start: 6, end: 10 },
 ];
 
-/** Off-peak rates are half of the peak rates. */
-export const OFF_PEAK_RATE_MULTIPLIER = 0.5;
-
 /** True when the Beijing-calendar day containing `date` is Saturday or Sunday (UTC+8, no DST). */
 export function isBeijingWeekendDay(date: Date): boolean {
   const day = new Date(date.getTime() + 8 * 3600 * 1000).getUTCDay();

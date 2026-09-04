@@ -31,11 +31,6 @@ function keyLabel(key: ShortcutKey, mac: boolean): string {
   }
 }
 
-export function shortcutText(keys: readonly ShortcutKey[]): string {
-  const mac = isMacPlatform();
-  return keys.map((key) => keyLabel(key, mac)).join(mac ? "" : "+");
-}
-
 export function localizeShortcutText(text: string): string {
   return text.replace(/⌘/g, keyLabel("mod", isMacPlatform()));
 }

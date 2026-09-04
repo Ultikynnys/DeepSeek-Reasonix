@@ -2,7 +2,7 @@ import type { ApprovalPrompt } from "@reasonix/core-utils";
 import { isCompactionSummary, stripCompactionMarker } from "@reasonix/core-utils/compaction";
 import { derivePrefix } from "@reasonix/core-utils/derive-prefix";
 import { Copy } from "lucide-react";
-import { type ReactNode, memo, useState } from "react";
+import { memo, useState } from "react";
 import type {
   ActivePlan,
   AssistantSegment,
@@ -699,8 +699,4 @@ export function ActivePlanTaskCard({ plan }: { plan: ActivePlan }) {
       steps={activePlanToTaskSteps(plan)}
     />
   );
-}
-
-export function HeaderHint({ children }: { children: ReactNode }) {
-  return <div className="msg-text">{children}</div>;
 }
