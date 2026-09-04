@@ -63,6 +63,6 @@ export default defineConfig({
     sourcemap: true,
   },
   optimizeDeps: {
-    exclude: ["@xenova/transformers"],
+    exclude: ["@huggingface/transformers"],
   },
 });

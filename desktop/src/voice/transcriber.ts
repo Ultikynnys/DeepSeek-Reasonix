@@ -49,7 +49,7 @@ type ASRPipeline = (
   options?: Record<string, unknown>,
 ) => Promise<{ text: string } | string>;
 
-type TransformersEnv = typeof import("@xenova/transformers").env;
+type TransformersEnv = typeof import("@huggingface/transformers").env;
 
 const ONNX_NOISE_MARKER = Symbol.for("reasonix.onnxNoiseSuppressed");
 
@@ -108,9 +108,39 @@ function configureTransformersEnv(env: TransformersEnv): void {
   suppressOnnxOptimizerNoise();
   env.allowRemoteModels = true;
   env.allowLocalModels = false;
-  env.backends.onnx.wasm.wasmPaths = "/wasm/";
-  env.backends.onnx.logLevel = "error";
-  env.backends.onnx.wasm.proxy = false;
+  const wasm = env.backends.onnx?.wasm;
+  if (wasm) {
+    wasm.wasmPaths = "/wasm/";
+    wasm.proxy = false;
+  }
+  if (env.backends.onnx) {
+    env.backends.onnx.logLevel = "error";
+  }
+}
+
+interface WebGPUNavigator {
+  gpu?: {
+    requestAdapter(): Promise<unknown>;
+  };
+}
+
+/**
+ * Detects whether the device has a valid GPU with WebGPU compute support.
+ */
+export async function isWebGPUSupported(): Promise<boolean> {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  const nav = navigator as unknown as WebGPUNavigator;
+  if (!nav.gpu) {
+    return false;
+  }
+  try {
+    const adapter = await nav.gpu.requestAdapter();
+    return adapter !== null;
+  } catch {
+    return false;
+  }
 }
 
 class LocalSpeechTranscriber {
@@ -166,12 +196,13 @@ class LocalSpeechTranscriber {
     this.updateStatus("downloading", `Downloading ${opt.name}...`);
 
     try {
-      const { pipeline, env } = await import("@xenova/transformers");
+      const { pipeline, env } = await import("@huggingface/transformers");
 
       configureTransformersEnv(env);
 
+      const hasGpu = await isWebGPUSupported();
       const pipe = (await pipeline("automatic-speech-recognition", opt.repoId, {
-        quantized: true,
+        device: hasGpu ? "webgpu" : "wasm",
         progress_callback: (data: unknown) => {
           if (onProgress && data && typeof data === "object") {
             onProgress(data as DownloadProgress);
@@ -213,15 +244,16 @@ class LocalSpeechTranscriber {
 
     this.initPromise = (async () => {
       this.isInitializing = true;
-      this.updateStatus("loading-model", `Loading ${opt.name}...`);
+      const hasGpu = await isWebGPUSupported();
+      this.updateStatus("loading-model", `Loading ${opt.name} (${hasGpu ? "GPU" : "CPU"})...`);
 
       try {
-        const { pipeline, env } = await import("@xenova/transformers");
+        const { pipeline, env } = await import("@huggingface/transformers");
 
         configureTransformersEnv(env);
 
         const pipe = (await pipeline("automatic-speech-recognition", opt.repoId, {
-          quantized: true,
+          device: hasGpu ? "webgpu" : "wasm",
         })) as unknown as ASRPipeline;
 
         this.pipelineInstance = pipe;

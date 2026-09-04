@@ -21,7 +21,8 @@
         "resizable": true,
         "decorations": false,
         "transparent": false,
-        "backgroundColor": "#0b0b0b"
+        "backgroundColor": "#0b0b0b",
+        "additionalBrowserArgs": "--enable-features=WebGPU --enable-unsafe-webgpu"
       }
     ],
     "security": {

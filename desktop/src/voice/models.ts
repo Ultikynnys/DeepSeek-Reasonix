@@ -24,7 +24,7 @@ export const VOICE_MODELS: ReadonlyArray<VoiceModelOption> = [
     size: "~40 MB",
     parameters: "39M",
     description: "Fastest transcription with lowest resource usage.",
-    repoId: "Xenova/whisper-tiny.en",
+    repoId: "onnx-community/whisper-tiny.en",
   },
   {
     id: "Xenova/whisper-base.en",
@@ -33,7 +33,7 @@ export const VOICE_MODELS: ReadonlyArray<VoiceModelOption> = [
     size: "~75 MB",
     parameters: "74M",
     description: "Noticeably higher accuracy for daily speech with moderate speed.",
-    repoId: "Xenova/whisper-base.en",
+    repoId: "onnx-community/whisper-base.en",
   },
   {
     id: "Xenova/whisper-small.en",
@@ -42,7 +42,7 @@ export const VOICE_MODELS: ReadonlyArray<VoiceModelOption> = [
     size: "~250 MB",
     parameters: "244M",
     description: "High accuracy speech recognition for accents, jargon, and noisy audio.",
-    repoId: "Xenova/whisper-small.en",
+    repoId: "onnx-community/whisper-small.en",
   },
 ];
 
@@ -89,10 +89,14 @@ export async function isVoiceModelDownloaded(id: VoiceModelId): Promise<boolean>
       const cache = await caches.open("transformers-cache");
       const keys = await cache.keys();
       const hasEncoder = keys.some(
-        (req) => req.url.includes(opt.repoId) && req.url.includes("encoder_model"),
+        (req) =>
+          (req.url.includes(opt.repoId) || req.url.includes(opt.id)) &&
+          req.url.includes("encoder_model"),
       );
       const hasDecoder = keys.some(
-        (req) => req.url.includes(opt.repoId) && req.url.includes("decoder_model"),
+        (req) =>
+          (req.url.includes(opt.repoId) || req.url.includes(opt.id)) &&
+          req.url.includes("decoder_model"),
       );
       if (hasEncoder && hasDecoder) {
         markVoiceModelDownloaded(id, true);
@@ -128,7 +132,7 @@ export async function deleteVoiceModelCache(id: VoiceModelId): Promise<void> {
       const cache = await caches.open("transformers-cache");
       const keys = await cache.keys();
       for (const req of keys) {
-        if (req.url.includes(opt.repoId)) {
+        if (req.url.includes(opt.repoId) || req.url.includes(opt.id)) {
           await cache.delete(req);
         }
       }

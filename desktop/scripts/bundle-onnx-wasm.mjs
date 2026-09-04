@@ -1,7 +1,7 @@
 // Bundles the ONNX WASM runtime into desktop/public/ so Vite and Tauri bundle
-// it offline with the app. Whisper models are NOT bundled — they download on
+// it offline with the app. Whisper models are NOT bundled: they download on
 // demand at runtime (into the browser cache) to keep the app bundle small.
-import { createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
 import https from "node:https";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,30 @@ const publicDir = join(here, "..", "public");
 const wasmDir = join(publicDir, "wasm");
 
 mkdirSync(wasmDir, { recursive: true });
+
+const localDistDirs = [
+  join(
+    here,
+    "..",
+    "node_modules",
+    "@huggingface",
+    "transformers",
+    "node_modules",
+    "onnxruntime-web",
+    "dist",
+  ),
+  join(here, "..", "node_modules", "onnxruntime-web", "dist"),
+  join(here, "..", "..", "node_modules", "onnxruntime-web", "dist"),
+];
+
+const RUNTIME_FILES = [
+  "ort-wasm-simd-threaded.jsep.wasm",
+  "ort-wasm-simd-threaded.jsep.mjs",
+  "ort-wasm-simd-threaded.wasm",
+  "ort-wasm-simd-threaded.mjs",
+];
+
+const ORT_BASE = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist";
 
 function downloadFile(url, dest, label) {
   return new Promise((resolve, reject) => {
@@ -76,30 +100,24 @@ function downloadFile(url, dest, label) {
   });
 }
 
-const ORT_BASE = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist";
+console.log("=== Bundling ONNX WASM & WebGPU runtime ===");
+for (const fileName of RUNTIME_FILES) {
+  const dest = join(wasmDir, fileName);
+  let copied = false;
+  for (const localDir of localDistDirs) {
+    const src = join(localDir, fileName);
+    if (existsSync(src)) {
+      copyFileSync(src, dest);
+      const mb = (statSync(dest).size / 1024 / 1024).toFixed(2);
+      console.log(`[local] Copied ${fileName} (${mb} MB)`);
+      copied = true;
+      break;
+    }
+  }
 
-const WASM_FILES = [
-  { url: `${ORT_BASE}/ort-wasm.wasm`, dest: join(wasmDir, "ort-wasm.wasm"), name: "ort-wasm.wasm" },
-  {
-    url: `${ORT_BASE}/ort-wasm-simd.wasm`,
-    dest: join(wasmDir, "ort-wasm-simd.wasm"),
-    name: "ort-wasm-simd.wasm",
-  },
-  {
-    url: `${ORT_BASE}/ort-wasm-threaded.wasm`,
-    dest: join(wasmDir, "ort-wasm-threaded.wasm"),
-    name: "ort-wasm-threaded.wasm",
-  },
-  {
-    url: `${ORT_BASE}/ort-wasm-simd-threaded.wasm`,
-    dest: join(wasmDir, "ort-wasm-simd-threaded.wasm"),
-    name: "ort-wasm-simd-threaded.wasm",
-  },
-];
-
-console.log("=== Bundling ONNX WASM runtime ===");
-for (const file of WASM_FILES) {
-  await downloadFile(file.url, file.dest, file.name);
+  if (!copied) {
+    await downloadFile(`${ORT_BASE}/${fileName}`, dest, fileName);
+  }
 }
 
-console.log("ONNX WASM runtime bundled successfully.");
+console.log("ONNX runtime bundled successfully.");

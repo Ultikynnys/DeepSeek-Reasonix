@@ -17,12 +17,12 @@ const mockEnv = {
   },
 };
 
-vi.mock("@xenova/transformers", () => ({
+vi.mock("@huggingface/transformers", () => ({
   pipeline: (...args: unknown[]) => mockPipeline(...args),
   env: mockEnv,
 }));
 
-import { speechTranscriber, suppressOnnxOptimizerNoise } from "./transcriber";
+import { isWebGPUSupported, speechTranscriber, suppressOnnxOptimizerNoise } from "./transcriber";
 
 describe("LocalSpeechTranscriber", () => {
   beforeEach(() => {
@@ -70,8 +70,8 @@ describe("LocalSpeechTranscriber", () => {
 
     expect(mockPipeline).toHaveBeenCalledWith(
       "automatic-speech-recognition",
-      "Xenova/whisper-tiny.en",
-      { quantized: true },
+      "onnx-community/whisper-tiny.en",
+      { device: "wasm" },
     );
   });
 
@@ -84,9 +84,40 @@ describe("LocalSpeechTranscriber", () => {
     expect(mockEnv.backends.onnx.wasm.proxy).toBe(false);
     expect(mockPipeline).toHaveBeenCalledWith(
       "automatic-speech-recognition",
-      "Xenova/whisper-small.en",
-      expect.objectContaining({ quantized: true }),
+      "onnx-community/whisper-small.en",
+      expect.objectContaining({ device: "wasm" }),
     );
+  });
+
+  it("selects webgpu device when GPU adapter is available", async () => {
+    const fakePipe = vi.fn().mockResolvedValue({ text: "GPU output" });
+    mockPipeline.mockResolvedValueOnce(fakePipe);
+
+    const originalGpu = (navigator as unknown as { gpu?: unknown }).gpu;
+    try {
+      Object.defineProperty(navigator, "gpu", {
+        value: {
+          requestAdapter: vi.fn().mockResolvedValue({}),
+        },
+        configurable: true,
+      });
+
+      expect(await isWebGPUSupported()).toBe(true);
+
+      speechTranscriber.setModel("Xenova/whisper-base.en");
+      await speechTranscriber.getPipeline("Xenova/whisper-base.en");
+
+      expect(mockPipeline).toHaveBeenCalledWith(
+        "automatic-speech-recognition",
+        "onnx-community/whisper-base.en",
+        { device: "webgpu" },
+      );
+    } finally {
+      Object.defineProperty(navigator, "gpu", {
+        value: originalGpu,
+        configurable: true,
+      });
+    }
   });
 
   it("suppresses ONNX Runtime graph optimizer noise while preserving real warnings", () => {
