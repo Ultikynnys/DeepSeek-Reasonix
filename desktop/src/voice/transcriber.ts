@@ -68,6 +68,7 @@ export function suppressOnnxOptimizerNoise(): void {
       if (
         typeof first === "string" &&
         (first.includes("CleanUnusedInitializersAndNodeArgs") ||
+          first.includes("VerifyEachNodeIsAssignedToAnEp") ||
           (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
       ) {
         return;
@@ -85,6 +86,7 @@ export function suppressOnnxOptimizerNoise(): void {
       if (
         typeof first === "string" &&
         (first.includes("CleanUnusedInitializersAndNodeArgs") ||
+          first.includes("VerifyEachNodeIsAssignedToAnEp") ||
           (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
       ) {
         return;
@@ -203,6 +205,7 @@ class LocalSpeechTranscriber {
       const hasGpu = await isWebGPUSupported();
       const pipe = (await pipeline("automatic-speech-recognition", opt.repoId, {
         device: hasGpu ? "webgpu" : "wasm",
+        dtype: hasGpu ? { encoder_model: "fp32", decoder_model_merged: "q4" } : "q8",
         progress_callback: (data: unknown) => {
           if (onProgress && data && typeof data === "object") {
             onProgress(data as DownloadProgress);
@@ -254,6 +257,7 @@ class LocalSpeechTranscriber {
 
         const pipe = (await pipeline("automatic-speech-recognition", opt.repoId, {
           device: hasGpu ? "webgpu" : "wasm",
+          dtype: hasGpu ? { encoder_model: "fp32", decoder_model_merged: "q4" } : "q8",
         })) as unknown as ASRPipeline;
 
         this.pipelineInstance = pipe;

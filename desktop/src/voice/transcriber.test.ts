@@ -71,7 +71,7 @@ describe("LocalSpeechTranscriber", () => {
     expect(mockPipeline).toHaveBeenCalledWith(
       "automatic-speech-recognition",
       "onnx-community/whisper-tiny.en",
-      { device: "wasm" },
+      { device: "wasm", dtype: "q8" },
     );
   });
 
@@ -85,7 +85,7 @@ describe("LocalSpeechTranscriber", () => {
     expect(mockPipeline).toHaveBeenCalledWith(
       "automatic-speech-recognition",
       "onnx-community/whisper-small.en",
-      expect.objectContaining({ device: "wasm" }),
+      expect.objectContaining({ device: "wasm", dtype: "q8" }),
     );
   });
 
@@ -110,7 +110,10 @@ describe("LocalSpeechTranscriber", () => {
       expect(mockPipeline).toHaveBeenCalledWith(
         "automatic-speech-recognition",
         "onnx-community/whisper-base.en",
-        { device: "webgpu" },
+        {
+          device: "webgpu",
+          dtype: { encoder_model: "fp32", decoder_model_merged: "q4" },
+        },
       );
     } finally {
       Object.defineProperty(navigator, "gpu", {
@@ -127,9 +130,12 @@ describe("LocalSpeechTranscriber", () => {
 
     suppressOnnxOptimizerNoise();
 
-    // ONNX optimizer noise should be dropped:
+    // ONNX optimizer and EP assignment noise should be dropped:
     console.warn(
       "2026-09-05 00:04:11.843900 [W:onnxruntime:, graph.cc:3490 CleanUnusedInitializersAndNodeArgs] Removing initializer '/model/decoder/layers.8/encoder_attn_layer_norm/Constant_1_output_0'. It is not used by any node and should be removed from the model.",
+    );
+    console.warn(
+      "2026-09-05 00:44:21.507599 [W:onnxruntime:, session_state.cc:1280 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance.",
     );
     expect(warnSpy).not.toHaveBeenCalled();
 
