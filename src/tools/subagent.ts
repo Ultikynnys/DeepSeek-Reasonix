@@ -49,6 +49,7 @@ export interface SubagentEvent {
   outputChars?: number;
   reasoningChars?: number;
   toolReadChars?: number;
+  thought?: string;
   maxToolIters?: number;
   maxElapsedMs?: number;
   budgetExhausted?: "tool-iters" | "elapsed";
@@ -345,6 +346,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   let contextTokens = 0;
   let lastStreamEmitAt = 0;
   let charsSinceLastEmit = 0;
+  let recentThought = "";
   // Throttle gates — 200ms or 400 chars between emits, whichever first.
   // Cheap enough that React doesn't drown, often enough that the seconds
   // counter has company.
@@ -373,6 +375,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       outputChars,
       reasoningChars,
       toolReadChars,
+      ...(recentThought ? { thought: recentThought } : {}),
     });
   };
   try {
@@ -380,6 +383,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       emit({ kind: "inner", runId, task: taskPreview, skillName, model, inner: ev });
 
       if (ev.role === "tool") {
+        recentThought = "";
         let budgetRefusal = false;
         try {
           budgetRefusal = JSON.parse(ev.content ?? "{}").__reasonixSubagentBudgetRefusal === true;
@@ -407,6 +411,11 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       if (ev.role === "assistant_delta") {
         const dContent = ev.content?.length ?? 0;
         const dReason = ev.reasoningDelta?.length ?? 0;
+        if (dReason > 0 && ev.reasoningDelta) {
+          recentThought = (recentThought + ev.reasoningDelta).slice(-800);
+        } else if (dContent > 0 && ev.content) {
+          recentThought = (recentThought + ev.content).slice(-800);
+        }
         if (dContent > 0 || dReason > 0) {
           streamedContent += ev.content ?? "";
           outputChars += dContent;

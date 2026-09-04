@@ -147,6 +147,7 @@ export interface SubagentProgressEvent extends EventBase {
   outputChars?: number;
   reasoningChars?: number;
   toolReadChars?: number;
+  thought?: string;
   childCallId?: string;
   toolName?: string;
   /** Redacted and bounded JSON arguments; never includes a tool result body. */

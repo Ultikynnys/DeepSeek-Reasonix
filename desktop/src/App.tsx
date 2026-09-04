@@ -148,6 +148,13 @@ export type SubagentToolActivity = {
   status: "running" | "done" | "failed";
 };
 
+export type SubagentActivityRow = {
+  id: string;
+  kind: "thinking" | "process";
+  text: string;
+  status?: "running" | "done" | "failed";
+};
+
 export type SubagentRunProgress = {
   runId: string;
   task: string;
@@ -169,6 +176,8 @@ export type SubagentRunProgress = {
   maxElapsedMs?: number;
   budgetExhausted?: "tool-iters" | "elapsed";
   error?: string;
+  thought?: string;
+  recentRows?: SubagentActivityRow[];
   tools: SubagentToolActivity[];
 };
 
@@ -1685,6 +1694,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           const runIndex = runs.findIndex((run) => run.runId === ev.runId);
           const previous = runIndex >= 0 ? runs[runIndex] : undefined;
           const tools = [...(previous?.tools ?? [])];
+          const recentRows = [...(previous?.recentRows ?? [])];
           if (ev.action === "tool-start") {
             const callId = ev.childCallId ?? `${ev.runId}-tool-${tools.length}`;
             const existing = tools.findIndex((tool) => tool.callId === callId);
@@ -1696,6 +1706,13 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
             };
             if (existing >= 0) tools[existing] = activity;
             else tools.push(activity);
+            const text = `↳ ${ev.toolName ?? "tool"}${ev.toolArgs ? ` ${ev.toolArgs}` : ""}`;
+            recentRows.push({
+              id: `${ev.runId}-tool-${Date.now()}-${recentRows.length}`,
+              kind: "process",
+              text,
+              status: "running",
+            });
           } else if (ev.action === "tool-end") {
             const existing = ev.childCallId
               ? tools.findIndex((tool) => tool.callId === ev.childCallId)
@@ -1706,7 +1723,44 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
                 status: ev.toolOk === false ? "failed" : "done",
               };
             }
+            const lastProcess = [...recentRows]
+              .reverse()
+              .find((r) => r.kind === "process" && r.status === "running");
+            if (lastProcess) {
+              lastProcess.status = ev.toolOk === false ? "failed" : "done";
+            }
+          } else if (ev.action === "phase" && ev.phase) {
+            recentRows.push({
+              id: `${ev.runId}-phase-${Date.now()}-${recentRows.length}`,
+              kind: "process",
+              text: ev.phase === "summarising" ? "Summarising findings..." : "Exploring codebase...",
+              status: "running",
+            });
           }
+
+          if (ev.thought) {
+            const lines = ev.thought
+              .split("\n")
+              .map((l) => l.trim())
+              .filter((l) => l.length > 0);
+            if (lines.length > 0) {
+              const latestLine = lines[lines.length - 1]!;
+              const lastRow = recentRows[recentRows.length - 1];
+              if (lastRow && lastRow.kind === "thinking") {
+                lastRow.text = latestLine;
+              } else {
+                recentRows.push({
+                  id: `${ev.runId}-th-${Date.now()}-${recentRows.length}`,
+                  kind: "thinking",
+                  text: latestLine,
+                });
+              }
+            }
+          }
+          if (recentRows.length > 20) {
+            recentRows.splice(0, recentRows.length - 20);
+          }
+
           const next: SubagentRunProgress = {
             runId: ev.runId,
             task: ev.task,
@@ -1733,6 +1787,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
             maxElapsedMs: ev.maxElapsedMs ?? previous?.maxElapsedMs,
             budgetExhausted: ev.budgetExhausted ?? previous?.budgetExhausted,
             error: ev.error ?? previous?.error,
+            thought: ev.thought ?? previous?.thought,
+            recentRows,
             tools,
           };
           if (runIndex >= 0) runs[runIndex] = next;

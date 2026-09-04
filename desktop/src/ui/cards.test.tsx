@@ -346,6 +346,39 @@ describe("SubagentCard — model visibility", () => {
     expect(header.textContent).toContain("deepseek-v4-flash");
     expect(header.textContent).toContain("$0.0422");
   });
+
+  it("shows the last 3 rows of thinking and process when subagent is running", () => {
+    const runningRun = {
+      runId: "run-live",
+      task: "Analyze codebase",
+      skillName: "explore",
+      model: "deepseek-v4-flash",
+      status: "running" as const,
+      tools: [],
+      recentRows: [
+        { id: "r1", kind: "thinking" as const, text: "Initial thoughts" },
+        { id: "r2", kind: "process" as const, text: "↳ read_file src/index.ts" },
+        { id: "r3", kind: "thinking" as const, text: "Parsing export signatures" },
+        { id: "r4", kind: "process" as const, text: "↳ search_content loop" },
+      ],
+    };
+
+    render(<SubagentCard name="explore" runs={[runningRun]} />);
+
+    const activityBox = screen.getByLabelText("Subagent activity");
+    expect(activityBox).toBeTruthy();
+
+    const rows = activityBox.querySelectorAll(".sub-activity-row");
+    expect(rows.length).toBe(3);
+
+    // Should show the last 3 rows (r2, r3, r4), dropping r1
+    expect(rows[0]?.textContent).toContain("process");
+    expect(rows[0]?.textContent).toContain("↳ read_file src/index.ts");
+    expect(rows[1]?.textContent).toContain("thinking");
+    expect(rows[1]?.textContent).toContain("Parsing export signatures");
+    expect(rows[2]?.textContent).toContain("process");
+    expect(rows[2]?.textContent).toContain("↳ search_content loop");
+  });
 });
 
 describe("DiffCard — show-in-explorer button", () => {

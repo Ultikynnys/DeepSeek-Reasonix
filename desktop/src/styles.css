@@ -3800,6 +3800,62 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   color: var(--muted);
 }
 
+.sub-activity {
+  margin: 6px 0;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: inherit;
+  font-size: 12px;
+}
+.sub-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.4;
+  min-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub-activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.sub-activity-dot.thinking {
+  background: var(--violet);
+  box-shadow: 0 0 4px var(--violet-soft);
+  animation: pulse-dot 1.5s infinite;
+}
+.sub-activity-dot.process {
+  background: var(--accent);
+}
+.sub-activity-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.sub-activity-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-2);
+  font-family: "Geist Mono", monospace;
+  font-size: 11px;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.6; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
 /* ---- Cache / token card (inline strip) ---- */
 
 .metric-strip {

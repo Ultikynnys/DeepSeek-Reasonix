@@ -1550,6 +1550,71 @@ describe("Desktop App reducer — subagent progress", () => {
       ],
     });
   });
+
+  it("accumulates thinking and process rows into recentRows on subagent.progress", () => {
+    const base = {
+      ...initialState(),
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn: 3,
+          pending: true,
+          segments: [
+            {
+              kind: "tool" as const,
+              callId: "parent-sub",
+              name: "explore",
+              args: "{}",
+              startedAt: 1,
+            },
+          ],
+        },
+      ],
+    };
+    const send = (
+      state: Parameters<typeof reduce>[0],
+      event: import("./protocol").SubagentProgressEvent,
+    ) => reduce(state, { t: "incoming", event });
+    const common = {
+      type: "subagent.progress" as const,
+      ts: "2026-06-01T00:00:00.000Z",
+      turn: 3,
+      runId: "run-act",
+      parentCallId: "parent-sub",
+      task: "explore codebase",
+    };
+
+    let state = send(base, { ...common, id: 1, action: "start" });
+    state = send(state, {
+      ...common,
+      id: 2,
+      action: "stream",
+      thought: "Analyzing the architecture...",
+    });
+    state = send(state, {
+      ...common,
+      id: 3,
+      action: "tool-start",
+      toolName: "read_file",
+      toolArgs: "src/index.ts",
+    });
+
+    const assistant = state.messages[0];
+    if (assistant?.kind !== "assistant") throw new Error("expected assistant");
+    const run = (assistant.segments[0] as { subagentRuns?: Array<{ recentRows?: unknown[] }> })
+      ?.subagentRuns?.[0];
+
+    expect(run?.recentRows).toHaveLength(2);
+    expect(run?.recentRows?.[0]).toMatchObject({
+      kind: "thinking",
+      text: "Analyzing the architecture...",
+    });
+    expect(run?.recentRows?.[1]).toMatchObject({
+      kind: "process",
+      text: "↳ read_file src/index.ts",
+      status: "running",
+    });
+  });
 });
 
 describe("Desktop App reducer — plan timeline anchor", () => {

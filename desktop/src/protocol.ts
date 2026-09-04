@@ -275,6 +275,7 @@ export type SubagentProgressEvent = {
   outputChars?: number;
   reasoningChars?: number;
   toolReadChars?: number;
+  thought?: string;
   childCallId?: string;
   toolName?: string;
   toolArgs?: string;
