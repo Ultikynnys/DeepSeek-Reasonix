@@ -13,6 +13,7 @@ import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
+import { allQuickSends } from "../protocol";
 import {
   FONT_FAMILY,
   FONT_SCALE,
@@ -360,6 +361,8 @@ function PageGeneral({
   useEffect(() => {
     setCustomFontDraft(customFontFamily);
   }, [customFontFamily]);
+  const [quickSendLabel, setQuickSendLabel] = useState("");
+  const [quickSendMessage, setQuickSendMessage] = useState("");
   const commitCustomFont = (value: string) => {
     const next = value.trim();
     setCustomFontDraft(next);
@@ -610,6 +613,107 @@ function PageGeneral({
           </select>
         </div>
         <WebSearchEngineCredentials settings={settings} onSave={onSave} />
+      </section>
+
+      <section className="section">
+        <div className="stitle">{t("settings.quickSendSection")}</div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.quickSend")}</div>
+            <div className="h">{t("settings.quickSendHint")}</div>
+          </div>
+          <div className="seg-ctrl">
+            {allQuickSends(settings.quickSends ?? []).map((q) => (
+              <button
+                type="button"
+                key={q.id}
+                data-on={settings.quickSendId === q.id}
+                onClick={() => onSave({ quickSendId: q.id })}
+              >
+                {q.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {(settings.quickSends ?? []).length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {(settings.quickSends ?? []).map((q) => (
+              <div className="rule" key={q.id}>
+                <div className="top">
+                  <span className="pat">{q.label}</span>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    title={t("settings.quickSendRemove")}
+                    aria-label={`Remove quick send: ${q.label}`}
+                    onClick={() =>
+                      onSave({
+                        quickSends: (settings.quickSends ?? []).filter((x) => x.id !== q.id),
+                      })
+                    }
+                  >
+                    <I.trash size={12} />
+                  </button>
+                </div>
+                <div className="desc">{q.message}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {(settings.quickSends ?? []).length === 0 && (
+          <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 12 }}>
+            {t("settings.quickSendNoCustom")}
+          </div>
+        )}
+
+        <form
+          className="rule-composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const label = quickSendLabel.trim();
+            const message = quickSendMessage.trim();
+            if (!label || !message) return;
+            onSave({
+              quickSends: [
+                ...(settings.quickSends ?? []),
+                { id: `custom-${Date.now()}`, label, message, shorthand: label },
+              ],
+            });
+            setQuickSendLabel("");
+            setQuickSendMessage("");
+          }}
+        >
+          <div className="rule-composer-row">
+            <input
+              type="text"
+              className="rule-input"
+              placeholder={t("settings.quickSendNamePlaceholder")}
+              value={quickSendLabel}
+              onChange={(e) => setQuickSendLabel(e.target.value)}
+              aria-label={t("settings.quickSendName")}
+            />
+            <input
+              type="text"
+              className="rule-input"
+              placeholder={t("settings.quickSendMessagePlaceholder")}
+              value={quickSendMessage}
+              onChange={(e) => setQuickSendMessage(e.target.value)}
+              aria-label={t("settings.quickSendMessage")}
+            />
+            <button
+              type="submit"
+              className="btn small"
+              disabled={!quickSendLabel.trim() || !quickSendMessage.trim()}
+              title={t("settings.quickSendAdd")}
+              aria-label={t("settings.quickSendAdd")}
+            >
+              <I.plus size={12} />
+              <span style={{ marginLeft: 4 }}>{t("settings.quickSendAdd")}</span>
+            </button>
+          </div>
+        </form>
       </section>
     </>
   );

@@ -143,4 +143,11 @@ export type {
   SettingsPatch,
   OutgoingCommand,
   UserImageAttachment,
+  QuickSend,
+} from "./desktop-protocol.js";
+export {
+  BUILTIN_QUICK_SENDS,
+  allQuickSends,
+  isQuickSend,
+  resolveActiveQuickSend,
 } from "./desktop-protocol.js";

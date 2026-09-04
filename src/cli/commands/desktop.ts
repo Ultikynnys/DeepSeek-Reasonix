@@ -90,6 +90,7 @@ import {
   loadApiKey,
   loadBraveApiKey,
   loadContextTokens,
+  loadCustomQuickSends,
   loadDesktopOpenTabs,
   loadEditMode,
   loadEndpoint,
@@ -106,6 +107,7 @@ import {
   loadPerplexityApiKey,
   loadProjectPathAllowed,
   loadProjectShellAllowed,
+  loadQuickSendId,
   loadReasoningEffort,
   loadRecentWorkspaces,
   loadResolvedSkillPaths,
@@ -125,6 +127,7 @@ import {
   saveApiKey,
   saveBaseUrl,
   saveContextTokens,
+  saveCustomQuickSends,
   saveDesktopOpenTabs,
   saveEditMode,
   saveMaxIterPerTurn,
@@ -132,6 +135,7 @@ import {
   saveOllamaGenerationPatch,
   saveOpenAIApiKey,
   saveOpenAIOAuth,
+  saveQuickSendId,
   saveReasoningEffort,
   saveShowSystemEvents,
   saveWorkspaceDir,
@@ -898,6 +902,8 @@ function emitSettings(tab: Tab): void {
       type: "$settings",
       reasoningEffort: tab.currentReasoningEffort,
       editMode,
+      quickSendId: loadQuickSendId(),
+      quickSends: loadCustomQuickSends(),
       budgetUsd: tab.runtime?.loop.budgetUsd ?? null,
       contextTokens: tab.ctxMaxOverride ?? null,
       maxIterPerTurn: tab.runtime?.loop.maxIterPerTurn ?? loadMaxIterPerTurn(),
@@ -4540,6 +4546,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         if (msg.editMode !== undefined) {
           saveEditMode(msg.editMode);
           if (tab.toolset) applyPlanMode(tab.toolset.tools, msg.editMode);
+        }
+        if (msg.quickSendId !== undefined) {
+          saveQuickSendId(msg.quickSendId);
+        }
+        if (msg.quickSends !== undefined) {
+          saveCustomQuickSends(msg.quickSends);
         }
         if (msg.budgetUsd !== undefined) {
           tab.budgetUsd = msg.budgetUsd ?? undefined;

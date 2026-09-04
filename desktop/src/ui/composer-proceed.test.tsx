@@ -31,7 +31,7 @@ describe("Composer quick send Proceed button", () => {
 
     const proceedBtn = screen.getByRole("button", { name: /Proceed/i });
     expect(proceedBtn).toBeTruthy();
-    expect(proceedBtn.getAttribute("title")).toBe("Quick send 'proceed'");
+    expect(proceedBtn.getAttribute("title")).toBe("Quick send");
   });
 
   it("calls onSend with 'proceed' when clicked", () => {

@@ -81,6 +81,7 @@ export function Composer({
   draft,
   setDraft,
   onSend,
+  quickSend,
   onAbort,
   disabled,
   busy,
@@ -120,7 +121,9 @@ export function Composer({
 }: {
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
-  onSend: (text?: string) => void;
+  onSend: (text?: string | QueuedSend) => void;
+  /** The active quick-send action — drives the composer's quick button. Absent → "proceed". */
+  quickSend?: { label: string; message: string; shorthand: string };
   onAbort: () => void;
   disabled?: boolean;
   busy?: boolean;
@@ -277,13 +280,18 @@ export function Composer({
     if (trimmed) {
       historyRef.current.push(trimmed);
     }
-    historyRef.current.push("proceed");
+    const shorthand = quickSend?.shorthand ?? "proceed";
+    historyRef.current.push(shorthand);
     if (historyRef.current.length > 100) {
       historyRef.current.splice(0, historyRef.current.length - 100);
     }
     setBrowseIdx(-1);
     setDraft("");
-    onSend("proceed");
+    if (quickSend) {
+      onSend({ text: quickSend.message, echo: quickSend.shorthand });
+    } else {
+      onSend("proceed");
+    }
   };
 
   const navigateHistory = (dir: -1 | 1) => {
@@ -691,10 +699,10 @@ export function Composer({
               className="quick-proceed-btn"
               disabled={disabled || busy}
               onClick={handleProceed}
-              title={t("composer.quickProceedTitle")}
+              title={t("composer.quickSendTitle")}
             >
               <I.play size={11} />
-              <span>{t("composer.proceed")}</span>
+              <span>{quickSend?.label ?? t("composer.proceed")}</span>
             </button>
             <button
               type="button"

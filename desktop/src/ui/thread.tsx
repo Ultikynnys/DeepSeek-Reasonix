@@ -266,12 +266,20 @@ export const AssistantMsg = memo(function AssistantMsg({
                       tools: [],
                     },
                   ];
+            const effectiveRuns =
+              s.result !== undefined
+                ? runs.map((r) =>
+                    r.status === "running"
+                      ? { ...r, status: (s.ok === false ? "failed" : "done") as "failed" | "done" }
+                      : r,
+                  )
+                : runs;
             return (
               <SubagentCard
                 // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
                 key={i}
                 name={skillName}
-                runs={runs}
+                runs={effectiveRuns}
                 args={s.args}
                 result={s.result}
                 ok={s.ok}

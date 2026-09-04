@@ -8,6 +8,52 @@ import type { ChoiceOption, PlanStep, ReasoningEffort } from "./permission-types
 
 export type EditMode = "review" | "auto" | "yolo" | "plan";
 
+/** A composer "quick send" — a one-click action that sends a message to the
+ *  model. `message` is the full text sent via user_input; `shorthand` is the
+ *  short form shown in the chat when the message is long. */
+export interface QuickSend {
+  id: string;
+  label: string;
+  message: string;
+  shorthand: string;
+}
+
+/** Built-in quick sends — always available; the active one is selected in
+ *  Settings → General and defaults to Proceed. */
+export const BUILTIN_QUICK_SENDS: readonly QuickSend[] = [
+  { id: "proceed", label: "Proceed", message: "proceed", shorthand: "proceed" },
+  {
+    id: "commit-and-push",
+    label: "Commit and Push all changes",
+    message: "commit and push all changes",
+    shorthand: "commit and push",
+  },
+];
+
+export function isQuickSend(v: unknown): v is QuickSend {
+  if (!v || typeof v !== "object") return false;
+  const q = v as Record<string, unknown>;
+  return (
+    typeof q.id === "string" &&
+    typeof q.label === "string" &&
+    typeof q.message === "string" &&
+    typeof q.shorthand === "string"
+  );
+}
+
+/** Built-ins plus user-defined customs — the full set of selectable quick sends. */
+export function allQuickSends(customs: readonly QuickSend[]): QuickSend[] {
+  return [...BUILTIN_QUICK_SENDS, ...customs];
+}
+
+/** The active quick send by id, falling back to Proceed when unknown/absent. */
+export function resolveActiveQuickSend(
+  id: string | undefined,
+  customs: readonly QuickSend[],
+): QuickSend {
+  return allQuickSends(customs).find((q) => q.id === id) ?? BUILTIN_QUICK_SENDS[0]!;
+}
+
 export type WebSearchEngineName =
   | "bing"
   | "bing-intl"
@@ -381,6 +427,10 @@ export interface SettingsEvent {
   type: "$settings";
   reasoningEffort: ReasoningEffort;
   editMode: EditMode;
+  /** Active quick-send action id (default "proceed"). */
+  quickSendId: string;
+  /** User-defined quick sends (built-ins are code-defined). */
+  quickSends: QuickSend[];
   budgetUsd: number | null;
   /** User-configured context-window cap (tokens); null = per-model default (300K). */
   contextTokens?: number | null;
@@ -624,6 +674,8 @@ export interface OllamaModelsEvent {
 export interface SettingsPatch {
   reasoningEffort?: ReasoningEffort;
   editMode?: EditMode;
+  quickSendId?: string;
+  quickSends?: QuickSend[];
   budgetUsd?: number | null;
   /** Context-window cap in tokens, clamped to [128000, 1000000]; null/undefined = per-model default. */
   contextTokens?: number | null;

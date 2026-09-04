@@ -3836,6 +3836,17 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .sub-activity-dot.process {
   background: var(--accent);
 }
+.sub-activity-dot.process.running {
+  background: var(--accent);
+  box-shadow: 0 0 4px var(--accent-soft);
+  animation: pulse-dot 1.5s infinite;
+}
+.sub-activity-dot.process.done {
+  background: var(--success);
+}
+.sub-activity-dot.process.failed {
+  background: var(--danger);
+}
 .sub-activity-tag {
   font-size: 10px;
   text-transform: uppercase;

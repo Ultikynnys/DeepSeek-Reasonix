@@ -46,6 +46,8 @@ export class Eventizer {
   private inflightToolStartedAt: number[] = [];
   /** Per-turn dedupe so each toolCallIndex emits exactly one tool.preparing. */
   private announcedToolIdx = new Set<string>();
+  /** Maps loop-internal call IDs (e.g. API call ids or inflight IDs) to wire tool call IDs (`tc-N`). */
+  private loopCallIdToWireCallId = new Map<string, string>();
 
   consume(ev: LoopEvent, ctx: EventizeContext): Event[] {
     const out: Event[] = [];
@@ -86,6 +88,9 @@ export class Eventizer {
         const callId = this.preparingCallIds.shift() ?? `tc-${++this.nextToolSeq}`;
         this.inflightCallIds.push(callId);
         this.inflightToolStartedAt.push(performance.now());
+        if (ev.callId) {
+          this.loopCallIdToWireCallId.set(ev.callId, callId);
+        }
         out.push(this.toolIntentEvent(ev.turn, callId, ev.toolName ?? "", ev.toolArgs ?? ""));
         out.push(this.toolDispatchedEvent(ev.turn, callId));
         break;
@@ -294,12 +299,16 @@ export class Eventizer {
     turn: number,
     progress: Omit<SubagentProgressEvent, "id" | "ts" | "turn" | "type">,
   ): SubagentProgressEvent {
+    const parentCallId = progress.parentCallId
+      ? (this.loopCallIdToWireCallId.get(progress.parentCallId) ?? progress.parentCallId)
+      : undefined;
     return {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
       type: EventType.subagentProgress,
       ...progress,
+      ...(parentCallId ? { parentCallId } : {}),
     };
   }
 

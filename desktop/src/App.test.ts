@@ -517,6 +517,8 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
         type: "$settings",
         reasoningEffort: "high",
         editMode: "review",
+        quickSendId: "proceed",
+        quickSends: [],
         budgetUsd: null,
         workspaceDir: "/workspace",
         recentWorkspaces: [],
@@ -554,6 +556,8 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
         type: "$settings",
         reasoningEffort: "high",
         editMode: "review",
+        quickSendId: "proceed",
+        quickSends: [],
         budgetUsd: null,
         workspaceDir: "/workspace",
         recentWorkspaces: [],
@@ -1416,6 +1420,8 @@ describe("Desktop App reducer — OpenAI OAuth flow state", () => {
         type: "$settings",
         reasoningEffort: "medium",
         editMode: "review",
+        quickSendId: "proceed",
+        quickSends: [],
         budgetUsd: null,
         workspaceDir: "/workspace",
         recentWorkspaces: [],
@@ -1436,6 +1442,8 @@ describe("Desktop App reducer — OpenAI OAuth flow state", () => {
         type: "$settings",
         reasoningEffort: "medium",
         editMode: "review",
+        quickSendId: "proceed",
+        quickSends: [],
         budgetUsd: null,
         workspaceDir: "/workspace",
         recentWorkspaces: [],
@@ -1475,6 +1483,8 @@ describe("Desktop App reducer — OpenAI OAuth flow state", () => {
         type: "$settings",
         reasoningEffort: "medium",
         editMode: "review",
+        quickSendId: "proceed",
+        quickSends: [],
         budgetUsd: null,
         workspaceDir: "/workspace",
         recentWorkspaces: [],
@@ -1667,6 +1677,50 @@ describe("Desktop App reducer — subagent progress", () => {
           tools: [{ callId: "child", name: "read_file", status: "done" }],
         },
       ],
+    });
+  });
+
+  it("falls back to running subagent candidate when parentCallId does not match segment callId", () => {
+    const base = {
+      ...initialState(),
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn: 5,
+          pending: true,
+          segments: [
+            {
+              kind: "tool" as const,
+              callId: "tc-1",
+              name: "explore",
+              args: "{}",
+              startedAt: 1,
+            },
+          ],
+        },
+      ],
+    };
+    const send = (
+      state: Parameters<typeof reduce>[0],
+      event: import("./protocol").SubagentProgressEvent,
+    ) => reduce(state, { t: "incoming", event });
+    const event = {
+      type: "subagent.progress" as const,
+      id: 1,
+      ts: "2026-06-01T00:00:00.000Z",
+      turn: 5,
+      runId: "run-mismatched",
+      parentCallId: "loop-internal-call-id",
+      action: "start" as const,
+      task: "investigate quick send",
+    };
+
+    const next = send(base, event);
+    const assistant = next.messages[0];
+    if (assistant?.kind !== "assistant") throw new Error("expected assistant");
+    expect(assistant.segments[0]).toMatchObject({
+      callId: "tc-1",
+      subagentRuns: [{ runId: "run-mismatched", task: "investigate quick send" }],
     });
   });
 

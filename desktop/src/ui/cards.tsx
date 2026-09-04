@@ -906,7 +906,8 @@ export function extractSubagentDetails(
       task = args;
     }
   }
-  return { task: task || name, skillName, model };
+  const displayTask = task.length > 120 ? `${task.slice(0, 120)}…` : task;
+  return { task: displayTask || name, skillName, model };
 }
 
 export type SubagentResultMeta = {
@@ -961,7 +962,11 @@ function SubagentActivityRows({ run }: { run: import("../App").SubagentRunProgre
     <div className="sub-activity" aria-label="Subagent activity">
       {rowsToShow.map((row) => (
         <div className="sub-activity-row" key={row.id}>
-          <span className={`sub-activity-dot ${row.kind}`} />
+          <span
+            className={`sub-activity-dot ${row.kind}${
+              row.status ? ` ${row.status}` : ""
+            }`}
+          />
           <span className="sub-activity-tag">{row.kind}</span>
           <span className="sub-activity-text" title={row.text}>
             {row.text}

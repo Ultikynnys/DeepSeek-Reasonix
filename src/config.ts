@@ -10,7 +10,10 @@ import {
   KNOWN_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
+  allQuickSends,
+  isQuickSend,
   isUsableAntigravityModel,
+  resolveActiveQuickSend,
 } from "@reasonix/core-utils";
 import { z } from "zod";
 import { atomicWriteSync, tmpSiblingPath } from "./core/atomic-write.js";
@@ -143,7 +146,7 @@ export function loadOllamaEndpoint(path: string = defaultConfigPath()): Resolved
   return { baseUrl: DEFAULT_OLLAMA_CHAT_URL, apiKey: loadOllamaApiKey(path) };
 }
 
-import type { EditMode, ReasoningEffort } from "@reasonix/core-utils";
+import type { EditMode, QuickSend, ReasoningEffort } from "@reasonix/core-utils";
 import { expandTilde } from "@reasonix/core-utils/expand-tilde";
 
 /** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates; plan blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch. */
@@ -317,6 +320,10 @@ export interface ReasonixConfig {
   models?: Record<string, ModelProviderConfig>;
   editMode?: EditMode;
   editModeHintShown?: boolean;
+  /** Active quick-send action id (default "proceed"). */
+  quickSendId?: string;
+  /** User-defined quick sends (built-ins are code-defined). */
+  quickSends?: QuickSend[];
   mouseClipboardHintShown?: boolean;
   /** When false, skip the boot splash animation and show the main UI immediately. Default true. */
   banner?: boolean;
@@ -1667,6 +1674,32 @@ export function loadEditMode(path: string = defaultConfigPath()): EditMode {
 export function saveEditMode(mode: EditMode, path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
   cfg.editMode = mode;
+  writeConfig(cfg, path);
+}
+
+/** Load the active quick-send action id; unknown/absent falls back to Proceed. */
+export function loadQuickSendId(path: string = defaultConfigPath()): string {
+  return resolveActiveQuickSend(readConfig(path).quickSendId, loadCustomQuickSends(path)).id;
+}
+
+/** Persist the active quick-send action id. */
+export function saveQuickSendId(id: string, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.quickSendId = id;
+  writeConfig(cfg, path);
+}
+
+/** Load user-defined quick sends (built-ins are code-defined); malformed entries are dropped. */
+export function loadCustomQuickSends(path: string = defaultConfigPath()): QuickSend[] {
+  const v = readConfig(path).quickSends;
+  if (!Array.isArray(v)) return [];
+  return v.filter(isQuickSend);
+}
+
+/** Persist the full user-defined quick-send list. */
+export function saveCustomQuickSends(list: QuickSend[], path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.quickSends = list;
   writeConfig(cfg, path);
 }
 

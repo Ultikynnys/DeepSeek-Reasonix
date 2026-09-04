@@ -55,12 +55,14 @@ import {
   type OutgoingCommand,
   type PlanStep,
   type PlanVerdict,
+  type QuickSend,
   type RevisionVerdict,
   type SessionProviderCost,
   type SettingsPatch,
   type SkillInfo,
   type SubagentProgressEvent,
   type UserImageAttachment,
+  resolveActiveQuickSend,
   rpcSend,
 } from "./protocol";
 import {
@@ -345,6 +347,10 @@ export type SessionInfo = {
 export type Settings = {
   reasoningEffort: ReasoningEffort;
   editMode: "review" | "auto" | "yolo" | "plan";
+  /** Active quick-send action id (default "proceed"). */
+  quickSendId?: string;
+  /** User-defined quick sends (built-ins are code-defined). */
+  quickSends?: QuickSend[];
   budgetUsd: number | null;
   /** User-configured context-window cap (tokens); null = per-model default. */
   contextTokens?: number | null;
@@ -447,6 +453,8 @@ type MentionPreviewState = {
 
 export type QueuedSend = {
   text: string;
+  /** Short form shown in the chat when `text` is long (quick sends). Defaults to text. */
+  echo?: string;
   images?: { id: string; thumbnail: string; wire?: UserImageAttachment }[];
 };
 
@@ -1891,14 +1899,30 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
                 (segment) => segment.kind === "tool" && segment.callId === ev.parentCallId,
               )
             : -1;
-          if (host < 0 && !ev.parentCallId) {
-            const candidates = m.segments
-              .map((segment, index) => ({ segment, index }))
-              .filter(
-                ({ segment }) =>
-                  segment.kind === "tool" && isSubagentTool(segment.name, segment.args),
-              );
-            if (candidates.length === 1) host = candidates[0]?.index ?? -1;
+          if (host < 0) {
+            const existingHost = m.segments.findIndex(
+              (segment) =>
+                segment.kind === "tool" &&
+                segment.subagentRuns?.some((run) => run.runId === ev.runId),
+            );
+            if (existingHost >= 0) {
+              host = existingHost;
+            } else {
+              const candidates = m.segments
+                .map((segment, index) => ({ segment, index }))
+                .filter(
+                  ({ segment }) =>
+                    segment.kind === "tool" && isSubagentTool(segment.name, segment.args),
+                );
+              if (candidates.length === 1) {
+                host = candidates[0]?.index ?? -1;
+              } else if (candidates.length > 1) {
+                const running = candidates.find(
+                  (c) => c.segment.kind === "tool" && c.segment.result === undefined,
+                );
+                host = running ? running.index : (candidates[candidates.length - 1]?.index ?? -1);
+              }
+            }
           }
           if (host < 0) return m;
           const segments = [...m.segments];
@@ -2497,7 +2521,9 @@ function TabRuntime({
       // Without this the live chat shows the raw @path until session reload.
       let echoText = text;
       let echoImages = sendImageUrls;
-      if (imageCapable) {
+      if (override !== undefined && typeof override !== "string" && override.echo) {
+        echoText = override.echo;
+      } else if (imageCapable) {
         const typed = typedMentionImages(text, state.settings?.workspaceDir);
         echoText = typed.text;
         if (typed.images.length > 0) echoImages = [...sendImageUrls, ...typed.images];
@@ -3144,6 +3170,10 @@ function TabRuntime({
                 draft={draft}
                 setDraft={setDraft}
                 onSend={(text) => send(text)}
+                quickSend={resolveActiveQuickSend(
+                  state.settings?.quickSendId,
+                  state.settings?.quickSends ?? [],
+                )}
                 onAbort={abort}
                 disabled={!state.ready}
                 busy={state.busy}

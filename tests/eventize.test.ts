@@ -440,4 +440,30 @@ describe("Eventizer.consume", () => {
     expect(ev.id).toBeGreaterThan(0);
     expect(ev.ts).toBeTruthy();
   });
+
+  it("emitSubagentProgress maps loop parentCallId to wire tool callId", () => {
+    const e = new Eventizer();
+    e.consume(lev({ turn: 1 }), ctx);
+    const startOut = e.consume(
+      lev({
+        turn: 1,
+        role: "tool_start",
+        toolName: "explore",
+        toolArgs: "{}",
+        callId: "loop-call-99",
+      }),
+      ctx,
+    );
+    const wireToolCallId = (startOut.find((ev) => ev.type === "tool.intent") as { callId: string })
+      .callId;
+    expect(wireToolCallId).toMatch(/^tc-\d+$/);
+
+    const progress = e.emitSubagentProgress(1, {
+      action: "start",
+      runId: "sub-run-1",
+      task: "explore codebase",
+      parentCallId: "loop-call-99",
+    });
+    expect(progress.parentCallId).toBe(wireToolCallId);
+  });
 });

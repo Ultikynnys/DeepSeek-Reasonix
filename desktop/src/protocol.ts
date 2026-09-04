@@ -80,12 +80,19 @@ import type {
   TabsSnapshotEvent,
   TurnCompleteEvent,
   UserImageAttachment,
+  QuickSend,
   WebSearchEngineName,
 } from "@reasonix/core-utils";
 import { invoke } from "@tauri-apps/api/core";
 
 /** Re-export so UI components can identify Antigravity-routed model ids. */
 export { isAntigravityModel } from "@reasonix/core-utils";
+export {
+  BUILTIN_QUICK_SENDS,
+  allQuickSends,
+  isQuickSend,
+  resolveActiveQuickSend,
+} from "@reasonix/core-utils";
 
 export type {
   AntigravityQuota,
@@ -161,6 +168,7 @@ export type {
   TabOpenedEvent,
   TurnCompleteEvent,
   UserImageAttachment,
+  QuickSend,
   WebSearchEngineName,
 };
 
