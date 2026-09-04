@@ -305,11 +305,13 @@ class LocalSpeechTranscriber {
     }
 
     try {
-      const output = await pipe(audioData, {
-        language: "english",
-        task: "transcribe",
+      const isEnglishOnly = this.activeModelId.endsWith(".en");
+      const generateOptions: Record<string, unknown> = {
         return_timestamps: false,
-      });
+        ...(isEnglishOnly ? {} : { language: "english", task: "transcribe" }),
+      };
+
+      const output = await pipe(audioData, generateOptions);
 
       let rawText: string;
       if (typeof output === "string") {

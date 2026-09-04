@@ -30,6 +30,7 @@ describe("LocalSpeechTranscriber", () => {
     mockPipeline.mockReset();
     mockEnv.backends.onnx.wasm.proxy = true;
     mockEnv.backends.onnx.wasm.wasmPaths = "";
+    speechTranscriber.setModel("Xenova/whisper-base.en");
     speechTranscriber.setModel("whisper-tiny.en");
   });
 
@@ -54,6 +55,20 @@ describe("LocalSpeechTranscriber", () => {
     await expect(speechTranscriber.transcribe(new Float32Array(1600))).rejects.toThrow(
       "Recording was too short to transcribe (100 ms captured; minimum is 200 ms).",
     );
+  });
+
+  it("omits task and language options for English-only models during transcribe", async () => {
+    const fakePipe = vi.fn().mockResolvedValue({ text: "Recognized text" });
+    mockPipeline.mockResolvedValueOnce(fakePipe);
+
+    speechTranscriber.setModel("whisper-tiny.en");
+    const dummyAudio = new Float32Array(16000);
+    const result = await speechTranscriber.transcribe(dummyAudio);
+
+    expect(result.text).toBe("Recognized text");
+    expect(fakePipe).toHaveBeenCalledWith(dummyAudio, {
+      return_timestamps: false,
+    });
   });
 
   it("configures transformers env with proxy=false and loads using repoId", async () => {
