@@ -296,11 +296,9 @@ export class Eventizer {
     };
   }
 
-  /** Live stdout/stderr of a blocking shell tool (`run_command`), forwarded to
-   *  the UI while the command still runs. Call id rides the same loop → wire
-   *  mapping as subagent events so the frontend can attach the rows to the
-   *  exact tool segment. Transient: the authoritative full output lands on the
-   *  matching tool.result, which replaces the live view. */
+  /** Transient stdout/stderr of a blocking shell call, forwarded while the
+   *  command runs. Call id follows the loop → wire mapping so the frontend
+   *  attaches the rows to the exact tool segment. */
   emitToolOutput(
     turn: number,
     output: Omit<ToolOutputEvent, "id" | "ts" | "turn" | "type">,

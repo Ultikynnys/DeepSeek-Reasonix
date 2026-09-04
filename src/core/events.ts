@@ -132,11 +132,9 @@ export interface ToolCallEvent extends EventBase {
   args: Record<string, unknown>;
 }
 
-/** Transient — never persisted, drops on next primary event, exactly like
- *  `subagent.progress`: carries the incremental stdout/stderr of a blocking
- *  shell tool (`run_command`) so UIs can render live output rows while the
- *  command still runs. The authoritative full output arrives on the matching
- *  `tool.result`; this event only fills the gap between dispatch and settle. */
+/** Transient incremental stdout/stderr of a blocking shell tool call. Never
+ *  persisted; fills the gap between dispatch and settle. The authoritative
+ *  full output arrives on the matching `tool.result`. */
 export interface ToolOutputEvent extends EventBase {
   type: typeof EventType.toolOutput;
   /** Wire call id of the running tool call (loop id already mapped). */

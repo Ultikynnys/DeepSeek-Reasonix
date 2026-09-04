@@ -2589,10 +2589,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     };
   }
 
-  /** Fires with `run_command`'s incremental stdout+stderr — streams it to the
-   *  tab as a transient `tool.output` event so the shell card can render live
-   *  output rows while the command runs. Drops when the toolset runs outside a
-   *  tab runtime (never in the desktop flow) or the call id can't be mapped. */
+  /** Streams `run_command` stdout+stderr to the tab as transient `tool.output`
+   *  events so the shell card renders live rows. Drops when the toolset runs
+   *  outside a tab runtime or the call id can't be mapped. */
   function shellOutputFor(tab: Tab) {
     return (ev: import("../../tools/shell.js").ShellOutputEvent): void => {
       const runtime = tab.runtime;

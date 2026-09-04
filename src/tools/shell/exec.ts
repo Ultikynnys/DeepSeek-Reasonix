@@ -32,16 +32,13 @@ export interface RunCommandResult {
   timedOut: boolean;
 }
 
-/** Flush cadence for live output — coalesce short writes so a chatty process
+/** Flush cadence for live output: coalesce short writes so a chatty process
  *  doesn't emit one event per data chunk, but never delay a completed line. */
 const LIVE_COALESCE_CHARS = 512;
 
-/** Incremental stdout/stderr feed for UIs: decodes raw chunks UTF-8 (tolerating
- *  multi-byte sequences split across chunks), coalesces bursts, and hard-caps
- *  the total forwarded so an unbounded `cat` can't flood the wire. The final
- *  authoritative output is NOT this — runCommand still decodes the full byte
- *  buffer at close (smartDecodeOutput), so live text may degrade to U+FFFD on
- *  non-UTF-8 codepages without hurting the tool result the model sees. */
+/** Incremental stdout/stderr feed for UIs: decodes chunks UTF-8 (multi-byte
+ *  splits safe), coalesces bursts, and hard-caps total text forwarded. Not
+ *  authoritative: runCommand re-decodes the full byte buffer at close. */
 export class LiveOutputEmitter {
   private decoder = new StringDecoder("utf8");
   private pending = "";
