@@ -319,6 +319,9 @@ export class CacheFirstLoop {
   private _foldedThisTurn = false;
   /** Latched once per turn — the empty-completion guard retries exactly once. */
   private _emptyResponseRetried = false;
+  /** Latched once per turn — a thinking-only completion (no content, no tool call)
+   *  is re-requested exactly once instead of ending the turn on the thinking dump. */
+  private _thinkingOnlyRetried = false;
   /** Latched once per turn — replay one provider failure before any output reached the UI. */
   private _providerErrorRetried = false;
   /** Count of ollama length-truncation continuations this turn — caps the resume loop. */
@@ -1035,6 +1038,7 @@ export class CacheFirstLoop {
     this._iterCapBypassed = false;
     this._foldedThisTurn = false;
     this._emptyResponseRetried = false;
+    this._thinkingOnlyRetried = false;
     this._providerErrorRetried = false;
     this._ollamaContinuations = 0;
     this._lastReasoningSig = null;
@@ -1628,6 +1632,35 @@ export class CacheFirstLoop {
         this._steerQueue.length = 0;
         restoreModelIfNeeded();
         return;
+      }
+
+      // Thinking-only completion guard: a response that ended with reasoning but
+      // no content and no tool call is a degenerate stop, not a finished turn.
+      // Ollama-hosted reasoning models (deepseek-r1 / v4 with `think` enabled)
+      // intermittently end generation right after emitting their thinking, having
+      // neither answered nor called a tool. The empty guard above cannot catch it
+      // (reasoning is non-empty) and the promotion below would commit the thinking
+      // dump as the final answer, closing the conversation on a non-answer. When
+      // tools were offered, append the partial (reasoning-only) assistant message
+      // and re-request ONCE so the model can continue into a real answer or tool
+      // call; a second thinking-only stop falls through to the promotion so the
+      // turn still ends (bounded, never silent).
+      if (
+        assistantContent.trim().length === 0 &&
+        toolCalls.length === 0 &&
+        reasoningContent.trim().length > 0 &&
+        toolSpecs.length > 0 &&
+        !this._thinkingOnlyRetried
+      ) {
+        this._thinkingOnlyRetried = true;
+        this.appendAndPersist(buildAssistantMessage("", [], callModel, reasoningContent));
+        yield {
+          turn: this._turn,
+          role: "warning",
+          severity: "low",
+          content: t("loop.thinkingOnlyRetry"),
+        };
+        continue;
       }
 
       // If the model produced reasoning but no content and no tool calls,

@@ -4066,6 +4066,138 @@ describe("CacheFirstLoop — ollama length-truncation continuation", () => {
   });
 });
 
+describe("CacheFirstLoop — thinking-only completion continuation", () => {
+  const THINKING_ONLY =
+    "I need to check the rendered output. Let me reconsider the DOM and CSS once more before answering.";
+
+  // Each chat frame carries `thinking` (streamed as the reasoning channel);
+  // when `content` is absent the completion is thinking-only with
+  // done_reason "stop" — the degenerate stop the guard must recover from.
+  const thinkingOnlyFetch = (
+    chatFrames: Array<{ thinking: string; content?: string }>,
+  ): { fetch: typeof fetch; chatCalls: () => number } => {
+    let chatCalls = 0;
+    const fetch = vi.fn(async (url: unknown) => {
+      if (String(url).includes("/api/show")) {
+        return new Response(JSON.stringify({ model_info: { "qwen3.32b.context_length": 32768 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const frame = chatFrames[chatCalls++]!;
+      const lines = [
+        JSON.stringify({
+          model: "qwen3:32b",
+          message: {
+            role: "assistant",
+            content: frame.content ?? "",
+            thinking: frame.thinking,
+          },
+          done: false,
+        }),
+        JSON.stringify({
+          model: "qwen3:32b",
+          message: { role: "assistant", content: "" },
+          done: true,
+          done_reason: "stop",
+          prompt_eval_count: 5,
+          eval_count: 1,
+        }),
+      ];
+      return new Response(new TextEncoder().encode(`${lines.join("\n")}\n`), {
+        status: 200,
+        headers: { "Content-Type": "application/x-ndjson" },
+      });
+    }) as unknown as typeof fetch;
+    return { fetch, chatCalls: () => chatCalls };
+  };
+
+  const registerNoop = (): ToolRegistry => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "noop",
+      description: "does nothing",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    return tools;
+  };
+
+  it("re-requests once after a thinking-only stop instead of committing the thinking as the answer", async () => {
+    const { fetch, chatCalls } = thinkingOnlyFetch([
+      { thinking: THINKING_ONLY },
+      { thinking: "Now I know what to do.", content: "Here is the actual answer." },
+    ]);
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const tools = registerNoop();
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: true,
+      model: "ollama/qwen3:32b",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    // The thinking-only stop triggered exactly one re-request; the turn then
+    // finished on the model's real answer, not on the promoted thinking dump.
+    expect(chatCalls()).toBe(2);
+    expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe(
+      "Here is the actual answer.",
+    );
+    expect(
+      events
+        .filter((ev) => ev.role === "warning")
+        .some((ev) => ev.content?.includes("retrying once")),
+    ).toBe(true);
+    expect(
+      events.some((ev) => ev.role === "assistant_final" && ev.content?.includes("rendered output")),
+    ).toBe(false);
+    expect(events.some((ev) => ev.role === "done")).toBe(true);
+  });
+
+  it("latches after one continuation — a second thinking-only stop ends the turn via the promotion fallback", async () => {
+    const { fetch, chatCalls } = thinkingOnlyFetch([
+      { thinking: THINKING_ONLY },
+      { thinking: THINKING_ONLY },
+    ]);
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const tools = registerNoop();
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: true,
+      model: "ollama/qwen3:32b",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    // Exactly one extra call (bounded), one warning, and the second thinking
+    // dump is promoted so the turn still ends rather than looping or dying
+    // silently.
+    expect(chatCalls()).toBe(2);
+    expect(
+      events
+        .filter((ev) => ev.role === "warning")
+        .filter((ev) => ev.content?.includes("retrying once")),
+    ).toHaveLength(1);
+    expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe(THINKING_ONLY);
+    expect(events.some((ev) => ev.role === "done")).toBe(true);
+  });
+});
+
 describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
   // Build a client that always returns a tool call — the loop would
   // run forever without the iteration cap. Use unique call IDs AND

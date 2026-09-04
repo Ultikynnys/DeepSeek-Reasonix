@@ -291,6 +291,7 @@ export interface TranslationSchema {
     stormSuppressed: string;
     emptyResponseRetry: string;
     emptyResponseGiveUp: string;
+    thinkingOnlyRetry: string;
     providerErrorRetry: string;
     ollamaTruncatedRetry: string;
     ollamaTruncatedGiveUp: string;
