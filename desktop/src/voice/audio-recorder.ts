@@ -198,12 +198,29 @@ export class AudioRecorder {
         throw new Error("AudioWorklet is not supported in this environment.");
       }
 
-      const workletBlob = new Blob([RECORDER_WORKLET_CODE], { type: "application/javascript" });
-      const workletUrl = URL.createObjectURL(workletBlob);
+      let moduleLoaded = false;
+      const staticWorkletUrl =
+        typeof window !== "undefined" && window.location?.href
+          ? new URL("/recorder-worklet.js", window.location.href).href
+          : "/recorder-worklet.js";
+
       try {
-        await this.audioContext.audioWorklet.addModule(workletUrl);
-      } finally {
-        URL.revokeObjectURL(workletUrl);
+        await this.audioContext.audioWorklet.addModule(staticWorkletUrl);
+        moduleLoaded = true;
+      } catch {
+        // Fallback to in-memory blob URL if static asset is not reachable
+      }
+
+      if (!moduleLoaded) {
+        const workletBlob = new Blob([RECORDER_WORKLET_CODE], {
+          type: "application/javascript",
+        });
+        const workletUrl = URL.createObjectURL(workletBlob);
+        try {
+          await this.audioContext.audioWorklet.addModule(workletUrl);
+        } finally {
+          URL.revokeObjectURL(workletUrl);
+        }
       }
 
       const AudioWorkletNodeClass =
