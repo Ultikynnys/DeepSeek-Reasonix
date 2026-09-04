@@ -267,4 +267,48 @@ describe("ContextPanel files", () => {
 
     expect(onAddRule).toHaveBeenCalledWith("shell", "npm run build");
   });
+
+  it("renders context window slider in the Tools tab and commits updates", () => {
+    const onSaveSettings = vi.fn();
+    render(
+      <ContextPanel
+        settings={{ ...settings, contextTokens: 500_000 }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onSaveSettings={onSaveSettings}
+      />,
+    );
+
+    // Switch to Tools tab
+    fireEvent.click(screen.getByText("Tools"));
+
+    const slider = screen.getByRole("slider", { name: "Context window" });
+    expect(slider).toBeTruthy();
+    expect(slider.getAttribute("min")).toBe("128000");
+    expect(slider.getAttribute("max")).toBe("1000000");
+    expect((slider as HTMLInputElement).value).toBe("500000");
+    expect(screen.getByText("500K (500,000)")).toBeTruthy();
+
+    // Adjust the slider and release
+    fireEvent.change(slider, { target: { value: "750000" } });
+    fireEvent.pointerUp(slider);
+    expect(onSaveSettings).toHaveBeenCalledWith({ contextTokens: 750_000 });
+
+    // Click reset button
+    const resetBtn = screen.getByTitle("Reset to model default");
+    expect(resetBtn).toBeTruthy();
+    fireEvent.click(resetBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({ contextTokens: null });
+  });
 });

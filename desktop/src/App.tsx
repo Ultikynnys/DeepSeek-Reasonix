@@ -1208,12 +1208,7 @@ export function applySubagentProgress(
     skillName: ev.skillName ?? previous?.skillName,
     model: ev.model ?? previous?.model,
     phase: ev.phase ?? previous?.phase,
-    status:
-      ev.action === "end"
-        ? ev.error
-          ? "failed"
-          : "done"
-        : (previous?.status ?? "running"),
+    status: ev.action === "end" ? (ev.error ? "failed" : "done") : (previous?.status ?? "running"),
     iter: ev.iter ?? previous?.iter,
     elapsedMs: ev.elapsedMs ?? previous?.elapsedMs,
     contextTokens: ev.contextTokens ?? previous?.contextTokens,
@@ -3138,6 +3133,7 @@ function TabRuntime({
           onCompact={() => sendRpc({ cmd: "compact_history" })}
           onAddRule={addRule}
           onRemoveRule={removeRule}
+          onSaveSettings={saveSettings}
         />
 
         <StatusBar

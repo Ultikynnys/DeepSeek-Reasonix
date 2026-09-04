@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
-import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
+import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
 import { FileMenu } from "./file-menu";
 import { activationHandler } from "./keyboard";
@@ -16,8 +16,12 @@ type Tab = "files" | "tools" | "memory" | "rules";
  *  window is 300K (DEEPSEEK_CONTEXT_TOKENS); never show the old 1M API ceiling. */
 const CONTEXT_MAX_TOKENS = 300_000;
 
-/** 1_234_567 → "1235K" — used for compaction-limit labels on the meter. */
+/** 1_234_567 → "1.2M" or 500_000 → "500K" — used for compaction-limit labels and slider display. */
 function fmtCompact(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  }
   return n >= 1000 ? `${Math.round(n / 1000)}K` : String(Math.round(n));
 }
 
@@ -39,6 +43,7 @@ export function ContextPanel({
   onCompact,
   onAddRule,
   onRemoveRule,
+  onSaveSettings,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -62,6 +67,7 @@ export function ContextPanel({
   onCompact?: () => void;
   onAddRule?: (ruleType: "shell" | "path", pattern: string) => void;
   onRemoveRule?: (ruleType: "shell" | "path", pattern: string) => void;
+  onSaveSettings?: (patch: SettingsPatch) => void;
 }) {
   useLang();
   const [tab, setTab] = useState<Tab>("files");
@@ -130,7 +136,9 @@ export function ContextPanel({
                   onClick={onCompact}
                 >
                   <I.archive size={11} />
-                  <span style={{ marginLeft: 3, fontSize: 10.5 }}>{t("contextPanel.compactBtn")}</span>
+                  <span style={{ marginLeft: 3, fontSize: 10.5 }}>
+                    {t("contextPanel.compactBtn")}
+                  </span>
                 </button>
               ) : null}
             </span>
@@ -183,7 +191,15 @@ export function ContextPanel({
 
         <PanelErrorBoundary key={tab} label={tab}>
           {tab === "files" && <CtxFiles files={sessionFiles} settings={settings} />}
-          {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
+          {tab === "tools" && (
+            <CtxTools
+              specs={mcpSpecs}
+              bridged={mcpBridged}
+              settings={settings}
+              usage={usage}
+              onSaveSettings={onSaveSettings}
+            />
+          )}
           {tab === "memory" && (
             <CtxMemory
               entries={memory}
@@ -198,11 +214,7 @@ export function ContextPanel({
             />
           )}
           {tab === "rules" && (
-            <CtxRules
-              settings={settings}
-              onAddRule={onAddRule}
-              onRemoveRule={onRemoveRule}
-            />
+            <CtxRules settings={settings} onAddRule={onAddRule} onRemoveRule={onRemoveRule} />
           )}
         </PanelErrorBoundary>
       </div>
@@ -373,61 +385,127 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
   );
 }
 
-function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }) {
+function CtxTools({
+  specs,
+  bridged,
+  settings,
+  usage,
+  onSaveSettings,
+}: {
+  specs: McpSpecInfo[];
+  bridged: boolean;
+  settings: Settings | null;
+  usage: UsageStats;
+  onSaveSettings?: (patch: SettingsPatch) => void;
+}) {
   const readyCount = specs.filter((s) => s.status === "connected").length;
+  const effectiveTokens = settings?.contextTokens ?? usage.ctxMax ?? 300_000;
+  const clampedTokens = Math.min(1_000_000, Math.max(128_000, effectiveTokens));
+  const [sliderValue, setSliderValue] = useState<number>(clampedTokens);
+
+  useEffect(() => {
+    setSliderValue(clampedTokens);
+  }, [clampedTokens]);
+
+  const commit = (val: number) => {
+    const next = Math.min(1_000_000, Math.max(128_000, val));
+    onSaveSettings?.({ contextTokens: next });
+  };
+
   return (
-    <div className="ctx-block">
-      <div className="h">
-        <span>{t("contextPanel.mcpTitle")}</span>
-        <span className="right">
-          {specs.length === 0
-            ? "—"
-            : bridged
-              ? t("contextPanel.mcpReadyAll", { count: specs.length })
-              : t("contextPanel.mcpReadySome", { ready: readyCount, count: specs.length })}
-        </span>
+    <>
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.contextWindow")}</span>
+          <span className="right" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span>
+              {fmtCompact(sliderValue)} ({sliderValue.toLocaleString()})
+            </span>
+            {settings?.contextTokens !== undefined && settings?.contextTokens !== null ? (
+              <button
+                type="button"
+                className="mini-btn"
+                title={t("contextPanel.contextWindowResetTooltip")}
+                onClick={() => onSaveSettings?.({ contextTokens: null })}
+              >
+                {t("contextPanel.contextWindowReset")}
+              </button>
+            ) : null}
+          </span>
+        </div>
+        <div className="ctx-slider-container">
+          <input
+            type="range"
+            className="ctx-slider"
+            min={128_000}
+            max={1_000_000}
+            step={1_000}
+            value={sliderValue}
+            aria-label={t("contextPanel.contextWindow")}
+            onChange={(e) => setSliderValue(Number(e.target.value))}
+            onPointerUp={(e) => commit(Number(e.currentTarget.value))}
+            onKeyUp={(e) => commit(Number(e.currentTarget.value))}
+          />
+          <div className="ctx-slider-bounds">
+            <span>128K</span>
+            <span>1M</span>
+          </div>
+        </div>
       </div>
-      {specs.length === 0 ? (
-        <div className="ctx-empty">{t("contextPanel.mcpEmpty")}</div>
-      ) : (
-        specs.map((s) => {
-          const dot =
-            s.status === "connected"
-              ? "ok"
-              : s.status === "failed" || s.parseError
-                ? "off"
-                : "pending";
-          const suffix = s.statusReason
-            ? ` · ${s.statusReason}`
-            : s.status === "connected"
-              ? typeof s.toolCount === "number"
-                ? ` · ${t("contextPanel.mcpTools", { count: s.toolCount })}`
-                : ` · ${t("contextPanel.mcpReady")}`
-              : s.status === "handshake"
-                ? ` · ${t("contextPanel.mcpConnecting")}`
-                : s.status === "disabled"
-                  ? ` · ${t("contextPanel.mcpDisabled")}`
-                  : s.status === "failed"
-                    ? ` · ${t("contextPanel.mcpFailed")}`
-                    : ` · ${t("contextPanel.mcpConfigured")}`;
-          return (
-            <div className="mcp-row" key={s.raw}>
-              <span className="ico">
-                <I.wrench size={12} />
-              </span>
-              <div className="body">
-                <div className="n">{s.name ?? s.summary}</div>
-                <div className="m">
-                  {s.transport}
-                  {suffix}
+
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.mcpTitle")}</span>
+          <span className="right">
+            {specs.length === 0
+              ? "—"
+              : bridged
+                ? t("contextPanel.mcpReadyAll", { count: specs.length })
+                : t("contextPanel.mcpReadySome", { ready: readyCount, count: specs.length })}
+          </span>
+        </div>
+        {specs.length === 0 ? (
+          <div className="ctx-empty">{t("contextPanel.mcpEmpty")}</div>
+        ) : (
+          specs.map((s) => {
+            const dot =
+              s.status === "connected"
+                ? "ok"
+                : s.status === "failed" || s.parseError
+                  ? "off"
+                  : "pending";
+            const suffix = s.statusReason
+              ? ` · ${s.statusReason}`
+              : s.status === "connected"
+                ? typeof s.toolCount === "number"
+                  ? ` · ${t("contextPanel.mcpTools", { count: s.toolCount })}`
+                  : ` · ${t("contextPanel.mcpReady")}`
+                : s.status === "handshake"
+                  ? ` · ${t("contextPanel.mcpConnecting")}`
+                  : s.status === "disabled"
+                    ? ` · ${t("contextPanel.mcpDisabled")}`
+                    : s.status === "failed"
+                      ? ` · ${t("contextPanel.mcpFailed")}`
+                      : ` · ${t("contextPanel.mcpConfigured")}`;
+            return (
+              <div className="mcp-row" key={s.raw}>
+                <span className="ico">
+                  <I.wrench size={12} />
+                </span>
+                <div className="body">
+                  <div className="n">{s.name ?? s.summary}</div>
+                  <div className="m">
+                    {s.transport}
+                    {suffix}
+                  </div>
                 </div>
+                <span className="status" data-s={dot} />
               </div>
-              <span className="status" data-s={dot} />
-            </div>
-          );
-        })
-      )}
-    </div>
+            );
+          })
+        )}
+      </div>
+    </>
   );
 }
 

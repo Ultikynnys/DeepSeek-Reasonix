@@ -12,12 +12,7 @@ import { type ChangeEvent, type ReactNode, useEffect, useRef, useState } from "r
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
-import type {
-  McpSpecInfo,
-  MemoryDetail,
-  MemoryEntryInfo,
-  SettingsPatch,
-} from "../protocol";
+import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
 import {
   FONT_FAMILY,
   FONT_SCALE,
@@ -49,14 +44,7 @@ function hintNodes(text: string): ReactNode[] {
   return out;
 }
 
-export type PageId =
-  | "general"
-  | "models"
-  | "mcp"
-  | "memory"
-  | "rules"
-  | "billing"
-  | "shortcuts";
+export type PageId = "general" | "models" | "mcp" | "memory" | "rules" | "billing" | "shortcuts";
 
 const PAGE_META: ReadonlyArray<{ id: PageId; icon: keyof typeof I }> = [
   { id: "general", icon: "cog" },
@@ -619,15 +607,7 @@ function PageGeneral({
 }
 
 const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
-  engine:
-    | "metaso"
-    | "baidu"
-    | "tavily"
-    | "perplexity"
-    | "exa"
-    | "brave"
-    | "ollama"
-    | "zai";
+  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama" | "zai";
   patchKey:
     | "metasoApiKey"
     | "baiduApiKey"
@@ -722,15 +702,7 @@ function WebSearchApiKeyRow({
   prefix,
   onSave,
 }: {
-  engine:
-    | "metaso"
-    | "baidu"
-    | "tavily"
-    | "perplexity"
-    | "exa"
-    | "brave"
-    | "ollama"
-    | "zai";
+  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama" | "zai";
   patchKey:
     | "metasoApiKey"
     | "baiduApiKey"
@@ -1136,7 +1108,9 @@ function PageModels({
         <div className="stitle">{t("settings.defaultModelCurrent", { model: settings.model })}</div>
         {groups.map((g) => (
           <div key={g.title} style={{ marginBottom: 12 }}>
-            <div className="h" style={{ fontWeight: 600, marginBottom: 6 }}>{g.title}</div>
+            <div className="h" style={{ fontWeight: 600, marginBottom: 6 }}>
+              {g.title}
+            </div>
             <div className="model-grid">
               {g.models.map((id) => (
                 <div
