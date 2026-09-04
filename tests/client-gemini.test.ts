@@ -332,6 +332,88 @@ describe("gemini payload", () => {
     ]);
   });
 
+  it("prepends a user turn when message history starts with an assistant turn", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-2.5-flash",
+      messages: [
+        { role: "assistant", content: "prior summary from fold" },
+        { role: "user", content: "what next?" },
+      ],
+    });
+
+    const contents = (
+      captured as { request: { contents: Array<{ role: string; parts: unknown[] }> } }
+    ).request.contents;
+    expect(contents[0]?.role).toBe("user");
+    expect(contents[0]?.parts).toEqual([{ text: "Continue the conversation." }]);
+    expect(contents[1]?.role).toBe("model");
+    expect(contents[1]?.parts).toEqual([{ text: "prior summary from fold" }]);
+    expect(contents[2]?.role).toBe("user");
+    expect(contents[2]?.parts).toEqual([{ text: "what next?" }]);
+  });
+
+  it("prepends a user turn when message history starts with an assistant function call", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-2.5-flash",
+      messages: [
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call-1",
+              function: { name: "read_file", arguments: '{"path":"foo.ts"}' },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          name: "read_file",
+          tool_call_id: "call-1",
+          content: "file contents",
+        },
+        { role: "user", content: "Summarize." },
+      ],
+    });
+
+    const contents = (
+      captured as { request: { contents: Array<{ role: string; parts: unknown[] }> } }
+    ).request.contents;
+    // The first turn is normalized to user, so the model's functionCall turn
+    // immediately follows a user turn instead of appearing at index 0.
+    expect(contents[0]?.role).toBe("user");
+    expect(contents[0]?.parts).toEqual([{ text: "Continue the conversation." }]);
+    expect(contents[1]?.role).toBe("model");
+    expect(contents[1]?.parts).toEqual([
+      {
+        functionCall: {
+          id: "call-1",
+          name: "read_file",
+          args: { path: "foo.ts" },
+        },
+      },
+    ]);
+  });
+
   it("skips user contents with zero parts", async () => {
     let captured: unknown = null;
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {

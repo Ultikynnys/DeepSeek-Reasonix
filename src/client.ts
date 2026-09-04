@@ -1207,6 +1207,16 @@ export class DeepSeekClient {
       }
     }
     flushFunctionResponses();
+    // Gemini requires conversations to start with a user turn. If the first turn
+    // is a model turn (e.g. from an assistant summary message or history trimming),
+    // prepend a synthetic user turn so the conversation starts with user and any
+    // subsequent function calls come immediately after a user turn.
+    if (contents.length > 0 && contents[0]?.role === "model") {
+      contents.unshift({
+        role: "user",
+        parts: [{ text: "Continue the conversation." }],
+      });
+    }
     const request: Record<string, unknown> = { contents };
     const generationConfig: Record<string, unknown> = {
       ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),

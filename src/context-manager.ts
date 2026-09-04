@@ -104,23 +104,51 @@ export const SKILL_PIN_MEMO_HEADER = "[Active skill memos — preserved verbatim
 /** Matches the wrapper emitted by `run_skill` so the fold can lift bodies out before summarizing. */
 const SKILL_PIN_REGEX = /<skill-pin name="([^"]+)">\n[\s\S]*?\n<\/skill-pin>/g;
 
-/** Keep the most-recent messages that fit within `budgetTokens`, dropping the oldest
- *  overflow. Always keeps at least one message so the summarizer never gets an empty
- *  head. Returns the kept slice plus the dropped token count (for a transparency note). */
+/** Keep the most-recent messages fitting within `budgetTokens`, aligned to a turn boundary
+ *  so tool calls/results are not orphaned. Returns kept slice plus dropped token count. */
 function trimMessageWindow(
   messages: ChatMessage[],
   budgetTokens: number,
 ): { messages: ChatMessage[]; droppedTokens: number } {
-  const kept: ChatMessage[] = [];
-  let used = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const tok = countMessageTokens(messages[i]!);
-    if (kept.length > 0 && used + tok > budgetTokens) break;
-    kept.unshift(messages[i]!);
-    used += tok;
+  if (messages.length === 0) {
+    return { messages: [], droppedTokens: 0 };
   }
   const total = messages.reduce((acc, m) => acc + countMessageTokens(m), 0);
-  return { messages: kept, droppedTokens: Math.max(0, total - used) };
+  if (total <= budgetTokens) {
+    return { messages: [...messages], droppedTokens: 0 };
+  }
+
+  // Walk backwards to find candidate start indices that correspond to turn boundaries.
+  // A turn boundary is either a user message, or the very first message if it carries
+  // HISTORY_FOLD_MARKER.
+  let used = 0;
+  let candidateStart = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]!;
+    const tok = countMessageTokens(msg);
+    const isTurnBoundary =
+      msg.role === "user" ||
+      (i === 0 &&
+        msg.role === "assistant" &&
+        typeof msg.content === "string" &&
+        msg.content.includes(HISTORY_FOLD_MARKER));
+
+    if (isTurnBoundary) {
+      if (candidateStart === -1 || used + tok <= budgetTokens) {
+        candidateStart = i;
+        used += tok;
+      } else {
+        break;
+      }
+    } else {
+      used += tok;
+    }
+  }
+
+  const startIdx = candidateStart >= 0 ? candidateStart : Math.max(0, messages.length - 1);
+  const kept = messages.slice(startIdx);
+  const keptTokens = kept.reduce((acc, m) => acc + countMessageTokens(m), 0);
+  return { messages: kept, droppedTokens: Math.max(0, total - keptTokens) };
 }
 
 export interface ContextManagerDeps {

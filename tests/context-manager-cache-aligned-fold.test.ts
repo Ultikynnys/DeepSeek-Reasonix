@@ -421,4 +421,84 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     expect(capturedBody).toBeDefined();
     expect(capturedBody!.model).toBe("gemini-3.7-flash");
   });
+
+  it("gemini compaction succeeds when trimmed head contains tool calls", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const fetchMock = vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      if (init?.body) {
+        capturedBody = JSON.parse(init.body) as Record<string, unknown>;
+      }
+      return new Response(
+        JSON.stringify({
+          response: {
+            candidates: [{ content: { parts: [{ text: "compact prose summary." }] } }],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    const client = new DeepSeekClient({
+      baseUrl: "https://daily-cloudcode-pa.googleapis.com",
+      allowMissingKey: true,
+      geminiAuthResolver: async () => ({ accessToken: "at", projectId: "p-123" }),
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: SYSTEM_PROMPT, toolSpecs: TOOLS }),
+      model: "gemini-3.7-flash",
+      stream: false,
+    });
+
+    // Seed multiple turns containing tool calls and results
+    for (let i = 0; i < 6; i++) {
+      loop.log.append({
+        role: "user",
+        content: `q${i}: find info in file ${i} ${"context padding ".repeat(30)}`,
+      });
+      loop.log.append({
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: `call-${i}`,
+            type: "function",
+            function: { name: "Read", arguments: JSON.stringify({ path: `file${i}.ts` }) },
+          },
+        ],
+      });
+      loop.log.append({
+        role: "tool",
+        tool_call_id: `call-${i}`,
+        name: "Read",
+        content: `content of file ${i} ${"data padding ".repeat(50)}`,
+      });
+      loop.log.append({
+        role: "assistant",
+        content: `found info for q${i}`,
+      });
+    }
+
+    const result = await loop.compactHistory({ keepRecentTokens: 50 });
+    expect(result.folded).toBe(true);
+
+    const request = capturedBody?.request as {
+      contents: Array<{ role: "user" | "model"; parts: Array<Record<string, unknown>> }>;
+    };
+    expect(request).toBeDefined();
+    // Invariant 1: First content turn must always be "user"
+    expect(request.contents[0]?.role).toBe("user");
+
+    // Invariant 2: Any turn containing functionCall must come immediately after a user turn
+    for (let j = 0; j < request.contents.length; j++) {
+      const turn = request.contents[j]!;
+      const hasFunctionCall = turn.parts.some((p) => Boolean(p.functionCall));
+      if (hasFunctionCall) {
+        expect(turn.role).toBe("model");
+        expect(j).toBeGreaterThan(0);
+        const prevTurn = request.contents[j - 1]!;
+        expect(prevTurn.role).toBe("user");
+      }
+    }
+  });
 });
