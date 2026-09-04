@@ -119,6 +119,22 @@ describe("Composer Voice Input Button", () => {
     );
   });
 
+  it("shows the transcribing throbber even while the chat is busy (queueing)", async () => {
+    render(<Composer {...baseProps} busy={true} />);
+
+    const voiceBtn = screen.getByTitle("Voice input") as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+    await act(async () => {
+      fireEvent.click(voiceBtn);
+    });
+
+    expect(voiceBtn.classList.contains("transcribing")).toBe(true);
+    const throbber = voiceBtn.querySelector(".voice-throbber");
+    expect(throbber).toBeTruthy();
+  });
+
   it("shows circular throbber as processing indicator when finished talking and transcribing", async () => {
     render(<Composer {...baseProps} />);
 

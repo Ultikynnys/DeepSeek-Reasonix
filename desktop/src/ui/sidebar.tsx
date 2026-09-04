@@ -158,14 +158,14 @@ export function Sidebar({
             type="button"
             className="open-workdir-btn"
             title={t("sidebarPanel.openWorkspace")}
+            aria-label={t("sidebarPanel.openWorkspace")}
             onClick={() => {
               void openPath(workspaceDir).catch((err) =>
                 console.error("open workspace failed", err),
               );
             }}
           >
-            <I.external size={12} />
-            <span>{t("sidebarPanel.openWorkspace")}</span>
+            <I.external size={13} />
           </button>
         ) : null}
       </div>
