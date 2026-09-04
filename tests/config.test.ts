@@ -1118,11 +1118,11 @@ describe("config", () => {
       minP: undefined,
       seed: undefined,
       keepAlive: "30m",
-      repeatPenalty: 1.3,
-      frequencyPenalty: 0.5,
-      presencePenalty: 0.4,
-      topK: 40,
-      repeatLastN: 128,
+      repeatPenalty: undefined,
+      frequencyPenalty: undefined,
+      presencePenalty: undefined,
+      topK: undefined,
+      repeatLastN: undefined,
     });
 
     saveOllamaGenerationPatch(

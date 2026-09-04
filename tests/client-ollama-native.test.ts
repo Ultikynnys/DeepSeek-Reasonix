@@ -1,19 +1,30 @@
 /** Native `/api/chat` transport for the Ollama provider: payload shape,
  *  non-stream + NDJSON stream parsing, cache-hit inference, num_ctx probe. */
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient, type Usage } from "../src/client.js";
 import { estimateRequestTokens } from "../src/tokenizer.js";
 
 const savedKeepAlive = process.env.OLLAMA_KEEP_ALIVE;
 const savedNumCtx = process.env.OLLAMA_NUM_CTX;
+const savedReasonixConfig = process.env.REASONIX_CONFIG;
+const testConfigPath = join(tmpdir(), "reasonix-test-empty-config.json");
 
 beforeEach(() => {
   process.env.OLLAMA_KEEP_ALIVE = "30m";
   process.env.OLLAMA_NUM_CTX = "8192";
+  process.env.REASONIX_CONFIG = testConfigPath;
 });
 
 afterEach(() => {
+  if (savedReasonixConfig === undefined) {
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.REASONIX_CONFIG;
+  } else {
+    process.env.REASONIX_CONFIG = savedReasonixConfig;
+  }
   if (savedKeepAlive === undefined) {
     // biome-ignore lint/performance/noDelete: restore exact env state
     delete process.env.OLLAMA_KEEP_ALIVE;
@@ -226,7 +237,7 @@ describe("ollama native payload", () => {
     delete process.env.OLLAMA_REPEAT_LAST_N;
   });
 
-  it("uses anti-loop default penalty options in payload when unconfigured", async () => {
+  it("omits sampling penalty options and top_k from payload when unconfigured so model defaults apply", async () => {
     // Ensure no env vars leak into this test.
     // biome-ignore lint/performance/noDelete: restore exact env state
     delete process.env.OLLAMA_REPEAT_PENALTY;
@@ -257,11 +268,11 @@ describe("ollama native payload", () => {
     });
     const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
     const options = (body.options ?? {}) as Record<string, unknown>;
-    expect(options.repeat_penalty).toBe(1.3);
-    expect(options.frequency_penalty).toBe(0.5);
-    expect(options.presence_penalty).toBe(0.4);
-    expect(options.top_k).toBe(40);
-    expect(options.repeat_last_n).toBe(128);
+    expect(options.repeat_penalty).toBeUndefined();
+    expect(options.frequency_penalty).toBeUndefined();
+    expect(options.presence_penalty).toBeUndefined();
+    expect(options.top_k).toBeUndefined();
+    expect(options.repeat_last_n).toBeUndefined();
   });
 
   it("maps thinking/effort to native think and responseFormat to format json", async () => {
@@ -563,11 +574,6 @@ describe("ollama num_ctx learning", () => {
     expect(capturedBodies).toHaveLength(2);
     expect(capturedBodies[0]!.options).toEqual({
       num_ctx: 131072,
-      repeat_penalty: 1.3,
-      frequency_penalty: 0.5,
-      presence_penalty: 0.4,
-      top_k: 40,
-      repeat_last_n: 128,
     });
     expect(showCalls).toHaveLength(1);
   });
@@ -598,11 +604,6 @@ describe("ollama num_ctx learning", () => {
     const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
     expect(body.options).toEqual({
       num_ctx: 131072,
-      repeat_penalty: 1.3,
-      frequency_penalty: 0.5,
-      presence_penalty: 0.4,
-      top_k: 40,
-      repeat_last_n: 128,
     });
   });
 });

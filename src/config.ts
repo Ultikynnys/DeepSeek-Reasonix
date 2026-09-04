@@ -394,24 +394,24 @@ export interface ReasonixConfig {
    *  is used. */
   ollamaNumCtx?: number;
   /** Repeat penalty (`repeat_penalty`) for Ollama models. Higher values (e.g.
-   *  1.3-1.5) penalize token repetition more aggressively, reducing doom
-   *  loops. Defaults to 1.3 (server default 1.1). Env OLLAMA_REPEAT_PENALTY overrides. */
+   *  1.3-1.5) penalize token repetition more aggressively. Unset lets the
+   *  model's Modelfile or server default apply. Env OLLAMA_REPEAT_PENALTY overrides. */
   ollamaRepeatPenalty?: number;
   /** Frequency penalty (`frequency_penalty`) for Ollama models. Penalizes tokens
-   *  proportional to how often they've appeared so far. Defaults to 0.5 (server default 0).
-   *  Env OLLAMA_FREQUENCY_PENALTY overrides. */
+   *  proportional to how often they've appeared so far. Unset lets the model's
+   *  Modelfile or server default apply. Env OLLAMA_FREQUENCY_PENALTY overrides. */
   ollamaFrequencyPenalty?: number;
   /** Presence penalty (`presence_penalty`) for Ollama models. Penalizes tokens
-   *  that have appeared at all (binary). Defaults to 0.4 (server default 0).
-   *  Env OLLAMA_PRESENCE_PENALTY overrides. */
+   *  that have appeared at all. Unset lets the model's Modelfile or server default
+   *  apply. Env OLLAMA_PRESENCE_PENALTY overrides. */
   ollamaPresencePenalty?: number;
   /** Top-K sampling (`top_k`) for Ollama models. Limits the next-token pool
-   *  to the top K candidates. Defaults to 40 (server default 40). Env OLLAMA_TOP_K
-   *  overrides. */
+   *  to the top K candidates. Unset lets the model's Modelfile or server default
+   *  apply. Env OLLAMA_TOP_K overrides. */
   ollamaTopK?: number;
   /** Repeat penalty window (`repeat_last_n`) for Ollama models. How many tokens
-   *  back to consider for the repeat penalty. Defaults to 128 (server default 64).
-   *  Env OLLAMA_REPEAT_LAST_N overrides. */
+   *  back to consider for the repeat penalty. Unset lets the model's Modelfile or
+   *  server default apply. Env OLLAMA_REPEAT_LAST_N overrides. */
   ollamaRepeatLastN?: number;
   /** Brave Search API key. Falls back to BRAVE_SEARCH_API_KEY env var. Free 2000/mo signup at https://brave.com/search/api/ */
   braveApiKey?: string;
@@ -617,11 +617,11 @@ export interface OllamaGenerationSettings {
   minP?: number;
   seed?: number;
   keepAlive: string;
-  repeatPenalty: number;
-  frequencyPenalty: number;
-  presencePenalty: number;
-  topK: number;
-  repeatLastN: number;
+  repeatPenalty?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  topK?: number;
+  repeatLastN?: number;
 }
 
 export type OllamaGenerationPatch = {
@@ -630,11 +630,6 @@ export type OllamaGenerationPatch = {
 
 const DEFAULT_OLLAMA_GENERATION = {
   keepAlive: "30m",
-  repeatPenalty: 1.3,
-  frequencyPenalty: 0.5,
-  presencePenalty: 0.4,
-  topK: 40,
-  repeatLastN: 128,
 } as const;
 
 const OLLAMA_NUMBER_SPECS = {
@@ -691,7 +686,7 @@ function resolveOllamaNumber(key: OllamaNumberKey, config: ReasonixConfig): numb
 }
 
 /** Resolve all native Ollama generation options once: environment > config >
- *  Reasonix policy default. Newly introduced sampling options remain absent so
+ *  Reasonix policy default. Sampling options remain absent when unconfigured so
  *  the model's Modelfile or server default can apply. */
 export function loadOllamaGenerationSettings(
   path: string = defaultConfigPath(),
@@ -705,15 +700,11 @@ export function loadOllamaGenerationSettings(
     minP: resolveOllamaNumber("minP", config),
     seed: resolveOllamaNumber("seed", config),
     keepAlive: keepAliveEnv || keepAliveConfig || DEFAULT_OLLAMA_GENERATION.keepAlive,
-    repeatPenalty:
-      resolveOllamaNumber("repeatPenalty", config) ?? DEFAULT_OLLAMA_GENERATION.repeatPenalty,
-    frequencyPenalty:
-      resolveOllamaNumber("frequencyPenalty", config) ?? DEFAULT_OLLAMA_GENERATION.frequencyPenalty,
-    presencePenalty:
-      resolveOllamaNumber("presencePenalty", config) ?? DEFAULT_OLLAMA_GENERATION.presencePenalty,
-    topK: resolveOllamaNumber("topK", config) ?? DEFAULT_OLLAMA_GENERATION.topK,
-    repeatLastN:
-      resolveOllamaNumber("repeatLastN", config) ?? DEFAULT_OLLAMA_GENERATION.repeatLastN,
+    repeatPenalty: resolveOllamaNumber("repeatPenalty", config),
+    frequencyPenalty: resolveOllamaNumber("frequencyPenalty", config),
+    presencePenalty: resolveOllamaNumber("presencePenalty", config),
+    topK: resolveOllamaNumber("topK", config),
+    repeatLastN: resolveOllamaNumber("repeatLastN", config),
   };
 }
 
@@ -779,23 +770,23 @@ export function loadOllamaNumCtx(path: string = defaultConfigPath()): number | u
 }
 
 /** Compatibility loaders for callers that consume one setting at a time. */
-export function loadOllamaRepeatPenalty(path: string = defaultConfigPath()): number {
+export function loadOllamaRepeatPenalty(path: string = defaultConfigPath()): number | undefined {
   return loadOllamaGenerationSettings(path).repeatPenalty;
 }
 
-export function loadOllamaFrequencyPenalty(path: string = defaultConfigPath()): number {
+export function loadOllamaFrequencyPenalty(path: string = defaultConfigPath()): number | undefined {
   return loadOllamaGenerationSettings(path).frequencyPenalty;
 }
 
-export function loadOllamaPresencePenalty(path: string = defaultConfigPath()): number {
+export function loadOllamaPresencePenalty(path: string = defaultConfigPath()): number | undefined {
   return loadOllamaGenerationSettings(path).presencePenalty;
 }
 
-export function loadOllamaTopK(path: string = defaultConfigPath()): number {
+export function loadOllamaTopK(path: string = defaultConfigPath()): number | undefined {
   return loadOllamaGenerationSettings(path).topK;
 }
 
-export function loadOllamaRepeatLastN(path: string = defaultConfigPath()): number {
+export function loadOllamaRepeatLastN(path: string = defaultConfigPath()): number | undefined {
   return loadOllamaGenerationSettings(path).repeatLastN;
 }
 
@@ -814,6 +805,8 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_BATCH_SIZE = 10;
 
 export function defaultConfigPath(): string {
+  const envConfig = process.env.REASONIX_CONFIG?.trim();
+  if (envConfig) return envConfig;
   return join(reasonixHome(), "config.json");
 }
 

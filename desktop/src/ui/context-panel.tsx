@@ -445,6 +445,112 @@ const OLLAMA_NUMBER_FIELDS: Array<{
   },
 ];
 
+interface OllamaPreset {
+  id: string;
+  labelKey: TKey;
+  tooltipKey: TKey;
+  patch: NonNullable<SettingsPatch["ollamaGeneration"]>;
+}
+
+const OLLAMA_SAMPLING_PRESETS: OllamaPreset[] = [
+  {
+    id: "default",
+    labelKey: "contextPanel.ollamaPresetDefault",
+    tooltipKey: "contextPanel.ollamaPresetDefaultTooltip",
+    patch: {
+      temperature: null,
+      topP: null,
+      topK: null,
+      minP: null,
+      seed: null,
+      repeatPenalty: null,
+      repeatLastN: null,
+      frequencyPenalty: null,
+      presencePenalty: null,
+    },
+  },
+  {
+    id: "coding",
+    labelKey: "contextPanel.ollamaPresetCoding",
+    tooltipKey: "contextPanel.ollamaPresetCodingTooltip",
+    patch: {
+      temperature: 0.2,
+      topP: 0.9,
+      topK: 40,
+      minP: null,
+      seed: null,
+      repeatPenalty: null,
+      repeatLastN: null,
+      frequencyPenalty: null,
+      presencePenalty: null,
+    },
+  },
+  {
+    id: "balanced",
+    labelKey: "contextPanel.ollamaPresetBalanced",
+    tooltipKey: "contextPanel.ollamaPresetBalancedTooltip",
+    patch: {
+      temperature: 0.7,
+      topP: 0.9,
+      topK: 40,
+      minP: 0.05,
+      seed: null,
+      repeatPenalty: null,
+      repeatLastN: null,
+      frequencyPenalty: null,
+      presencePenalty: null,
+    },
+  },
+  {
+    id: "creative",
+    labelKey: "contextPanel.ollamaPresetCreative",
+    tooltipKey: "contextPanel.ollamaPresetCreativeTooltip",
+    patch: {
+      temperature: 1.0,
+      topP: 0.95,
+      topK: 50,
+      minP: null,
+      seed: null,
+      repeatPenalty: null,
+      repeatLastN: null,
+      frequencyPenalty: null,
+      presencePenalty: null,
+    },
+  },
+  {
+    id: "anti-loop",
+    labelKey: "contextPanel.ollamaPresetAntiLoop",
+    tooltipKey: "contextPanel.ollamaPresetAntiLoopTooltip",
+    patch: {
+      temperature: 0.7,
+      topP: 0.9,
+      topK: 40,
+      minP: null,
+      seed: null,
+      repeatPenalty: 1.1,
+      repeatLastN: 64,
+      frequencyPenalty: null,
+      presencePenalty: null,
+    },
+  },
+];
+
+function isPresetActive(
+  preset: OllamaPreset,
+  overrides: Settings["ollamaGenerationOverrides"],
+): boolean {
+  for (const field of OLLAMA_NUMBER_FIELDS) {
+    const expected = preset.patch[field.key];
+    const actual = overrides?.[field.key];
+    if (expected === null) {
+      if (actual !== undefined) return false;
+    } else if (expected !== undefined) {
+      if (actual !== expected) return false;
+    }
+  }
+  return true;
+}
+
 function OllamaNumberField({
   field,
   value,
@@ -532,6 +638,23 @@ function OllamaGenerationControls({
         <span className="right">{t("contextPanel.ollamaNativeApi")}</span>
       </div>
       <p className="ollama-help">{t("contextPanel.ollamaGenerationHelp")}</p>
+      <div className="ollama-presets" role="group" aria-label={t("contextPanel.ollamaGeneration")}>
+        {OLLAMA_SAMPLING_PRESETS.map((preset) => {
+          const active = isPresetActive(preset, overrides);
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              className="ollama-preset-btn"
+              data-active={active ? "true" : undefined}
+              title={t(preset.tooltipKey)}
+              onClick={() => onSaveSettings?.({ ollamaGeneration: preset.patch })}
+            >
+              {t(preset.labelKey)}
+            </button>
+          );
+        })}
+      </div>
       <div className="ollama-fields">{fields(false)}</div>
       <details className="ollama-advanced">
         <summary>{t("contextPanel.ollamaAdvanced")}</summary>

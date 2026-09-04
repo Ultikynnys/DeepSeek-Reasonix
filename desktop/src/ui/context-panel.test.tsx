@@ -429,6 +429,92 @@ describe("ContextPanel files", () => {
     expect(onSaveSettings).toHaveBeenCalledWith({ ollamaGeneration: { temperature: null } });
   });
 
+  it("renders 5 Ollama sampling preset buttons and applies presets on click", () => {
+    const onSaveSettings = vi.fn();
+    render(
+      <ContextPanel
+        settings={{
+          ...settings,
+          modelEndpoint: { provider: "ollama", baseUrl: "http://localhost:11434" },
+          ollamaGeneration: {
+            temperature: 0.2,
+            topP: 0.9,
+            topK: 40,
+            keepAlive: "30m",
+          },
+          ollamaGenerationOverrides: {
+            temperature: 0.2,
+            topP: 0.9,
+            topK: 40,
+          },
+        }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onSaveSettings={onSaveSettings}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    const defaultBtn = screen.getByRole("button", { name: "Default" });
+    const codingBtn = screen.getByRole("button", { name: "Coding" });
+    const balancedBtn = screen.getByRole("button", { name: "Balanced" });
+    const creativeBtn = screen.getByRole("button", { name: "Creative" });
+    const antiLoopBtn = screen.getByRole("button", { name: "Anti-loop" });
+
+    expect(defaultBtn).toBeTruthy();
+    expect(codingBtn).toBeTruthy();
+    expect(balancedBtn).toBeTruthy();
+    expect(creativeBtn).toBeTruthy();
+    expect(antiLoopBtn).toBeTruthy();
+
+    // With temperature 0.2, topP 0.9, topK 40 and others null, Coding is active
+    expect(codingBtn.getAttribute("data-active")).toBe("true");
+    expect(defaultBtn.getAttribute("data-active")).toBeNull();
+
+    // Clicking Balanced applies the balanced preset
+    fireEvent.click(balancedBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({
+      ollamaGeneration: {
+        temperature: 0.7,
+        topP: 0.9,
+        topK: 40,
+        minP: 0.05,
+        seed: null,
+        repeatPenalty: null,
+        repeatLastN: null,
+        frequencyPenalty: null,
+        presencePenalty: null,
+      },
+    });
+
+    // Clicking Default clears all overrides to model defaults
+    fireEvent.click(defaultBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({
+      ollamaGeneration: {
+        temperature: null,
+        topP: null,
+        topK: null,
+        minP: null,
+        seed: null,
+        repeatPenalty: null,
+        repeatLastN: null,
+        frequencyPenalty: null,
+        presencePenalty: null,
+      },
+    });
+  });
+
   it("shows Ollama generation controls when only the subagent endpoint is Ollama", () => {
     render(
       <ContextPanel

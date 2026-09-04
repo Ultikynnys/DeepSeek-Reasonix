@@ -4979,6 +4979,34 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   font-size: 12px;
   line-height: 1.4;
 }
+.ollama-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.ollama-preset-btn {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--fg-2);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.ollama-preset-btn:hover {
+  background: var(--panel);
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.ollama-preset-btn[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 500;
+}
 .ollama-fields {
   display: grid;
   gap: 8px;
@@ -9171,4 +9199,139 @@ html[data-platform="macos"] .splash {
   .memory-browser {
     grid-template-columns: 1fr;
   }
+}
+
+.voice-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.voice-section-hint {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.voice-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--error-soft, rgba(239, 68, 68, 0.1));
+  border: 1px solid var(--error, #ef4444);
+  color: var(--error, #ef4444);
+  font-size: 12px;
+}
+
+.voice-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.voice-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 12px;
+  gap: 8px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.voice-card[data-active="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+  background: var(--card);
+}
+
+.voice-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.voice-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.voice-badge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.voice-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--mono, monospace);
+  color: var(--muted);
+}
+
+.voice-card-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.voice-download-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.voice-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.voice-file-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-progress-track {
+  height: 4px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.1));
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.voice-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.voice-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.voice-active-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
 }

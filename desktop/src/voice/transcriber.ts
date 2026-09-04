@@ -1,12 +1,37 @@
 /**
- * Local offline speech-to-text transcription using the bundled Whisper-tiny.en model.
+ * Local speech-to-text transcription with selectable Whisper models.
+ * Default is the bundled offline Whisper-tiny.en model.
+ * Optional higher-accuracy models (Base and Small) can be downloaded directly in-app.
  */
 
-export type TranscriberStatus = "idle" | "loading-model" | "transcribing" | "ready" | "error";
+import {
+  type VoiceModelId,
+  getActiveVoiceModelId,
+  getVoiceModelOption,
+  markVoiceModelDownloaded,
+  setActiveVoiceModelId,
+} from "./models";
+
+export type TranscriberStatus =
+  | "idle"
+  | "loading-model"
+  | "downloading"
+  | "transcribing"
+  | "ready"
+  | "error";
 
 export interface TranscribeProgress {
   status: TranscriberStatus;
   detail?: string;
+  progress?: number;
+}
+
+export interface DownloadProgress {
+  status: "initiate" | "download" | "progress" | "done" | "ready";
+  file?: string;
+  progress?: number;
+  loaded?: number;
+  total?: number;
 }
 
 export interface TranscribeResult {
@@ -27,6 +52,8 @@ type ASRPipeline = (
 
 class LocalSpeechTranscriber {
   private pipelineInstance: ASRPipeline | null = null;
+  private loadedModelId: VoiceModelId | null = null;
+  private activeModelId: VoiceModelId = getActiveVoiceModelId();
   private isInitializing = false;
   private initPromise: Promise<ASRPipeline> | null = null;
   private currentStatus: TranscriberStatus = "idle";
@@ -36,58 +63,133 @@ class LocalSpeechTranscriber {
     return this.currentStatus;
   }
 
+  public get activeModel(): VoiceModelId {
+    return this.activeModelId;
+  }
+
+  public setModel(modelId: VoiceModelId): void {
+    if (this.activeModelId === modelId) {
+      return;
+    }
+    this.activeModelId = modelId;
+    setActiveVoiceModelId(modelId);
+    if (this.loadedModelId !== modelId) {
+      this.pipelineInstance = null;
+      this.loadedModelId = null;
+      this.currentStatus = "idle";
+    }
+  }
+
   public setStatusListener(listener?: (progress: TranscribeProgress) => void): void {
     this.onStatusChange = listener;
   }
 
-  private updateStatus(status: TranscriberStatus, detail?: string): void {
+  private updateStatus(status: TranscriberStatus, detail?: string, progress?: number): void {
     this.currentStatus = status;
     if (this.onStatusChange) {
-      this.onStatusChange({ status, detail });
+      this.onStatusChange({ status, detail, progress });
     }
   }
 
   /**
-   * Initializes the bundled ASR pipeline using @xenova/transformers.
-   * Remote model downloads are disabled to enforce 100% offline bundled usage.
+   * Downloads a model into the local browser cache with progress reporting.
    */
-  public async getPipeline(): Promise<ASRPipeline> {
-    if (this.pipelineInstance) {
+  public async downloadModel(
+    modelId: VoiceModelId,
+    onProgress?: (progress: DownloadProgress) => void,
+  ): Promise<void> {
+    const opt = getVoiceModelOption(modelId);
+    if (opt.isBundled) {
+      markVoiceModelDownloaded(modelId, true);
+      return;
+    }
+
+    this.updateStatus("downloading", `Downloading ${opt.name}...`);
+
+    try {
+      const { pipeline, env } = await import("@xenova/transformers");
+
+      env.allowRemoteModels = true;
+      env.allowLocalModels = false;
+      env.backends.onnx.wasm.wasmPaths = "/wasm/";
+      env.backends.onnx.logLevel = "error";
+
+      const pipe = (await pipeline("automatic-speech-recognition", modelId, {
+        quantized: true,
+        progress_callback: (data: unknown) => {
+          if (onProgress && data && typeof data === "object") {
+            onProgress(data as DownloadProgress);
+          }
+        },
+      })) as unknown as ASRPipeline;
+
+      markVoiceModelDownloaded(modelId, true);
+
+      // If downloading the currently active model, retain the initialized pipeline:
+      if (this.activeModelId === modelId) {
+        this.pipelineInstance = pipe;
+        this.loadedModelId = modelId;
+        this.updateStatus("ready");
+      } else {
+        this.updateStatus("idle");
+      }
+    } catch (err) {
+      const details = errorDetails(err);
+      this.updateStatus("error", details);
+      throw new Error(`Failed to download voice model ${opt.name} (${details}).`);
+    }
+  }
+
+  /**
+   * Initializes the ASR pipeline for the target model.
+   * Bundled models use local assets; downloaded models use local cache.
+   */
+  public async getPipeline(targetModelId?: VoiceModelId): Promise<ASRPipeline> {
+    const modelId = targetModelId ?? this.activeModelId;
+
+    if (this.pipelineInstance && this.loadedModelId === modelId) {
       return this.pipelineInstance;
     }
     if (this.initPromise) {
       return this.initPromise;
     }
 
+    const opt = getVoiceModelOption(modelId);
+
     this.initPromise = (async () => {
       this.isInitializing = true;
-      this.updateStatus("loading-model", "Loading bundled Whisper model...");
+      this.updateStatus("loading-model", `Loading ${opt.name}...`);
 
       try {
         const { pipeline, env } = await import("@xenova/transformers");
 
-        // Enforce offline bundled assets:
-        env.allowRemoteModels = false;
-        env.allowLocalModels = true;
-        env.localModelPath = "/models/";
         env.backends.onnx.wasm.wasmPaths = "/wasm/";
-
-        // Silence onnxruntime's noisy "[W:onnxruntime:...] Removing initializer ..."
-        // warnings during model graph optimization. Default is "warning".
         env.backends.onnx.logLevel = "error";
 
-        // Load the local whisper-tiny.en model:
-        const pipe = (await pipeline("automatic-speech-recognition", "whisper-tiny.en", {
+        if (opt.isBundled) {
+          env.allowRemoteModels = false;
+          env.allowLocalModels = true;
+          env.localModelPath = "/models/";
+        } else {
+          env.allowRemoteModels = true;
+          env.allowLocalModels = false;
+        }
+
+        const pipe = (await pipeline("automatic-speech-recognition", modelId, {
           quantized: true,
         })) as unknown as ASRPipeline;
 
         this.pipelineInstance = pipe;
+        this.loadedModelId = modelId;
+        if (!opt.isBundled) {
+          markVoiceModelDownloaded(modelId, true);
+        }
         this.updateStatus("ready");
         return pipe;
       } catch (err) {
         const details = errorDetails(err);
         this.updateStatus("error", details);
-        throw new Error(`Failed to load bundled transcription model (${details}).`);
+        throw new Error(`Failed to load transcription model ${opt.name} (${details}).`);
       } finally {
         this.isInitializing = false;
         this.initPromise = null;

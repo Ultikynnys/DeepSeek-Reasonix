@@ -29,11 +29,11 @@ export interface OllamaGenerationSettings {
   minP?: number;
   seed?: number;
   keepAlive: string;
-  repeatPenalty: number;
-  frequencyPenalty: number;
-  presencePenalty: number;
-  topK: number;
-  repeatLastN: number;
+  repeatPenalty?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  topK?: number;
+  repeatLastN?: number;
 }
 
 export type OllamaGenerationPatch = {

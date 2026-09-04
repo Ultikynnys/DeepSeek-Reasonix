@@ -689,11 +689,16 @@ export class DeepSeekClient {
     if (seed !== undefined) options.seed = seed;
     if (ollamaNumCtx !== undefined) options.num_ctx = ollamaNumCtx;
     // Request values override centralized environment/config/default resolution.
-    options.repeat_penalty = opts.ollama?.repeatPenalty ?? resolved.repeatPenalty;
-    options.frequency_penalty = opts.ollama?.frequencyPenalty ?? resolved.frequencyPenalty;
-    options.presence_penalty = opts.ollama?.presencePenalty ?? resolved.presencePenalty;
-    options.top_k = opts.ollama?.topK ?? resolved.topK;
-    options.repeat_last_n = opts.ollama?.repeatLastN ?? resolved.repeatLastN;
+    const repeatPenalty = opts.ollama?.repeatPenalty ?? resolved.repeatPenalty;
+    if (repeatPenalty !== undefined) options.repeat_penalty = repeatPenalty;
+    const frequencyPenalty = opts.ollama?.frequencyPenalty ?? resolved.frequencyPenalty;
+    if (frequencyPenalty !== undefined) options.frequency_penalty = frequencyPenalty;
+    const presencePenalty = opts.ollama?.presencePenalty ?? resolved.presencePenalty;
+    if (presencePenalty !== undefined) options.presence_penalty = presencePenalty;
+    const topK = opts.ollama?.topK ?? resolved.topK;
+    if (topK !== undefined) options.top_k = topK;
+    const repeatLastN = opts.ollama?.repeatLastN ?? resolved.repeatLastN;
+    if (repeatLastN !== undefined) options.repeat_last_n = repeatLastN;
     const payload: Record<string, unknown> = {
       // `ollama/<id>` namespacing is client-side routing — the server wants the raw id.
       model: opts.model.replace(/^ollama\//, ""),

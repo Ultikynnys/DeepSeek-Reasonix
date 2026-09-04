@@ -8,7 +8,7 @@ import {
   modelDisplayName,
 } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { type ChangeEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
@@ -24,6 +24,15 @@ import {
   type ThemeStyle,
   themeForStyle,
 } from "../theme";
+import {
+  DEFAULT_VOICE_MODEL_ID,
+  VOICE_MODELS,
+  type VoiceModelId,
+  deleteVoiceModelCache,
+  getActiveVoiceModelId,
+  isVoiceModelDownloaded,
+} from "../voice/models";
+import { speechTranscriber } from "../voice/transcriber";
 import { activationHandler, escapeHandler } from "./keyboard";
 import { Shortcut, type ShortcutKey } from "./shortcut";
 
@@ -602,7 +611,180 @@ function PageGeneral({
         </div>
         <WebSearchEngineCredentials settings={settings} onSave={onSave} />
       </section>
+
+      <section className="section">
+        <VoiceModelSettings />
+      </section>
     </>
+  );
+}
+
+export function VoiceModelSettings() {
+  const [activeModel, setActiveModel] = useState<VoiceModelId>(() => getActiveVoiceModelId());
+  const [downloadedMap, setDownloadedMap] = useState<Record<string, boolean>>({
+    [DEFAULT_VOICE_MODEL_ID]: true,
+  });
+  const [downloadingModel, setDownloadingModel] = useState<VoiceModelId | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<number>(0);
+  const [downloadFile, setDownloadFile] = useState<string>("");
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const refreshDownloaded = useCallback(async () => {
+    const nextMap: Record<string, boolean> = { [DEFAULT_VOICE_MODEL_ID]: true };
+    for (const m of VOICE_MODELS) {
+      if (!m.isBundled) {
+        nextMap[m.id] = await isVoiceModelDownloaded(m.id);
+      }
+    }
+    setDownloadedMap(nextMap);
+  }, []);
+
+  useEffect(() => {
+    refreshDownloaded();
+  }, [refreshDownloaded]);
+
+  const handleSelect = (id: VoiceModelId) => {
+    speechTranscriber.setModel(id);
+    setActiveModel(id);
+  };
+
+  const handleDownload = async (id: VoiceModelId) => {
+    setDownloadingModel(id);
+    setDownloadProgress(0);
+    setDownloadFile("");
+    setDownloadError(null);
+
+    try {
+      await speechTranscriber.downloadModel(id, (p) => {
+        if (p.file) {
+          const shortFileName = p.file.split("/").pop() || p.file;
+          setDownloadFile(shortFileName);
+        }
+        if (typeof p.progress === "number") {
+          setDownloadProgress(Math.round(p.progress));
+        }
+      });
+      await refreshDownloaded();
+      handleSelect(id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setDownloadError(message);
+    } finally {
+      setDownloadingModel(null);
+      setDownloadProgress(0);
+      setDownloadFile("");
+    }
+  };
+
+  const handleDelete = async (id: VoiceModelId) => {
+    try {
+      await deleteVoiceModelCache(id);
+      await refreshDownloaded();
+      setActiveModel(getActiveVoiceModelId());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setDownloadError(message);
+    }
+  };
+
+  return (
+    <div className="voice-settings">
+      <div className="stitle">{t("settings.voiceSection")}</div>
+      <div className="voice-section-hint">{t("settings.voiceSectionHint")}</div>
+
+      {downloadError && (
+        <div className="voice-error-banner" role="alert">
+          <span>{downloadError}</span>
+          <button type="button" className="btn btn-subtle" onClick={() => setDownloadError(null)}>
+            ✕
+          </button>
+        </div>
+      )}
+
+      <div className="voice-card-grid">
+        {VOICE_MODELS.map((model) => {
+          const isActive = activeModel === model.id;
+          const isDownloaded = Boolean(downloadedMap[model.id]);
+          const isDownloading = downloadingModel === model.id;
+
+          return (
+            <div
+              key={model.id}
+              className={`voice-card ${isActive ? "active" : ""}`}
+              data-active={isActive}
+            >
+              <div className="voice-card-header">
+                <div className="voice-card-title">{model.name}</div>
+                <span className="voice-badge">
+                  {model.isBundled
+                    ? t("settings.voiceBundled")
+                    : model.shortName === "Small"
+                      ? "High Accuracy"
+                      : "Balanced"}
+                </span>
+              </div>
+
+              <div className="voice-card-meta">
+                <span>{model.parameters} params</span>
+                <span>•</span>
+                <span>{model.size}</span>
+              </div>
+
+              <div className="voice-card-desc">{model.description}</div>
+
+              {isDownloading && (
+                <div className="voice-download-box">
+                  <div className="voice-progress-meta">
+                    <span className="voice-file-name">
+                      {downloadFile || t("settings.voiceDownloading")}
+                    </span>
+                    <span className="voice-pct">{downloadProgress}%</span>
+                  </div>
+                  <div className="voice-progress-track">
+                    <div className="voice-progress-bar" style={{ width: `${downloadProgress}%` }} />
+                  </div>
+                </div>
+              )}
+
+              <div className="voice-card-actions">
+                {isActive ? (
+                  <span className="voice-active-label">✓ {t("settings.voiceActive")}</span>
+                ) : isDownloading ? (
+                  <button type="button" className="btn" disabled>
+                    {t("settings.voiceDownloading")}
+                  </button>
+                ) : isDownloaded ? (
+                  <>
+                    <button type="button" className="btn" onClick={() => handleSelect(model.id)}>
+                      {t("settings.voiceSelect")}
+                    </button>
+                    {!model.isBundled && (
+                      <button
+                        type="button"
+                        className="btn btn-subtle"
+                        title="Delete downloaded files to free space"
+                        onClick={() => handleDelete(model.id)}
+                      >
+                        {t("settings.voiceDelete")}
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-download"
+                    disabled={downloadingModel !== null}
+                    onClick={() => handleDownload(model.id)}
+                  >
+                    {t("settings.voiceDownload")}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

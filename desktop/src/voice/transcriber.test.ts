@@ -1,9 +1,23 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { speechTranscriber } from "./transcriber";
 
 describe("LocalSpeechTranscriber", () => {
-  it("initializes with idle status", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    speechTranscriber.setModel("whisper-tiny.en");
+  });
+
+  it("initializes with idle status and default tiny model", () => {
     expect(speechTranscriber.status).toBe("idle");
+    expect(speechTranscriber.activeModel).toBe("whisper-tiny.en");
+  });
+
+  it("updates active model via setModel", () => {
+    speechTranscriber.setModel("Xenova/whisper-base.en");
+    expect(speechTranscriber.activeModel).toBe("Xenova/whisper-base.en");
+    expect(localStorage.getItem("reasonix.voiceModel")).toBe("Xenova/whisper-base.en");
   });
 
   it("reports when no microphone audio was captured", async () => {
@@ -16,5 +30,11 @@ describe("LocalSpeechTranscriber", () => {
     await expect(speechTranscriber.transcribe(new Float32Array(1600))).rejects.toThrow(
       "Recording was too short to transcribe (100 ms captured; minimum is 200 ms).",
     );
+  });
+
+  it("completes download for bundled model immediately", async () => {
+    const onProgress = vi.fn();
+    await speechTranscriber.downloadModel("whisper-tiny.en", onProgress);
+    expect(onProgress).not.toHaveBeenCalled();
   });
 });
