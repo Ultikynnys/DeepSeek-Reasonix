@@ -9240,6 +9240,29 @@ html[data-platform="macos"] .splash {
   line-height: 1.4;
 }
 
+.voice-device-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.voice-device-select {
+  width: 100%;
+  max-width: 360px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.voice-device-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
 .voice-error-banner {
   display: flex;
   align-items: center;

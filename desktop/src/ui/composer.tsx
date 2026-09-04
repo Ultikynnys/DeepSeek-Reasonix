@@ -25,6 +25,7 @@ import { I } from "../icons";
 import { isImagePath, resolveImagePath } from "../image-attach";
 import type { EditMode, ReasoningEffort, UserImageAttachment } from "../protocol";
 import { AudioRecorder } from "../voice/audio-recorder";
+import { getSelectedAudioInputDeviceId } from "../voice/device";
 import { speechTranscriber } from "../voice/transcriber";
 import { DEFAULT_COMPOSER_ROWS, applyComposerTextareaAutosize } from "./composer-sizing";
 import { activationHandler } from "./keyboard";
@@ -389,6 +390,7 @@ export function Composer({
     if (voiceState === "idle") {
       const recorder = new AudioRecorder({
         onError: (err) => reportVoiceError("audio cleanup", err),
+        deviceId: getSelectedAudioInputDeviceId(),
       });
       recorderRef.current = recorder;
       try {

@@ -30,6 +30,12 @@ import {
   themeForStyle,
 } from "../theme";
 import {
+  type AudioInputDevice,
+  getSelectedAudioInputDeviceId,
+  listAudioInputDevices,
+  setSelectedAudioInputDeviceId,
+} from "../voice/device";
+import {
   VOICE_MODELS,
   type VoiceModelId,
   deleteVoiceModelCache,
@@ -736,6 +742,64 @@ function PageGeneral({
         </form>
       </section>
     </>
+  );
+}
+
+/** Audio input device picker for voice input. Persists the choice in localStorage. */
+export function AudioInputDeviceSettings() {
+  const [devices, setDevices] = useState<AudioInputDevice[]>([]);
+  const [selected, setSelected] = useState<string>(() => getSelectedAudioInputDeviceId());
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const list = await listAudioInputDevices();
+      setDevices(list);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    // Re-enumerate when devices are plugged/unplugged.
+    if (typeof navigator !== "undefined" && navigator?.mediaDevices?.addEventListener) {
+      navigator.mediaDevices.addEventListener("devicechange", refresh);
+      return () => navigator.mediaDevices.removeEventListener("devicechange", refresh);
+    }
+  }, [refresh]);
+
+  const handleChange = (deviceId: string) => {
+    setSelected(deviceId);
+    setSelectedAudioInputDeviceId(deviceId);
+  };
+
+  return (
+    <div className="voice-device-settings">
+      <div className="stitle">{t("settings.voiceInputDevice")}</div>
+      <div className="voice-section-hint">{t("settings.voiceInputDeviceHint")}</div>
+
+      {error && (
+        <div className="voice-error-banner" role="alert">
+          <span>{error}</span>
+        </div>
+      )}
+
+      <select
+        className="voice-device-select"
+        value={selected}
+        onChange={(e) => handleChange(e.target.value)}
+        aria-label={t("settings.voiceInputDevice")}
+      >
+        <option value="">{t("settings.voiceInputDeviceDefault")}</option>
+        {devices.map((d) => (
+          <option key={d.deviceId} value={d.deviceId}>
+            {d.label}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -1579,6 +1643,9 @@ function PageModels({
         onCancel={onAntigravityCancel}
         onSignOut={onAntigravitySignOut}
       />
+      <section className="section">
+        <AudioInputDeviceSettings />
+      </section>
       <section className="section">
         <VoiceModelSettings />
       </section>

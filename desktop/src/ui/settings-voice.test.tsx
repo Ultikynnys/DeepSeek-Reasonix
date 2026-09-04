@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../App";
 import { markVoiceModelDownloaded, setActiveVoiceModelId } from "../voice/models";
 import { speechTranscriber } from "../voice/transcriber";
-import { SettingsModal, VoiceModelSettings } from "./settings";
+import { AudioInputDeviceSettings, SettingsModal, VoiceModelSettings } from "./settings";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
@@ -236,5 +236,57 @@ describe("VoiceModelSettings", () => {
         }),
       ],
     });
+  });
+});
+
+describe("AudioInputDeviceSettings", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: {
+        enumerateDevices: vi.fn().mockResolvedValue([
+          { kind: "audioinput", deviceId: "mic-1", label: "Built-in Microphone" },
+          { kind: "audioinput", deviceId: "mic-2", label: "USB Headset" },
+        ]),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("renders the device picker with the system default and enumerated devices", async () => {
+    render(<AudioInputDeviceSettings />);
+
+    expect(screen.getByText("Audio input device")).toBeTruthy();
+
+    const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.textContent);
+    expect(options).toContain("System default");
+    expect(options).toContain("Built-in Microphone");
+    expect(options).toContain("USB Headset");
+  });
+
+  it("selects a device and persists the choice", async () => {
+    render(<AudioInputDeviceSettings />);
+
+    const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "mic-2" } });
+
+    expect(localStorage.getItem("reasonix.voiceInputDevice")).toBe("mic-2");
+    expect(select.value).toBe("mic-2");
+  });
+
+  it("restores the previously selected device", async () => {
+    localStorage.setItem("reasonix.voiceInputDevice", "mic-1");
+    render(<AudioInputDeviceSettings />);
+
+    const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
+    expect(select.value).toBe("mic-1");
   });
 });

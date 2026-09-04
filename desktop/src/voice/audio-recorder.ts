@@ -11,6 +11,8 @@ export interface AudioRecordingResult {
 export interface AudioRecorderOptions {
   onVolumeChange?: (level: number) => void;
   onError?: (error: Error) => void;
+  /** Preferred audio input device id (from `enumerateDevices`). Empty → OS/browser default. */
+  deviceId?: string;
 }
 
 type DetailedError = Error & { constraint?: string };
@@ -61,10 +63,12 @@ export class AudioRecorder {
   private isRecording = false;
   private onVolumeChange?: (level: number) => void;
   private onError?: (error: Error) => void;
+  private deviceId?: string;
 
   constructor(options?: AudioRecorderOptions) {
     this.onVolumeChange = options?.onVolumeChange;
     this.onError = options?.onError;
+    this.deviceId = options?.deviceId;
   }
 
   public get recording(): boolean {
@@ -86,14 +90,18 @@ export class AudioRecorder {
     }
 
     try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const audioConstraints: MediaTrackConstraints = {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      };
+      // A plain (non-exact) deviceId lets the browser fall back to the default
+      // device if the chosen one is no longer available.
+      if (this.deviceId) {
+        audioConstraints.deviceId = this.deviceId;
+      }
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     } catch (err) {
       const error = err as Error;
       const technicalDetails = errorDetails(err);

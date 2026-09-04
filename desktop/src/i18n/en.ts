@@ -226,6 +226,10 @@ export const en = {
     voiceSection: "Voice processing model",
     voiceSectionHint:
       "Select a speech-to-text recognition model. Models download on demand into the local cache.",
+    voiceInputDevice: "Audio input device",
+    voiceInputDeviceHint:
+      "Choose the microphone used for voice input. The system default is used until you pick one.",
+    voiceInputDeviceDefault: "System default",
     voiceActive: "Active",
     voiceSelect: "Select",
     voiceDownload: "Download",
