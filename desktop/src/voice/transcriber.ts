@@ -65,6 +65,10 @@ class LocalSpeechTranscriber {
         env.localModelPath = "/models/";
         env.backends.onnx.wasm.wasmPaths = "/wasm/";
 
+        // Silence onnxruntime's noisy "[W:onnxruntime:...] Removing initializer ..."
+        // warnings during model graph optimization. Default is "warning".
+        env.backends.onnx.logLevel = "error";
+
         // Load the local whisper-tiny.en model:
         const pipe = (await pipeline("automatic-speech-recognition", "whisper-tiny.en", {
           quantized: true,
