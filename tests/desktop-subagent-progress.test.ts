@@ -39,6 +39,24 @@ describe("desktop subagent progress projection", () => {
     });
   });
 
+  it("retains parent identity on every live update", () => {
+    expect(
+      projectSubagentEvent({
+        kind: "stream-progress",
+        runId: "sub-associated",
+        parentCallId: "parent-call",
+        parentTurn: 7,
+        task: "research docs",
+        thought: "Checking the event bridge",
+      }),
+    ).toMatchObject({
+      action: "stream",
+      runId: "sub-associated",
+      parentCallId: "parent-call",
+      thought: "Checking the event bridge",
+    });
+  });
+
   it("projects configured budgets and exhaustion status", () => {
     expect(
       projectSubagentEvent({

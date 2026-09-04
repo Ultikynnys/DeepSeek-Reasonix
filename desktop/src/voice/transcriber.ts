@@ -13,6 +13,13 @@ export interface TranscribeResult {
   text: string;
 }
 
+function errorDetails(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return `unknown error: ${String(err)}`;
+  }
+  return `name=${err.name || "Error"}, message=${err.message || "No message"}`;
+}
+
 type ASRPipeline = (
   audio: Float32Array,
   options?: Record<string, unknown>,
@@ -78,8 +85,9 @@ class LocalSpeechTranscriber {
         this.updateStatus("ready");
         return pipe;
       } catch (err) {
-        this.updateStatus("error", (err as Error).message);
-        throw new Error(`Failed to load bundled transcription model: ${(err as Error).message}`);
+        const details = errorDetails(err);
+        this.updateStatus("error", details);
+        throw new Error(`Failed to load bundled transcription model (${details}).`);
       } finally {
         this.isInitializing = false;
         this.initPromise = null;
@@ -97,12 +105,15 @@ class LocalSpeechTranscriber {
     options?: { onProgress?: (status: TranscribeProgress) => void },
   ): Promise<TranscribeResult> {
     if (audioData.length === 0) {
-      return { text: "" };
+      throw new Error("No microphone audio was captured.");
     }
 
     const minSamples = 16000 * 0.2; // 200 ms minimum audio
     if (audioData.length < minSamples) {
-      return { text: "" };
+      const durationMs = Math.round((audioData.length / 16000) * 1000);
+      throw new Error(
+        `Recording was too short to transcribe (${durationMs} ms captured; minimum is 200 ms).`,
+      );
     }
 
     const pipe = await this.getPipeline();
@@ -119,19 +130,27 @@ class LocalSpeechTranscriber {
         return_timestamps: false,
       });
 
-      let rawText = "";
+      let rawText: string;
       if (typeof output === "string") {
         rawText = output;
       } else if (output && typeof output.text === "string") {
         rawText = output.text;
+      } else {
+        throw new Error(
+          `Speech recognizer returned an unsupported result (${Object.prototype.toString.call(output)}).`,
+        );
       }
 
       const text = rawText.trim();
+      if (!text) {
+        throw new Error("No speech was recognized in the recording.");
+      }
       this.updateStatus("ready");
       return { text };
     } catch (err) {
-      this.updateStatus("error", (err as Error).message);
-      throw new Error(`Speech transcription failed: ${(err as Error).message}`);
+      const details = errorDetails(err);
+      this.updateStatus("error", details);
+      throw new Error(`Speech transcription failed (${details}).`);
     }
   }
 

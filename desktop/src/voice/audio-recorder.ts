@@ -10,6 +10,21 @@ export interface AudioRecordingResult {
 
 export interface AudioRecorderOptions {
   onVolumeChange?: (level: number) => void;
+  onError?: (error: Error) => void;
+}
+
+type DetailedError = Error & { constraint?: string };
+
+function errorDetails(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return `unknown error: ${String(err)}`;
+  }
+  const error = err as DetailedError;
+  const details = [`name=${error.name || "Error"}`, `message=${error.message || "No message"}`];
+  if (error.constraint) {
+    details.push(`constraint=${error.constraint}`);
+  }
+  return details.join(", ");
 }
 
 /**
@@ -45,9 +60,11 @@ export class AudioRecorder {
   private chunks: Float32Array[] = [];
   private isRecording = false;
   private onVolumeChange?: (level: number) => void;
+  private onError?: (error: Error) => void;
 
   constructor(options?: AudioRecorderOptions) {
     this.onVolumeChange = options?.onVolumeChange;
+    this.onError = options?.onError;
   }
 
   public get recording(): boolean {
@@ -79,57 +96,73 @@ export class AudioRecorder {
       });
     } catch (err) {
       const error = err as Error;
+      const technicalDetails = errorDetails(err);
       if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
-        throw new Error("Microphone permission was denied. Please allow microphone access.");
+        throw new Error(
+          `Microphone access was not allowed. Check the app, browser, and operating-system microphone permissions (${technicalDetails}).`,
+        );
       }
       if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
-        throw new Error("No microphone device was found on this system.");
+        throw new Error(
+          `No microphone matched the requested audio settings. Check that a microphone is connected and enabled (${technicalDetails}).`,
+        );
       }
       if (error.name === "NotReadableError") {
-        throw new Error("Microphone is currently unavailable or used by another application.");
+        throw new Error(
+          `The microphone could not be read because of a device, operating-system, browser, or page-level failure (${technicalDetails}).`,
+        );
       }
-      throw new Error(`Microphone initialization failed: ${error.message}`);
+      if (error.name === "OverconstrainedError") {
+        throw new Error(
+          `The microphone could not satisfy the requested audio constraint (${technicalDetails}).`,
+        );
+      }
+      throw new Error(`Microphone capture request failed (${technicalDetails}).`);
     }
 
-    const AudioContextClass =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    try {
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-    if (!AudioContextClass) {
-      this.cleanup();
-      throw new Error("AudioContext is not supported in this environment.");
-    }
+      if (!AudioContextClass) {
+        throw new Error("AudioContext is not supported in this environment.");
+      }
 
-    this.audioContext = new AudioContextClass();
-    if (this.audioContext.state === "suspended") {
-      await this.audioContext.resume();
-    }
+      this.audioContext = new AudioContextClass();
+      if (this.audioContext.state === "suspended") {
+        await this.audioContext.resume();
+      }
 
-    this.chunks = [];
-    this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
+      this.chunks = [];
+      this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
 
-    // 4096 buffer size gives ~90ms latency at 44.1kHz / ~250ms at 16kHz
-    this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+      // 4096 buffer size gives ~90ms latency at 44.1kHz / ~250ms at 16kHz
+      this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
 
-    this.scriptProcessor.onaudioprocess = (event: AudioProcessingEvent) => {
-      if (!this.isRecording) return;
-      const channelData = event.inputBuffer.getChannelData(0);
-      this.chunks.push(new Float32Array(channelData));
+      this.scriptProcessor.onaudioprocess = (event: AudioProcessingEvent) => {
+        if (!this.isRecording) return;
+        const channelData = event.inputBuffer.getChannelData(0);
+        this.chunks.push(new Float32Array(channelData));
 
-      if (this.onVolumeChange) {
-        let sumSquares = 0;
-        for (let i = 0; i < channelData.length; i++) {
-          const val = channelData[i] ?? 0;
-          sumSquares += val * val;
+        if (this.onVolumeChange) {
+          let sumSquares = 0;
+          for (let i = 0; i < channelData.length; i++) {
+            const val = channelData[i] ?? 0;
+            sumSquares += val * val;
+          }
+          const rms = Math.sqrt(sumSquares / channelData.length);
+          this.onVolumeChange(Math.min(rms * 5, 1));
         }
-        const rms = Math.sqrt(sumSquares / channelData.length);
-        this.onVolumeChange(Math.min(rms * 5, 1));
-      }
-    };
+      };
 
-    this.sourceNode.connect(this.scriptProcessor);
-    this.scriptProcessor.connect(this.audioContext.destination);
-    this.isRecording = true;
+      this.sourceNode.connect(this.scriptProcessor);
+      this.scriptProcessor.connect(this.audioContext.destination);
+      this.isRecording = true;
+    } catch (err) {
+      this.cleanup();
+      throw new Error(`Microphone audio processing setup failed (${errorDetails(err)}).`);
+    }
   }
 
   /**
@@ -187,7 +220,9 @@ export class AudioRecorder {
       this.sourceNode = null;
     }
     if (this.audioContext && this.audioContext.state !== "closed") {
-      void this.audioContext.close();
+      void this.audioContext.close().catch((err: unknown) => {
+        this.onError?.(new Error(`Microphone AudioContext cleanup failed (${errorDetails(err)}).`));
+      });
       this.audioContext = null;
     }
     if (this.mediaStream) {

@@ -1700,16 +1700,88 @@ describe("Desktop App reducer — subagent progress", () => {
     const run = (assistant.segments[0] as { subagentRuns?: Array<{ recentRows?: unknown[] }> })
       ?.subagentRuns?.[0];
 
-    expect(run?.recentRows).toHaveLength(2);
+    expect(run?.recentRows).toHaveLength(3);
     expect(run?.recentRows?.[0]).toMatchObject({
+      kind: "process",
+      text: "Starting subagent...",
+      status: "running",
+    });
+    expect(run?.recentRows?.[1]).toMatchObject({
       kind: "thinking",
       text: "Analyzing the architecture...",
     });
-    expect(run?.recentRows?.[1]).toMatchObject({
+    expect(run?.recentRows?.[2]).toMatchObject({
       kind: "process",
       text: "↳ read_file src/index.ts",
       status: "running",
     });
+  });
+
+  it("keeps the latest three streamed lines as live activity rows", () => {
+    const base = {
+      ...initialState(),
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn: 4,
+          pending: true,
+          segments: [
+            {
+              kind: "tool" as const,
+              callId: "parent-live",
+              name: "research",
+              args: "{}",
+              startedAt: 1,
+            },
+          ],
+        },
+      ],
+    };
+    const common = {
+      type: "subagent.progress" as const,
+      ts: "2026-06-01T00:00:00.000Z",
+      turn: 4,
+      runId: "run-live",
+      parentCallId: "parent-live",
+      task: "research docs",
+      skillName: "research",
+    };
+
+    let state = reduce(base, { t: "incoming", event: { ...common, id: 1, action: "start" } });
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        ...common,
+        id: 2,
+        action: "stream",
+        reasoningChars: 30,
+        thought: "First line\nSecond line\nThird line\nFourth line",
+      },
+    });
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        ...common,
+        id: 3,
+        action: "stream",
+        reasoningChars: 40,
+        thought: "Second line\nThird line\nFourth line updated",
+      },
+    });
+
+    const assistant = state.messages[0];
+    if (assistant?.kind !== "assistant") throw new Error("expected assistant");
+    const run = (
+      assistant.segments[0] as {
+        subagentRuns?: Array<{ recentRows?: Array<{ kind: string; text: string }> }>;
+      }
+    ).subagentRuns?.[0];
+
+    expect(run?.recentRows?.slice(-3)).toEqual([
+      expect.objectContaining({ kind: "thinking", text: "Second line" }),
+      expect.objectContaining({ kind: "thinking", text: "Third line" }),
+      expect.objectContaining({ kind: "thinking", text: "Fourth line updated" }),
+    ]);
   });
 });
 

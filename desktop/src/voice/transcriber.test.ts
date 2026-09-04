@@ -6,16 +6,15 @@ describe("LocalSpeechTranscriber", () => {
     expect(speechTranscriber.status).toBe("idle");
   });
 
-  it("returns empty text for empty audio buffer without initializing pipeline", async () => {
-    const emptyBuffer = new Float32Array(0);
-    const result = await speechTranscriber.transcribe(emptyBuffer);
-    expect(result.text).toBe("");
+  it("reports when no microphone audio was captured", async () => {
+    await expect(speechTranscriber.transcribe(new Float32Array(0))).rejects.toThrow(
+      "No microphone audio was captured.",
+    );
   });
 
-  it("returns empty text for audio buffers shorter than 200ms", async () => {
-    // 16000 * 0.1 = 1600 samples (100ms)
-    const shortBuffer = new Float32Array(1600);
-    const result = await speechTranscriber.transcribe(shortBuffer);
-    expect(result.text).toBe("");
+  it("reports the captured duration when audio is shorter than 200 ms", async () => {
+    await expect(speechTranscriber.transcribe(new Float32Array(1600))).rejects.toThrow(
+      "Recording was too short to transcribe (100 ms captured; minimum is 200 ms).",
+    );
   });
 });

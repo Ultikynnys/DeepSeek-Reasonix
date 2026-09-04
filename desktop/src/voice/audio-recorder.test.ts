@@ -52,10 +52,10 @@ describe("AudioRecorder", () => {
     }
   });
 
-  it("maps permission denial error to clear message", async () => {
+  it("preserves technical details when microphone access is not allowed", async () => {
     const originalMediaDevices = navigator.mediaDevices;
     try {
-      const err = new Error("Permission denied");
+      const err = new Error("Blocked by operating-system privacy settings");
       err.name = "NotAllowedError";
 
       // @ts-expect-error test mock
@@ -64,18 +64,22 @@ describe("AudioRecorder", () => {
       };
 
       const recorder = new AudioRecorder();
-      await expect(recorder.start()).rejects.toThrow(/Microphone permission was denied/i);
+      await expect(recorder.start()).rejects.toThrow(
+        /Microphone access was not allowed.*name=NotAllowedError.*Blocked by operating-system privacy settings/i,
+      );
     } finally {
       // @ts-expect-error restore
       navigator.mediaDevices = originalMediaDevices;
     }
   });
 
-  it("maps missing device error to clear message", async () => {
+  it("preserves the failed constraint for overconstrained capture", async () => {
     const originalMediaDevices = navigator.mediaDevices;
     try {
-      const err = new Error("Requested device not found");
-      err.name = "NotFoundError";
+      const err = Object.assign(new Error("Requested channel count is unavailable"), {
+        name: "OverconstrainedError",
+        constraint: "channelCount",
+      });
 
       // @ts-expect-error test mock
       navigator.mediaDevices = {
@@ -83,10 +87,36 @@ describe("AudioRecorder", () => {
       };
 
       const recorder = new AudioRecorder();
-      await expect(recorder.start()).rejects.toThrow(/No microphone device was found/i);
+      await expect(recorder.start()).rejects.toThrow(
+        /requested audio constraint.*name=OverconstrainedError.*constraint=channelCount/i,
+      );
     } finally {
       // @ts-expect-error restore
       navigator.mediaDevices = originalMediaDevices;
+    }
+  });
+
+  it("stops the acquired microphone track when audio processing setup fails", async () => {
+    const originalMediaDevices = navigator.mediaDevices;
+    const originalWindow = globalThis.window;
+    const stop = vi.fn();
+    try {
+      // @ts-expect-error test mock
+      navigator.mediaDevices = {
+        getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop }] }),
+      };
+      // @ts-expect-error test mock
+      globalThis.window = { AudioContext: undefined };
+
+      const recorder = new AudioRecorder();
+      await expect(recorder.start()).rejects.toThrow(
+        /Microphone audio processing setup failed.*AudioContext is not supported/i,
+      );
+      expect(stop).toHaveBeenCalledOnce();
+    } finally {
+      // @ts-expect-error restore
+      navigator.mediaDevices = originalMediaDevices;
+      globalThis.window = originalWindow;
     }
   });
 

@@ -24,6 +24,7 @@ const baseProps = {
   onEffortChange: vi.fn(),
   editMode: "review",
   onEditModeChange: vi.fn(),
+  onVoiceError: vi.fn(),
   textareaRef: { current: null },
 } as const;
 

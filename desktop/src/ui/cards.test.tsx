@@ -379,6 +379,46 @@ describe("SubagentCard — model visibility", () => {
     expect(rows[2]?.textContent).toContain("process");
     expect(rows[2]?.textContent).toContain("↳ search_content loop");
   });
+
+  it("updates the visible last three rows while a subagent is streaming", () => {
+    const run = {
+      runId: "run-streaming",
+      task: "Research current docs",
+      skillName: "research",
+      status: "running" as const,
+      tools: [],
+      recentRows: [{ id: "start", kind: "process" as const, text: "Starting research..." }],
+    };
+    const { rerender } = render(<SubagentCard name="research" runs={[run]} />);
+
+    let activityBox = screen.getByLabelText("Subagent activity");
+    expect(activityBox.textContent).toContain("Starting research...");
+
+    rerender(
+      <SubagentCard
+        name="research"
+        runs={[
+          {
+            ...run,
+            recentRows: [
+              ...run.recentRows,
+              { id: "line-1", kind: "thinking", text: "Checking Tauri events" },
+              { id: "line-2", kind: "thinking", text: "Reading local event bridge" },
+              { id: "tool-1", kind: "process", text: "↳ web_fetch Tauri docs" },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    activityBox = screen.getByLabelText("Subagent activity");
+    const rows = activityBox.querySelectorAll(".sub-activity-row");
+    expect(rows.length).toBe(3);
+    expect(activityBox.textContent).not.toContain("Starting research...");
+    expect(rows[0]?.textContent).toContain("Checking Tauri events");
+    expect(rows[1]?.textContent).toContain("Reading local event bridge");
+    expect(rows[2]?.textContent).toContain("↳ web_fetch Tauri docs");
+  });
 });
 
 describe("DiffCard — show-in-explorer button", () => {

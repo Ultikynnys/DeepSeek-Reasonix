@@ -33,6 +33,8 @@ vi.mock("../voice/transcriber", () => {
 
 afterEach(cleanup);
 
+import { AudioRecorder } from "../voice/audio-recorder";
+import { speechTranscriber } from "../voice/transcriber";
 import { Composer } from "./composer";
 
 const baseProps = {
@@ -46,6 +48,7 @@ const baseProps = {
   onEffortChange: vi.fn(),
   editMode: "review",
   onEditModeChange: vi.fn(),
+  onVoiceError: vi.fn(),
   textareaRef: { current: null },
 } as const;
 
@@ -74,6 +77,46 @@ describe("Composer Voice Input Button", () => {
       fireEvent.click(voiceBtn);
     });
     expect(voiceBtn.classList.contains("recording")).toBe(true);
+  });
+
+  it("reports microphone startup failures through the durable chat callback", async () => {
+    const onVoiceError = vi.fn();
+    vi.mocked(AudioRecorder).mockImplementationOnce(
+      () =>
+        ({
+          recording: false,
+          start: vi.fn().mockRejectedValue(new Error("name=NotAllowedError, message=Blocked")),
+          stop: vi.fn(),
+          cancel: vi.fn(),
+        }) as unknown as AudioRecorder,
+    );
+    render(<Composer {...baseProps} onVoiceError={onVoiceError} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle("Voice input"));
+    });
+
+    expect(onVoiceError).toHaveBeenCalledWith(
+      "Voice input failed during microphone startup: name=NotAllowedError, message=Blocked",
+    );
+  });
+
+  it("reports an empty recognizer result through the durable chat callback", async () => {
+    const onVoiceError = vi.fn();
+    vi.mocked(speechTranscriber.transcribe).mockResolvedValueOnce({ text: "" });
+    render(<Composer {...baseProps} onVoiceError={onVoiceError} />);
+
+    const voiceButton = screen.getByTitle("Voice input");
+    await act(async () => {
+      fireEvent.click(voiceButton);
+    });
+    await act(async () => {
+      fireEvent.click(voiceButton);
+    });
+
+    expect(onVoiceError).toHaveBeenCalledWith(
+      "Voice input failed during recording or transcription: The speech recognizer returned no transcript.",
+    );
   });
 
   it("shows circular throbber as processing indicator when finished talking and transcribing", async () => {

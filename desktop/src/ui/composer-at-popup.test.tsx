@@ -26,6 +26,7 @@ function renderComposer(props?: Partial<React.ComponentProps<typeof Composer>>) 
       onEffortChange={vi.fn()}
       editMode="review"
       onEditModeChange={vi.fn()}
+      onVoiceError={vi.fn()}
       textareaRef={textareaRef}
       workspaceDir="/repo"
       {...props}

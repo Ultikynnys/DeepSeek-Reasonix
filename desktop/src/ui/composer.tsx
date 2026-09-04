@@ -24,12 +24,12 @@ import { type TKey, t } from "../i18n";
 import { I } from "../icons";
 import { isImagePath, resolveImagePath } from "../image-attach";
 import type { EditMode, ReasoningEffort, UserImageAttachment } from "../protocol";
+import { AudioRecorder } from "../voice/audio-recorder";
+import { speechTranscriber } from "../voice/transcriber";
 import { DEFAULT_COMPOSER_ROWS, applyComposerTextareaAutosize } from "./composer-sizing";
 import { activationHandler } from "./keyboard";
 import { TimerSpan } from "./live";
 import { Shortcut } from "./shortcut";
-import { AudioRecorder } from "../voice/audio-recorder";
-import { speechTranscriber } from "../voice/transcriber";
 export type { EditMode, ReasoningEffort };
 
 export type QueuedSendItem = string | QueuedSend;
@@ -116,6 +116,7 @@ export function Composer({
   onPasteImage,
   onImageRejected,
   onPickImage,
+  onVoiceError,
 }: {
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -178,6 +179,8 @@ export function Composer({
   onImageRejected?: () => void;
   /** Vision path for picked/dropped image paths — daemon reads the bytes. */
   onPickImage?: (path: string) => void;
+  /** Surfaces every voice-input failure as a durable in-chat error notice. */
+  onVoiceError: (message: string) => void;
 }) {
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [subagentMenuOpen, setSubagentMenuOpen] = useState(false);
@@ -311,9 +314,8 @@ export function Composer({
 
   useEffect(() => {
     return () => {
-      if (recorderRef.current?.recording) {
-        recorderRef.current.cancel();
-      }
+      recorderRef.current?.cancel();
+      recorderRef.current = null;
     };
   }, []);
 
@@ -323,41 +325,59 @@ export function Composer({
     return () => clearTimeout(timer);
   }, [voiceError]);
 
+  const reportVoiceError = (stage: string, err: unknown) => {
+    const reason = err instanceof Error ? err.message : String(err);
+    const message = `Voice input failed during ${stage}: ${reason || "Unknown error."}`;
+    setVoiceError(message);
+    onVoiceError(message);
+  };
+
   const handleToggleVoice = async () => {
     if (disabled) return;
     setVoiceError(null);
 
     if (voiceState === "recording") {
       const recorder = recorderRef.current;
-      if (!recorder) return;
+      if (!recorder) {
+        reportVoiceError(
+          "recording stop",
+          new Error("The active microphone recorder was unavailable."),
+        );
+        setVoiceState("idle");
+        return;
+      }
       setVoiceState("transcribing");
       try {
         const { audioData } = await recorder.stop();
         recorderRef.current = null;
         const { text } = await speechTranscriber.transcribe(audioData);
-        if (text) {
-          setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
-          textareaRef.current?.focus();
+        if (!text.trim()) {
+          throw new Error("The speech recognizer returned no transcript.");
         }
+        setDraft((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+        textareaRef.current?.focus();
       } catch (err) {
-        const msg = (err as Error).message;
-        setVoiceError(msg);
+        reportVoiceError("recording or transcription", err);
       } finally {
+        recorder.cancel();
+        recorderRef.current = null;
         setVoiceState("idle");
       }
       return;
     }
 
     if (voiceState === "idle") {
+      const recorder = new AudioRecorder({
+        onError: (err) => reportVoiceError("audio cleanup", err),
+      });
+      recorderRef.current = recorder;
       try {
-        const recorder = new AudioRecorder();
-        recorderRef.current = recorder;
         await recorder.start();
         setVoiceState("recording");
       } catch (err) {
+        recorder.cancel();
         recorderRef.current = null;
-        const msg = (err as Error).message;
-        setVoiceError(msg);
+        reportVoiceError("microphone startup", err);
         setVoiceState("idle");
       }
     }
@@ -427,7 +447,9 @@ export function Composer({
               const hasImages = Boolean(images && images.length > 0);
               const tooltip = [
                 text,
-                hasImages && images ? `(${images.length} image${images.length > 1 ? "s" : ""})` : null,
+                hasImages && images
+                  ? `(${images.length} image${images.length > 1 ? "s" : ""})`
+                  : null,
               ]
                 .filter(Boolean)
                 .join(" ");
@@ -702,11 +724,7 @@ export function Composer({
               ) : (
                 <I.mic size={13} />
               )}
-              {voiceError ? (
-                <div className="voice-error-tooltip">
-                  {voiceError}
-                </div>
-              ) : null}
+              {voiceError ? <div className="voice-error-tooltip">{voiceError}</div> : null}
             </button>
             {busy ? (
               <button
