@@ -20,7 +20,7 @@ let probeOverride: boolean | null = null;
 let binaryPath: string | null | undefined; // undefined = not resolved yet
 
 /** Resolve rg: REASONIX_RG_PATH env → bundled dist/rg/rg.exe → @vscode/ripgrep package → PATH. */
-export function resolveRgBinary(): string | null {
+function resolveRgBinary(): string | null {
   if (binaryPath !== undefined) return binaryPath;
   const envPath = process.env.REASONIX_RG_PATH;
   if (envPath && envPath.length > 0) {

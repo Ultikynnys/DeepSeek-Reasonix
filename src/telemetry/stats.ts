@@ -26,7 +26,7 @@ export const DEEPSEEK_PRICING: Record<
 
 export type ModelPricing = (typeof DEEPSEEK_PRICING)[string];
 
-export function pricingFor(model: string, path?: string): ModelPricing | undefined {
+function pricingFor(model: string, path?: string): ModelPricing | undefined {
   const defaults = DEEPSEEK_PRICING[model];
   const override = loadPricingOverride(path)[model];
   if (!override) return defaults;
@@ -93,7 +93,7 @@ export function resolveContextTokens(model: string, configured?: number): number
 
 /** Maximum turns retained in memory before old entries are rolled into carryover.
  *  Each TurnStats holds usage + cost + model — at N=200 this caps memory at ~50KB. */
-export const MAX_TURNS = 200;
+const MAX_TURNS = 200;
 
 export function costUsd(model: string, usage: Usage, path?: string): number {
   const p = pricingFor(model, path);

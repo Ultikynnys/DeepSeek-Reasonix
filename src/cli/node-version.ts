@@ -1,6 +1,6 @@
 export const MIN_NODE_MAJOR = 22;
 
-export function parseNodeMajor(version: string): number | null {
+function parseNodeMajor(version: string): number | null {
   const major = Number.parseInt(version.split(".")[0] ?? "", 10);
   return Number.isInteger(major) ? major : null;
 }

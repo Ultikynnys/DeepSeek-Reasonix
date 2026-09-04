@@ -4,7 +4,7 @@ import { type FileEncoding, decodeFileBuffer, encodeFile } from "../../code/file
 import { displayRel } from "./rel.js";
 
 /** Marker substring in the gate-reject message so tools.ts's repeat-rejection tracker spots a 2nd identical unread-edit and switches to the sharper "stop retrying" hint. */
-export const READ_BEFORE_EDIT_MARKER = "read_file first";
+const READ_BEFORE_EDIT_MARKER = "read_file first";
 
 export async function applyEdit(
   rootDir: string,
@@ -58,7 +58,7 @@ export interface DeletePatch {
   noopReason?: string;
 }
 
-export function computeDeleteRangePatchFromText(text: string, args: DeleteRangeArgs): DeletePatch {
+function computeDeleteRangePatchFromText(text: string, args: DeleteRangeArgs): DeletePatch {
   const startAnchor = args.start_anchor;
   const endAnchor = args.end_anchor;
   if (typeof startAnchor !== "string" || startAnchor.length === 0) {
@@ -129,7 +129,7 @@ export async function applyDeleteRange(
   return `delete_range: deleted ${patch.deletedChars} chars from ${rel}\n${renderEditDiff(patch.search, patch.replace, patch.startLine)}`;
 }
 
-export function computeDeleteLineRangePatchFromText(
+function computeDeleteLineRangePatchFromText(
   text: string,
   startLine: number,
   endLine: number,

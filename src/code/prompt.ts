@@ -6,7 +6,7 @@ import { TUI_FORMATTING_RULES, escalationContract } from "../prompt-fragments.js
 const DEFAULT_CODE_MODEL = "deepseek-v4-flash";
 
 /** Built per-session against the resolved model id so the contract names the actual tier (#582). */
-export function codeSystemBase(modelId: string): string {
+function codeSystemBase(modelId: string): string {
   return CODE_SYSTEM_TEMPLATE.replace("__ESCALATION_CONTRACT__", escalationContract(modelId));
 }
 
