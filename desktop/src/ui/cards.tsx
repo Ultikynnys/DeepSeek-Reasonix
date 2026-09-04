@@ -939,6 +939,33 @@ export function extractSubagentResultMeta(result?: string): SubagentResultMeta {
   }
 }
 
+function SubagentActivityRows({ run }: { run: import("../App").SubagentRunProgress }) {
+  const rowsToShow =
+    run.recentRows && run.recentRows.length > 0
+      ? run.recentRows.slice(-3)
+      : [
+          {
+            id: "init",
+            kind: "process" as const,
+            text: `Starting ${run.skillName ?? "subagent"}...`,
+          },
+        ];
+
+  return (
+    <div className="sub-activity" aria-label="Subagent activity">
+      {rowsToShow.map((row) => (
+        <div className="sub-activity-row" key={row.id}>
+          <span className={`sub-activity-dot ${row.kind}`} />
+          <span className="sub-activity-tag">{row.kind}</span>
+          <span className="sub-activity-text" title={row.text}>
+            {row.text}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SubagentCard({
   name,
   runs,
@@ -1034,26 +1061,7 @@ export function SubagentCard({
                   : ""}
               </div>
               {run.status === "running" ? (
-                <div className="sub-activity" aria-label="Subagent activity">
-                  {(run.recentRows && run.recentRows.length > 0
-                    ? run.recentRows.slice(-3)
-                    : [
-                        {
-                          id: "init",
-                          kind: "process" as const,
-                          text: `Starting ${run.skillName ?? "subagent"}...`,
-                        },
-                      ]
-                  ).map((row) => (
-                    <div className="sub-activity-row" key={row.id}>
-                      <span className={`sub-activity-dot ${row.kind}`} />
-                      <span className="sub-activity-tag">{row.kind}</span>
-                      <span className="sub-activity-text" title={row.text}>
-                        {row.text}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <SubagentActivityRows run={run} />
               ) : (
                 run.tools.map((tool) => (
                   <div className="role" key={tool.callId} title={tool.args}>

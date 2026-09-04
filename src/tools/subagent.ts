@@ -411,10 +411,9 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       if (ev.role === "assistant_delta") {
         const dContent = ev.content?.length ?? 0;
         const dReason = ev.reasoningDelta?.length ?? 0;
-        if (dReason > 0 && ev.reasoningDelta) {
-          recentThought = (recentThought + ev.reasoningDelta).slice(-800);
-        } else if (dContent > 0 && ev.content) {
-          recentThought = (recentThought + ev.content).slice(-800);
+        const delta = ev.reasoningDelta || ev.content || "";
+        if (delta) {
+          recentThought = (recentThought + delta).slice(-800);
         }
         if (dContent > 0 || dReason > 0) {
           streamedContent += ev.content ?? "";

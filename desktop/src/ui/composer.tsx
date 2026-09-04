@@ -19,6 +19,7 @@ import {
   useState,
 } from "react";
 import type React from "react";
+import type { QueuedSend } from "../App";
 import { type TKey, t } from "../i18n";
 import { I } from "../icons";
 import { isImagePath, resolveImagePath } from "../image-attach";
@@ -31,12 +32,7 @@ import { AudioRecorder } from "../voice/audio-recorder";
 import { speechTranscriber } from "../voice/transcriber";
 export type { EditMode, ReasoningEffort };
 
-export type QueuedSendItem =
-  | string
-  | {
-      text: string;
-      images?: { id: string; thumbnail: string; wire?: UserImageAttachment }[];
-    };
+export type QueuedSendItem = string | QueuedSend;
 
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
 
