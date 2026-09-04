@@ -529,6 +529,11 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
     });
     expect(fromEvent.settings?.model).toBe("deepseek-v4-pro");
     expect(fromEvent.settings?.subagentModel).toBe("deepseek-v4-flash");
+    // The active quick-send id and custom list must survive the $settings
+    // round-trip, or the Settings → General selector can never highlight a
+    // choice (regression: quick-send enum was dropped from the reducer).
+    expect(fromEvent.settings?.quickSendId).toBe("proceed");
+    expect(fromEvent.settings?.quickSends).toEqual([]);
 
     // An explicit chat-menu pick patches the tab's own subagent model.
     const base: Parameters<typeof reduce>[0] = {

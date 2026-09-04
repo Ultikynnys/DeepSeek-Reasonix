@@ -1620,6 +1620,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         settings: {
           reasoningEffort: ev.reasoningEffort,
           editMode: ev.editMode,
+          quickSendId: ev.quickSendId,
+          quickSends: ev.quickSends,
           budgetUsd: ev.budgetUsd,
           contextTokens: ev.contextTokens ?? null,
           baseUrl: ev.baseUrl,
