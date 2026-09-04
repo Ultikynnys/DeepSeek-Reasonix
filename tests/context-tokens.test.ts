@@ -46,7 +46,8 @@ describe("resolveContextTokens", () => {
 
   it("an override below the max stays in effect (floored to the config range)", () => {
     expect(resolveContextTokens("deepseek-v4-flash", 300_000)).toBe(300_000);
-    expect(resolveContextTokens("deepseek-v4-flash", 250_000)).toBe(MIN_CONTEXT_TOKENS);
+    expect(resolveContextTokens("deepseek-v4-flash", 250_000)).toBe(250_000);
+    expect(resolveContextTokens("deepseek-v4-flash", 100_000)).toBe(MIN_CONTEXT_TOKENS);
   });
 
   it("an override also applies to unknown models up to the API ceiling (the table is only the no-override fallback)", () => {

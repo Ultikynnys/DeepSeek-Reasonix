@@ -62,7 +62,7 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
 };
 
 /** Lower bound of the user-configurable `contextTokens` setting. */
-export const MIN_CONTEXT_TOKENS = 300_000;
+export const MIN_CONTEXT_TOKENS = 128_000;
 /** Upper bound of the user-configurable `contextTokens` setting — the API's 1M-token ceiling. */
 export const MAX_CONTEXT_TOKENS = 1_000_000;
 

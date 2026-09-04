@@ -327,7 +327,7 @@ export interface ReasonixConfig {
    *  unlimited API budget. Default 50. Env `REASONIX_MAX_ITER` overrides. */
   maxIterPerTurn?: number;
   /** Context-window cap in tokens, overriding the per-model default (300K). Clamped to
-   *  [300000, 1000000] at load; the effective cap is also clamped to the model's max
+   *  [128000, 1000000] at load; the effective cap is also clamped to the model's max
    *  context length (resolveContextTokens), so a value above it is reduced internally. */
   contextTokens?: number;
   /** Default workspace root for the desktop client. CLI uses cwd. */
@@ -1571,7 +1571,7 @@ export function loadFilesystemOutlineThresholdBytes(
   return Math.floor(v);
 }
 
-/** User-configured context-window cap in tokens, clamped to [300K, 1M] (the API ceiling).
+/** User-configured context-window cap in tokens, clamped to [128K, 1M] (the API ceiling).
  *  Unset / non-numeric → undefined (callers fall back to the per-model default). The
  *  effective per-model cap is further clamped to the model's max in resolveContextTokens. */
 export function loadContextTokens(path: string = defaultConfigPath()): number | undefined {
@@ -1581,7 +1581,7 @@ export function loadContextTokens(path: string = defaultConfigPath()): number | 
 }
 
 /** Persist the context-window cap. `null` / undefined clears it back to the per-model
- *  default; out-of-range values clamp to [300K, 1M]. Values above the model's max are kept
+ *  default; out-of-range values clamp to [128K, 1M]. Values above the model's max are kept
  *  as entered and clamped only at resolve time (resolveContextTokens). */
 export function saveContextTokens(
   value: number | null | undefined,

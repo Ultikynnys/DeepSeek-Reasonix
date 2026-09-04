@@ -598,7 +598,7 @@ export interface SettingsPatch {
   reasoningEffort?: ReasoningEffort;
   editMode?: EditMode;
   budgetUsd?: number | null;
-  /** Context-window cap in tokens, clamped to [300000, 1000000]; null/undefined = per-model default. */
+  /** Context-window cap in tokens, clamped to [128000, 1000000]; null/undefined = per-model default. */
   contextTokens?: number | null;
   baseUrl?: string;
   workspaceDir?: string;

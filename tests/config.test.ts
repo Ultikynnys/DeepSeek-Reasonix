@@ -1083,9 +1083,9 @@ describe("config", () => {
     expect(loadContextTokens(path)).toBe(500000);
   });
 
-  it("loadContextTokens clamps out-of-range values to [300000, 1000000]", () => {
+  it("loadContextTokens clamps out-of-range values to [128000, 1000000]", () => {
     writeConfig({ contextTokens: 100 } as any, path);
-    expect(loadContextTokens(path)).toBe(300000);
+    expect(loadContextTokens(path)).toBe(128000);
     writeConfig({ contextTokens: 2_000_000 }, path);
     expect(loadContextTokens(path)).toBe(1_000_000);
   });
@@ -1100,7 +1100,7 @@ describe("config", () => {
     expect(readConfig(path).contextTokens).toBe(750_000);
 
     saveContextTokens(50, path);
-    expect(readConfig(path).contextTokens).toBe(300_000);
+    expect(readConfig(path).contextTokens).toBe(128_000);
 
     saveContextTokens(null, path);
     expect(readConfig(path).contextTokens).toBeUndefined();
