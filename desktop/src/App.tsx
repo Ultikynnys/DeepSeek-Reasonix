@@ -512,7 +512,14 @@ type State = {
   /** True between gemini_oauth_begin_result and the flow's terminal state — settings card spinner. */
   antigravityOAuthWaiting: boolean;
   /** Current turn's activity status — shown as a live indicator below the streaming assistant message. */
-  turnStatus: "thinking" | "reasoning" | "calling_tool" | "waiting_tool" | "responding" | null;
+  turnStatus:
+    | "thinking"
+    | "reasoning"
+    | "calling_tool"
+    | "waiting_tool"
+    | "responding"
+    | "waiting_user"
+    | null;
   /** Tool name currently being prepared/called — displayed in the turn status line. */
   turnStatusTool: string | null;
   /** Timestamp (ms) of the last model/tool event — used to detect "stuck" state. */
@@ -596,6 +603,32 @@ let noticeSequence = 0;
 function nextNoticeId(): string {
   noticeSequence += 1;
   return `notice-${Date.now().toString(36)}-${noticeSequence}`;
+}
+
+export function hasPendingIntervention(state: {
+  pendingConfirms?: readonly unknown[];
+  pendingPathAccess?: readonly unknown[];
+  pendingChoices?: readonly unknown[];
+  pendingPlans?: readonly unknown[];
+  pendingCheckpoints?: readonly unknown[];
+  pendingRevisions?: readonly unknown[];
+}): boolean {
+  return Boolean(
+    (state.pendingChoices && state.pendingChoices.length > 0) ||
+      (state.pendingConfirms && state.pendingConfirms.length > 0) ||
+      (state.pendingPathAccess && state.pendingPathAccess.length > 0) ||
+      (state.pendingPlans && state.pendingPlans.length > 0) ||
+      (state.pendingCheckpoints && state.pendingCheckpoints.length > 0) ||
+      (state.pendingRevisions && state.pendingRevisions.length > 0),
+  );
+}
+
+function turnStatusAfterResolve(
+  nextState: Parameters<typeof hasPendingIntervention>[0],
+  currentBusy: boolean,
+): State["turnStatus"] {
+  if (hasPendingIntervention(nextState)) return "waiting_user";
+  return currentBusy ? "calling_tool" : null;
 }
 
 export function reduce(state: State, action: Action): State {
@@ -724,21 +757,33 @@ export function reduce(state: State, action: Action): State {
         queuedSends: [],
         retryNonce: 0,
       };
-    case "resolve_confirm":
+    case "resolve_confirm": {
+      const nextConfirms = state.pendingConfirms.filter((c) => c.id !== action.id);
       return {
         ...state,
-        pendingConfirms: state.pendingConfirms.filter((c) => c.id !== action.id),
+        pendingConfirms: nextConfirms,
+        turnStatus: turnStatusAfterResolve({ ...state, pendingConfirms: nextConfirms }, state.busy),
       };
-    case "resolve_path_access":
+    }
+    case "resolve_path_access": {
+      const nextPathAccess = state.pendingPathAccess.filter((p) => p.id !== action.id);
       return {
         ...state,
-        pendingPathAccess: state.pendingPathAccess.filter((p) => p.id !== action.id),
+        pendingPathAccess: nextPathAccess,
+        turnStatus: turnStatusAfterResolve(
+          { ...state, pendingPathAccess: nextPathAccess },
+          state.busy,
+        ),
       };
-    case "resolve_choice":
+    }
+    case "resolve_choice": {
+      const nextChoices = state.pendingChoices.filter((c) => c.id !== action.id);
       return {
         ...state,
-        pendingChoices: state.pendingChoices.filter((c) => c.id !== action.id),
+        pendingChoices: nextChoices,
+        turnStatus: turnStatusAfterResolve({ ...state, pendingChoices: nextChoices }, state.busy),
       };
+    }
     case "resolve_plan": {
       const removed = state.pendingPlans.find((p) => p.id === action.id);
       let activePlan = state.activePlan;
@@ -753,17 +798,25 @@ export function reduce(state: State, action: Action): State {
           callId: removed.callId,
         };
       }
+      const nextPlans = state.pendingPlans.filter((p) => p.id !== action.id);
       return {
         ...state,
-        pendingPlans: state.pendingPlans.filter((p) => p.id !== action.id),
+        pendingPlans: nextPlans,
         activePlan,
+        turnStatus: turnStatusAfterResolve({ ...state, pendingPlans: nextPlans }, state.busy),
       };
     }
-    case "resolve_checkpoint":
+    case "resolve_checkpoint": {
+      const nextCheckpoints = state.pendingCheckpoints.filter((c) => c.id !== action.id);
       return {
         ...state,
-        pendingCheckpoints: state.pendingCheckpoints.filter((c) => c.id !== action.id),
+        pendingCheckpoints: nextCheckpoints,
+        turnStatus: turnStatusAfterResolve(
+          { ...state, pendingCheckpoints: nextCheckpoints },
+          state.busy,
+        ),
       };
+    }
     case "resolve_revision": {
       const removed = state.pendingRevisions.find((r) => r.id === action.id);
       let activePlan = state.activePlan;
@@ -775,10 +828,15 @@ export function reduce(state: State, action: Action): State {
           steps: [...keptDone, ...removed.remainingSteps],
         };
       }
+      const nextRevisions = state.pendingRevisions.filter((r) => r.id !== action.id);
       return {
         ...state,
-        pendingRevisions: state.pendingRevisions.filter((r) => r.id !== action.id),
+        pendingRevisions: nextRevisions,
         activePlan,
+        turnStatus: turnStatusAfterResolve(
+          { ...state, pendingRevisions: nextRevisions },
+          state.busy,
+        ),
       };
     }
     case "dismiss_memory_result":
@@ -922,6 +980,7 @@ const AssistantRow = memo(function AssistantRow({
   onRejectConfirm,
   onAlwaysAllowConfirm,
   onStopTool,
+  isInterventionPending,
 }: {
   m: Extract<ChatMessage, { kind: "assistant" }>;
   model?: string;
@@ -931,13 +990,14 @@ const AssistantRow = memo(function AssistantRow({
   onRejectConfirm: (id: number) => void;
   onAlwaysAllowConfirm: (id: number, prefix: string) => void;
   onStopTool: () => void;
+  isInterventionPending?: boolean;
 }) {
   const stats = !m.pending ? countFileStats(m.segments) : null;
   return (
     <>
       <AssistantMsg
         segments={m.segments}
-        pending={m.pending}
+        pending={m.pending && !isInterventionPending}
         model={model}
         onApproveConfirm={onApproveConfirm}
         onRejectConfirm={onRejectConfirm}
@@ -945,6 +1005,7 @@ const AssistantRow = memo(function AssistantRow({
         onStopTool={onStopTool}
         pendingConfirms={pendingConfirms}
         activePlan={activePlan}
+        isInterventionPending={isInterventionPending}
       />
       {stats ? <DiffStats stats={stats} /> : null}
     </>
@@ -1324,6 +1385,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$confirm_required":
       return {
         ...state,
+        turnStatus: "waiting_user",
+        turnStatusTool: null,
         pendingConfirms: [
           ...state.pendingConfirms,
           { id: ev.id, kind: ev.kind, command: ev.command, prompt: ev.prompt! },
@@ -1332,6 +1395,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$path_access_required":
       return {
         ...state,
+        turnStatus: "waiting_user",
+        turnStatusTool: null,
         pendingPathAccess: [
           ...state.pendingPathAccess,
           {
@@ -1348,6 +1413,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$choice_required":
       return {
         ...state,
+        turnStatus: "waiting_user",
+        turnStatusTool: null,
         pendingChoices: [
           ...state.pendingChoices,
           {
@@ -1363,6 +1430,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       const steps = Array.isArray(ev.steps) ? (ev.steps as PlanStep[]) : undefined;
       return {
         ...state,
+        turnStatus: "waiting_user",
+        turnStatusTool: null,
         pendingPlans: [
           ...state.pendingPlans,
           {
@@ -1379,6 +1448,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$checkpoint_required":
       return {
         ...state,
+        turnStatus: "waiting_user",
+        turnStatusTool: null,
         pendingCheckpoints: [
           ...state.pendingCheckpoints,
           {
@@ -1395,6 +1466,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$revision_required":
       return {
         ...state,
+        turnStatus: "waiting_user",
+        turnStatusTool: null,
         pendingRevisions: [
           ...state.pendingRevisions,
           {
@@ -2970,6 +3043,7 @@ function TabRuntime({
                                 onRejectConfirm={onRejectConfirm}
                                 onAlwaysAllowConfirm={onAlwaysAllowConfirm}
                                 onStopTool={onStopTool}
+                                isInterventionPending={hasPendingIntervention(state)}
                               />
                             </div>
                           );
@@ -3077,19 +3151,33 @@ function TabRuntime({
                   state.busy
                     ? state.activeSkill
                       ? `Skill · ${state.activeSkill.name}`
-                      : state.turnStatus === "thinking"
-                        ? t("app.status.thinking")
-                        : state.turnStatus === "reasoning"
-                          ? t("app.status.reasoning")
-                          : state.turnStatus === "calling_tool" && state.turnStatusTool
-                            ? `${t("app.status.callingTool")} ${state.turnStatusTool}`
-                            : state.turnStatus === "waiting_tool"
-                              ? t("app.status.waitingTool")
-                              : state.turnStatus === "responding"
-                                ? t("app.status.responding")
-                                : stuckSec > 30
-                                  ? t("app.status.stuck", { sec: stuckSec })
-                                  : t("app.status.thinking")
+                      : state.pendingChoices.length > 0
+                        ? t("app.status.waitingChoice")
+                        : state.pendingPlans.length > 0
+                          ? t("app.status.waitingPlan")
+                          : state.pendingCheckpoints.length > 0
+                            ? t("app.status.waitingCheckpoint")
+                            : state.pendingRevisions.length > 0
+                              ? t("app.status.waitingRevision")
+                              : state.pendingConfirms.length > 0 ||
+                                  state.pendingPathAccess.length > 0
+                                ? t("app.status.waitingConfirm")
+                                : state.turnStatus === "waiting_user"
+                                  ? t("app.status.waitingUser")
+                                  : state.turnStatus === "thinking"
+                                    ? t("app.status.thinking")
+                                    : state.turnStatus === "reasoning"
+                                      ? t("app.status.reasoning")
+                                      : state.turnStatus === "calling_tool" &&
+                                          state.turnStatusTool
+                                        ? `${t("app.status.callingTool")} ${state.turnStatusTool}`
+                                        : state.turnStatus === "waiting_tool"
+                                          ? t("app.status.waitingTool")
+                                          : state.turnStatus === "responding"
+                                            ? t("app.status.responding")
+                                            : stuckSec > 30
+                                              ? t("app.status.stuck", { sec: stuckSec })
+                                              : t("app.status.thinking")
                     : undefined
                 }
                 textareaRef={composerRef}

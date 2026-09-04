@@ -136,6 +136,7 @@ function registerSubmitPlan(registry: ToolRegistry, opts: PlanToolOptions): void
     name: "submit_plan",
     description: SUBMIT_PLAN_DESCRIPTION,
     readOnly: true,
+    userIntervention: true,
     parameters: {
       type: "object",
       properties: {
@@ -188,6 +189,7 @@ function registerMarkStepComplete(registry: ToolRegistry, opts: PlanToolOptions)
     name: "mark_step_complete",
     description: MARK_STEP_COMPLETE_DESCRIPTION,
     readOnly: true,
+    userIntervention: true,
     parameters: {
       type: "object",
       properties: {
@@ -276,6 +278,7 @@ function registerRevisePlan(registry: ToolRegistry, opts: PlanToolOptions): void
     name: "revise_plan",
     description: REVISE_PLAN_DESCRIPTION,
     readOnly: true,
+    userIntervention: true,
     parameters: {
       type: "object",
       properties: {

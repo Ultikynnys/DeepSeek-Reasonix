@@ -146,6 +146,7 @@ export const AssistantMsg = memo(function AssistantMsg({
   onStopTool,
   pendingConfirms,
   activePlan,
+  isInterventionPending,
 }: {
   segments: AssistantSegment[];
   pending: boolean;
@@ -157,6 +158,7 @@ export const AssistantMsg = memo(function AssistantMsg({
   onStopTool: () => void;
   pendingConfirms: PendingConfirm[];
   activePlan?: ActivePlan;
+  isInterventionPending?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const content = segments
@@ -197,7 +199,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                 // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
                 key={i}
                 text={s.text}
-                streaming={pending && i === segments.length - 1}
+                streaming={pending && !isInterventionPending && i === segments.length - 1}
               />
             );
           }
@@ -350,6 +352,17 @@ export const AssistantMsg = memo(function AssistantMsg({
               result={s.result}
               ok={s.ok}
               durationMs={s.durationMs}
+              waiting={
+                s.result === undefined &&
+                Boolean(
+                  isInterventionPending ||
+                    pendingConfirm ||
+                    s.name === "ask_choice" ||
+                    s.name === "submit_plan" ||
+                    s.name === "revise_plan" ||
+                    s.name === "mark_step_complete",
+                )
+              }
             />
           );
         })}

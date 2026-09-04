@@ -39,6 +39,8 @@ export interface ToolDefinition<A = any, R = any> {
   readOnlyCheck?: (args: A) => boolean;
   /** Safe to dispatch concurrently with other parallel-safe calls in the same turn. Default false — opt-in only. */
   parallelSafe?: boolean;
+  /** Requires user intervention / approval gate. Never batched in parallel; halts subsequent tool execution in the turn until resolved. */
+  userIntervention?: boolean;
   /** Excluded from repeat-loop storm accounting; use only for cheap, state-inspection tools. */
   stormExempt?: boolean;
   /** When true, skip saving full result to disk on truncation. Use for tools that might leak secrets (get_env) or return trivial data. */
@@ -180,6 +182,11 @@ export class ToolRegistry {
   /** Unknown / unannotated tools default to false — third-party MCP tools must opt in. */
   isParallelSafe(name: string): boolean {
     return this._tools.get(name)?.parallelSafe === true;
+  }
+
+  /** True if the tool requires interactive user intervention (choices, plans, revisions). */
+  isUserIntervention(name: string): boolean {
+    return this._tools.get(name)?.userIntervention === true;
   }
 
   specs(): ToolSpec[] {

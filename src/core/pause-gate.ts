@@ -163,6 +163,16 @@ export class PauseGate {
     return null;
   }
 
+  /** True if any pause request is currently pending user resolution. */
+  hasPending(): boolean {
+    return this._pending.size > 0;
+  }
+
+  /** Check if a specific pause request id is pending. */
+  isPending(id: number): boolean {
+    return this._pending.has(id);
+  }
+
   private emitAuditEvent(request: PauseRequest, data: unknown): void {
     if (!this._auditListener) return;
     if (request.kind !== "run_command" && request.kind !== "run_background") return;

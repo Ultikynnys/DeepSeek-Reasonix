@@ -68,6 +68,7 @@ export function registerChoiceTool(
     description:
       "Render an arrow-key picker with 2–6 alternatives. Use when the user is supposed to pick — never enumerate choices as prose. Skip when one option is clearly best (just do it). The picker ALWAYS shows a 'type your own answer' free-text input; pass `allowCustom:false` only when the answer must be one of the listed options.",
     readOnly: true,
+    userIntervention: true,
     parameters: {
       type: "object",
       properties: {

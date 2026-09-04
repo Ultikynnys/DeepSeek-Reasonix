@@ -16,6 +16,8 @@ export interface DispatchContext {
    *  so their tool calls never run ahead of each other's results. */
   model: string;
   isParallelSafe: (name: string) => boolean;
+  isUserIntervention?: (name: string) => boolean;
+  hasPendingGate?: () => boolean;
   inflightIdFor: (call: ToolCall) => string;
   inflightAdd: (id: string) => void;
   runOne: (call: ToolCall, signal: AbortSignal) => Promise<RunOneToolCallResult>;
@@ -69,7 +71,8 @@ export async function* dispatchToolCallsChunked(
       while (
         callIdx < repairedCalls.length &&
         chunk.length < parallelMax &&
-        ctx.isParallelSafe(repairedCalls[callIdx]?.function?.name ?? "")
+        ctx.isParallelSafe(repairedCalls[callIdx]?.function?.name ?? "") &&
+        !ctx.isUserIntervention?.(repairedCalls[callIdx]?.function?.name ?? "")
       ) {
         chunk.push(repairedCalls[callIdx++]!);
       }
@@ -164,6 +167,37 @@ export async function* dispatchToolCallsChunked(
         toolArgs: args,
         callId: ctx.inflightIdFor(call),
       };
+    }
+
+    // If an interactive user-intervention tool ran or a PauseGate request was opened,
+    // prevent subsequent tool calls from running ahead of the user's resolution.
+    // Stub remaining calls as cancelled so the API log maintains tool_call_id parity.
+    const hadIntervention =
+      chunk.some((c) => ctx.isUserIntervention?.(c.function?.name ?? "")) ||
+      ctx.hasPendingGate?.() === true;
+    if (hadIntervention && callIdx < repairedCalls.length) {
+      while (callIdx < repairedCalls.length) {
+        const skipped = repairedCalls[callIdx++]!;
+        const name = skipped.function?.name ?? "";
+        const cancelResult = JSON.stringify({
+          cancelledByUser: true,
+          error: "Tool call cancelled: user intervention was required before this action.",
+        });
+        ctx.appendAndPersist({
+          role: "tool",
+          tool_call_id: skipped.id ?? "",
+          name,
+          content: cancelResult,
+        });
+        yield {
+          turn: ctx.turn,
+          role: "tool",
+          content: cancelResult,
+          toolName: name,
+          toolArgs: skipped.function?.arguments ?? "{}",
+          callId: ctx.inflightIdFor(skipped),
+        };
+      }
     }
   }
 }

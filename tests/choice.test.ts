@@ -229,4 +229,29 @@ describe("registerChoiceTool + ask_choice", () => {
     );
     expect(out).toBe("user picked: A");
   });
+
+  it("marks ask_choice with userIntervention: true and tracks pending in PauseGate", async () => {
+    const reg = new ToolRegistry();
+    registerChoiceTool(reg);
+    expect(reg.isUserIntervention("ask_choice")).toBe(true);
+
+    const gate = new PauseGate();
+    gate.on(() => {
+      // listener registered so ask does not throw
+    });
+    expect(gate.hasPending()).toBe(false);
+    const promise = gate.ask({
+      kind: "choice",
+      payload: {
+        question: "Wait?",
+        options: [{ id: "1", title: "one" }],
+        allowCustom: true,
+      },
+    });
+    expect(gate.hasPending()).toBe(true);
+    gate.resolve(0, { type: "pick", optionId: "1" });
+    const verdict = await promise;
+    expect(verdict.type).toBe("pick");
+    expect(gate.hasPending()).toBe(false);
+  });
 });

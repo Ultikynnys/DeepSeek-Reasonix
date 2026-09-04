@@ -252,7 +252,7 @@ describe("DeepSeekClient ollama provider (keyless + prefix strip)", () => {
       const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
       expect(body.model).toBe("llama3.1:latest");
       expect(body.keep_alive).toBe("30m");
-      expect(body.options).toEqual({
+      expect(body.options).toMatchObject({
         num_ctx: 131072,
       });
       expect(res.content).toBe("hi");

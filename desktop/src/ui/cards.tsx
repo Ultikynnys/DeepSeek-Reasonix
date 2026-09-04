@@ -552,17 +552,19 @@ export function ToolCard({
   result,
   ok,
   durationMs,
+  waiting,
 }: {
   name: string;
   args?: string;
   result?: string;
   ok?: boolean;
   durationMs?: number;
+  waiting?: boolean;
 }) {
   useLang();
   const fileRef = useMemo(() => extractToolFileRef(args), [args]);
   const running = result === undefined;
-  const tone: Tone = running ? "default" : ok === false ? "danger" : "success";
+  const tone: Tone = running ? (waiting ? "warning" : "default") : ok === false ? "danger" : "success";
   // Web tool results (web_search, web_fetch, …) carry the engine that
   // served the call (resolved from config at call time) as an `engine:`
   // line — surface it in the header. No per-tool special-casing.
@@ -582,7 +584,11 @@ export function ToolCard({
       meta={
         <>
           {running ? (
-            <StatusIcon state="running" label={t("cards.running")} />
+            waiting ? (
+              <StatusIcon state="waiting" label={t("cards.awaitingUser") ?? "Waiting for user"} />
+            ) : (
+              <StatusIcon state="running" label={t("cards.running")} />
+            )
           ) : ok === false ? (
             <StatusIcon state="failed" label={t("cards.error")} />
           ) : (

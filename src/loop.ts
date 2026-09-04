@@ -1280,6 +1280,7 @@ export class CacheFirstLoop {
             reasoningEffort: this.reasoningEffort,
             maxTokens: this.maxOutputTokens,
             turn: this._turn,
+            isUserIntervention: (name) => this.tools.isUserIntervention(name),
           });
           assistantContent = result.assistantContent;
           reasoningContent = result.reasoningContent;
@@ -1752,6 +1753,8 @@ export class CacheFirstLoop {
         signal,
         model: this.model,
         isParallelSafe: (name) => this.tools.isParallelSafe(name),
+        isUserIntervention: (name) => this.tools.isUserIntervention(name),
+        hasPendingGate: () => this.confirmationGate.hasPending(),
         inflightIdFor: (call) => this.inflightIdFor(call),
         inflightAdd: (id) => this._inflight.add(id),
         runOne: (call, sig) => this.runOneToolCall(call, sig),

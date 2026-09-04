@@ -15,6 +15,7 @@ import type { LoopEvent } from "../src/loop/types.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
 import { ToolRegistry } from "../src/tools.js";
+import { registerChoiceTool } from "../src/tools/choice.js";
 import type { ChatMessage } from "../src/types.js";
 import { type FakeResponseShape, makeFakeClient } from "./support/fake-client.js";
 import { MATERIAL_REASONING_LOOP } from "./support/repetition-fixtures.js";
@@ -2110,6 +2111,66 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     expect(deltas[deltas.length - 1]!.chars).toBeGreaterThan(deltas[0]!.chars!);
   });
 
+  it("halts stream immediately when an interactive user-intervention tool is ready", async () => {
+    let subsequentChunkSent = false;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: (async (_url: any, _init: any) => {
+        const frames = [
+          `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "ask_choice", arguments: '{"question":"A or B?","options":[{"id":"A","title":"A"}]}' } }] } }] })}\n\n`,
+          () => {
+            subsequentChunkSent = true;
+            return `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "more thinking that should be prevented", tool_calls: [{ index: 1, id: "c2", function: { name: "edit_file", arguments: "{}" } }] } }] })}\n\n`;
+          },
+          "data: [DONE]\n\n",
+        ];
+        const body = new ReadableStream({
+          async pull(ctrl) {
+            if (frames.length === 0) {
+              ctrl.close();
+              return;
+            }
+            const item = frames.shift()!;
+            const text = typeof item === "function" ? item() : item;
+            ctrl.enqueue(new TextEncoder().encode(text));
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    const gate = new PauseGate();
+    gate.ask = () => Promise.resolve({ type: "pick", optionId: "A" } as any);
+
+    const tools = new ToolRegistry();
+    registerChoiceTool(tools);
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: true,
+      confirmationGate: gate,
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("ask")) {
+      events.push(ev);
+      if (ev.role === "tool") break;
+    }
+
+    const reasoningEvents = events.filter(
+      (e) => e.role === "assistant_delta" && e.reasoningDelta?.includes("more thinking"),
+    );
+    expect(reasoningEvents).toHaveLength(0);
+    const toolCallNames = events.filter((e) => e.toolName).map((e) => e.toolName);
+    expect(toolCallNames).toContain("ask_choice");
+    expect(toolCallNames).not.toContain("edit_file");
+  });
+
   it("yields reasoning before content when a chunk carries both fields", async () => {
     const client = new DeepSeekClient({
       apiKey: "sk-test",
@@ -2471,6 +2532,86 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
 
     // Turn ends cleanly
     expect(events[events.length - 1]?.role).toBe("done");
+  });
+
+  it("cancels subsequent tool calls in the same turn when an intervention tool is called", async () => {
+    const gate = new PauseGate();
+    gate.ask = (_opts: { kind: string; payload?: unknown }) => {
+      return Promise.resolve<any>({ type: "pick", optionId: "A" });
+    };
+
+    const reg = new ToolRegistry();
+    let followUpCalled = false;
+    reg.register({
+      name: "ask_choice",
+      description: "ask choice",
+      userIntervention: true,
+      parameters: { type: "object", properties: {} },
+      fn: async () => {
+        const choice = await gate.ask({ kind: "choice", payload: {} });
+        return `user picked: ${(choice as any).optionId}`;
+      },
+    });
+    reg.register({
+      name: "follow_up_tool",
+      description: "speculative tool after choice",
+      parameters: { type: "object", properties: {} },
+      fn: async () => {
+        followUpCalled = true;
+        return "ran follow up";
+      },
+    });
+
+    // Model emits both ask_choice and follow_up_tool in the same turn
+    const toolCallResp: FakeResponseShape = {
+      content: "",
+      tool_calls: [
+        {
+          id: "call_choice",
+          type: "function",
+          function: { name: "ask_choice", arguments: "{}" },
+        },
+        {
+          id: "call_follow_up",
+          type: "function",
+          function: { name: "follow_up_tool", arguments: "{}" },
+        },
+      ],
+    };
+    const followUpResp: FakeResponseShape = {
+      content: "Choice resolved.",
+      tool_calls: [],
+    };
+
+    const responses: FakeResponseShape[] = [toolCallResp, followUpResp];
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: fakeFetch(responses) as unknown as typeof fetch,
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      confirmationGate: gate,
+    });
+
+    const events: Array<{ role: string; content?: string; toolName?: string }> = [];
+    for await (const ev of loop.step("test choice intervention")) {
+      events.push({ role: ev.role, content: ev.content, toolName: ev.toolName });
+    }
+
+    // follow_up_tool must NOT have been executed
+    expect(followUpCalled).toBe(false);
+
+    // Both calls have tool results for API parity, but follow_up is cancelled
+    const toolResults = events.filter((e) => e.role === "tool");
+    expect(toolResults).toHaveLength(2);
+    expect(toolResults[0]?.content).toContain("user picked: A");
+    expect(toolResults[1]?.content).toContain(
+      "Tool call cancelled: user intervention was required",
+    );
   });
 
   describe("session USD budget", () => {

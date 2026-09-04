@@ -34,7 +34,7 @@ vi.mock("./theme", () => ({
   themeForStyle: vi.fn(() => "dark"),
 }));
 
-import { activePlanForMessage, reduce } from "./App";
+import { activePlanForMessage, hasPendingIntervention, reduce } from "./App";
 import type { ModelTurnStartedEvent } from "./protocol";
 import { getThreadMaxWidth } from "./ui/thread-layout";
 
@@ -632,6 +632,29 @@ describe("Desktop App reducer — yolo interactive countdown", () => {
       id: 11,
       countdownMs: 10_000,
     });
+  });
+
+  it("transitions turnStatus to waiting_user and updates hasPendingIntervention on $choice_required", () => {
+    const s0 = { ...initialState(), busy: true, turnStatus: "calling_tool" as const };
+    const next = reduce(s0, {
+      t: "incoming",
+      event: {
+        type: "$choice_required",
+        id: 12,
+        question: "A or B?",
+        options: [
+          { id: "A", title: "Option A" },
+          { id: "B", title: "Option B" },
+        ],
+        allowCustom: true,
+      },
+    });
+    expect(next.turnStatus).toBe("waiting_user");
+    expect(hasPendingIntervention(next)).toBe(true);
+
+    const resolved = reduce(next, { t: "resolve_choice", id: 12 });
+    expect(hasPendingIntervention(resolved)).toBe(false);
+    expect(resolved.turnStatus).toBe("calling_tool");
   });
 });
 

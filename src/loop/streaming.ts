@@ -16,6 +16,8 @@ export interface StreamModelOptions {
   /** Per-turn output token cap forwarded to the stream as `max_tokens`. Undefined = no cap. */
   maxTokens?: number;
   turn: number;
+  /** Optional checker for tools that require user intervention/confirmation. */
+  isUserIntervention?: (name: string) => boolean;
 }
 
 export interface StreamModelResult {
@@ -158,11 +160,11 @@ export async function* streamModelResponse(
         if (d.thoughtSignature) cur.thoughtSignature = d.thoughtSignature;
         callBuf.set(d.index, cur);
 
-        if (
+        const isComplete =
           !readyIndices.has(d.index) &&
           cur.function.name &&
-          looksLikeCompleteJson(cur.function.arguments ?? "")
-        ) {
+          looksLikeCompleteJson(cur.function.arguments ?? "");
+        if (isComplete) {
           readyIndices.add(d.index);
         }
 
@@ -178,19 +180,38 @@ export async function* streamModelResponse(
             toolCallReadyCount: readyIndices.size,
           };
         }
+
+        // Halt stream immediately when an interactive user-intervention tool is ready,
+        // so the model does not continue generating additional thinking or tool calls.
+        if (isComplete) {
+          const isIntervention =
+            opts.isUserIntervention?.(cur.function.name) ??
+            (cur.function.name === "ask_choice" ||
+              cur.function.name === "submit_plan" ||
+              cur.function.name === "revise_plan");
+          if (isIntervention) {
+            finishReason = finishReason ?? "tool_calls";
+            stallAbort.abort(new Error(`Intervention tool ${cur.function.name} ready`));
+            break;
+          }
+        }
       }
       if (chunk.usage) usage = chunk.usage;
       if (chunk.finishReason) finishReason = chunk.finishReason;
       if (chunk.image) image = chunk.image;
     }
   } catch (err) {
-    // The loop may safely replay a body-read failure only when no assistant
-    // bytes or tool-call progress reached the UI. Mark partial streams so the
-    // retry path cannot append a second response to a settled card.
-    if (emittedOutput && typeof err === "object" && err !== null) {
-      (err as { partialDelivered?: boolean }).partialDelivered = true;
+    // If we deliberately aborted the stream due to repetition stall or an intervention tool ready,
+    // suppress the abort error and let the accumulated response settle cleanly.
+    if (!stallAbort.signal.aborted) {
+      // The loop may safely replay a body-read failure only when no assistant
+      // bytes or tool-call progress reached the UI. Mark partial streams so the
+      // retry path cannot append a second response to a settled card.
+      if (emittedOutput && typeof err === "object" && err !== null) {
+        (err as { partialDelivered?: boolean }).partialDelivered = true;
+      }
+      throw err;
     }
-    throw err;
   }
 
   return {
