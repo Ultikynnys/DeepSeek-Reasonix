@@ -2,7 +2,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { type Server, createServer } from "node:http";
-import { escapeHtml, isUsableAntigravityModel } from "@reasonix/core-utils";
+import { isUsableAntigravityModel } from "@reasonix/core-utils";
 import {
   type AntigravityOAuthCreds,
   clearAntigravityOAuth,
@@ -10,6 +10,7 @@ import {
   readConfig,
   saveAntigravityOAuth,
 } from "./config.js";
+import { type TokenResponse, errorPage, postTokenForm } from "./oauth-shared.js";
 
 /** Published installed-app OAuth identity used by Antigravity's browser flow. */
 export const ANTIGRAVITY_OAUTH_CLIENT_ID =
@@ -85,37 +86,6 @@ export function buildAuthorizeUrl(p: AuthorizeParams): string {
     q.set("code_challenge_method", "S256");
   }
   return `${antigravityAuthorizeUrl()}?${q.toString()}`;
-}
-
-interface TokenResponse {
-  access_token?: string;
-  refresh_token?: string;
-  id_token?: string;
-  expires_in?: number;
-  error?: string;
-  error_description?: string;
-}
-
-async function postTokenForm(url: string, body: URLSearchParams): Promise<TokenResponse> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  const text = await res.text();
-  let parsed: TokenResponse;
-  try {
-    parsed = JSON.parse(text) as TokenResponse;
-  } catch {
-    throw new Error(`OAuth token endpoint returned ${res.status}: ${text.slice(0, 200)}`);
-  }
-  if (!res.ok || parsed.error) {
-    throw new Error(
-      `OAuth token exchange failed (${res.status}): ${parsed.error_description ?? parsed.error ?? text.slice(0, 200)}`,
-    );
-  }
-  if (!parsed.access_token) throw new Error("OAuth token endpoint returned no access_token");
-  return parsed;
 }
 
 function toCreds(parsed: TokenResponse, fallbackRefresh: string): AntigravityOAuthCreds {
@@ -485,13 +455,6 @@ export interface OAuthFlow {
 const SUCCESS_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Signed in</title></head>
 <body style="font-family:system-ui;max-width:34em;margin:4em auto;line-height:1.6">
 <h2>Signed in to Google</h2><p>You can close this window and return to Reasonix.</p></body></html>`;
-
-function errorPage(msg: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in failed</title></head>
-<body style="font-family:system-ui;max-width:34em;margin:4em auto;line-height:1.6">
-<h2>Sign-in failed</h2><p>${escapeHtml(msg)}</p>
-<p>You can close this window and retry from Reasonix.</p></body></html>`;
-}
 
 /** Starts the browser OAuth dance: a one-shot localhost callback server and the
  *  authorize URL. `done` rejects on error, cancel, or the 10-minute timeout. */

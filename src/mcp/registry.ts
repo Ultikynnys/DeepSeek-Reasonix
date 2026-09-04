@@ -384,7 +384,14 @@ export function truncateForModelByTokens(s: string, maxTokens: number, extraNote
   return `${head}\n\n[…truncated ~${droppedTokens} tokens (${droppedChars} chars) — raise BridgeOptions.maxResultTokens, or call the tool with a narrower scope (filter, head, pagination)${note}…]\n\n${tail}`;
 }
 
-function sizePrefixToTokens(s: string, budget: number): string {
+// Find the largest slice of `s` that fits `budget` tokens. The caller
+// supplies `slice` to anchor the scan: `sliceAlignedToCodepoint` grows the
+// largest prefix, `sliceSuffixAlignedToCodepoint` the largest suffix.
+function sizeSliceToTokens(
+  s: string,
+  budget: number,
+  slice: (s: string, len: number) => string,
+): string {
   if (budget <= 0 || s.length === 0) return "";
   // Optimistic starting size: assume ~4 chars/token (English/code
   // average). If the content is denser (CJK ~1 char/token), the first
@@ -392,31 +399,24 @@ function sizePrefixToTokens(s: string, budget: number): string {
   let size = Math.min(s.length, budget * 4);
   for (let iter = 0; iter < 6; iter++) {
     if (size <= 0) return "";
-    const slice = sliceAlignedToCodepoint(s, size);
-    const count = countTokens(slice);
-    if (count <= budget) return slice;
+    const candidate = slice(s, size);
+    const count = countTokens(candidate);
+    if (count <= budget) return candidate;
     // Shrink by the overshoot fraction plus a small safety margin.
     const next = Math.floor(size * (budget / count) * 0.95);
-    if (next >= size) return sliceAlignedToCodepoint(s, Math.max(0, size - 1));
+    if (next >= size) return slice(s, Math.max(0, size - 1));
     size = next;
   }
-  return sliceAlignedToCodepoint(s, Math.max(0, size));
+  return slice(s, Math.max(0, size));
+}
+
+function sizePrefixToTokens(s: string, budget: number): string {
+  return sizeSliceToTokens(s, budget, sliceAlignedToCodepoint);
 }
 
 /** Slice `s` from the end to the largest suffix that fits `budget` tokens. */
 function sizeSuffixToTokens(s: string, budget: number): string {
-  if (budget <= 0 || s.length === 0) return "";
-  let size = Math.min(s.length, budget * 4);
-  for (let iter = 0; iter < 6; iter++) {
-    if (size <= 0) return "";
-    const slice = sliceSuffixAlignedToCodepoint(s, size);
-    const count = countTokens(slice);
-    if (count <= budget) return slice;
-    const next = Math.floor(size * (budget / count) * 0.95);
-    if (next >= size) return sliceSuffixAlignedToCodepoint(s, Math.max(0, size - 1));
-    size = next;
-  }
-  return sliceSuffixAlignedToCodepoint(s, Math.max(0, size));
+  return sizeSliceToTokens(s, budget, sliceSuffixAlignedToCodepoint);
 }
 
 function blockToString(block: McpContentBlock): string {

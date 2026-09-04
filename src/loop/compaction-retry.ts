@@ -86,6 +86,43 @@ export async function withCompactionRetry<T>(opts: CompactionRetryOptions<T>): P
   }
 }
 
+// Run `task` under a wall-clock deadline. The deadline aborts its own
+// AbortController (combined via AbortSignal.any) and rejects with
+// `new Error(timeoutMessage)`; the timer always clears and the controller
+// aborts on settle so no request work survives completion.
+export async function withDeadline<T>(
+  task: (signal: AbortSignal) => Promise<T>,
+  deadlineMs: number,
+  timeoutMessage: string,
+  parentSignal?: AbortSignal,
+): Promise<T> {
+  const deadlineCtrl = new AbortController();
+  const signal = parentSignal
+    ? AbortSignal.any([parentSignal, deadlineCtrl.signal])
+    : deadlineCtrl.signal;
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadlinePromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      deadlineCtrl.abort(new Error(timeoutMessage));
+      reject(new Error(timeoutMessage));
+    }, deadlineMs);
+  });
+  try {
+    const result = task(signal);
+    return await Promise.race([result, deadlinePromise]);
+  } catch (err) {
+    // Whichever promise wins, preserve the terminal timeout identity instead of
+    // misclassifying the abort as a transient provider drop.
+    if (timedOut) throw new Error(timeoutMessage);
+    throw err;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    deadlineCtrl.abort();
+  }
+}
+
 /** Provider statuses and network/body failures that are safe to replay. */
 export function isRetryableCompactionError(message: string): boolean {
   const trimmed = message.trim();

@@ -11,7 +11,11 @@ import { type TurnStats, resolveContextTokens } from "../telemetry/stats.js";
 import { countTokensBounded } from "../tokenizer.js";
 import type { ChatMessage } from "../types.js";
 import { buildFoldSummaryInstruction, extractPinnedConstraints } from "./compaction-prompt.js";
-import { COMPACTION_RETRY_DELAY_MS, withCompactionRetry } from "./compaction-retry.js";
+import {
+  COMPACTION_RETRY_DELAY_MS,
+  withCompactionRetry,
+  withDeadline,
+} from "./compaction-retry.js";
 import { errorLabelFor, reasonPrefixFor } from "./errors.js";
 import { buildAssistantMessage } from "./messages.js";
 import { stripHallucinatedToolMarkup } from "./thinking.js";
@@ -135,36 +139,19 @@ export async function* forceSummaryAfterIterLimit(
       maxElapsedMs: deadlineMs + COMPACTION_RETRY_DELAY_MS,
       timeoutMessage: "forced-summary-timeout",
       attempt: async (attemptSignal) => {
-        const deadlineCtrl = new AbortController();
-        const requestSignal = AbortSignal.any([attemptSignal, deadlineCtrl.signal]);
-        let timedOut = false;
-        let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-        const deadlinePromise = new Promise<never>((_, reject) => {
-          deadlineTimer = setTimeout(() => {
-            timedOut = true;
-            deadlineCtrl.abort(new Error("forced-summary-timeout"));
-            reject(new Error("forced-summary-timeout"));
-          }, deadlineMs);
-        });
-        try {
-          return await Promise.race([
+        return withDeadline(
+          (signal) =>
             ctx.client.chat({
               model: ctx.model,
               messages,
-              signal: requestSignal,
+              signal,
               thinking: "disabled",
               maxTokens: ctx.maxOutputTokens,
             }),
-            deadlinePromise,
-          ]);
-        } catch (err) {
-          // Keep the local deadline terminal; only provider/network failures
-          // are eligible for the shared bounded compaction replay.
-          if (timedOut) throw new Error("forced-summary-timeout");
-          throw err;
-        } finally {
-          if (deadlineTimer) clearTimeout(deadlineTimer);
-        }
+          deadlineMs,
+          "forced-summary-timeout",
+          attemptSignal,
+        );
       },
     });
     const rawContent = resp.content?.trim() ?? "";

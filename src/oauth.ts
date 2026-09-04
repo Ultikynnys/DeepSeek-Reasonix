@@ -3,7 +3,6 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { type Server, createServer } from "node:http";
-import { escapeHtml } from "@reasonix/core-utils";
 import {
   type OpenAIOAuthCreds,
   clearOpenAIOAuth,
@@ -11,6 +10,7 @@ import {
   readConfig,
   saveOpenAIOAuth,
 } from "./config.js";
+import { type TokenResponse, errorPage, postTokenForm } from "./oauth-shared.js";
 
 export const OPENAI_DEFAULT_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
 export const OPENAI_DEFAULT_TOKEN_URL = "https://auth.openai.com/oauth/token";
@@ -94,37 +94,6 @@ export function buildAuthorizeUrl(p: AuthorizeParams): string {
   const audience = p.audience ?? process.env.OPENAI_OAUTH_AUDIENCE?.trim();
   if (audience) q.set("audience", audience);
   return `${openAIAuthorizeUrl()}?${q.toString()}`;
-}
-
-interface TokenResponse {
-  access_token?: string;
-  refresh_token?: string;
-  id_token?: string;
-  expires_in?: number;
-  error?: string;
-  error_description?: string;
-}
-
-async function postTokenForm(url: string, body: URLSearchParams): Promise<TokenResponse> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  const text = await res.text();
-  let parsed: TokenResponse;
-  try {
-    parsed = JSON.parse(text) as TokenResponse;
-  } catch {
-    throw new Error(`OAuth token endpoint returned ${res.status}: ${text.slice(0, 200)}`);
-  }
-  if (!res.ok || parsed.error) {
-    throw new Error(
-      `OAuth token exchange failed (${res.status}): ${parsed.error_description ?? parsed.error ?? text.slice(0, 200)}`,
-    );
-  }
-  if (!parsed.access_token) throw new Error("OAuth token endpoint returned no access_token");
-  return parsed;
 }
 
 /** OpenAI account id from JWT claims (id_token or access_token) — the Codex
@@ -256,14 +225,6 @@ const SUCCESS_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Si
 <body style="font-family:system-ui;max-width:34em;margin:4em auto;line-height:1.6">
 <h2>Signed in to OpenAI</h2><p>You can close this window and return to Reasonix.</p></body></html>`;
 
-function errorPage(msg: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in failed</title></head>
-<body style="font-family:system-ui;max-width:34em;margin:4em auto;line-height:1.6">
-<h2>Sign-in failed</h2><p>${escapeHtml(msg)}</p>
-<p>You can close this window and retry from Reasonix.</p></body></html>`;
-}
-
-/** Port parsed from an OPENAI_OAUTH_REDIRECT_URI override, else the Codex port. */
 function redirectPort(uri: string): number {
   try {
     const parsed = new URL(uri);

@@ -19,6 +19,7 @@ import {
   COMPACTION_MAX_ATTEMPTS,
   COMPACTION_RETRY_DELAY_MS,
   withCompactionRetry,
+  withDeadline,
 } from "./loop/compaction-retry.js";
 import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
@@ -689,7 +690,6 @@ export class ContextManager {
     // kept climbing to the 80% forced-summary guard. The fold now runs to
     // completion bounded only by the scaled deadline below; the loop honors
     // a deferred Esc at its next iteration boundary instead.
-    let timeout: ReturnType<typeof setTimeout> | undefined;
     // Deadline scales with the head being summarized: prefill + queue time
     // grows with the prompt, so a fixed short timeout would deterministically
     // kill folds at large context sizes (e.g. 15s vs a 240k-token prefill) —
@@ -707,42 +707,25 @@ export class ContextManager {
         maxElapsedMs: deadlineMs + HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS,
         timeoutMessage: "fold-timeout",
         attempt: async (attemptSignal) => {
-          const deadlineCtrl = new AbortController();
-          const requestSignal = AbortSignal.any([attemptSignal, deadlineCtrl.signal]);
-          let timedOut = false;
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            timeout = setTimeout(() => {
-              timedOut = true;
-              deadlineCtrl.abort(new Error("fold-timeout"));
-              reject(new Error("fold-timeout"));
-            }, deadlineMs);
-          });
-          try {
-            const resp = await Promise.race([
+          const resp = await withDeadline(
+            (signal) =>
               this.deps.client.chat({
                 model: summaryModel,
                 messages,
                 tools: tools.length ? (tools as ToolSpec[]) : undefined,
-                signal: requestSignal,
+                signal,
                 thinking: "disabled",
                 maxTokens: HISTORY_FOLD_SUMMARY_MAX_OUTPUT_TOKENS,
               }),
-              timeoutPromise,
-            ]);
-            this.deps.stats.recordCompaction(summaryModel, resp.usage ?? new Usage());
-            return {
-              content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
-              reasoningContent: resp.reasoningContent ?? "",
-            };
-          } catch (err) {
-            // Whichever promise wins the race, preserve the local timeout's
-            // non-retryable identity instead of misclassifying its abort as a
-            // transient provider drop.
-            if (timedOut) throw new Error("fold-timeout");
-            throw err;
-          } finally {
-            if (timeout) clearTimeout(timeout);
-          }
+            deadlineMs,
+            "fold-timeout",
+            attemptSignal,
+          );
+          this.deps.stats.recordCompaction(summaryModel, resp.usage ?? new Usage());
+          return {
+            content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
+            reasoningContent: resp.reasoningContent ?? "",
+          };
         },
       });
     } catch (err) {
@@ -771,30 +754,24 @@ export class ContextManager {
       },
       { role: "user", content: buildFileTriageInstruction(summary, allPaths) },
     ];
-    const triageCtrl = new AbortController();
-    let triageTimer: ReturnType<typeof setTimeout> | undefined;
     // Deadline race, not just abort: the client's own socket cap is 11 min and
     // this call runs INSIDE the fold — a hung connection would freeze the
     // "compacting history…" card (and the loop's tool dispatch) for minutes.
-    // The race rejects at FILE_TRIAGE_TIMEOUT_MS; the catch below fail-opens
+    // withDeadline rejects at FILE_TRIAGE_TIMEOUT_MS; the catch below fail-opens
     // with zero drops, same as any other triage failure.
-    const deadlinePromise = new Promise<never>((_, reject) => {
-      triageTimer = setTimeout(() => {
-        triageCtrl.abort();
-        reject(new Error("file-triage-timeout"));
-      }, FILE_TRIAGE_TIMEOUT_MS);
-    });
     const triageModel = compactModelForProvider(activeModel);
     try {
-      const resp = await Promise.race([
-        this.deps.client.chat({
-          model: triageModel,
-          messages,
-          signal: triageCtrl.signal,
-          thinking: "disabled",
-        }),
-        deadlinePromise,
-      ]);
+      const resp = await withDeadline(
+        (signal) =>
+          this.deps.client.chat({
+            model: triageModel,
+            messages,
+            signal,
+            thinking: "disabled",
+          }),
+        FILE_TRIAGE_TIMEOUT_MS,
+        "file-triage-timeout",
+      );
       this.deps.stats.recordCompaction(triageModel, resp.usage ?? new Usage());
       return parseFileTriage(resp.content, allPaths);
     } catch (err) {
@@ -807,8 +784,6 @@ export class ContextManager {
         drop: [],
         warn: `file triage failed — no files dropped (${message})`,
       };
-    } finally {
-      if (triageTimer) clearTimeout(triageTimer);
     }
   }
 

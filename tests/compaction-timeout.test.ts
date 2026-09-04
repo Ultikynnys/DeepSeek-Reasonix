@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 import { ContextManager, FILE_TRIAGE_TIMEOUT_MS } from "../src/context-manager.js";
-import { COMPACTION_RETRY_DELAY_MS } from "../src/loop/compaction-retry.js";
+import { COMPACTION_RETRY_DELAY_MS, withDeadline } from "../src/loop/compaction-retry.js";
 import {
   FORCE_SUMMARY_TIMEOUT_MS,
   type ForceSummaryContext,
@@ -296,5 +296,50 @@ describe("compaction model-call deadlines", () => {
     }>;
     expect(sentContents).toBeDefined();
     expect(sentContents.length).toBeLessThan(messages.length);
+  });
+
+  describe("withDeadline", () => {
+    it("rejects with the timeout identity when the task hangs", async () => {
+      vi.useFakeTimers();
+      const hanging = new Promise<never>(() => {});
+      const pending = withDeadline(() => hanging, 1_000, "fold-timeout");
+      // Swallow the rejection so the fake-timer advance isn't an unhandled
+      // rejection; the caught value below is what we assert on.
+      pending.catch(() => {});
+      await vi.advanceTimersByTimeAsync(1_001);
+      await expect(pending).rejects.toThrow("fold-timeout");
+    });
+
+    it("aborts the task signal on timeout and clears the timer on settle", async () => {
+      vi.useFakeTimers();
+      let sawSignal: AbortSignal | undefined;
+      let settled = false;
+      const pending = withDeadline(
+        (signal) => {
+          sawSignal = signal;
+          return new Promise<never>(() => {});
+        },
+        1_000,
+        "fold-timeout",
+      );
+      pending.catch(() => {});
+      const deadlinePromise = (async () => {
+        await vi.advanceTimersByTimeAsync(1_001);
+        settled = true;
+      })();
+      await pending.catch(() => {});
+      // The signal handed to the task reflects the deadline abort after it fires.
+      expect(sawSignal).toBeDefined();
+      expect(sawSignal?.aborted).toBe(true);
+      await deadlinePromise;
+      expect(settled).toBe(true);
+    });
+
+    it("preserves a transient failure and clears the timer", async () => {
+      const err = new Error("provider connection reset");
+      await expect(withDeadline(() => Promise.reject(err), 10_000, "fold-timeout")).rejects.toBe(
+        err,
+      );
+    });
   });
 });
