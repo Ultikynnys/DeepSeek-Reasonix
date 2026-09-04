@@ -348,6 +348,10 @@ export type Settings = {
   budgetUsd: number | null;
   /** User-configured context-window cap (tokens); null = per-model default. */
   contextTokens?: number | null;
+  /** Effective per-turn iteration cap after config, environment, and default resolution. */
+  maxIterPerTurn?: number | null;
+  /** Explicit config override; null means environment/default resolution is active. */
+  maxIterPerTurnOverride?: number | null;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;

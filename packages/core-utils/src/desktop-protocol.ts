@@ -367,6 +367,10 @@ export interface SettingsEvent {
   budgetUsd: number | null;
   /** User-configured context-window cap (tokens); null = per-model default (300K). */
   contextTokens?: number | null;
+  /** Effective per-turn iteration cap after config, environment, and default resolution. */
+  maxIterPerTurn?: number | null;
+  /** Explicit config override; null means environment/default resolution is active. */
+  maxIterPerTurnOverride?: number | null;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -600,6 +604,8 @@ export interface SettingsPatch {
   budgetUsd?: number | null;
   /** Context-window cap in tokens, clamped to [128000, 1000000]; null/undefined = per-model default. */
   contextTokens?: number | null;
+  /** Per-turn iteration cap, clamped to [50, 100]; null/undefined = default (50). */
+  maxIterPerTurn?: number | null;
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;

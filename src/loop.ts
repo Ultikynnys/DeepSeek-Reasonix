@@ -179,6 +179,8 @@ export interface ReconfigurableOptions {
   maxOutputTokens?: number | null;
   /** Context-window cap override (tokens); undefined = per-model default. `null` = clear a set override. */
   ctxMaxOverride?: number | null;
+  /** Per-turn iteration cap; undefined = keep current, `null` = reset to default (50). */
+  maxIterPerTurn?: number | null;
 }
 
 export interface LoopAbortOptions {
@@ -573,6 +575,9 @@ export class CacheFirstLoop {
       const v = opts.ctxMaxOverride ?? undefined;
       this.ctxMaxOverride = v;
       this.context.ctxMaxOverride = v;
+    }
+    if (opts.maxIterPerTurn !== undefined) {
+      this.maxIterPerTurn = opts.maxIterPerTurn ?? CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN;
     }
   }
 

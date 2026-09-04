@@ -1642,16 +1642,33 @@ export function saveReasoningEffort(
   writeConfig(cfg, path);
 }
 
-/** Load the per-turn iteration cap. Config > env > default (50). */
+/** Load the per-turn iteration cap. Config > env > default (50). Clamped to [50, 100]. */
 export function loadMaxIterPerTurn(path: string = defaultConfigPath()): number {
   const fromConfig = readConfig(path).maxIterPerTurn;
-  if (typeof fromConfig === "number" && fromConfig > 0) return fromConfig;
+  if (typeof fromConfig === "number" && Number.isFinite(fromConfig) && fromConfig > 0) {
+    return Math.min(100, Math.max(50, Math.floor(fromConfig)));
+  }
   const fromEnv = process.env.REASONIX_MAX_ITER;
   if (fromEnv) {
     const n = Number(fromEnv);
-    if (Number.isFinite(n) && n > 0) return n;
+    if (Number.isFinite(n) && n > 0) return Math.min(100, Math.max(50, Math.floor(n)));
   }
   return 50;
+}
+
+/** Persist the per-turn iteration cap. `null` / undefined clears it back to default (50). */
+export function saveMaxIterPerTurn(
+  value: number | null | undefined,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  if (value === null || value === undefined) {
+    const { maxIterPerTurn: _drop, ...rest } = cfg;
+    writeConfig(rest, path);
+  } else {
+    const clamped = Math.min(100, Math.max(50, Math.floor(value)));
+    writeConfig({ ...cfg, maxIterPerTurn: clamped }, path);
+  }
 }
 
 /** Returns undefined when no cap is set (caller passes nothing to the API, server default applies). */

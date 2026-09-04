@@ -125,6 +125,7 @@ import {
   saveContextTokens,
   saveDesktopOpenTabs,
   saveEditMode,
+  saveMaxIterPerTurn,
   saveModel,
   saveOpenAIApiKey,
   saveOpenAIOAuth,
@@ -882,8 +883,9 @@ export function modelEndpointFor(model: string, path?: string): ModelEndpointInf
 }
 
 function emitSettings(tab: Tab): void {
-  const oauth = readConfig().openaiOAuth;
-  const antigravityOAuth = readConfig().antigravityOAuth;
+  const config = readConfig();
+  const oauth = config.openaiOAuth;
+  const antigravityOAuth = config.antigravityOAuth;
   const ep = loadEndpoint();
   const editMode = loadEditMode();
   if (tab.toolset) applyPlanMode(tab.toolset.tools, editMode);
@@ -895,19 +897,22 @@ function emitSettings(tab: Tab): void {
       editMode,
       budgetUsd: tab.runtime?.loop.budgetUsd ?? null,
       contextTokens: tab.ctxMaxOverride ?? null,
+      maxIterPerTurn: tab.runtime?.loop.maxIterPerTurn ?? loadMaxIterPerTurn(),
+      maxIterPerTurnOverride:
+        typeof config.maxIterPerTurn === "number" ? config.maxIterPerTurn : null,
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
       workspaceDir: tab.rootDir,
       recentWorkspaces: recent,
       model: tab.currentModel,
-      customModels: Object.keys(readConfig().models ?? {}).sort(),
-      ollamaBaseUrl: readConfig().ollamaBaseUrl,
+      customModels: Object.keys(config.models ?? {}).sort(),
+      ollamaBaseUrl: config.ollamaBaseUrl,
       webSearchEngine: readWebSearchEngine(),
       webSearchEndpoint: readConfig().webSearchEndpoint,
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
       subagentModel: tab.currentSubagentModel,
       showSystemEvents: loadShowSystemEvents(),
-      statusBar: readConfig().statusBar,
+      statusBar: config.statusBar,
       modelEndpoint: modelEndpointFor(tab.currentModel),
       openaiOAuth: {
         signedIn: !!oauth?.accessToken,
@@ -4543,6 +4548,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           tab.runtime?.loop.configure({ ctxMaxOverride: tabCtxMaxOverride(tab) ?? null });
           emitCtxBreakdown(tab);
           emitSettings(tab);
+        }
+        if (msg.maxIterPerTurn !== undefined) {
+          saveMaxIterPerTurn(msg.maxIterPerTurn);
+          const next = loadMaxIterPerTurn();
+          for (const openTab of tabs.values()) {
+            openTab.runtime?.loop.configure({ maxIterPerTurn: next });
+            emitSettings(openTab);
+          }
         }
         if (msg.baseUrl !== undefined) saveBaseUrl(msg.baseUrl);
         if (msg.workspaceDir !== undefined) {

@@ -30,6 +30,7 @@ import {
   loadFilesystemOutlineThresholdBytes,
   loadIndexConfig,
   loadIndexUserConfig,
+  loadMaxIterPerTurn,
   loadModel,
   loadMouseWheelRows,
   loadPricingOverride,
@@ -59,6 +60,7 @@ import {
   saveDesktopOpenTabs,
   saveEditMode,
   saveIndexConfig,
+  saveMaxIterPerTurn,
   saveModel,
   saveOpenAIApiKey,
   saveOpenAIOAuth,
@@ -1104,6 +1106,31 @@ describe("config", () => {
 
     saveContextTokens(null, path);
     expect(readConfig(path).contextTokens).toBeUndefined();
+  });
+
+  it("loadMaxIterPerTurn defaults to 50 when unset", () => {
+    expect(loadMaxIterPerTurn(path)).toBe(50);
+  });
+
+  it("loadMaxIterPerTurn clamps out-of-range values to [50, 100]", () => {
+    writeConfig({ maxIterPerTurn: 20 } as any, path);
+    expect(loadMaxIterPerTurn(path)).toBe(50);
+    writeConfig({ maxIterPerTurn: 150 } as any, path);
+    expect(loadMaxIterPerTurn(path)).toBe(100);
+  });
+
+  it("saveMaxIterPerTurn persists clamped value and clears on null", () => {
+    saveMaxIterPerTurn(75, path);
+    expect(readConfig(path).maxIterPerTurn).toBe(75);
+
+    saveMaxIterPerTurn(20, path);
+    expect(readConfig(path).maxIterPerTurn).toBe(50);
+
+    saveMaxIterPerTurn(120, path);
+    expect(readConfig(path).maxIterPerTurn).toBe(100);
+
+    saveMaxIterPerTurn(null, path);
+    expect(readConfig(path).maxIterPerTurn).toBeUndefined();
   });
 
   it("loadReasoningEffort defaults to 'high' when unset (safe for vLLM / Azure)", () => {

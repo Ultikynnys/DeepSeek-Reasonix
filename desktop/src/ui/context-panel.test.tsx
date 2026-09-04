@@ -27,6 +27,8 @@ const settings: Settings = {
   reasoningEffort: "high",
   editMode: "review",
   budgetUsd: null,
+  maxIterPerTurn: 50,
+  maxIterPerTurnOverride: null,
   workspaceDir: "/repo",
   recentWorkspaces: [],
   model: "deepseek-reasoner",
@@ -272,7 +274,12 @@ describe("ContextPanel files", () => {
     const onSaveSettings = vi.fn();
     render(
       <ContextPanel
-        settings={{ ...settings, contextTokens: 500_000 }}
+        settings={{
+          ...settings,
+          contextTokens: 500_000,
+          maxIterPerTurn: 75,
+          maxIterPerTurnOverride: 75,
+        }}
         usage={usage}
         mcpSpecs={[]}
         mcpBridged={false}
@@ -310,5 +317,20 @@ describe("ContextPanel files", () => {
     expect(resetBtn).toBeTruthy();
     fireEvent.click(resetBtn);
     expect(onSaveSettings).toHaveBeenCalledWith({ contextTokens: null });
+
+    const iterationSlider = screen.getByRole("slider", { name: "Max iterations" });
+    expect(iterationSlider.getAttribute("min")).toBe("50");
+    expect(iterationSlider.getAttribute("max")).toBe("100");
+    expect(iterationSlider.getAttribute("step")).toBe("1");
+    expect((iterationSlider as HTMLInputElement).value).toBe("75");
+    expect(screen.getByText("75 iters")).toBeTruthy();
+
+    fireEvent.change(iterationSlider, { target: { value: "90" } });
+    fireEvent.pointerUp(iterationSlider);
+    expect(onSaveSettings).toHaveBeenCalledWith({ maxIterPerTurn: 90 });
+
+    const iterationReset = screen.getByTitle("Reset to environment or default (50)");
+    fireEvent.click(iterationReset);
+    expect(onSaveSettings).toHaveBeenCalledWith({ maxIterPerTurn: null });
   });
 });

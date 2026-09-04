@@ -412,6 +412,19 @@ function CtxTools({
     onSaveSettings?.({ contextTokens: next });
   };
 
+  const effectiveMaxIter = settings?.maxIterPerTurn ?? 50;
+  const clampedMaxIter = Math.min(100, Math.max(50, effectiveMaxIter));
+  const [iterValue, setIterValue] = useState<number>(clampedMaxIter);
+
+  useEffect(() => {
+    setIterValue(clampedMaxIter);
+  }, [clampedMaxIter]);
+
+  const commitIter = (val: number) => {
+    const next = Math.min(100, Math.max(50, val));
+    onSaveSettings?.({ maxIterPerTurn: next });
+  };
+
   return (
     <>
       <div className="ctx-block">
@@ -449,6 +462,44 @@ function CtxTools({
           <div className="ctx-slider-bounds">
             <span>128K</span>
             <span>1M</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.maxIterations")}</span>
+          <span className="right" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span>{t("contextPanel.maxIterationsUnit", { count: iterValue })}</span>
+            {settings?.maxIterPerTurnOverride !== undefined &&
+            settings?.maxIterPerTurnOverride !== null ? (
+              <button
+                type="button"
+                className="mini-btn"
+                title={t("contextPanel.maxIterationsResetTooltip")}
+                onClick={() => onSaveSettings?.({ maxIterPerTurn: null })}
+              >
+                {t("contextPanel.contextWindowReset")}
+              </button>
+            ) : null}
+          </span>
+        </div>
+        <div className="ctx-slider-container">
+          <input
+            type="range"
+            className="ctx-slider"
+            min={50}
+            max={100}
+            step={1}
+            value={iterValue}
+            aria-label={t("contextPanel.maxIterations")}
+            onChange={(e) => setIterValue(Number(e.target.value))}
+            onPointerUp={(e) => commitIter(Number(e.currentTarget.value))}
+            onKeyUp={(e) => commitIter(Number(e.currentTarget.value))}
+          />
+          <div className="ctx-slider-bounds">
+            <span>50</span>
+            <span>100</span>
           </div>
         </div>
       </div>
