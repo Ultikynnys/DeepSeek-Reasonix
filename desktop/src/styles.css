@@ -27,6 +27,13 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Links use the theme accent everywhere (markdown, settings, about) so they
+   adapt to the active theme instead of falling back to the browser's fixed
+   dark blue, which is unreadable on dark backgrounds. */
+a {
+  color: var(--accent);
+}
+
 html[data-platform="macos"],
 body[data-platform="macos"],
 html[data-platform="macos"] #root {
