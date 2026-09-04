@@ -191,7 +191,7 @@ describe("VoiceModelSettings", () => {
     const onSave = vi.fn();
     render(<SettingsModal {...baseProps} onSave={onSave} initialPage="general" />);
 
-    fireEvent.change(screen.getByPlaceholderText("Name (shown on the button)"), {
+    fireEvent.change(screen.getByPlaceholderText("Name (action title)"), {
       target: { value: "Deploy" },
     });
     fireEvent.change(screen.getByPlaceholderText("Message sent to the model"), {
@@ -206,6 +206,33 @@ describe("VoiceModelSettings", () => {
           label: "Deploy",
           message: "deploy to production",
           shorthand: "Deploy",
+        }),
+      ],
+    });
+  });
+
+  it("enforces max length on explicit shorthand in custom quick send", () => {
+    const onSave = vi.fn();
+    render(<SettingsModal {...baseProps} onSave={onSave} initialPage="general" />);
+
+    fireEvent.change(screen.getByPlaceholderText("Name (action title)"), {
+      target: { value: "Deploy to production immediately" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Shorthand (button label, max 20 chars)"), {
+      target: { value: "Deploy to production immediately" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Message sent to the model"), {
+      target: { value: "deploy to production" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add quick send" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      quickSends: [
+        expect.objectContaining({
+          id: expect.stringMatching(/^custom-/),
+          label: "Deploy to production immediately",
+          message: "deploy to production",
+          shorthand: "Deploy to production",
         }),
       ],
     });

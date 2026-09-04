@@ -13,7 +13,11 @@ import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
-import { allQuickSends } from "../protocol";
+import {
+  allQuickSends,
+  enforceQuickSendShorthand,
+  QUICK_SEND_SHORTHAND_MAX_LENGTH,
+} from "../protocol";
 import {
   FONT_FAMILY,
   FONT_SCALE,
@@ -361,6 +365,7 @@ function PageGeneral({
     setCustomFontDraft(customFontFamily);
   }, [customFontFamily]);
   const [quickSendLabel, setQuickSendLabel] = useState("");
+  const [quickSendShorthand, setQuickSendShorthand] = useState("");
   const [quickSendMessage, setQuickSendMessage] = useState("");
   const commitCustomFont = (value: string) => {
     const next = value.trim();
@@ -641,6 +646,11 @@ function PageGeneral({
               <div className="rule" key={q.id}>
                 <div className="top">
                   <span className="pat">{q.label}</span>
+                  {q.shorthand && q.shorthand !== q.label ? (
+                    <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 6 }}>
+                      ({q.shorthand})
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     className="mini-btn"
@@ -672,15 +682,17 @@ function PageGeneral({
           onSubmit={(e) => {
             e.preventDefault();
             const label = quickSendLabel.trim();
+            const shorthand = enforceQuickSendShorthand(quickSendShorthand.trim() || label);
             const message = quickSendMessage.trim();
-            if (!label || !message) return;
+            if (!label || !message || !shorthand) return;
             onSave({
               quickSends: [
                 ...(settings.quickSends ?? []),
-                { id: `custom-${Date.now()}`, label, message, shorthand: label },
+                { id: `custom-${Date.now()}`, label, message, shorthand },
               ],
             });
             setQuickSendLabel("");
+            setQuickSendShorthand("");
             setQuickSendMessage("");
           }}
         >
@@ -692,6 +704,15 @@ function PageGeneral({
               value={quickSendLabel}
               onChange={(e) => setQuickSendLabel(e.target.value)}
               aria-label={t("settings.quickSendName")}
+            />
+            <input
+              type="text"
+              className="rule-input"
+              placeholder={t("settings.quickSendShorthandPlaceholder")}
+              value={quickSendShorthand}
+              maxLength={QUICK_SEND_SHORTHAND_MAX_LENGTH}
+              onChange={(e) => setQuickSendShorthand(e.target.value)}
+              aria-label={t("settings.quickSendShorthand")}
             />
             <input
               type="text"

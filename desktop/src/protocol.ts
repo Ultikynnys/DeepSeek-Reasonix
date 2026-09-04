@@ -89,7 +89,9 @@ import { invoke } from "@tauri-apps/api/core";
 export { isAntigravityModel } from "@reasonix/core-utils";
 export {
   BUILTIN_QUICK_SENDS,
+  QUICK_SEND_SHORTHAND_MAX_LENGTH,
   allQuickSends,
+  enforceQuickSendShorthand,
   isQuickSend,
   resolveActiveQuickSend,
 } from "@reasonix/core-utils";

@@ -163,9 +163,9 @@ export function Composer({
   workspaceDir?: string;
   /** Messages typed while busy=true; rendered as removable chips above the textarea and auto-drained FIFO on turn-complete. */
   queuedSends?: QueuedSendItem[];
-  /** Called when the user presses Enter while busy with a non-empty draft or pending images. Owns clearing the draft and images. */
+  /** Called when the user presses Enter or quick send while busy with a non-empty draft, payload, or pending images. Owns clearing the draft and images. */
   onQueueWhileBusy?: (
-    text: string,
+    send: string | QueuedSend,
     images?: { id: string; thumbnail: string; wire?: UserImageAttachment }[],
   ) => void;
   onDequeueSend?: (index: number) => void;
@@ -279,20 +279,28 @@ export function Composer({
   };
 
   const handleProceed = () => {
-    if (disabled || busy) return;
+    if (disabled) return;
     const trimmed = draft.trim();
     if (trimmed) {
       historyRef.current.push(trimmed);
     }
-    const shorthand = quickSend?.shorthand ?? "proceed";
+    const shorthand = quickSend?.shorthand || quickSend?.label || "proceed";
     historyRef.current.push(shorthand);
     if (historyRef.current.length > 100) {
       historyRef.current.splice(0, historyRef.current.length - 100);
     }
     setBrowseIdx(-1);
     setDraft("");
-    if (quickSend) {
-      onSend({ text: quickSend.message, echo: quickSend.shorthand });
+    if (busy) {
+      if (onQueueWhileBusy) {
+        onQueueWhileBusy(
+          quickSend
+            ? { text: quickSend.message, echo: shorthand }
+            : { text: "proceed", echo: "proceed" },
+        );
+      }
+    } else if (quickSend) {
+      onSend({ text: quickSend.message, echo: shorthand });
     } else {
       onSend("proceed");
     }
@@ -454,11 +462,11 @@ export function Composer({
             </span>
             {queuedSends.map((raw, i) => {
               const item = typeof raw === "string" ? { text: raw } : raw;
-              const text = item.text;
+              const displayText = item.echo || item.text;
               const images = item.images;
               const hasImages = Boolean(images && images.length > 0);
               const tooltip = [
-                text,
+                item.echo && item.echo !== item.text ? `${item.echo}: ${item.text}` : item.text,
                 hasImages && images
                   ? `(${images.length} image${images.length > 1 ? "s" : ""})`
                   : null,
@@ -481,7 +489,7 @@ export function Composer({
                       ))}
                     </span>
                   ) : null}
-                  {text ? <span className="text">{text}</span> : null}
+                  {displayText ? <span className="text">{displayText}</span> : null}
                   {onDequeueSend ? (
                     <span
                       className="x"
@@ -701,12 +709,16 @@ export function Composer({
             <button
               type="button"
               className="quick-proceed-btn"
-              disabled={disabled || busy}
+              disabled={disabled}
               onClick={handleProceed}
-              title={t("composer.quickSendTitle")}
+              title={
+                quickSend
+                  ? `${quickSend.label}: ${quickSend.message}`
+                  : t("composer.quickSendTitle")
+              }
             >
               <I.play size={11} />
-              <span>{quickSend?.label ?? t("composer.proceed")}</span>
+              <span>{quickSend?.shorthand || quickSend?.label || t("composer.proceed")}</span>
             </button>
             <button
               type="button"

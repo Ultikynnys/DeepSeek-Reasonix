@@ -18,6 +18,14 @@ export interface QuickSend {
   shorthand: string;
 }
 
+/** Maximum character length allowed for a quick send button shorthand. */
+export const QUICK_SEND_SHORTHAND_MAX_LENGTH = 20;
+
+/** Clamp and normalize shorthand text to ensure it fits comfortably in the composer button. */
+export function enforceQuickSendShorthand(raw: string): string {
+  return raw.trim().slice(0, QUICK_SEND_SHORTHAND_MAX_LENGTH);
+}
+
 /** Built-in quick sends — always available; the active one is selected in
  *  Settings → General and defaults to Proceed. */
 export const BUILTIN_QUICK_SENDS: readonly QuickSend[] = [
@@ -43,7 +51,10 @@ export function isQuickSend(v: unknown): v is QuickSend {
 
 /** Built-ins plus user-defined customs — the full set of selectable quick sends. */
 export function allQuickSends(customs: readonly QuickSend[]): QuickSend[] {
-  return [...BUILTIN_QUICK_SENDS, ...customs];
+  return [...BUILTIN_QUICK_SENDS, ...customs].map((q) => ({
+    ...q,
+    shorthand: enforceQuickSendShorthand(q.shorthand || q.label),
+  }));
 }
 
 /** The active quick send by id, falling back to Proceed when unknown/absent. */
@@ -51,7 +62,11 @@ export function resolveActiveQuickSend(
   id: string | undefined,
   customs: readonly QuickSend[],
 ): QuickSend {
-  return allQuickSends(customs).find((q) => q.id === id) ?? BUILTIN_QUICK_SENDS[0]!;
+  const found = allQuickSends(customs).find((q) => q.id === id) ?? BUILTIN_QUICK_SENDS[0]!;
+  return {
+    ...found,
+    shorthand: enforceQuickSendShorthand(found.shorthand || found.label),
+  };
 }
 
 export type WebSearchEngineName =

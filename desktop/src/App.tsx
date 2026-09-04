@@ -3260,8 +3260,12 @@ function TabRuntime({
                 onEditModeChange={applyEditMode}
                 workspaceDir={state.settings?.workspaceDir}
                 queuedSends={state.queuedSends}
-                onQueueWhileBusy={(text, images) => {
-                  dispatch({ t: "enqueue_send", send: { text, images } });
+                onQueueWhileBusy={(sendOrText, images) => {
+                  const send: QueuedSend =
+                    typeof sendOrText === "string"
+                      ? { text: sendOrText, images }
+                      : { ...sendOrText, ...(images ? { images } : {}) };
+                  dispatch({ t: "enqueue_send", send });
                   setDraft("");
                   setPendingImages([]);
                 }}

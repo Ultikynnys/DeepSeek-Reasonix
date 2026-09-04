@@ -11,6 +11,7 @@ import {
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
   allQuickSends,
+  enforceQuickSendShorthand,
   isQuickSend,
   isUsableAntigravityModel,
   resolveActiveQuickSend,
@@ -1693,13 +1694,19 @@ export function saveQuickSendId(id: string, path: string = defaultConfigPath()):
 export function loadCustomQuickSends(path: string = defaultConfigPath()): QuickSend[] {
   const v = readConfig(path).quickSends;
   if (!Array.isArray(v)) return [];
-  return v.filter(isQuickSend);
+  return v.filter(isQuickSend).map((q) => ({
+    ...q,
+    shorthand: enforceQuickSendShorthand(q.shorthand || q.label),
+  }));
 }
 
 /** Persist the full user-defined quick-send list. */
 export function saveCustomQuickSends(list: QuickSend[], path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
-  cfg.quickSends = list;
+  cfg.quickSends = list.map((q) => ({
+    ...q,
+    shorthand: enforceQuickSendShorthand(q.shorthand || q.label),
+  }));
   writeConfig(cfg, path);
 }
 

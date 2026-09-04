@@ -4433,6 +4433,12 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   cursor: not-allowed;
   opacity: 0.6;
 }
+.quick-proceed-btn span {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .voice-btn {
   width: 30px;
@@ -8227,6 +8233,9 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   }
   .composer-foot .model-pill {
     max-width: 140px;
+  }
+  .composer-foot .quick-proceed-btn span {
+    max-width: 90px;
   }
 }
 @container composer (max-width: 420px) {

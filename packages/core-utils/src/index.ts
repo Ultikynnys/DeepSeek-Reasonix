@@ -147,7 +147,9 @@ export type {
 } from "./desktop-protocol.js";
 export {
   BUILTIN_QUICK_SENDS,
+  QUICK_SEND_SHORTHAND_MAX_LENGTH,
   allQuickSends,
+  enforceQuickSendShorthand,
   isQuickSend,
   resolveActiveQuickSend,
 } from "./desktop-protocol.js";
