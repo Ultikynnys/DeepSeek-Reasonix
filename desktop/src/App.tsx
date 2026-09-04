@@ -243,7 +243,7 @@ export type ChatMessage =
       segments: AssistantSegment[];
       pending: boolean;
     }
-  | { kind: "notice"; id: string; text: string; severity: NoticeSeverity };
+  | { kind: "notice"; id: string; text: string; severity: NoticeSeverity; turn?: number };
 
 export type PendingConfirm = {
   id: number;
@@ -1114,20 +1114,35 @@ function appendTextSegment(
   return [...segments, { kind, text }];
 }
 
+function insertMessageAtTurn(
+  messages: ChatMessage[],
+  message: ChatMessage,
+  turn: number,
+): ChatMessage[] {
+  const insertAt = messages.findIndex(
+    (candidate) => "turn" in candidate && candidate.turn !== undefined && candidate.turn > turn,
+  );
+  if (insertAt < 0) return [...messages, message];
+  return [...messages.slice(0, insertAt), message, ...messages.slice(insertAt)];
+}
+
 function appendAssistantSegment(
   messages: ChatMessage[],
   segment: AssistantSegment,
   turn = 1,
 ): ChatMessage[] {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const host = messages[i];
-    if (host?.kind === "assistant") {
-      const next = [...messages];
-      next[i] = { ...host, segments: [...host.segments, segment] };
-      return next;
-    }
+  const hostIndex = messages.findIndex((m) => m.kind === "assistant" && m.turn === turn);
+  const host = messages[hostIndex];
+  if (host?.kind === "assistant") {
+    const next = [...messages];
+    next[hostIndex] = { ...host, segments: [...host.segments, segment] };
+    return next;
   }
-  return [...messages, { kind: "assistant", turn, segments: [segment], pending: false }];
+  return insertMessageAtTurn(
+    messages,
+    { kind: "assistant", turn, segments: [segment], pending: false },
+    turn,
+  );
 }
 
 export function applySubagentProgress(
@@ -1610,12 +1625,20 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       // timeline but uses a softer tone for recoverable errors so a session
       // full of self-repaired loops does not look like everything failed.
       const recoverable = ev.type === "error" ? ev.recoverable : false;
+      const turn = ev.type === "error" ? ev.turn : undefined;
       // Loop has returned (any error path ends the turn); flip the still-
       // streaming assistant message to settled so the UI doesn't keep
       // showing a "thinking" spinner above the error card (#1660).
       const settled = state.messages.map((m) =>
         m.kind === "assistant" && m.pending ? { ...m, pending: false } : m,
       );
+      const notice: ChatMessage = {
+        kind: "notice",
+        text: ev.message,
+        id: nextNoticeId(),
+        severity: recoverable ? "warning" : "error",
+        ...(turn !== undefined ? { turn } : {}),
+      };
       return {
         ...state,
         busy: false,
@@ -1623,15 +1646,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         turnStatus: null,
         turnStatusTool: null,
         oauthWaiting: ev.message.includes("OAuth") ? false : state.oauthWaiting,
-        messages: [
-          ...settled,
-          {
-            kind: "notice",
-            text: ev.message,
-            id: nextNoticeId(),
-            severity: recoverable ? "warning" : "error",
-          },
-        ],
+        messages:
+          turn === undefined ? [...settled, notice] : insertMessageAtTurn(settled, notice, turn),
       };
     }
     case "oauth_begin_result":

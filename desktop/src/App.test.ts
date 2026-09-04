@@ -212,6 +212,60 @@ describe("Desktop App reducer — usage", () => {
     });
   });
 
+  it("anchors a late kernel error to its turn instead of the bottom of the timeline", () => {
+    const base = initialState();
+    const state = {
+      ...base,
+      messages: [
+        { kind: "user" as const, text: "first", clientId: "c-1", turn: 1 },
+        { kind: "assistant" as const, turn: 1, segments: [], pending: false },
+        { kind: "user" as const, text: "second", clientId: "c-2", turn: 2 },
+        { kind: "assistant" as const, turn: 2, segments: [], pending: false },
+      ],
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "error",
+        id: 3,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        message: "Late failure from turn one",
+        recoverable: false,
+      },
+    });
+
+    expect(
+      next.messages.map((m) => (m.kind === "notice" ? `notice-${m.turn}` : `${m.kind}-${m.turn}`)),
+    ).toEqual(["user-1", "assistant-1", "notice-1", "user-2", "assistant-2"]);
+  });
+
+  it("places an error before later turns when its own turn messages are absent", () => {
+    const base = initialState();
+    const state = {
+      ...base,
+      messages: [
+        { kind: "user" as const, text: "second", clientId: "c-2", turn: 2 },
+        { kind: "assistant" as const, turn: 2, segments: [], pending: false },
+      ],
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "error",
+        id: 4,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        message: "Failure from a missing earlier turn",
+        recoverable: false,
+      },
+    });
+
+    expect(
+      next.messages.map((m) => (m.kind === "notice" ? `notice-${m.turn}` : `${m.kind}-${m.turn}`)),
+    ).toEqual(["notice-1", "user-2", "assistant-2"]);
+  });
+
   it("settles every unresolved tool card when the conversation stops", () => {
     const base = initialState();
     const state = {
@@ -1236,6 +1290,48 @@ describe("Desktop App reducer — model.final content", () => {
         severity: "high",
       },
     ]);
+  });
+
+  it("anchors a late warning to its assistant turn instead of the latest assistant", () => {
+    const base = initialState();
+    const state = {
+      ...base,
+      messages: [
+        { kind: "user" as const, text: "first", clientId: "c-1", turn: 1 },
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          segments: [{ kind: "text" as const, text: "first answer" }],
+          pending: false,
+        },
+        { kind: "user" as const, text: "second", clientId: "c-2", turn: 2 },
+        {
+          kind: "assistant" as const,
+          turn: 2,
+          segments: [{ kind: "text" as const, text: "second answer" }],
+          pending: false,
+        },
+      ],
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "warning",
+        id: 4,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        text: "Late warning from turn one",
+        severity: "high",
+      },
+    });
+    const assistants = next.messages.filter((m) => m.kind === "assistant");
+
+    expect(assistants[0]?.segments.at(-1)).toMatchObject({
+      kind: "warning",
+      id: "w-4",
+      text: "Late warning from turn one",
+    });
+    expect(assistants[1]?.segments).toEqual([{ kind: "text", text: "second answer" }]);
   });
 
   it("skips forcedSummary finals — the compaction card renders that content", () => {
