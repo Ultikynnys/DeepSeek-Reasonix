@@ -1,5 +1,6 @@
-// Bundles the lightweight Xenova/whisper-tiny.en model and ONNX WASM runtime
-// into desktop/public/ so Vite and Tauri bundle them offline with the app.
+// Bundles the ONNX WASM runtime into desktop/public/ so Vite and Tauri bundle
+// it offline with the app. Whisper models are NOT bundled — they download on
+// demand at runtime (into the browser cache) to keep the app bundle small.
 import { createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
 import https from "node:https";
 import { dirname, join } from "node:path";
@@ -7,12 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(here, "..", "public");
-const modelDir = join(publicDir, "models", "whisper-tiny.en");
-const modelOnnxDir = join(modelDir, "onnx");
 const wasmDir = join(publicDir, "wasm");
 
-mkdirSync(modelDir, { recursive: true });
-mkdirSync(modelOnnxDir, { recursive: true });
 mkdirSync(wasmDir, { recursive: true });
 
 function downloadFile(url, dest, label) {
@@ -79,42 +76,7 @@ function downloadFile(url, dest, label) {
   });
 }
 
-const HF_BASE = "https://huggingface.co/Xenova/whisper-tiny.en/resolve/main";
 const ORT_BASE = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist";
-
-const MODEL_FILES = [
-  { url: `${HF_BASE}/config.json`, dest: join(modelDir, "config.json"), name: "config.json" },
-  {
-    url: `${HF_BASE}/generation_config.json`,
-    dest: join(modelDir, "generation_config.json"),
-    name: "generation_config.json",
-  },
-  {
-    url: `${HF_BASE}/preprocessor_config.json`,
-    dest: join(modelDir, "preprocessor_config.json"),
-    name: "preprocessor_config.json",
-  },
-  {
-    url: `${HF_BASE}/tokenizer.json`,
-    dest: join(modelDir, "tokenizer.json"),
-    name: "tokenizer.json",
-  },
-  {
-    url: `${HF_BASE}/tokenizer_config.json`,
-    dest: join(modelDir, "tokenizer_config.json"),
-    name: "tokenizer_config.json",
-  },
-  {
-    url: `${HF_BASE}/onnx/encoder_model_quantized.onnx`,
-    dest: join(modelOnnxDir, "encoder_model_quantized.onnx"),
-    name: "encoder_model_quantized.onnx",
-  },
-  {
-    url: `${HF_BASE}/onnx/decoder_model_merged_quantized.onnx`,
-    dest: join(modelOnnxDir, "decoder_model_merged_quantized.onnx"),
-    name: "decoder_model_merged_quantized.onnx",
-  },
-];
 
 const WASM_FILES = [
   { url: `${ORT_BASE}/ort-wasm.wasm`, dest: join(wasmDir, "ort-wasm.wasm"), name: "ort-wasm.wasm" },
@@ -135,14 +97,9 @@ const WASM_FILES = [
   },
 ];
 
-console.log("=== Bundling lightweight transcription model ===");
-for (const file of MODEL_FILES) {
-  await downloadFile(file.url, file.dest, file.name);
-}
-
 console.log("=== Bundling ONNX WASM runtime ===");
 for (const file of WASM_FILES) {
   await downloadFile(file.url, file.dest, file.name);
 }
 
-console.log("Transcription model and WASM runtime bundled successfully.");
+console.log("ONNX WASM runtime bundled successfully.");

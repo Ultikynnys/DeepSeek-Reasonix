@@ -89,3 +89,19 @@ describe("Composer quick send Proceed button", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 });
+
+describe("Composer voice button availability", () => {
+  it("is enabled by default when voiceAvailable is omitted", () => {
+    render(<Composer {...baseProps} />);
+
+    const voiceBtn = screen.getByTitle("Voice input");
+    expect(voiceBtn.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("is disabled when no voice model is installed", () => {
+    render(<Composer {...baseProps} voiceAvailable={false} />);
+
+    const voiceBtn = screen.getByTitle(/No voice model installed/);
+    expect(voiceBtn.hasAttribute("disabled")).toBe(true);
+  });
+});

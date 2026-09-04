@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { speechTranscriber } from "./transcriber";
 
 describe("LocalSpeechTranscriber", () => {
@@ -30,11 +30,5 @@ describe("LocalSpeechTranscriber", () => {
     await expect(speechTranscriber.transcribe(new Float32Array(1600))).rejects.toThrow(
       "Recording was too short to transcribe (100 ms captured; minimum is 200 ms).",
     );
-  });
-
-  it("completes download for bundled model immediately", async () => {
-    const onProgress = vi.fn();
-    await speechTranscriber.downloadModel("whisper-tiny.en", onProgress);
-    expect(onProgress).not.toHaveBeenCalled();
   });
 });

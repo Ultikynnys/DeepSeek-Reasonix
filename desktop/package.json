@@ -7,13 +7,13 @@
     "dev": "vite",
     "dev:tauri": "npm --prefix .. run build && vite",
     "dev:browser": "node scripts/dev-browser.mjs",
-    "build": "node scripts/bundle-transcription-model.mjs && tsc && vite build",
+    "build": "node scripts/bundle-onnx-wasm.mjs && tsc && vite build",
     "build:tauri": "npm --prefix .. run build && npm run build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "tauri": "tauri",
     "bundle:node": "node scripts/bundle-node.mjs",
-    "bundle:model": "node scripts/bundle-transcription-model.mjs"
+    "bundle:model": "node scripts/bundle-onnx-wasm.mjs"
   },
   "dependencies": {
     "@fontsource/geist": "^5.2.8",

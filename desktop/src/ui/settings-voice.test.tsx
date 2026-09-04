@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../App";
 import { markVoiceModelDownloaded, setActiveVoiceModelId } from "../voice/models";
@@ -93,12 +93,12 @@ describe("VoiceModelSettings", () => {
     expect(screen.getByText("Whisper Base (English)")).toBeTruthy();
     expect(screen.getByText("Whisper Small (English)")).toBeTruthy();
 
-    // Tiny is active by default
-    expect(screen.getByText(/✓ Active/)).toBeTruthy();
+    // No model is downloaded by default — all download on demand
+    expect(screen.queryByText(/✓ Active/)).toBeNull();
 
-    // Base and Small have Download buttons
+    // All three models have Download buttons
     const downloadButtons = screen.getAllByRole("button", { name: "Download" });
-    expect(downloadButtons).toHaveLength(2);
+    expect(downloadButtons).toHaveLength(3);
   });
 
   it("handles successful in-app download and activates model", async () => {
@@ -113,8 +113,8 @@ describe("VoiceModelSettings", () => {
 
     render(<VoiceModelSettings />);
 
-    const downloadButtons = screen.getAllByRole("button", { name: "Download" });
-    const baseDownloadBtn = downloadButtons[0]!;
+    const baseCard = screen.getByText("Whisper Base (English)").closest(".voice-card") as HTMLElement;
+    const baseDownloadBtn = within(baseCard).getByRole("button", { name: "Download" });
 
     await act(async () => {
       fireEvent.click(baseDownloadBtn);
@@ -134,8 +134,8 @@ describe("VoiceModelSettings", () => {
 
     render(<VoiceModelSettings />);
 
-    const downloadButtons = screen.getAllByRole("button", { name: "Download" });
-    const baseDownloadBtn = downloadButtons[0]!;
+    const baseCard = screen.getByText("Whisper Base (English)").closest(".voice-card") as HTMLElement;
+    const baseDownloadBtn = within(baseCard).getByRole("button", { name: "Download" });
 
     await act(async () => {
       fireEvent.click(baseDownloadBtn);

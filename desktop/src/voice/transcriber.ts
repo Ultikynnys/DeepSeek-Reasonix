@@ -1,7 +1,6 @@
 /**
  * Local speech-to-text transcription with selectable Whisper models.
- * Default is the bundled offline Whisper-tiny.en model.
- * Optional higher-accuracy models (Base and Small) can be downloaded directly in-app.
+ * Models are downloaded on demand into the local browser cache.
  */
 
 import {
@@ -99,10 +98,6 @@ class LocalSpeechTranscriber {
     onProgress?: (progress: DownloadProgress) => void,
   ): Promise<void> {
     const opt = getVoiceModelOption(modelId);
-    if (opt.isBundled) {
-      markVoiceModelDownloaded(modelId, true);
-      return;
-    }
 
     this.updateStatus("downloading", `Downloading ${opt.name}...`);
 
@@ -141,8 +136,7 @@ class LocalSpeechTranscriber {
   }
 
   /**
-   * Initializes the ASR pipeline for the target model.
-   * Bundled models use local assets; downloaded models use local cache.
+   * Initializes the ASR pipeline for the target model, downloading it on first use.
    */
   public async getPipeline(targetModelId?: VoiceModelId): Promise<ASRPipeline> {
     const modelId = targetModelId ?? this.activeModelId;
@@ -165,15 +159,8 @@ class LocalSpeechTranscriber {
 
         env.backends.onnx.wasm.wasmPaths = "/wasm/";
         env.backends.onnx.logLevel = "error";
-
-        if (opt.isBundled) {
-          env.allowRemoteModels = false;
-          env.allowLocalModels = true;
-          env.localModelPath = "/models/";
-        } else {
-          env.allowRemoteModels = true;
-          env.allowLocalModels = false;
-        }
+        env.allowRemoteModels = true;
+        env.allowLocalModels = false;
 
         const pipe = (await pipeline("automatic-speech-recognition", modelId, {
           quantized: true,
@@ -181,9 +168,7 @@ class LocalSpeechTranscriber {
 
         this.pipelineInstance = pipe;
         this.loadedModelId = modelId;
-        if (!opt.isBundled) {
-          markVoiceModelDownloaded(modelId, true);
-        }
+        markVoiceModelDownloaded(modelId, true);
         this.updateStatus("ready");
         return pipe;
       } catch (err) {

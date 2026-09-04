@@ -26,7 +26,6 @@ import {
   themeForStyle,
 } from "../theme";
 import {
-  DEFAULT_VOICE_MODEL_ID,
   VOICE_MODELS,
   type VoiceModelId,
   deleteVoiceModelCache,
@@ -721,20 +720,16 @@ function PageGeneral({
 
 export function VoiceModelSettings() {
   const [activeModel, setActiveModel] = useState<VoiceModelId>(() => getActiveVoiceModelId());
-  const [downloadedMap, setDownloadedMap] = useState<Record<string, boolean>>({
-    [DEFAULT_VOICE_MODEL_ID]: true,
-  });
+  const [downloadedMap, setDownloadedMap] = useState<Record<string, boolean>>({});
   const [downloadingModel, setDownloadingModel] = useState<VoiceModelId | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
   const [downloadFile, setDownloadFile] = useState<string>("");
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const refreshDownloaded = useCallback(async () => {
-    const nextMap: Record<string, boolean> = { [DEFAULT_VOICE_MODEL_ID]: true };
+    const nextMap: Record<string, boolean> = {};
     for (const m of VOICE_MODELS) {
-      if (!m.isBundled) {
-        nextMap[m.id] = await isVoiceModelDownloaded(m.id);
-      }
+      nextMap[m.id] = await isVoiceModelDownloaded(m.id);
     }
     setDownloadedMap(nextMap);
   }, []);
@@ -816,11 +811,7 @@ export function VoiceModelSettings() {
               <div className="voice-card-header">
                 <div className="voice-card-title">{model.name}</div>
                 <span className="voice-badge">
-                  {model.isBundled
-                    ? t("settings.voiceBundled")
-                    : model.shortName === "Small"
-                      ? "High Accuracy"
-                      : "Balanced"}
+                  {model.shortName === "Small" ? "High Accuracy" : "Balanced"}
                 </span>
               </div>
 
@@ -847,27 +838,27 @@ export function VoiceModelSettings() {
               )}
 
               <div className="voice-card-actions">
-                {isActive ? (
-                  <span className="voice-active-label">✓ {t("settings.voiceActive")}</span>
-                ) : isDownloading ? (
+                {isDownloading ? (
                   <button type="button" className="btn" disabled>
                     {t("settings.voiceDownloading")}
                   </button>
                 ) : isDownloaded ? (
                   <>
-                    <button type="button" className="btn" onClick={() => handleSelect(model.id)}>
-                      {t("settings.voiceSelect")}
-                    </button>
-                    {!model.isBundled && (
-                      <button
-                        type="button"
-                        className="btn btn-subtle"
-                        title="Delete downloaded files to free space"
-                        onClick={() => handleDelete(model.id)}
-                      >
-                        {t("settings.voiceDelete")}
+                    {isActive ? (
+                      <span className="voice-active-label">✓ {t("settings.voiceActive")}</span>
+                    ) : (
+                      <button type="button" className="btn" onClick={() => handleSelect(model.id)}>
+                        {t("settings.voiceSelect")}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="btn btn-subtle"
+                      title="Delete downloaded files to free space"
+                      onClick={() => handleDelete(model.id)}
+                    >
+                      {t("settings.voiceDelete")}
+                    </button>
                   </>
                 ) : (
                   <button

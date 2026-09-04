@@ -71,6 +71,7 @@ export const en = {
     imageRequiresVision:
       "This model can't receive images. Switch to a vision-capable model (gpt-* or deepseek-v4-flash-vision-exp) to attach pasted images.",
     voiceInput: "Voice input",
+    voiceUnavailable: "No voice model installed. Download one in Settings → Voice.",
     voiceRecording: "Listening... Click to stop and transcribe",
     voiceTranscribing: "Transcribing audio...",
     voiceError: "Voice input failed: {error}",
@@ -224,13 +225,12 @@ export const en = {
     behaviorSection: "Behavior",
     voiceSection: "Voice processing model",
     voiceSectionHint:
-      "Select a speech-to-text recognition model. Whisper Tiny is bundled offline. You can optionally download Base or Small directly in the app for improved accuracy.",
+      "Select a speech-to-text recognition model. Models download on demand into the local cache.",
     voiceActive: "Active",
     voiceSelect: "Select",
     voiceDownload: "Download",
     voiceDownloading: "Downloading...",
     voiceDownloaded: "Downloaded",
-    voiceBundled: "Bundled",
     voiceDelete: "Delete",
     voiceDownloadError: "Voice model download failed: {error}",
     apiSection: "DeepSeek API",

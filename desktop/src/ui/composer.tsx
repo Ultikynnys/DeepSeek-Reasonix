@@ -118,6 +118,7 @@ export function Composer({
   onImageRejected,
   onPickImage,
   onVoiceError,
+  voiceAvailable = true,
 }: {
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -184,6 +185,9 @@ export function Composer({
   onPickImage?: (path: string) => void;
   /** Surfaces every voice-input failure as a durable in-chat error notice. */
   onVoiceError: (message: string) => void;
+  /** True when at least one voice model is downloaded — the voice button is
+   *  disabled (grayed out) when none are installed. */
+  voiceAvailable?: boolean;
 }) {
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [subagentMenuOpen, setSubagentMenuOpen] = useState(false);
@@ -707,17 +711,19 @@ export function Composer({
             <button
               type="button"
               className={`voice-btn ${voiceState === "recording" ? "recording" : ""} ${voiceState === "transcribing" ? "transcribing" : ""}`}
-              disabled={disabled || voiceState === "transcribing"}
+              disabled={disabled || voiceState === "transcribing" || !voiceAvailable}
               aria-busy={voiceState === "transcribing"}
               onClick={handleToggleVoice}
               title={
-                voiceError
-                  ? t("composer.voiceError", { error: voiceError })
-                  : voiceState === "recording"
-                    ? t("composer.voiceRecording")
-                    : voiceState === "transcribing"
-                      ? t("composer.voiceTranscribing")
-                      : t("composer.voiceInput")
+                !voiceAvailable
+                  ? t("composer.voiceUnavailable")
+                  : voiceError
+                    ? t("composer.voiceError", { error: voiceError })
+                    : voiceState === "recording"
+                      ? t("composer.voiceRecording")
+                      : voiceState === "transcribing"
+                        ? t("composer.voiceTranscribing")
+                        : t("composer.voiceInput")
               }
             >
               {voiceState === "recording" ? (

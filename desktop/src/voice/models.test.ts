@@ -26,7 +26,7 @@ describe("Voice Models Registry", () => {
     ]);
   });
 
-  it("defaults to the bundled whisper-tiny.en model", () => {
+  it("defaults to the whisper-tiny.en model", () => {
     expect(DEFAULT_VOICE_MODEL_ID).toBe("whisper-tiny.en");
     expect(getActiveVoiceModelId()).toBe("whisper-tiny.en");
   });
@@ -41,25 +41,17 @@ describe("Voice Models Registry", () => {
 
   it("looks up model options by id", () => {
     const tiny = getVoiceModelOption("whisper-tiny.en");
-    expect(tiny.isBundled).toBe(true);
     expect(tiny.shortName).toBe("Tiny");
 
     const base = getVoiceModelOption("Xenova/whisper-base.en");
-    expect(base.isBundled).toBe(false);
     expect(base.shortName).toBe("Base");
 
     const small = getVoiceModelOption("Xenova/whisper-small.en");
-    expect(small.isBundled).toBe(false);
     expect(small.shortName).toBe("Small");
 
     // Fallback for unknown id
     const unknown = getVoiceModelOption("unknown-model");
     expect(unknown.id).toBe("whisper-tiny.en");
-  });
-
-  it("bundled model is always reported as downloaded", async () => {
-    const isDownloaded = await isVoiceModelDownloaded("whisper-tiny.en");
-    expect(isDownloaded).toBe(true);
   });
 
   it("tracks and clears download state for remote models", async () => {
@@ -73,7 +65,7 @@ describe("Voice Models Registry", () => {
 
     await deleteVoiceModelCache("Xenova/whisper-base.en");
     expect(await isVoiceModelDownloaded("Xenova/whisper-base.en")).toBe(false);
-    // Deleted active model resets to bundled default:
+    // Deleted active model resets to the default:
     expect(getActiveVoiceModelId()).toBe("whisper-tiny.en");
   });
 });

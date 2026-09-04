@@ -11,7 +11,6 @@ export interface VoiceModelOption {
   size: string;
   parameters: string;
   description: string;
-  isBundled: boolean;
   repoId: string;
 }
 
@@ -24,8 +23,7 @@ export const VOICE_MODELS: ReadonlyArray<VoiceModelOption> = [
     shortName: "Tiny",
     size: "~40 MB",
     parameters: "39M",
-    description: "Fastest transcription with lowest resource usage. Pre-installed offline.",
-    isBundled: true,
+    description: "Fastest transcription with lowest resource usage.",
     repoId: "Xenova/whisper-tiny.en",
   },
   {
@@ -35,7 +33,6 @@ export const VOICE_MODELS: ReadonlyArray<VoiceModelOption> = [
     size: "~75 MB",
     parameters: "74M",
     description: "Noticeably higher accuracy for daily speech with moderate speed.",
-    isBundled: false,
     repoId: "Xenova/whisper-base.en",
   },
   {
@@ -45,7 +42,6 @@ export const VOICE_MODELS: ReadonlyArray<VoiceModelOption> = [
     size: "~250 MB",
     parameters: "244M",
     description: "High accuracy speech recognition for accents, jargon, and noisy audio.",
-    isBundled: false,
     repoId: "Xenova/whisper-small.en",
   },
 ];
@@ -86,9 +82,6 @@ export function markVoiceModelDownloaded(id: VoiceModelId, downloaded = true): v
 
 export async function isVoiceModelDownloaded(id: VoiceModelId): Promise<boolean> {
   const opt = getVoiceModelOption(id);
-  if (opt.isBundled) {
-    return true;
-  }
 
   // Check Web Cache API if available:
   if (typeof caches !== "undefined") {
@@ -117,11 +110,16 @@ export async function isVoiceModelDownloaded(id: VoiceModelId): Promise<boolean>
   return false;
 }
 
+/** True when at least one voice model is present in the local cache. */
+export async function anyVoiceModelDownloaded(): Promise<boolean> {
+  for (const m of VOICE_MODELS) {
+    if (await isVoiceModelDownloaded(m.id)) return true;
+  }
+  return false;
+}
+
 export async function deleteVoiceModelCache(id: VoiceModelId): Promise<void> {
   const opt = getVoiceModelOption(id);
-  if (opt.isBundled) {
-    return;
-  }
 
   markVoiceModelDownloaded(id, false);
 

@@ -126,6 +126,7 @@ import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { useResizable } from "./ui/useResizable";
 import { WorkdirPop } from "./ui/workdir-pop";
+import { anyVoiceModelDownloaded } from "./voice/models";
 
 const RIGHT_SIDEBAR_COLLAPSE_WIDTH = 1120;
 const LEFT_SIDEBAR_COLLAPSE_WIDTH = 760;
@@ -2243,6 +2244,7 @@ function TabRuntime({
   const threadInnerRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
+  const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const previousApprovalSnapshotRef = useRef<ApprovalSnapshot>({
@@ -2275,6 +2277,24 @@ function TabRuntime({
     registerDispatch(tabId, dispatch);
     return () => registerDispatch(tabId, null);
   }, [tabId, registerDispatch]);
+
+  // Voice input is only usable once at least one model is downloaded. Refresh
+  // on mount and whenever the settings modal closes (downloads happen there).
+  const prevSettingsOpenRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const prev = prevSettingsOpenRef.current;
+    prevSettingsOpenRef.current = settingsOpen;
+    // Refresh on mount (prev === null) and on the open→closed transition.
+    if (prev === null || (prev && !settingsOpen)) {
+      let cancelled = false;
+      anyVoiceModelDownloaded().then((ok) => {
+        if (!cancelled) setVoiceAvailable(ok);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [settingsOpen]);
 
   const sendRpc = useCallback(
     (cmd: OutgoingCommand) => {
@@ -3252,6 +3272,7 @@ function TabRuntime({
                 onImageRejected={() => appendNotice(t("composer.imageRequiresVision"), "warning")}
                 onPickImage={attachPickedImage}
                 onVoiceError={(message) => appendNotice(message, "error")}
+                voiceAvailable={voiceAvailable}
               />
             </>
           )}
