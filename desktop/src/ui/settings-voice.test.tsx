@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../App";
 import { markVoiceModelDownloaded, setActiveVoiceModelId } from "../voice/models";
@@ -266,16 +266,25 @@ describe("AudioInputDeviceSettings", () => {
     expect(screen.getByText("Audio input device")).toBeTruthy();
 
     const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
+    // Device enumeration is lazy — it only runs once the user opens the picker.
+    fireEvent.focus(select);
+    await waitFor(() => {
+      const options = Array.from(select.options).map((o) => o.textContent);
+      expect(options).toContain("Built-in Microphone");
+      expect(options).toContain("USB Headset");
+    });
     const options = Array.from(select.options).map((o) => o.textContent);
     expect(options).toContain("System default");
-    expect(options).toContain("Built-in Microphone");
-    expect(options).toContain("USB Headset");
   });
 
   it("selects a device and persists the choice", async () => {
     render(<AudioInputDeviceSettings />);
 
     const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
+    fireEvent.focus(select);
+    await waitFor(() => {
+      expect(Array.from(select.options).map((o) => o.textContent)).toContain("USB Headset");
+    });
     fireEvent.change(select, { target: { value: "mic-2" } });
 
     expect(localStorage.getItem("reasonix.voiceInputDevice")).toBe("mic-2");
@@ -287,6 +296,10 @@ describe("AudioInputDeviceSettings", () => {
     render(<AudioInputDeviceSettings />);
 
     const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
+    fireEvent.focus(select);
+    await waitFor(() => {
+      expect(Array.from(select.options).map((o) => o.textContent)).toContain("Built-in Microphone");
+    });
     expect(select.value).toBe("mic-1");
   });
 });

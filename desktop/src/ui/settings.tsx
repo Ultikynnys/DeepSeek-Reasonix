@@ -750,6 +750,7 @@ export function AudioInputDeviceSettings() {
   const [devices, setDevices] = useState<AudioInputDevice[]>([]);
   const [selected, setSelected] = useState<string>(() => getSelectedAudioInputDeviceId());
   const [error, setError] = useState<string | null>(null);
+  const loadedRef = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -761,18 +762,42 @@ export function AudioInputDeviceSettings() {
     }
   }, []);
 
+  const loadDevices = useCallback(async () => {
+    loadedRef.current = true;
+    await refresh();
+  }, [refresh]);
+
+  // Never enumerate on mount. Enumerating all media devices in WebView2
+  // surfaces video/webcam devices to the OS media stack, which Windows privacy
+  // tools (e.g. Kaspersky Webcam Protection) flag as the WebView process
+  // "attempting to access the webcam" — even though we only ever use audio.
+  // The first enumeration is therefore tied to an explicit user gesture.
   useEffect(() => {
-    refresh();
-    // Re-enumerate when devices are plugged/unplugged.
+    // Re-enumerate only when devices are plugged/unplugged AND the picker has
+    // already been loaded once (i.e. the user opened it). Registering the
+    // listener itself touches no hardware.
     if (typeof navigator !== "undefined" && navigator?.mediaDevices?.addEventListener) {
-      navigator.mediaDevices.addEventListener("devicechange", refresh);
-      return () => navigator.mediaDevices.removeEventListener("devicechange", refresh);
+      const onChange = () => {
+        if (loadedRef.current) {
+          void refresh();
+        }
+      };
+      navigator.mediaDevices.addEventListener("devicechange", onChange);
+      return () => navigator.mediaDevices.removeEventListener("devicechange", onChange);
     }
   }, [refresh]);
 
   const handleChange = (deviceId: string) => {
     setSelected(deviceId);
     setSelectedAudioInputDeviceId(deviceId);
+  };
+
+  // Enumerate lazily on the first time the user opens the picker, so we never
+  // touch media hardware until the user deliberately chooses a microphone.
+  const handleFocus = () => {
+    if (!loadedRef.current) {
+      void loadDevices();
+    }
   };
 
   return (
@@ -790,6 +815,7 @@ export function AudioInputDeviceSettings() {
         className="voice-device-select"
         value={selected}
         onChange={(e) => handleChange(e.target.value)}
+        onFocus={handleFocus}
         aria-label={t("settings.voiceInputDevice")}
       >
         <option value="">{t("settings.voiceInputDeviceDefault")}</option>
