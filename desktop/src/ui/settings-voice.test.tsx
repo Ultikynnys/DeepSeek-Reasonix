@@ -2,12 +2,10 @@
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  markVoiceModelDownloaded,
-  setActiveVoiceModelId,
-} from "../voice/models";
+import type { Settings } from "../App";
+import { markVoiceModelDownloaded, setActiveVoiceModelId } from "../voice/models";
 import { speechTranscriber } from "../voice/transcriber";
-import { VoiceModelSettings } from "./settings";
+import { SettingsModal, VoiceModelSettings } from "./settings";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
@@ -102,5 +100,78 @@ describe("VoiceModelSettings", () => {
     // Model is no longer downloaded, Download button returns
     const downloadBtns = screen.getAllByRole("button", { name: "Download" });
     expect(downloadBtns.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders voice model settings in models tab and not in general tab", () => {
+    const mockSettings: Settings = {
+      version: "1.0.0",
+      reasoningEffort: "high",
+      editMode: "review",
+      budgetUsd: null,
+      workspaceDir: "/test",
+      recentWorkspaces: [],
+      model: "deepseek-v4-flash",
+    };
+
+    const baseProps = {
+      settings: mockSettings,
+      balance: null,
+      usage: {
+        totalCostUsd: 0,
+        lastCallCostUsd: 0,
+        totalPromptTokens: 0,
+        totalCompletionTokens: 0,
+        cacheHitTokens: 0,
+        cacheMissTokens: 0,
+        lastCallCacheHit: null,
+        lastCallCacheMiss: null,
+        reservedTokens: 0,
+        liveLogTokens: 0,
+      },
+      currency: "USD" as const,
+      theme: "dark" as const,
+      themeStyle: "graphite" as const,
+      onSetTheme: vi.fn(),
+      onSetThemeStyle: vi.fn(),
+      fontScale: "medium" as const,
+      onSetFontScale: vi.fn(),
+      fontFamily: "sans" as const,
+      onSetFontFamily: vi.fn(),
+      customFontFamily: "",
+      onSetCustomFontFamily: vi.fn(),
+      mcpSpecs: [],
+      mcpBridged: false,
+      memory: [],
+      memoryDetail: null,
+      memoryResult: null,
+      onClose: vi.fn(),
+      onSave: vi.fn(),
+      onSaveApiKey: vi.fn(),
+      oauthWaiting: false,
+      onOAuthBegin: vi.fn(),
+      onOAuthCancel: vi.fn(),
+      onOAuthSignOut: vi.fn(),
+      onSaveOpenAIApiKey: vi.fn(),
+      antigravityOAuthWaiting: false,
+      onAntigravityOAuthBegin: vi.fn(),
+      onAntigravityOAuthCancel: vi.fn(),
+      onAntigravityOAuthSignOut: vi.fn(),
+      onPickWorkspace: vi.fn(),
+      onAddMcpSpec: vi.fn(),
+      onRemoveMcpSpec: vi.fn(),
+      onReadMemory: vi.fn(),
+      onWriteMemory: vi.fn(),
+      onDeleteMemory: vi.fn(),
+      onExportMemories: vi.fn(),
+      onImportMemories: vi.fn(),
+      onDismissMemoryResult: vi.fn(),
+    };
+
+    const { unmount } = render(<SettingsModal {...baseProps} initialPage="general" />);
+    expect(screen.queryByText("Voice processing model")).toBeNull();
+    unmount();
+
+    render(<SettingsModal {...baseProps} initialPage="models" />);
+    expect(screen.getByText("Voice processing model")).toBeTruthy();
   });
 });

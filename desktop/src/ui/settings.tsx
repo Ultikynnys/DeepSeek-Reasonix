@@ -611,10 +611,6 @@ function PageGeneral({
         </div>
         <WebSearchEngineCredentials settings={settings} onSave={onSave} />
       </section>
-
-      <section className="section">
-        <VoiceModelSettings />
-      </section>
     </>
   );
 }
@@ -1467,6 +1463,9 @@ function PageModels({
         onCancel={onAntigravityCancel}
         onSignOut={onAntigravitySignOut}
       />
+      <section className="section">
+        <VoiceModelSettings />
+      </section>
     </>
   );
 }
