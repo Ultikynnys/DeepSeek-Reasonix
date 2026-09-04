@@ -4255,11 +4255,11 @@ describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThan(hardCap);
   });
 
-  it("still force-summarizes a STUCK turn at the cap in yolo", async () => {
-    // Yolo bypasses the productive-turn pause, but the storm-breaker's stuck
-    // path must keep collapsing garbage loops: three identical calls latch
-    // `_turnSelfCorrected`, and at the cap the turn is force-summarized even
-    // with auto-shell.
+  it("yolo mode continues past the cap even if an earlier repeat-loop self-correction occurred", async () => {
+    // A prior self-correction event shouldn't prevent YOLO mode from running past
+    // the iteration cap: three identical calls latch `_turnSelfCorrected`, but the
+    // turn then resumes productive unique tool calls. At the cap, YOLO mode bypasses
+    // the cap instead of forcing a summary.
     const customCap = 6;
     const responses: FakeResponseShape[] = [
       ...Array.from({ length: 3 }, () => ({
@@ -4272,7 +4272,7 @@ describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
           },
         ],
       })),
-      ...Array.from({ length: customCap - 3 }, (_, i) => ({
+      ...Array.from({ length: customCap - 2 }, (_, i) => ({
         content: "",
         tool_calls: [
           {
@@ -4301,14 +4301,72 @@ describe("CacheFirstLoop — per-turn iteration cap (#2037)", () => {
       events.push(ev);
     }
 
-    const capEv = events.find(
-      (e) => e.role === "warning" && /forcing a summary/.test(e.content ?? ""),
-    );
-    expect(capEv).toBeDefined();
+    // Must emit the YOLO cap bypass warning, not the stuck forced summary.
+    const yoloEv = events.find((e) => e.role === "warning" && /YOLO mode/.test(e.content ?? ""));
+    expect(yoloEv).toBeDefined();
+    expect(yoloEv!.content).toContain(String(customCap));
+    expect(
+      events.find((e) => e.role === "warning" && /forcing a summary/.test(e.content ?? "")),
+    ).toBeUndefined();
+    expect(
+      events.find((e) => e.role === "assistant_final" && e.forcedSummary === true),
+    ).toBeUndefined();
+    expect(events.find((e) => e.role === "done")).toBeDefined();
+    // 3 storm iters (first 2 normal + 1 suppressed self-correction nudge) + (customCap - 2) tool calls + 1 final text
+    expect(fetchMock).toHaveBeenCalledTimes(customCap + 2);
+  });
+
+  it("still force-summarizes an actively repeating loop in yolo via the storm breaker", async () => {
+    // In YOLO mode, if the model ignores the self-correction nudge and repeats
+    // into a second all-suppressed storm, the storm-breaker guard catches it
+    // and force-summarizes immediately.
+    const responses: FakeResponseShape[] = [
+      // 3 identical calls -> trips first storm -> _turnSelfCorrected latched
+      ...Array.from({ length: 3 }, () => ({
+        content: "",
+        tool_calls: [
+          {
+            id: "call_0",
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i: 0 }) },
+          },
+        ],
+      })),
+      // 4th identical call -> second all-suppressed storm -> immediate force summary
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_0",
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i: 0 }) },
+          },
+        ],
+      },
+      // Summary completion response
+      { content: "Stuck in repeat loop summary." },
+    ];
+    const fetchMock = fakeFetch(responses);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = registerNoop();
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+      maxIterPerTurn: 20,
+      getEditMode: () => "yolo",
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      events.push(ev);
+    }
+
     expect(
       events.find((e) => e.role === "assistant_final" && e.forcedSummary === true),
     ).toBeDefined();
     expect(events.find((e) => e.role === "done")).toBeDefined();
-    expect(fetchMock).toHaveBeenCalledTimes(customCap + 1);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 });

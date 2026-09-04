@@ -1137,6 +1137,10 @@ export class CacheFirstLoop {
       // Hard iteration cap — prevents runaway tool-call loops from
       // consuming unlimited API budget. What happens at the cap depends
       // on the turn's health (#2037):
+      //  - YOLO mode (`getEditMode() === "yolo"`): the cap never pauses or stops
+      //    the turn — nobody is watching to say "continue". Noted once, then the
+      //    turn runs without the cap. Genuine repeat loops are still caught and
+      //    force-summarized in dispatch by the storm-breaker guard.
       //  - STUCK turn (storm-breaker latched `_turnSelfCorrected`): one final
       //    force-summary call, then stop — collapses the garbage loop so the
       //    next turn starts from a recap instead of re-sending it.
@@ -1146,12 +1150,18 @@ export class CacheFirstLoop {
       //    compressed recap. If the grace window also exhausts, the turn pauses
       //    NON-destructively: the log stays intact, so the next "continue"
       //    resumes with full state.
-      //  - YOLO mode (`getEditMode() === "yolo"`): the cap never pauses a
-      //    productive turn — nobody is watching to say "continue". Noted once,
-      //    then the turn runs without the cap. The STUCK path above still
-      //    applies: a garbage loop must collapse even with auto-shell.
       const hardCap = this.maxIterPerTurn + (this._iterGraceApplied ? this._iterGrace : 0);
       if (iter >= hardCap && !this._iterCapBypassed) {
+        if (this._getEditMode?.() === "yolo") {
+          this._iterCapBypassed = true;
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "low",
+            content: t("loop.iterLimitYolo", { max: this.maxIterPerTurn }),
+          };
+          continue;
+        }
         if (this._turnSelfCorrected) {
           yield {
             turn: this._turn,
@@ -1163,16 +1173,6 @@ export class CacheFirstLoop {
           restoreModelIfNeeded();
           this._steerQueue.length = 0;
           return;
-        }
-        if (this._getEditMode?.() === "yolo") {
-          this._iterCapBypassed = true;
-          yield {
-            turn: this._turn,
-            role: "warning",
-            severity: "low",
-            content: t("loop.iterLimitYolo", { max: this.maxIterPerTurn }),
-          };
-          continue;
         }
         if (!this._iterGraceApplied) {
           this._iterGrace = Math.max(5, Math.round(this.maxIterPerTurn / 2));
