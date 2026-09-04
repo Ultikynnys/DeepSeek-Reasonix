@@ -50,7 +50,7 @@ const AssistantImage = memo(function AssistantImage({
   useLang();
   return (
     <div className="msg-image-wrap">
-      <img className="msg-image" src={dataUrl} alt="" loading="lazy" />
+      <img className="msg-image" src={dataUrl} alt="" loading="eager" />
       <button
         type="button"
         className="copy-btn"
@@ -114,7 +114,7 @@ export const UserMsg = memo(function UserMsg({
           <div className="msg-images">
             {images.map((src, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: per-message image list is immutable
-              <img key={i} className="msg-image" src={src} alt="" loading="lazy" />
+              <img key={i} className="msg-image" src={src} alt="" loading="eager" />
             ))}
           </div>
         ) : null}

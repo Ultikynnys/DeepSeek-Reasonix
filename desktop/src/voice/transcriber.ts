@@ -55,20 +55,16 @@ type TransformersEnv = typeof import("@xenova/transformers").env;
  * Applies the Transformers.js environment configuration used for in-app
  * transcription.
  *
- * ONNX Runtime runs in "proxy" mode so the heavyweight model work (WASM
- * session creation plus the encoder/decoder forward passes that power Whisper
- * decoding) executes inside an internal Web Worker rather than on the UI
- * thread. Without this, the browser main thread stays blocked for the whole
- * transcription: the composer freezes and the progress throbber stops
- * animating, so voice input looks like it has crashed instead of showing that
- * it is still working.
+ * Runs ONNX Runtime directly with WebAssembly. Proxy mode is disabled because
+ * onnxruntime-web proxying uses Webpack worker-loader and causes concurrent
+ * session allocation errors during Seq2Seq encoder/decoder construction.
  */
 function configureTransformersEnv(env: TransformersEnv): void {
   env.allowRemoteModels = true;
   env.allowLocalModels = false;
   env.backends.onnx.wasm.wasmPaths = "/wasm/";
   env.backends.onnx.logLevel = "error";
-  env.backends.onnx.wasm.proxy = true;
+  env.backends.onnx.wasm.proxy = false;
 }
 
 class LocalSpeechTranscriber {
@@ -128,7 +124,7 @@ class LocalSpeechTranscriber {
 
       configureTransformersEnv(env);
 
-      const pipe = (await pipeline("automatic-speech-recognition", modelId, {
+      const pipe = (await pipeline("automatic-speech-recognition", opt.repoId, {
         quantized: true,
         progress_callback: (data: unknown) => {
           if (onProgress && data && typeof data === "object") {
@@ -178,7 +174,7 @@ class LocalSpeechTranscriber {
 
         configureTransformersEnv(env);
 
-        const pipe = (await pipeline("automatic-speech-recognition", modelId, {
+        const pipe = (await pipeline("automatic-speech-recognition", opt.repoId, {
           quantized: true,
         })) as unknown as ASRPipeline;
 

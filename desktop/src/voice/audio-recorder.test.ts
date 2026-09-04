@@ -41,14 +41,15 @@ describe("resampleAudio", () => {
 
 describe("AudioRecorder", () => {
   it("throws descriptive error when getUserMedia is unavailable", async () => {
-    const originalNavigator = globalThis.navigator;
+    const originalNavigatorDesc = Object.getOwnPropertyDescriptor(globalThis, "navigator");
     try {
-      // @ts-expect-error test override
-      delete globalThis.navigator;
+      Object.defineProperty(globalThis, "navigator", { value: undefined, configurable: true });
       const recorder = new AudioRecorder();
       await expect(recorder.start()).rejects.toThrow(/getUserMedia unavailable/i);
     } finally {
-      globalThis.navigator = originalNavigator;
+      if (originalNavigatorDesc) {
+        Object.defineProperty(globalThis, "navigator", originalNavigatorDesc);
+      }
     }
   });
 
@@ -124,5 +125,114 @@ describe("AudioRecorder", () => {
     const recorder = new AudioRecorder();
     expect(recorder.recording).toBe(false);
     expect(() => recorder.cancel()).not.toThrow();
+  });
+
+  it("fails if audioWorklet is not supported on AudioContext", async () => {
+    const originalMediaDevices = navigator.mediaDevices;
+    const originalWindow = globalThis.window;
+    const stop = vi.fn();
+    try {
+      // @ts-expect-error test mock
+      navigator.mediaDevices = {
+        getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop }] }),
+      };
+      class MockAudioContext {
+        createMediaStreamSource() {
+          return { connect: vi.fn(), disconnect: vi.fn() };
+        }
+        audioWorklet = undefined;
+        close = vi.fn().mockResolvedValue(undefined);
+      }
+      // @ts-expect-error test mock
+      globalThis.window = {
+        AudioContext: MockAudioContext as unknown as typeof AudioContext,
+      };
+
+      const recorder = new AudioRecorder();
+      await expect(recorder.start()).rejects.toThrow(
+        /Microphone audio processing setup failed.*AudioWorklet is not supported/i,
+      );
+      expect(stop).toHaveBeenCalledOnce();
+    } finally {
+      // @ts-expect-error restore
+      navigator.mediaDevices = originalMediaDevices;
+      globalThis.window = originalWindow;
+    }
+  });
+
+  it("captures audio using AudioWorkletNode and flushes on stop", async () => {
+    const originalMediaDevices = navigator.mediaDevices;
+    const originalWindow = globalThis.window;
+    const originalUrl = globalThis.URL;
+    const stopTrack = vi.fn();
+
+    class MockWorkletNode {
+      port = {
+        onmessage: null as ((event: { data: unknown }) => void) | null,
+        postMessage: vi.fn().mockImplementation((msg: unknown) => {
+          if (msg === "flush" && this.port.onmessage) {
+            this.port.onmessage({ data: new Float32Array([0.2, 0.4]) });
+            this.port.onmessage({ data: { type: "flushed" } });
+          }
+        }),
+      };
+      connect = vi.fn();
+      disconnect = vi.fn();
+    }
+
+    class MockAudioContext {
+      sampleRate = 16000;
+      state = "running";
+      destination = {};
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      audioWorklet = {
+        addModule: vi.fn().mockResolvedValue(undefined),
+      };
+      close = vi.fn().mockResolvedValue(undefined);
+    }
+
+    try {
+      // @ts-expect-error test mock
+      navigator.mediaDevices = {
+        getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: stopTrack }] }),
+      };
+      // @ts-expect-error test mock
+      globalThis.window = {
+        AudioContext: MockAudioContext as unknown as typeof AudioContext,
+        AudioWorkletNode: MockWorkletNode as unknown as typeof AudioWorkletNode,
+      };
+      // @ts-expect-error test mock
+      globalThis.URL = {
+        createObjectURL: vi.fn().mockReturnValue("blob:mock-url"),
+        revokeObjectURL: vi.fn(),
+      };
+
+      let lastVolume = 0;
+      const recorder = new AudioRecorder({
+        onVolumeChange: (vol) => {
+          lastVolume = vol;
+        },
+      });
+
+      await recorder.start();
+      expect(recorder.recording).toBe(true);
+
+      // Simulate incoming audio buffer chunk from worklet
+      // @ts-expect-error accessing private workletNode for test simulation
+      recorder.workletNode.port.onmessage({ data: new Float32Array([0.1, -0.1, 0.2, -0.2]) });
+      expect(lastVolume).toBeGreaterThan(0);
+
+      const result = await recorder.stop();
+      expect(recorder.recording).toBe(false);
+      expect(result.audioData.length).toBe(6); // 4 initial + 2 flushed
+      expect(stopTrack).toHaveBeenCalled();
+    } finally {
+      // @ts-expect-error restore
+      navigator.mediaDevices = originalMediaDevices;
+      globalThis.window = originalWindow;
+      globalThis.URL = originalUrl;
+    }
   });
 });

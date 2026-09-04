@@ -54,10 +54,59 @@ export function resampleAudio(
   return result;
 }
 
+const RECORDER_WORKLET_NAME = "reasonix-recorder-worklet";
+
+const RECORDER_WORKLET_CODE = `
+class ReasonixRecorderProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.bufferSize = 4096;
+    this.buffer = new Float32Array(this.bufferSize);
+    this.bytesWritten = 0;
+    this.port.onmessage = (event) => {
+      if (event.data === "flush") {
+        if (this.bytesWritten > 0) {
+          const remaining = this.buffer.slice(0, this.bytesWritten);
+          this.port.postMessage(remaining, [remaining.buffer]);
+          this.buffer = new Float32Array(this.bufferSize);
+          this.bytesWritten = 0;
+        }
+        this.port.postMessage({ type: "flushed" });
+      }
+    };
+  }
+
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || !input[0]) {
+      return true;
+    }
+    const channelData = input[0];
+    let offset = 0;
+    while (offset < channelData.length) {
+      const remaining = this.bufferSize - this.bytesWritten;
+      const toCopy = Math.min(remaining, channelData.length - offset);
+      this.buffer.set(channelData.subarray(offset, offset + toCopy), this.bytesWritten);
+      this.bytesWritten += toCopy;
+      offset += toCopy;
+
+      if (this.bytesWritten >= this.bufferSize) {
+        this.port.postMessage(this.buffer, [this.buffer.buffer]);
+        this.buffer = new Float32Array(this.bufferSize);
+        this.bytesWritten = 0;
+      }
+    }
+    return true;
+  }
+}
+
+registerProcessor("${RECORDER_WORKLET_NAME}", ReasonixRecorderProcessor);
+`;
+
 export class AudioRecorder {
   private mediaStream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
-  private scriptProcessor: ScriptProcessorNode | null = null;
+  private workletNode: AudioWorkletNode | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private chunks: Float32Array[] = [];
   private isRecording = false;
@@ -145,27 +194,49 @@ export class AudioRecorder {
       this.chunks = [];
       this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
 
-      // 4096 buffer size gives ~90ms latency at 44.1kHz / ~250ms at 16kHz
-      this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+      if (!this.audioContext.audioWorklet) {
+        throw new Error("AudioWorklet is not supported in this environment.");
+      }
 
-      this.scriptProcessor.onaudioprocess = (event: AudioProcessingEvent) => {
+      const workletBlob = new Blob([RECORDER_WORKLET_CODE], { type: "application/javascript" });
+      const workletUrl = URL.createObjectURL(workletBlob);
+      try {
+        await this.audioContext.audioWorklet.addModule(workletUrl);
+      } finally {
+        URL.revokeObjectURL(workletUrl);
+      }
+
+      const AudioWorkletNodeClass =
+        window.AudioWorkletNode ||
+        (window as unknown as { webkitAudioWorkletNode?: typeof AudioWorkletNode })
+          .webkitAudioWorkletNode;
+
+      if (!AudioWorkletNodeClass) {
+        throw new Error("AudioWorkletNode is not supported in this environment.");
+      }
+
+      this.workletNode = new AudioWorkletNodeClass(this.audioContext, RECORDER_WORKLET_NAME);
+
+      this.workletNode.port.onmessage = (event: MessageEvent<Float32Array | { type?: string }>) => {
         if (!this.isRecording) return;
-        const channelData = event.inputBuffer.getChannelData(0);
-        this.chunks.push(new Float32Array(channelData));
+        const data = event.data;
+        if (!(data instanceof Float32Array)) return;
+
+        this.chunks.push(data);
 
         if (this.onVolumeChange) {
           let sumSquares = 0;
-          for (let i = 0; i < channelData.length; i++) {
-            const val = channelData[i] ?? 0;
+          for (let i = 0; i < data.length; i++) {
+            const val = data[i] ?? 0;
             sumSquares += val * val;
           }
-          const rms = Math.sqrt(sumSquares / channelData.length);
+          const rms = Math.sqrt(sumSquares / data.length);
           this.onVolumeChange(Math.min(rms * 5, 1));
         }
       };
 
-      this.sourceNode.connect(this.scriptProcessor);
-      this.scriptProcessor.connect(this.audioContext.destination);
+      this.sourceNode.connect(this.workletNode);
+      this.workletNode.connect(this.audioContext.destination);
       this.isRecording = true;
     } catch (err) {
       this.cleanup();
@@ -182,6 +253,49 @@ export class AudioRecorder {
     }
 
     this.isRecording = false;
+
+    // Flush any pending uncommitted samples from the worklet buffer:
+    if (this.workletNode) {
+      await new Promise<void>((resolve) => {
+        const port = this.workletNode?.port;
+        if (!port) {
+          resolve();
+          return;
+        }
+        let settled = false;
+        const timeoutId = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            resolve();
+          }
+        }, 100);
+
+        port.onmessage = (event: MessageEvent<Float32Array | { type?: string }>) => {
+          const data = event.data;
+          if (data instanceof Float32Array) {
+            this.chunks.push(data);
+          } else if (
+            data &&
+            typeof data === "object" &&
+            "type" in data &&
+            data.type === "flushed"
+          ) {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timeoutId);
+              resolve();
+            }
+          }
+        };
+
+        try {
+          port.postMessage("flush");
+        } catch {
+          clearTimeout(timeoutId);
+          resolve();
+        }
+      });
+    }
 
     const sourceSampleRate = this.audioContext?.sampleRate ?? 16000;
     this.cleanup();
@@ -218,10 +332,10 @@ export class AudioRecorder {
   }
 
   private cleanup(): void {
-    if (this.scriptProcessor) {
-      this.scriptProcessor.disconnect();
-      this.scriptProcessor.onaudioprocess = null;
-      this.scriptProcessor = null;
+    if (this.workletNode) {
+      this.workletNode.disconnect();
+      this.workletNode.port.onmessage = null;
+      this.workletNode = null;
     }
     if (this.sourceNode) {
       this.sourceNode.disconnect();
