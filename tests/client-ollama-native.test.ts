@@ -78,7 +78,7 @@ describe("ollama native payload", () => {
     expect(calls[calls.length - 1]).toBe("http://localhost:11434/api/chat");
   });
 
-  it("maps maxTokens/temperature/num_ctx into options and sends keep_alive", async () => {
+  it("maps generation settings and request overrides into native options", async () => {
     let capturedInit: RequestInit | undefined;
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
       capturedInit = init as RequestInit;
@@ -97,19 +97,33 @@ describe("ollama native payload", () => {
       messages: [{ role: "user", content: "hi" }],
       temperature: 0.5,
       maxTokens: 200,
+      ollama: {
+        topP: 0.85,
+        minP: 0.05,
+        seed: 42,
+        repeatPenalty: 1.4,
+        frequencyPenalty: 0.2,
+        presencePenalty: 0.1,
+        topK: 60,
+        repeatLastN: 256,
+        keepAlive: "1h",
+      },
     });
     const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
     expect(body.model).toBe("qwen3:32b");
-    expect(body.keep_alive).toBe("30m");
+    expect(body.keep_alive).toBe("1h");
     expect(body.options).toEqual({
       num_predict: 200,
       temperature: 0.5,
+      top_p: 0.85,
+      min_p: 0.05,
+      seed: 42,
       num_ctx: 8192,
-      repeat_penalty: 1.3,
-      frequency_penalty: 0.5,
-      presence_penalty: 0.4,
-      top_k: 40,
-      repeat_last_n: 128,
+      repeat_penalty: 1.4,
+      frequency_penalty: 0.2,
+      presence_penalty: 0.1,
+      top_k: 60,
+      repeat_last_n: 256,
     });
   });
 

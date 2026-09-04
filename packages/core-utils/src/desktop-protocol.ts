@@ -23,6 +23,23 @@ export type WebSearchEngineName =
 
 export type ExternalSessionSource = "claude" | "codex";
 
+export interface OllamaGenerationSettings {
+  temperature?: number;
+  topP?: number;
+  minP?: number;
+  seed?: number;
+  keepAlive: string;
+  repeatPenalty: number;
+  frequencyPenalty: number;
+  presencePenalty: number;
+  topK: number;
+  repeatLastN: number;
+}
+
+export type OllamaGenerationPatch = {
+  [K in keyof OllamaGenerationSettings]?: OllamaGenerationSettings[K] | null;
+};
+
 export interface ExternalSessionApp {
   source: ExternalSessionSource;
   label: string;
@@ -405,8 +422,14 @@ export interface SettingsEvent {
     showVersion?: boolean;
     showFeedbackHint?: boolean;
   };
+  /** Effective native Ollama generation values after environment/config/default resolution. */
+  ollamaGeneration?: OllamaGenerationSettings;
+  /** Explicit persisted values, used to expose per-field reset actions. */
+  ollamaGenerationOverrides?: OllamaGenerationPatch;
   /** Endpoint + auth state for the tab's current model — per tab, follows model switches. */
   modelEndpoint?: ModelEndpointInfo;
+  /** Resolved endpoint for the tab's effective subagent model. */
+  subagentModelEndpoint?: ModelEndpointInfo;
   /** OpenAI website-account OAuth state — never ships tokens, only the masked account. */
   openaiOAuth?: {
     signedIn: boolean;
@@ -613,6 +636,8 @@ export interface SettingsPatch {
   subagentModel?: string;
   /** Ollama chat endpoint override (OpenAI-compatible). null = back to the local default. */
   ollamaBaseUrl?: string | null;
+  /** Native Ollama generation options. Null fields clear their persisted override. */
+  ollamaGeneration?: OllamaGenerationPatch;
   webSearchEngine?: WebSearchEngineName;
   webSearchEndpoint?: string | null;
   metasoApiKey?: string | null;

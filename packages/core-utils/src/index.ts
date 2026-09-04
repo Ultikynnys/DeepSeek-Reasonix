@@ -134,6 +134,8 @@ export type {
   CodexQuotaEvent,
   CodexQuotaWindow,
   ModelEndpointInfo,
+  OllamaGenerationPatch,
+  OllamaGenerationSettings,
   OllamaModelsEvent,
   OllamaQuota,
   OllamaQuotaEvent,

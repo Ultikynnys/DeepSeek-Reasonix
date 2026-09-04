@@ -4968,6 +4968,62 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   padding: 0 1px;
 }
 
+/* Ollama native generation controls */
+.ollama-generation {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.ollama-help {
+  margin: -2px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.ollama-fields {
+  display: grid;
+  gap: 8px;
+}
+.ollama-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--fg-2);
+  font-size: 13px;
+}
+.ollama-field-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+.ollama-field input {
+  width: 94px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--fg);
+  padding: 4px 6px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.ollama-field input:focus-visible {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+.ollama-advanced {
+  margin-top: 10px;
+}
+.ollama-advanced summary {
+  color: var(--muted-2);
+  cursor: pointer;
+  font-size: 12px;
+  margin-bottom: 8px;
+  user-select: none;
+}
+
 /* file tree */
 .tree {
   font-family: inherit;

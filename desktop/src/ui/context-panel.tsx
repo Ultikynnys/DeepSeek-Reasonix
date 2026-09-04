@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
 import { t, useLang } from "../i18n";
+import type { TKey } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
@@ -385,6 +386,196 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
   );
 }
 
+type OllamaNumberKey = Exclude<
+  keyof NonNullable<Settings["ollamaGeneration"]>,
+  "keepAlive"
+>;
+
+const OLLAMA_NUMBER_FIELDS: Array<{
+  key: OllamaNumberKey;
+  labelKey: TKey;
+  min: number;
+  max: number;
+  step: number;
+  advanced?: boolean;
+}> = [
+  { key: "temperature", labelKey: "contextPanel.ollamaTemperature", min: 0, max: 2, step: 0.05 },
+  { key: "topP", labelKey: "contextPanel.ollamaTopP", min: 0, max: 1, step: 0.01 },
+  { key: "topK", labelKey: "contextPanel.ollamaTopK", min: 0, max: 1_000, step: 1 },
+  { key: "minP", labelKey: "contextPanel.ollamaMinP", min: 0, max: 1, step: 0.01 },
+  {
+    key: "seed",
+    labelKey: "contextPanel.ollamaSeed",
+    min: 0,
+    max: 2_147_483_647,
+    step: 1,
+    advanced: true,
+  },
+  {
+    key: "repeatPenalty",
+    labelKey: "contextPanel.ollamaRepeatPenalty",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    advanced: true,
+  },
+  {
+    key: "repeatLastN",
+    labelKey: "contextPanel.ollamaRepeatLastN",
+    min: -1,
+    max: 1_000_000,
+    step: 1,
+    advanced: true,
+  },
+  {
+    key: "frequencyPenalty",
+    labelKey: "contextPanel.ollamaFrequencyPenalty",
+    min: -2,
+    max: 2,
+    step: 0.05,
+    advanced: true,
+  },
+  {
+    key: "presencePenalty",
+    labelKey: "contextPanel.ollamaPresencePenalty",
+    min: -2,
+    max: 2,
+    step: 0.05,
+    advanced: true,
+  },
+];
+
+function OllamaNumberField({
+  field,
+  value,
+  overridden,
+  onSaveSettings,
+}: {
+  field: (typeof OLLAMA_NUMBER_FIELDS)[number];
+  value: number | undefined;
+  overridden: boolean;
+  onSaveSettings?: (patch: SettingsPatch) => void;
+}) {
+  const [draft, setDraft] = useState(value === undefined ? "" : String(value));
+  useEffect(() => setDraft(value === undefined ? "" : String(value)), [value]);
+
+  const commit = () => {
+    if (!draft.trim()) return;
+    const parsed = Number(draft);
+    if (!Number.isFinite(parsed) || parsed < field.min || parsed > field.max) {
+      setDraft(value === undefined ? "" : String(value));
+      return;
+    }
+    onSaveSettings?.({ ollamaGeneration: { [field.key]: parsed } });
+  };
+
+  return (
+    <label className="ollama-field">
+      <span>{t(field.labelKey)}</span>
+      <span className="ollama-field-control">
+        <input
+          type="number"
+          value={draft}
+          min={field.min}
+          max={field.max}
+          step={field.step}
+          placeholder={t("contextPanel.ollamaModelDefault")}
+          aria-label={t(field.labelKey)}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+        />
+        {overridden ? (
+          <button
+            type="button"
+            className="mini-btn"
+            title={t("contextPanel.ollamaResetTooltip")}
+            onClick={() => onSaveSettings?.({ ollamaGeneration: { [field.key]: null } })}
+          >
+            {t("contextPanel.contextWindowReset")}
+          </button>
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
+function OllamaGenerationControls({
+  settings,
+  onSaveSettings,
+}: {
+  settings: Settings;
+  onSaveSettings?: (patch: SettingsPatch) => void;
+}) {
+  const values = settings.ollamaGeneration;
+  const overrides = settings.ollamaGenerationOverrides;
+  const [keepAlive, setKeepAlive] = useState(values?.keepAlive ?? "30m");
+  useEffect(() => setKeepAlive(values?.keepAlive ?? "30m"), [values?.keepAlive]);
+
+  const fields = (advanced: boolean) =>
+    OLLAMA_NUMBER_FIELDS.filter((field) => Boolean(field.advanced) === advanced).map((field) => (
+      <OllamaNumberField
+        key={field.key}
+        field={field}
+        value={values?.[field.key]}
+        overridden={overrides?.[field.key] !== undefined}
+        onSaveSettings={onSaveSettings}
+      />
+    ));
+
+  return (
+    <div className="ctx-block ollama-generation" data-testid="ollama-generation-settings">
+      <div className="h">
+        <span>{t("contextPanel.ollamaGeneration")}</span>
+        <span className="right">{t("contextPanel.ollamaNativeApi")}</span>
+      </div>
+      <p className="ollama-help">{t("contextPanel.ollamaGenerationHelp")}</p>
+      <div className="ollama-fields">{fields(false)}</div>
+      <details className="ollama-advanced">
+        <summary>{t("contextPanel.ollamaAdvanced")}</summary>
+        <div className="ollama-fields">
+          {fields(true)}
+          <label className="ollama-field">
+            <span>{t("contextPanel.ollamaKeepAlive")}</span>
+            <span className="ollama-field-control">
+              <input
+                value={keepAlive}
+                aria-label={t("contextPanel.ollamaKeepAlive")}
+                list="ollama-keep-alive-options"
+                onChange={(event) => setKeepAlive(event.target.value)}
+                onBlur={() => {
+                  const value = keepAlive.trim();
+                  if (value) onSaveSettings?.({ ollamaGeneration: { keepAlive: value } });
+                  else setKeepAlive(values?.keepAlive ?? "30m");
+                }}
+              />
+              {overrides?.keepAlive !== undefined ? (
+                <button
+                  type="button"
+                  className="mini-btn"
+                  title={t("contextPanel.ollamaResetTooltip")}
+                  onClick={() => onSaveSettings?.({ ollamaGeneration: { keepAlive: null } })}
+                >
+                  {t("contextPanel.contextWindowReset")}
+                </button>
+              ) : null}
+            </span>
+          </label>
+          <datalist id="ollama-keep-alive-options">
+            <option value="0" />
+            <option value="5m" />
+            <option value="30m" />
+            <option value="1h" />
+            <option value="-1" />
+          </datalist>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function CtxTools({
   specs,
   bridged,
@@ -503,6 +694,12 @@ function CtxTools({
           </div>
         </div>
       </div>
+
+      {settings &&
+      (settings.modelEndpoint?.provider === "ollama" ||
+        settings.subagentModelEndpoint?.provider === "ollama") ? (
+        <OllamaGenerationControls settings={settings} onSaveSettings={onSaveSettings} />
+      ) : null}
 
       <div className="ctx-block">
         <div className="h">

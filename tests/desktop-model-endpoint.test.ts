@@ -142,6 +142,20 @@ describe("desktop modelEndpointFor (#1529)", () => {
     });
   });
 
+  it("uses an explicit Ollama provider mapping for an arbitrary model id", () => {
+    writeConfig(
+      {
+        models: { "private-coding-model": { provider: "ollama" } },
+        ollamaBaseUrl: "http://localhost:11434",
+      },
+      path,
+    );
+    expect(modelEndpointFor("private-coding-model", path)).toEqual({
+      provider: "ollama",
+      baseUrl: "http://localhost:11434",
+    });
+  });
+
   it("ollama model follows a custom ollamaBaseUrl", () => {
     writeConfig({ ollamaBaseUrl: "https://ollama.example.com/v1" }, path);
     expect(modelEndpointFor("ollama/qwen3:32b", path)).toEqual({

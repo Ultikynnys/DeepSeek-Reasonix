@@ -101,6 +101,8 @@ import {
   loadModel,
   loadOllamaApiKey,
   loadOllamaEndpoint,
+  loadOllamaGenerationOverrides,
+  loadOllamaGenerationSettings,
   loadPerplexityApiKey,
   loadProjectPathAllowed,
   loadProjectShellAllowed,
@@ -127,6 +129,7 @@ import {
   saveEditMode,
   saveMaxIterPerTurn,
   saveModel,
+  saveOllamaGenerationPatch,
   saveOpenAIApiKey,
   saveOpenAIOAuth,
   saveReasoningEffort,
@@ -911,9 +914,12 @@ function emitSettings(tab: Tab): void {
       webSearchEndpoint: readConfig().webSearchEndpoint,
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
       subagentModel: tab.currentSubagentModel,
+      ollamaGeneration: loadOllamaGenerationSettings(),
+      ollamaGenerationOverrides: loadOllamaGenerationOverrides(),
       showSystemEvents: loadShowSystemEvents(),
       statusBar: config.statusBar,
       modelEndpoint: modelEndpointFor(tab.currentModel),
+      subagentModelEndpoint: modelEndpointFor(tab.currentSubagentModel ?? tab.currentModel),
       openaiOAuth: {
         signedIn: !!oauth?.accessToken,
         account: oauth?.account,
@@ -4556,6 +4562,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             openTab.runtime?.loop.configure({ maxIterPerTurn: next });
             emitSettings(openTab);
           }
+        }
+        if (msg.ollamaGeneration !== undefined) {
+          saveOllamaGenerationPatch(msg.ollamaGeneration);
+          for (const openTab of tabs.values()) emitSettings(openTab);
         }
         if (msg.baseUrl !== undefined) saveBaseUrl(msg.baseUrl);
         if (msg.workspaceDir !== undefined) {

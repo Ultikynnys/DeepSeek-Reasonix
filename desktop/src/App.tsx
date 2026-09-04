@@ -387,6 +387,8 @@ export type Settings = {
   };
   /** Per-tab subagent model — default for subagent skills without an explicit `model:` frontmatter. */
   subagentModel?: string;
+  ollamaGeneration?: import("./protocol").OllamaGenerationSettings;
+  ollamaGenerationOverrides?: import("./protocol").OllamaGenerationPatch;
   showSystemEvents?: boolean;
   /** Per-field visibility toggles for the bottom status row. Absent = all default to true. */
   statusBar?: {
@@ -400,6 +402,8 @@ export type Settings = {
   };
   /** Endpoint + auth state for the tab's current model — per tab, follows model switches. */
   modelEndpoint?: ModelEndpointInfo;
+  /** Daemon-resolved endpoint for the tab's effective subagent model. */
+  subagentModelEndpoint?: ModelEndpointInfo;
   openaiOAuth?: {
     signedIn: boolean;
     account?: string;
@@ -566,6 +570,7 @@ function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
     exaApiKey: _exa,
     ollamaApiKey: _ollama,
     ollamaBaseUrl: _ollamaBaseUrl,
+    ollamaGeneration: _ollamaGeneration,
     webSearchEndpoint,
     ...rest
   } = patch;
@@ -1155,7 +1160,14 @@ export function applySubagentProgress(
   const tools = [...(previous?.tools ?? [])];
   const recentRows = [...(previous?.recentRows ?? [])];
 
-  if (ev.action === "tool-start") {
+  if (ev.action === "start" && recentRows.length === 0) {
+    recentRows.push({
+      id: `${ev.runId}-start`,
+      kind: "process",
+      text: `Starting ${ev.skillName ?? "subagent"}...`,
+      status: "running",
+    });
+  } else if (ev.action === "tool-start") {
     const callId = ev.childCallId ?? `${ev.runId}-tool-${tools.length}`;
     const existing = tools.findIndex((tool) => tool.callId === callId);
     const activity: SubagentToolActivity = {
@@ -1201,20 +1213,18 @@ export function applySubagentProgress(
   if (ev.thought) {
     const lines = ev.thought
       .split("\n")
-      .map((l: string) => l.trim())
-      .filter((l: string) => l.length > 0);
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .slice(-3);
     if (lines.length > 0) {
-      const latestLine = lines[lines.length - 1]!;
-      const lastRow = recentRows[recentRows.length - 1];
-      if (lastRow && lastRow.kind === "thinking") {
-        lastRow.text = latestLine;
-      } else {
-        recentRows.push({
-          id: `${ev.runId}-th-${Date.now()}-${recentRows.length}`,
-          kind: "thinking",
-          text: latestLine,
-        });
-      }
+      while (recentRows.at(-1)?.kind === "thinking") recentRows.pop();
+      recentRows.push(
+        ...lines.map((text, index) => ({
+          id: `${ev.runId}-th-${ev.reasoningChars ?? ev.outputChars ?? Date.now()}-${index}`,
+          kind: "thinking" as const,
+          text,
+        })),
+      );
     }
   }
   if (recentRows.length > 20) {
@@ -1540,9 +1550,12 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           webSearchEndpoint: ev.webSearchEndpoint,
           webSearchApiKeys: ev.webSearchApiKeys,
           subagentModel: ev.subagentModel,
+          ollamaGeneration: ev.ollamaGeneration,
+          ollamaGenerationOverrides: ev.ollamaGenerationOverrides,
           showSystemEvents: ev.showSystemEvents,
           statusBar: ev.statusBar,
           modelEndpoint: ev.modelEndpoint,
+          subagentModelEndpoint: ev.subagentModelEndpoint,
           openaiOAuth: ev.openaiOAuth,
           antigravityOAuth: ev.antigravityOAuth,
           version: ev.version,
@@ -3120,6 +3133,7 @@ function TabRuntime({
                 onPasteImage={attachPastedImage}
                 onImageRejected={() => appendNotice(t("composer.imageRequiresVision"), "warning")}
                 onPickImage={attachPickedImage}
+                onVoiceError={(message) => appendNotice(message, "error")}
               />
             </>
           )}

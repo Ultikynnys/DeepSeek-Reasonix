@@ -109,6 +109,12 @@ export interface ChatRequestOptions {
     numCtx?: number;
     /** Model residency after the turn. Unset → config/env, then "30m". */
     keepAlive?: string;
+    /** Nucleus sampling probability (`top_p`). */
+    topP?: number;
+    /** Minimum probability relative to the most likely token (`min_p`). */
+    minP?: number;
+    /** Deterministic sampling seed. */
+    seed?: number;
     /** Repeat penalty (`repeat_penalty`). Higher values penalize repetition more
      *  aggressively. Unset → config/env, then server default (1.1). */
     repeatPenalty?: number;

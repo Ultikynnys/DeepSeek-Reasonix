@@ -2,7 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings, UsageStats } from "../App";
 import { ContextPanel } from "./context-panel";
@@ -332,5 +332,127 @@ describe("ContextPanel files", () => {
     const iterationReset = screen.getByTitle("Reset to environment or default (50)");
     fireEvent.click(iterationReset);
     expect(onSaveSettings).toHaveBeenCalledWith({ maxIterPerTurn: null });
+  });
+
+  it("hides Ollama generation controls when neither endpoint is Ollama", () => {
+    render(
+      <ContextPanel
+        settings={{
+          ...settings,
+          modelEndpoint: { provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+          subagentModelEndpoint: { provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+        }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+    expect(screen.queryByTestId("ollama-generation-settings")).toBeNull();
+  });
+
+  it("shows Ollama generation controls when the main model endpoint is Ollama", () => {
+    const onSaveSettings = vi.fn();
+    render(
+      <ContextPanel
+        settings={{
+          ...settings,
+          modelEndpoint: { provider: "ollama", baseUrl: "http://localhost:11434" },
+          subagentModelEndpoint: { provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+          ollamaGeneration: {
+            temperature: 0.5,
+            topP: 0.9,
+            topK: 40,
+            minP: 0.05,
+            seed: 42,
+            keepAlive: "30m",
+            repeatPenalty: 1.3,
+            frequencyPenalty: 0.5,
+            presencePenalty: 0.4,
+            repeatLastN: 128,
+          },
+          ollamaGenerationOverrides: { temperature: 0.5, seed: 42 },
+        }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onSaveSettings={onSaveSettings}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    const section = screen.getByTestId("ollama-generation-settings");
+    expect(section).toBeTruthy();
+
+    // Placed after Max iterations, before MCP servers.
+    const maxIter = screen.getByRole("slider", { name: "Max iterations" });
+    const mcp = screen.getByText("MCP servers");
+    expect(
+      maxIter.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      section.compareDocumentPosition(mcp) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // Commit a temperature edit on blur.
+    const temp = screen.getByRole("spinbutton", { name: "Temperature" });
+    fireEvent.change(temp, { target: { value: "0.7" } });
+    fireEvent.blur(temp);
+    expect(onSaveSettings).toHaveBeenCalledWith({ ollamaGeneration: { temperature: 0.7 } });
+
+    // Reset an overridden field, scoped to the temperature row.
+    const tempRow = temp.closest("label") as HTMLElement;
+    const reset = within(tempRow).getByTitle(
+      "Reset to environment, Reasonix default, or model default",
+    );
+    fireEvent.click(reset);
+    expect(onSaveSettings).toHaveBeenCalledWith({ ollamaGeneration: { temperature: null } });
+  });
+
+  it("shows Ollama generation controls when only the subagent endpoint is Ollama", () => {
+    render(
+      <ContextPanel
+        settings={{
+          ...settings,
+          modelEndpoint: { provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+          subagentModelEndpoint: { provider: "ollama", baseUrl: "http://localhost:11434" },
+        }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+    expect(screen.getByTestId("ollama-generation-settings")).toBeTruthy();
   });
 });

@@ -33,6 +33,8 @@ import {
   loadMaxIterPerTurn,
   loadModel,
   loadMouseWheelRows,
+  loadOllamaGenerationOverrides,
+  loadOllamaGenerationSettings,
   loadPricingOverride,
   loadProjectPathAllowed,
   loadProjectShellAllowed,
@@ -62,6 +64,7 @@ import {
   saveIndexConfig,
   saveMaxIterPerTurn,
   saveModel,
+  saveOllamaGenerationPatch,
   saveOpenAIApiKey,
   saveOpenAIOAuth,
   saveReasoningEffort,
@@ -1106,6 +1109,59 @@ describe("config", () => {
 
     saveContextTokens(null, path);
     expect(readConfig(path).contextTokens).toBeUndefined();
+  });
+
+  it("resolves and atomically persists Ollama generation settings", () => {
+    expect(loadOllamaGenerationSettings(path)).toEqual({
+      temperature: undefined,
+      topP: undefined,
+      minP: undefined,
+      seed: undefined,
+      keepAlive: "30m",
+      repeatPenalty: 1.3,
+      frequencyPenalty: 0.5,
+      presencePenalty: 0.4,
+      topK: 40,
+      repeatLastN: 128,
+    });
+
+    saveOllamaGenerationPatch(
+      { temperature: 0.25, topP: 0.9, minP: 0.05, seed: 42, topK: 80, keepAlive: "1h" },
+      path,
+    );
+    expect(loadOllamaGenerationOverrides(path)).toEqual({
+      temperature: 0.25,
+      topP: 0.9,
+      minP: 0.05,
+      seed: 42,
+      keepAlive: "1h",
+      topK: 80,
+    });
+    expect(loadOllamaGenerationSettings(path)).toMatchObject({
+      temperature: 0.25,
+      topP: 0.9,
+      minP: 0.05,
+      seed: 42,
+      topK: 80,
+      keepAlive: "1h",
+    });
+
+    saveOllamaGenerationPatch({ temperature: null, keepAlive: null }, path);
+    expect(loadOllamaGenerationOverrides(path)).not.toHaveProperty("temperature");
+    expect(loadOllamaGenerationOverrides(path)).not.toHaveProperty("keepAlive");
+  });
+
+  it("gives valid Ollama environment settings precedence and rejects invalid patches", () => {
+    process.env.OLLAMA_TEMPERATURE = "0.7";
+    process.env.OLLAMA_TOP_P = "0.8";
+    saveOllamaGenerationPatch({ temperature: 0.2, topP: 0.3 }, path);
+    expect(loadOllamaGenerationSettings(path)).toMatchObject({ temperature: 0.7, topP: 0.8 });
+    expect(() => saveOllamaGenerationPatch({ temperature: 3 }, path)).toThrow(RangeError);
+    expect(() => saveOllamaGenerationPatch({ keepAlive: "  " }, path)).toThrow(RangeError);
+    // biome-ignore lint/performance/noDelete: restore the test process environment
+    delete process.env.OLLAMA_TEMPERATURE;
+    // biome-ignore lint/performance/noDelete: restore the test process environment
+    delete process.env.OLLAMA_TOP_P;
   });
 
   it("loadMaxIterPerTurn defaults to 50 when unset", () => {

@@ -377,6 +377,14 @@ export interface ReasonixConfig {
   ollamaApiKey?: string;
   /** Ollama chat endpoint (OpenAI-compatible). Falls back to OLLAMA_BASE_URL env, then https://ollama.com/v1 (Ollama cloud). Local daemon is keyless; cloud requires ollamaApiKey. */
   ollamaBaseUrl?: string;
+  /** Sampling temperature sent to native Ollama chat requests. */
+  ollamaTemperature?: number;
+  /** Nucleus sampling probability sent as Ollama `top_p`. */
+  ollamaTopP?: number;
+  /** Minimum token probability relative to the most likely token. */
+  ollamaMinP?: number;
+  /** Deterministic sampling seed. Unset leaves sampling nondeterministic. */
+  ollamaSeed?: number;
   /** Keep-alive sent with every Ollama `/api/chat` request: how long the model
    *  stays loaded after a turn. Defaults to "30m"; "-1" pins it loaded
    *  indefinitely, "0" unloads immediately after each turn. */
@@ -603,14 +611,162 @@ export function loadOllamaApiKey(path: string = defaultConfigPath()): string | u
   return undefined;
 }
 
-/** Ollama keep-alive — env OLLAMA_KEEP_ALIVE > config > "30m" default; the env
- *  matches the server's own variable, and per-request overrides its 5m default. */
+export interface OllamaGenerationSettings {
+  temperature?: number;
+  topP?: number;
+  minP?: number;
+  seed?: number;
+  keepAlive: string;
+  repeatPenalty: number;
+  frequencyPenalty: number;
+  presencePenalty: number;
+  topK: number;
+  repeatLastN: number;
+}
+
+export type OllamaGenerationPatch = {
+  [K in keyof OllamaGenerationSettings]?: OllamaGenerationSettings[K] | null;
+};
+
+const DEFAULT_OLLAMA_GENERATION = {
+  keepAlive: "30m",
+  repeatPenalty: 1.3,
+  frequencyPenalty: 0.5,
+  presencePenalty: 0.4,
+  topK: 40,
+  repeatLastN: 128,
+} as const;
+
+const OLLAMA_NUMBER_SPECS = {
+  temperature: { config: "ollamaTemperature", env: "OLLAMA_TEMPERATURE", min: 0, max: 2 },
+  topP: { config: "ollamaTopP", env: "OLLAMA_TOP_P", min: 0, max: 1 },
+  minP: { config: "ollamaMinP", env: "OLLAMA_MIN_P", min: 0, max: 1 },
+  seed: { config: "ollamaSeed", env: "OLLAMA_SEED", min: 0, max: 2_147_483_647, integer: true },
+  repeatPenalty: {
+    config: "ollamaRepeatPenalty",
+    env: "OLLAMA_REPEAT_PENALTY",
+    min: 0,
+    max: 2,
+  },
+  frequencyPenalty: {
+    config: "ollamaFrequencyPenalty",
+    env: "OLLAMA_FREQUENCY_PENALTY",
+    min: -2,
+    max: 2,
+  },
+  presencePenalty: {
+    config: "ollamaPresencePenalty",
+    env: "OLLAMA_PRESENCE_PENALTY",
+    min: -2,
+    max: 2,
+  },
+  topK: { config: "ollamaTopK", env: "OLLAMA_TOP_K", min: 0, max: 1_000, integer: true },
+  repeatLastN: {
+    config: "ollamaRepeatLastN",
+    env: "OLLAMA_REPEAT_LAST_N",
+    min: -1,
+    max: 1_000_000,
+    integer: true,
+  },
+} as const;
+
+type OllamaNumberKey = keyof typeof OLLAMA_NUMBER_SPECS;
+type OllamaConfigNumberKey = (typeof OLLAMA_NUMBER_SPECS)[OllamaNumberKey]["config"];
+
+function validOllamaNumber(key: OllamaNumberKey, value: unknown): number | undefined {
+  const spec = OLLAMA_NUMBER_SPECS[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  if (value < spec.min || value > spec.max) return undefined;
+  return "integer" in spec && spec.integer ? Math.floor(value) : value;
+}
+
+function resolveOllamaNumber(key: OllamaNumberKey, config: ReasonixConfig): number | undefined {
+  const spec = OLLAMA_NUMBER_SPECS[key];
+  const env = process.env[spec.env]?.trim();
+  if (env) {
+    const parsed = validOllamaNumber(key, Number(env));
+    if (parsed !== undefined) return parsed;
+  }
+  return validOllamaNumber(key, config[spec.config]);
+}
+
+/** Resolve all native Ollama generation options once: environment > config >
+ *  Reasonix policy default. Newly introduced sampling options remain absent so
+ *  the model's Modelfile or server default can apply. */
+export function loadOllamaGenerationSettings(
+  path: string = defaultConfigPath(),
+): OllamaGenerationSettings {
+  const config = readConfig(path);
+  const keepAliveEnv = process.env.OLLAMA_KEEP_ALIVE?.trim();
+  const keepAliveConfig = config.ollamaKeepAlive?.trim();
+  return {
+    temperature: resolveOllamaNumber("temperature", config),
+    topP: resolveOllamaNumber("topP", config),
+    minP: resolveOllamaNumber("minP", config),
+    seed: resolveOllamaNumber("seed", config),
+    keepAlive: keepAliveEnv || keepAliveConfig || DEFAULT_OLLAMA_GENERATION.keepAlive,
+    repeatPenalty:
+      resolveOllamaNumber("repeatPenalty", config) ?? DEFAULT_OLLAMA_GENERATION.repeatPenalty,
+    frequencyPenalty:
+      resolveOllamaNumber("frequencyPenalty", config) ?? DEFAULT_OLLAMA_GENERATION.frequencyPenalty,
+    presencePenalty:
+      resolveOllamaNumber("presencePenalty", config) ?? DEFAULT_OLLAMA_GENERATION.presencePenalty,
+    topK: resolveOllamaNumber("topK", config) ?? DEFAULT_OLLAMA_GENERATION.topK,
+    repeatLastN:
+      resolveOllamaNumber("repeatLastN", config) ?? DEFAULT_OLLAMA_GENERATION.repeatLastN,
+  };
+}
+
+/** Persist a group of Ollama generation overrides atomically. Null clears an
+ *  override. Invalid input is rejected rather than silently clamped. */
+export function saveOllamaGenerationPatch(
+  patch: OllamaGenerationPatch,
+  path: string = defaultConfigPath(),
+): void {
+  const config = readConfig(path);
+  for (const key of Object.keys(OLLAMA_NUMBER_SPECS) as OllamaNumberKey[]) {
+    const value = patch[key];
+    if (value === undefined) continue;
+    const configKey: OllamaConfigNumberKey = OLLAMA_NUMBER_SPECS[key].config;
+    if (value === null) {
+      delete config[configKey];
+      continue;
+    }
+    const valid = validOllamaNumber(key, value);
+    if (valid === undefined) throw new RangeError(`Invalid Ollama ${key} value: ${String(value)}`);
+    config[configKey] = valid;
+  }
+  if (patch.keepAlive !== undefined) {
+    if (patch.keepAlive === null) {
+      // undefined so JSON.stringify omits the persisted key entirely.
+      config.ollamaKeepAlive = undefined;
+    } else {
+      const value = patch.keepAlive.trim();
+      if (!value) throw new RangeError("Ollama keepAlive must not be empty");
+      config.ollamaKeepAlive = value;
+    }
+  }
+  writeConfig(config, path);
+}
+
+/** Explicit persisted overrides, excluding environment/default resolution. */
+export function loadOllamaGenerationOverrides(
+  path: string = defaultConfigPath(),
+): OllamaGenerationPatch {
+  const config = readConfig(path);
+  const result: OllamaGenerationPatch = {};
+  for (const key of Object.keys(OLLAMA_NUMBER_SPECS) as OllamaNumberKey[]) {
+    const value = validOllamaNumber(key, config[OLLAMA_NUMBER_SPECS[key].config]);
+    if (value !== undefined) result[key] = value;
+  }
+  const keepAlive = config.ollamaKeepAlive?.trim();
+  if (keepAlive) result.keepAlive = keepAlive;
+  return result;
+}
+
+/** Ollama keep-alive — env OLLAMA_KEEP_ALIVE > config > "30m" default. */
 export function loadOllamaKeepAlive(path: string = defaultConfigPath()): string {
-  const env = process.env.OLLAMA_KEEP_ALIVE?.trim();
-  if (env) return env;
-  const cfg = readConfig(path).ollamaKeepAlive;
-  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
-  return "30m";
+  return loadOllamaGenerationSettings(path).keepAlive;
 }
 
 /** Ollama context window (`num_ctx`) — env OLLAMA_NUM_CTX > config > undefined. */
@@ -622,57 +778,25 @@ export function loadOllamaNumCtx(path: string = defaultConfigPath()): number | u
   return undefined;
 }
 
-/** Default sampling penalties for Ollama models — stops doom loops and repetitive
- *  attractor states at the logits level before they burn turns. */
-const DEFAULT_OLLAMA_REPEAT_PENALTY = 1.3;
-const DEFAULT_OLLAMA_FREQUENCY_PENALTY = 0.5;
-const DEFAULT_OLLAMA_PRESENCE_PENALTY = 0.4;
-const DEFAULT_OLLAMA_TOP_K = 40;
-const DEFAULT_OLLAMA_REPEAT_LAST_N = 128;
-
-/** Ollama repeat penalty — env OLLAMA_REPEAT_PENALTY > config > 1.3 default. */
+/** Compatibility loaders for callers that consume one setting at a time. */
 export function loadOllamaRepeatPenalty(path: string = defaultConfigPath()): number {
-  const env = process.env.OLLAMA_REPEAT_PENALTY?.trim();
-  if (env && Number.isFinite(Number(env))) return Number(env);
-  const cfg = readConfig(path).ollamaRepeatPenalty;
-  if (typeof cfg === "number" && Number.isFinite(cfg)) return cfg;
-  return DEFAULT_OLLAMA_REPEAT_PENALTY;
+  return loadOllamaGenerationSettings(path).repeatPenalty;
 }
 
-/** Ollama frequency penalty — env OLLAMA_FREQUENCY_PENALTY > config > 0.5 default. */
 export function loadOllamaFrequencyPenalty(path: string = defaultConfigPath()): number {
-  const env = process.env.OLLAMA_FREQUENCY_PENALTY?.trim();
-  if (env && Number.isFinite(Number(env))) return Number(env);
-  const cfg = readConfig(path).ollamaFrequencyPenalty;
-  if (typeof cfg === "number" && Number.isFinite(cfg)) return cfg;
-  return DEFAULT_OLLAMA_FREQUENCY_PENALTY;
+  return loadOllamaGenerationSettings(path).frequencyPenalty;
 }
 
-/** Ollama presence penalty — env OLLAMA_PRESENCE_PENALTY > config > 0.4 default. */
 export function loadOllamaPresencePenalty(path: string = defaultConfigPath()): number {
-  const env = process.env.OLLAMA_PRESENCE_PENALTY?.trim();
-  if (env && Number.isFinite(Number(env))) return Number(env);
-  const cfg = readConfig(path).ollamaPresencePenalty;
-  if (typeof cfg === "number" && Number.isFinite(cfg)) return cfg;
-  return DEFAULT_OLLAMA_PRESENCE_PENALTY;
+  return loadOllamaGenerationSettings(path).presencePenalty;
 }
 
-/** Ollama top-K — env OLLAMA_TOP_K > config > 40 default. */
 export function loadOllamaTopK(path: string = defaultConfigPath()): number {
-  const env = process.env.OLLAMA_TOP_K?.trim();
-  if (env && /^\d+$/.test(env)) return Number(env);
-  const cfg = readConfig(path).ollamaTopK;
-  if (typeof cfg === "number" && Number.isFinite(cfg) && cfg >= 0) return Math.floor(cfg);
-  return DEFAULT_OLLAMA_TOP_K;
+  return loadOllamaGenerationSettings(path).topK;
 }
 
-/** Ollama repeat-last-N window — env OLLAMA_REPEAT_LAST_N > config > 128 default. */
 export function loadOllamaRepeatLastN(path: string = defaultConfigPath()): number {
-  const env = process.env.OLLAMA_REPEAT_LAST_N?.trim();
-  if (env && /^-?\d+$/.test(env)) return Number(env);
-  const cfg = readConfig(path).ollamaRepeatLastN;
-  if (typeof cfg === "number" && Number.isFinite(cfg)) return Math.floor(cfg);
-  return DEFAULT_OLLAMA_REPEAT_LAST_N;
+  return loadOllamaGenerationSettings(path).repeatLastN;
 }
 
 /** Brave Search API key — env > config > undefined. Free 2000/mo signup at https://brave.com/search/api/ */
