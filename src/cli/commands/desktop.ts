@@ -578,7 +578,7 @@ function emit(ev: EmittableEvent, tabId?: string): void {
   // Model deltas are streamed at token/chunk frequency. They are already
   // observable in the WebView transcript; duplicating every chunk as a
   // diagnostic doubles synchronous stdout writes and can starve the loop.
-  if (ev.type === "$diagnostic" || ev.type === "model.delta") return;
+  if (ev.type === "$diagnostic" || ev.type === "model.delta" || ev.type === "tool.output") return;
   emitDiagnostic(
     "wire.emit",
     { eventType: ev.type, ...wireEventDetails(ev) },
@@ -2589,6 +2589,25 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     };
   }
 
+  /** Fires with `run_command`'s incremental stdout+stderr — streams it to the
+   *  tab as a transient `tool.output` event so the shell card can render live
+   *  output rows while the command runs. Drops when the toolset runs outside a
+   *  tab runtime (never in the desktop flow) or the call id can't be mapped. */
+  function shellOutputFor(tab: Tab) {
+    return (ev: import("../../tools/shell.js").ShellOutputEvent): void => {
+      const runtime = tab.runtime;
+      if (!runtime || ev.callId === undefined) return;
+      emitKernelEvent(
+        runtime.eventizer.emitToolOutput(ev.turn ?? runtime.loop.currentTurn, {
+          callId: ev.callId,
+          name: "run_command",
+          text: ev.text,
+        }),
+        tab.id,
+      );
+    };
+  }
+
   const bootstrapGate = new ConcurrencyGate(2);
 
   async function initTabToolset(tab: Tab, priority = 0): Promise<void> {
@@ -2601,6 +2620,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           rootDir: tab.rootDir,
           onSkillInstalled: () => emitSkills(tab),
           onJobsChanged: () => emitJobs(),
+          onShellOutput: shellOutputFor(tab),
           subagentSink: subagentSinkFor(tab),
           subagentBilling: (m) => subagentBillingFor(m),
           subagentModel: () => tab.currentSubagentModel ?? tab.currentModel,
@@ -3173,6 +3193,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       rootDir: target,
       onSkillInstalled: () => emitSkills(tab),
       onJobsChanged: () => emitJobs(),
+      onShellOutput: shellOutputFor(tab),
       subagentSink: subagentSinkFor(tab),
       subagentBilling: (m) => subagentBillingFor(m),
       subagentModel: () => tab.currentSubagentModel ?? tab.currentModel,

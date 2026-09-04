@@ -303,6 +303,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                 key={i}
                 command={cmd}
                 output={s.result}
+                liveOutput={s.liveOutput}
                 state={state}
                 durationMs={s.durationMs}
                 onApprove={pendingConfirm ? () => onApproveConfirm(pendingConfirm.id) : undefined}

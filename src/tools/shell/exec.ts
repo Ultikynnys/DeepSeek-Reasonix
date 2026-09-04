@@ -1,6 +1,7 @@
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import * as pathMod from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { killProcessTree as killProcessTreeByPid } from "../process-tree.js";
 import { parseCommandChain, runChain } from "../shell-chain.js";
 import { tokenizeCommand } from "./parse.js";
@@ -31,6 +32,88 @@ export interface RunCommandResult {
   timedOut: boolean;
 }
 
+/** Flush cadence for live output — coalesce short writes so a chatty process
+ *  doesn't emit one event per data chunk, but never delay a completed line. */
+const LIVE_COALESCE_CHARS = 512;
+
+/** Incremental stdout/stderr feed for UIs: decodes raw chunks UTF-8 (tolerating
+ *  multi-byte sequences split across chunks), coalesces bursts, and hard-caps
+ *  the total forwarded so an unbounded `cat` can't flood the wire. The final
+ *  authoritative output is NOT this — runCommand still decodes the full byte
+ *  buffer at close (smartDecodeOutput), so live text may degrade to U+FFFD on
+ *  non-UTF-8 codepages without hurting the tool result the model sees. */
+export class LiveOutputEmitter {
+  private decoder = new StringDecoder("utf8");
+  private pending = "";
+  private emitted = 0;
+  private done = false;
+
+  constructor(
+    private readonly emit: (text: string) => void,
+    private readonly maxChars: number,
+  ) {}
+
+  push(chunk: Buffer): void {
+    if (this.done) return;
+    this.pending += this.decoder.write(chunk);
+    // Carriage-return progress (spinners, `cargo build` percentage lines):
+    // each `\r` restarts the CURRENT partial line, so earlier frames of that
+    // line must not stack in the live view. Terminal semantics: only the
+    // frame written after the last `\r` survives. Complete lines already
+    // flushed past the final `\n` are never touched.
+    const nlAt = this.pending.lastIndexOf("\n");
+    const tail = this.pending.slice(nlAt + 1);
+    if (tail.includes("\r")) {
+      const frames = tail.split("\r");
+      const visible = frames[frames.length - 1] ?? "";
+      this.pending = this.pending.slice(0, nlAt + 1) + visible;
+    }
+    const newlineAt = this.pending.lastIndexOf("\n");
+    // Hold short unterminated writes (progress bars, partial lines) until
+    // either a newline completes them or they grow past the coalesce bound.
+    if (newlineAt < 0 && this.pending.length < LIVE_COALESCE_CHARS) return;
+    this.flushTo(newlineAt >= 0 ? newlineAt + 1 : this.pending.length);
+  }
+
+  /** Emit the partial trailing line (command/group ended without a final newline). */
+  flushPartial(): void {
+    if (this.done || this.pending.length === 0) return;
+    this.flushTo(this.pending.length);
+  }
+
+  /** Command settled — flush the tail and stop accepting chunks. */
+  end(): void {
+    if (this.done) return;
+    this.flushPartial();
+    this.done = true;
+    this.pending = "";
+    this.decoder.end();
+  }
+
+  private flushTo(len: number): void {
+    if (len <= 0) return;
+    const slice = this.pending.slice(0, len);
+    this.pending = this.pending.slice(len);
+    const remaining = this.maxChars - this.emitted;
+    if (remaining <= 0) {
+      this.done = true;
+      this.pending = "";
+      this.decoder.end();
+      return;
+    }
+    if (slice.length > remaining) {
+      this.emit(slice.slice(0, remaining));
+      this.emitted = this.maxChars;
+      this.done = true;
+      this.pending = "";
+      this.decoder.end();
+      return;
+    }
+    this.emit(slice);
+    this.emitted += slice.length;
+  }
+}
+
 export async function runCommand(
   cmd: string,
   opts: {
@@ -38,6 +121,9 @@ export async function runCommand(
     timeoutSec?: number;
     maxOutputChars?: number;
     signal?: AbortSignal;
+    /** Called with incremental stdout+stderr text while the command runs. When
+     *  absent (tests / non-UI callers) no streaming machinery is created. */
+    onOutput?: (text: string) => void;
   },
 ): Promise<RunCommandResult> {
   const timeoutSec = opts.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
@@ -51,6 +137,7 @@ export async function runCommand(
       timeoutSec,
       maxOutputChars: maxChars,
       signal: opts.signal,
+      onOutput: opts.onOutput,
     });
   }
   const timeoutMs = timeoutSec * 1000;
@@ -111,6 +198,7 @@ export async function runCommand(
     const byteCap = maxChars * 2 * 4; // worst-case 4 bytes/char for utf-8/gbk
     let timedOut = false;
     let settled = false;
+    const live = opts.onOutput ? new LiveOutputEmitter(opts.onOutput, maxChars * 2) : null;
     const killChildTree = () => killProcessTree(child);
     // Single settle path with an idempotency guard: the kill paths (timeout /
     // abort) call finish() immediately so the result — including whatever
@@ -124,6 +212,9 @@ export async function runCommand(
       settled = true;
       clearTimeout(killTimer);
       opts.signal?.removeEventListener("abort", onAbort);
+      // Flush the live tail BEFORE the result resolves: the UI should see the
+      // final partial line, then the authoritative full output on tool.result.
+      live?.end();
       const merged = Buffer.concat(chunks);
       const buf = smartDecodeOutput(merged);
       const output =
@@ -152,6 +243,7 @@ export async function runCommand(
 
     const onData = (chunk: Buffer | string) => {
       const b = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      live?.push(b);
       if (totalBytes >= byteCap) return;
       const remaining = byteCap - totalBytes;
       if (b.length > remaining) {
@@ -167,6 +259,7 @@ export async function runCommand(
     child.on("error", (err) => {
       clearTimeout(killTimer);
       opts.signal?.removeEventListener("abort", onAbort);
+      live?.end();
       reject(err);
     });
     child.on("close", (code) => finish(code));

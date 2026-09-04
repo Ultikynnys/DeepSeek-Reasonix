@@ -59,6 +59,10 @@ export interface CodeToolsetOpts {
   onSkillInstalled?: SkillInstalledHook;
   /** Fired after `run_background` / `stop_job` mutate the JobRegistry — desktop pushes a fresh `$jobs` event so the popover updates without waiting for poll. */
   onJobsChanged?: () => void;
+  /** Fired with `run_command`'s incremental stdout+stderr while it runs — desktop
+   *  forwards it as a transient `tool.output` kernel event so the shell card can
+   *  render live output rows. */
+  onShellOutput?: (ev: import("../tools/shell.js").ShellOutputEvent) => void;
   /** Shared `{current: callback}` sink the TUI populates after mount. Setup forwards it into every `spawnSubagent` so live progress events reach the rich subagent row even though setup runs before the UI does. */
   subagentSink?: SubagentSink;
   /** True when the tab's model accepts image content parts (gpt-*, deepseek-v4-flash-vision-exp, confirmed Ollama vision models). Registers the `see_image` tool so the model's toolset matches its vision capability. */
@@ -102,6 +106,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
       allowAll: () => loadEditMode() === "yolo",
       jobs,
       onJobsChanged: opts.onJobsChanged,
+      onShellOutput: opts.onShellOutput,
       sensitivePaths: cfg.sensitivePaths,
     });
     registerMemoryTools(tools, { projectRoot: root });

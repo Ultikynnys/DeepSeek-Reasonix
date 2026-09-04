@@ -253,6 +253,18 @@ describe("runChain integration", () => {
     const r = await runChain(chain, opts({ timeoutSec: 0.2 as unknown as number }));
     expect(r.timedOut).toBe(true);
   });
+
+  it("streams live output through onOutput as the last pipe segment produces it", async () => {
+    const events: string[] = [];
+    const chain = parseCommandChain(
+      "node -e \"process.stdout.write('seed\\n')\" | node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{process.stdout.write(d+'x1\\n');setTimeout(()=>process.stdout.write('x2\\n'),200)})\"",
+    )!;
+    const r = await runChain(chain, opts({ onOutput: (t) => events.push(t) }));
+    expect(r.exitCode).toBe(0);
+    expect(events.length).toBeGreaterThanOrEqual(2);
+    expect(events.join("")).toContain("x1");
+    expect(events.join("")).toContain("x2");
+  });
 });
 
 describe("runCommand wired with chains", () => {

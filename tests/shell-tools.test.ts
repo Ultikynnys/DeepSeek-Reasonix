@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
+  LiveOutputEmitter,
   NeedsConfirmationError,
   detectShellOperator,
   formatCommandResult,
@@ -394,6 +395,45 @@ describe("isAllowed", () => {
   });
 });
 
+describe("LiveOutputEmitter", () => {
+  it("coalesces unterminated writes until a newline lands", () => {
+    const events: string[] = [];
+    const em = new LiveOutputEmitter((t) => events.push(t), 10_000);
+    em.push(Buffer.from("ab"));
+    expect(events).toEqual([]);
+    em.push(Buffer.from("cd\n"));
+    expect(events.join("")).toBe("abcd\n");
+    em.end();
+  });
+
+  it("collapses carriage-return progress frames to the final frame", () => {
+    const events: string[] = [];
+    const em = new LiveOutputEmitter((t) => events.push(t), 10_000);
+    em.push(Buffer.from("Building 10%\rBuilding 40%\rBuilding 90%"));
+    em.push(Buffer.from("\n"));
+    expect(events.join("")).toBe("Building 90%\n");
+    em.end();
+  });
+
+  it("flushes partial trailing output on end", () => {
+    const events: string[] = [];
+    const em = new LiveOutputEmitter((t) => events.push(t), 10_000);
+    em.push(Buffer.from("still"));
+    expect(events).toEqual([]);
+    em.end();
+    expect(events.join("")).toBe("still");
+  });
+
+  it("stops forwarding once the character cap is reached", () => {
+    const events: string[] = [];
+    const em = new LiveOutputEmitter((t) => events.push(t), 8);
+    em.push(Buffer.from("1234567890\n"));
+    expect(events.join("")).toBe("12345678");
+    em.end();
+    expect(events.length).toBe(1);
+  });
+});
+
 describe("runCommand", () => {
   let tmp: string;
   beforeEach(() => {
@@ -447,6 +487,29 @@ describe("runCommand", () => {
 
   it("rejects empty commands", async () => {
     await expect(runCommand("", { cwd: tmp })).rejects.toThrow(/empty command/);
+  });
+
+  it("streams stdout lines to onOutput as they are produced", async () => {
+    const events: string[] = [];
+    const r = await runCommand(
+      "node -e \"process.stdout.write('one\\n');setTimeout(()=>process.stdout.write('two\\n'),250)\"",
+      { cwd: tmp, onOutput: (t) => events.push(t) },
+    );
+    expect(r.exitCode).toBe(0);
+    // More than one flush proves the stream runs live, not just once at close.
+    expect(events.length).toBeGreaterThanOrEqual(2);
+    expect(events.join("")).toContain("one\n");
+    expect(events.join("")).toContain("two\n");
+  });
+
+  it("flushes a trailing partial line when the command ends", async () => {
+    const events: string[] = [];
+    const r = await runCommand("node -e \"process.stdout.write('partial-no-newline')\"", {
+      cwd: tmp,
+      onOutput: (t) => events.push(t),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(events.join("")).toBe("partial-no-newline");
   });
 
   it("rejects commands with unclosed quotes", async () => {
@@ -529,6 +592,27 @@ describe("registerShellTools — dispatch integration", () => {
     );
     expect(out).toMatch(/\$ node --version/);
     expect(out).toMatch(/\[exit 0\]/);
+  });
+
+  it("streams run_command output through onShellOutput while it runs", async () => {
+    const registry = new ToolRegistry();
+    const events: Array<{ callId?: string; turn?: number; text: string }> = [];
+    registerShellTools(registry, {
+      rootDir: tmp,
+      extraAllowed: ["node"],
+      onShellOutput: (ev) => events.push(ev),
+    });
+    const out = await registry.dispatch(
+      "run_command",
+      JSON.stringify({
+        command:
+          "node -e \"process.stdout.write('ping\\n');setTimeout(()=>process.stdout.write('pong\\n'),200)\"",
+      }),
+    );
+    expect(out).toMatch(/\[exit 0\]/);
+    expect(events.length).toBeGreaterThanOrEqual(2);
+    expect(events.map((e) => e.text).join("")).toContain("ping");
+    expect(events.map((e) => e.text).join("")).toContain("pong");
   });
 
   it("blocks non-allowlisted commands via confirmation gate, runs on approve", async () => {

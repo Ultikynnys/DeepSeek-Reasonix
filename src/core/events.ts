@@ -25,6 +25,8 @@ export const EventType = {
   toolResult: "tool.result",
   toolCall: "tool.call",
   subagentProgress: "subagent.progress",
+  /** Transient mid-run stdout/stderr feed for a blocking shell tool (`run_command`). */
+  toolOutput: "tool.output",
 
   toolConfirmAllow: "tool.confirm.allow",
   toolConfirmDeny: "tool.confirm.deny",
@@ -128,6 +130,20 @@ export interface ToolCallEvent extends EventBase {
   type: typeof EventType.toolCall;
   name: string;
   args: Record<string, unknown>;
+}
+
+/** Transient — never persisted, drops on next primary event, exactly like
+ *  `subagent.progress`: carries the incremental stdout/stderr of a blocking
+ *  shell tool (`run_command`) so UIs can render live output rows while the
+ *  command still runs. The authoritative full output arrives on the matching
+ *  `tool.result`; this event only fills the gap between dispatch and settle. */
+export interface ToolOutputEvent extends EventBase {
+  type: typeof EventType.toolOutput;
+  /** Wire call id of the running tool call (loop id already mapped). */
+  callId: string;
+  name: string;
+  /** Incremental decoded stdout+stderr text since the previous event for this call. */
+  text: string;
 }
 
 /** Sanitized, transient child-agent activity. Raw child output and reasoning never enter this event. */
@@ -352,6 +368,7 @@ export type Event =
   | ToolResultEvent
   | ToolCallEvent
   | SubagentProgressEvent
+  | ToolOutputEvent
   | ToolConfirmAllowEvent
   | ToolConfirmDenyEvent
   | ToolConfirmAlwaysAllowEvent

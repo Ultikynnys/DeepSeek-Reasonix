@@ -563,6 +563,7 @@ export const en = {
     shellAwaiting: "Waiting approval",
     awaitingUser: "Waiting for user",
     shellRunning: "Running",
+    shellLiveLabel: "Command output — live",
     shellExecuteHint: "execute this command",
     shellAlwaysAllow: "Always allow",
     shellReject: "Reject",

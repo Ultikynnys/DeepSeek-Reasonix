@@ -310,9 +310,37 @@ export function ReasoningCard({
 
 // ---- Shell ----
 
+/** Rolling three-line tail of a running command's output — the shell-card
+ *  analogue of the subagent card's live activity rows. `\r`-only progress
+ *  updates collapse to their latest frame; each row is capped so a single
+ *  pathological line can't blow up the card. */
+function ShellLiveRows({ text }: { text: string }) {
+  const rows = useMemo(() => {
+    const normalized = text.replace(/\r(?!\n)/g, "\n");
+    return normalized
+      .split("\n")
+      .map((ln) => ln.trimEnd())
+      .filter((ln) => ln.length > 0)
+      .slice(-3)
+      .map((ln) => (ln.length > 220 ? `${ln.slice(0, 220)}…` : ln));
+  }, [text]);
+  if (rows.length === 0) return null;
+  return (
+    <div className="live-log shell-live" role="log" aria-label={t("cards.shellLiveLabel")}>
+      {rows.map((ln, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: rolling tail, rows shift as new output lands
+        <div className="line" key={i}>
+          {ln}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ShellCard({
   command,
   output,
+  liveOutput,
   state,
   durationMs,
   onApprove,
@@ -322,6 +350,9 @@ export function ShellCard({
 }: {
   command: string;
   output?: string;
+  /** Incremental stdout+stderr streamed while the command runs — rendered as
+   *  a rolling three-line tail (the subagent card's live activity rows). */
+  liveOutput?: string;
   state: "await" | "running" | "done" | "failed";
   durationMs?: number;
   onApprove?: () => void;
@@ -361,6 +392,7 @@ export function ShellCard({
           <span className="prompt">$</span>
           <span className="text">{command}</span>
         </div>
+        {state === "running" && liveOutput ? <ShellLiveRows text={liveOutput} /> : null}
         {output ? (
           <pre className="out">
             {output.split("\n").map((ln, i) => {

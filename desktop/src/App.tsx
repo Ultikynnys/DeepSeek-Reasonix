@@ -137,6 +137,11 @@ const RESPONSIVE_STAGE = {
   NARROW: "narrow",
 } as const;
 
+/** Tail budget kept per running shell tool for the card's live output rows.
+ *  The authoritative output arrives on tool.result; this only feeds the
+ *  "show what's happening right now" window. */
+const LIVE_OUTPUT_MAX_CHARS = 8_000;
+
 type ResponsiveStage = (typeof RESPONSIVE_STAGE)[keyof typeof RESPONSIVE_STAGE];
 
 function responsiveStage(width: number): ResponsiveStage {
@@ -197,6 +202,10 @@ export type AssistantSegment =
       result?: string;
       ok?: boolean;
       durationMs?: number;
+      /** Transient mid-run stdout/stderr for blocking shell tools — streamed via
+       *  `tool.output` events and rendered as live rows until tool.result lands
+       *  (never persisted; a session reload shows only the final result). */
+      liveOutput?: string;
       subagentRuns?: SubagentRunProgress[];
     }
   | {
@@ -1964,6 +1973,36 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           return mutated ? { ...m, segments: segs } : m;
         }),
       };
+    case "tool.output": {
+      // Transient live stdout/stderr feed for a blocking shell tool. Only the
+      // running segment (no result yet) consumes it; once tool.result lands the
+      // authoritative output replaces the live view. The buffer keeps the TAIL
+      // so the shell card's live rows always reflect the most recent output.
+      if (!ev.text) return state;
+      return {
+        ...state,
+        turnLastEventMs: Date.now(),
+        messages: state.messages.map((m) => {
+          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
+          let mutated = false;
+          const segs = m.segments.map((s) => {
+            if (s.kind !== "tool" || s.callId !== ev.callId || s.result !== undefined) return s;
+            mutated = true;
+            const prev = s.liveOutput ?? "";
+            const joined =
+              prev.length >= LIVE_OUTPUT_MAX_CHARS
+                ? prev.slice(prev.length - LIVE_OUTPUT_MAX_CHARS) + ev.text
+                : prev + ev.text;
+            const live =
+              joined.length > LIVE_OUTPUT_MAX_CHARS
+                ? joined.slice(joined.length - LIVE_OUTPUT_MAX_CHARS)
+                : joined;
+            return { ...s, liveOutput: live };
+          });
+          return mutated ? { ...m, segments: segs } : m;
+        }),
+      };
+    }
     case "compaction.started": {
       // Compaction card joins the assistant queue like a tool card: attached to
       // the LAST assistant message (the running turn for auto folds; the previous

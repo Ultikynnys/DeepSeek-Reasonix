@@ -22,6 +22,7 @@ import type {
   ToolConfirmDenyEvent,
   ToolDispatchedEvent,
   ToolIntentEvent,
+  ToolOutputEvent,
   ToolPreparingEvent,
   ToolResultEvent,
   UserMessageEvent,
@@ -292,6 +293,25 @@ export class Eventizer {
       type: EventType.toolCall,
       name,
       args: redactEventValue(args),
+    };
+  }
+
+  /** Live stdout/stderr of a blocking shell tool (`run_command`), forwarded to
+   *  the UI while the command still runs. Call id rides the same loop → wire
+   *  mapping as subagent events so the frontend can attach the rows to the
+   *  exact tool segment. Transient: the authoritative full output lands on the
+   *  matching tool.result, which replaces the live view. */
+  emitToolOutput(
+    turn: number,
+    output: Omit<ToolOutputEvent, "id" | "ts" | "turn" | "type">,
+  ): ToolOutputEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: EventType.toolOutput,
+      ...output,
+      callId: this.loopCallIdToWireCallId.get(output.callId) ?? output.callId,
     };
   }
 

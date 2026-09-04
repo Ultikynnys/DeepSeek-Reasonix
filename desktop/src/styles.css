@@ -3525,6 +3525,26 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   color: var(--muted);
 }
 
+/* live output tail while the command runs — three rolling rows fed by
+   tool.output events (the shell-card analogue of the subagent activity rows) */
+.shell .live-log {
+  padding: 6px 14px 8px;
+  border-top: 1px solid var(--border);
+  font-family: "Geist Mono", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  background: var(--bg-2);
+}
+.shell .live-log::after {
+  display: none;
+}
+.shell .live-log .line {
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-2);
+}
+
 .approve-row {
   display: flex;
   align-items: center;

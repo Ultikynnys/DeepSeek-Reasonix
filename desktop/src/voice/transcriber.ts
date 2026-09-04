@@ -49,6 +49,28 @@ type ASRPipeline = (
   options?: Record<string, unknown>,
 ) => Promise<{ text: string } | string>;
 
+type TransformersEnv = typeof import("@xenova/transformers").env;
+
+/**
+ * Applies the Transformers.js environment configuration used for in-app
+ * transcription.
+ *
+ * ONNX Runtime runs in "proxy" mode so the heavyweight model work (WASM
+ * session creation plus the encoder/decoder forward passes that power Whisper
+ * decoding) executes inside an internal Web Worker rather than on the UI
+ * thread. Without this, the browser main thread stays blocked for the whole
+ * transcription: the composer freezes and the progress throbber stops
+ * animating, so voice input looks like it has crashed instead of showing that
+ * it is still working.
+ */
+function configureTransformersEnv(env: TransformersEnv): void {
+  env.allowRemoteModels = true;
+  env.allowLocalModels = false;
+  env.backends.onnx.wasm.wasmPaths = "/wasm/";
+  env.backends.onnx.logLevel = "error";
+  env.backends.onnx.wasm.proxy = true;
+}
+
 class LocalSpeechTranscriber {
   private pipelineInstance: ASRPipeline | null = null;
   private loadedModelId: VoiceModelId | null = null;
@@ -104,10 +126,7 @@ class LocalSpeechTranscriber {
     try {
       const { pipeline, env } = await import("@xenova/transformers");
 
-      env.allowRemoteModels = true;
-      env.allowLocalModels = false;
-      env.backends.onnx.wasm.wasmPaths = "/wasm/";
-      env.backends.onnx.logLevel = "error";
+      configureTransformersEnv(env);
 
       const pipe = (await pipeline("automatic-speech-recognition", modelId, {
         quantized: true,
@@ -157,10 +176,7 @@ class LocalSpeechTranscriber {
       try {
         const { pipeline, env } = await import("@xenova/transformers");
 
-        env.backends.onnx.wasm.wasmPaths = "/wasm/";
-        env.backends.onnx.logLevel = "error";
-        env.allowRemoteModels = true;
-        env.allowLocalModels = false;
+        configureTransformersEnv(env);
 
         const pipe = (await pipeline("automatic-speech-recognition", modelId, {
           quantized: true,

@@ -11,6 +11,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openPath: vi.fn(), openUrl: vi.fn(
 import { WorkspaceProvider } from "../Markdown";
 import {
   DiffCard,
+  ShellCard,
   SubagentCard,
   ToolCard,
   extractSubagentResultMeta,
@@ -498,5 +499,57 @@ describe("DiffCard — show-in-explorer button", () => {
     await waitFor(() =>
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("/repo/src/new.ts"),
     );
+  });
+});
+
+describe("ShellCard — live output rows while running", () => {
+  it("renders only the last three lines of the streamed output tail", () => {
+    const { container } = render(
+      wrap(
+        <ShellCard
+          command="npm test"
+          liveOutput={"pass 1\npass 2\npass 3\npass 4\n"}
+          state="running"
+        />,
+      ),
+    );
+    const rows = [...container.querySelectorAll(".shell-live .line")].map((el) => el.textContent);
+    expect(rows).toEqual(["pass 2", "pass 3", "pass 4"]);
+  });
+
+  it("shows nothing until output actually arrives", () => {
+    const { container } = render(wrap(<ShellCard command="npm test" state="running" />));
+    expect(container.querySelector(".shell-live")).toBeNull();
+  });
+
+  it("shows a trailing partial line while the command is still writing", () => {
+    const { container } = render(
+      wrap(
+        <ShellCard
+          command="cargo build"
+          liveOutput={"Compiling reasonix\nBuilding... 90%"}
+          state="running"
+        />,
+      ),
+    );
+    const rows = [...container.querySelectorAll(".shell-live .line")].map((el) => el.textContent);
+    expect(rows).toEqual(["Compiling reasonix", "Building... 90%"]);
+  });
+
+  it("hides the live tail once the command settles with its full result", () => {
+    const { container } = render(
+      wrap(
+        <ShellCard
+          command="npm test"
+          output="✓ 10 tests passed"
+          liveOutput={"pass 1\npass 2\n"}
+          state="done"
+        />,
+      ),
+    );
+    // Done cards collapse to the header — the live tail must not render and the
+    // full output only appears once the user expands the card.
+    expect(container.querySelector(".shell-live")).toBeNull();
+    expect(container.querySelector(".shell")).toBeNull();
   });
 });

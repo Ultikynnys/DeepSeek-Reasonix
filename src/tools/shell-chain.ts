@@ -5,7 +5,13 @@ import { constants, closeSync, lstatSync, openSync, realpathSync } from "node:fs
 import { devNull } from "node:os";
 import * as pathMod from "node:path";
 import { pathIsUnder } from "@reasonix/core-utils/path-utils";
-import { isDqEscape, killProcessTree, prepareSpawn, smartDecodeOutput } from "./shell.js";
+import {
+  LiveOutputEmitter,
+  isDqEscape,
+  killProcessTree,
+  prepareSpawn,
+  smartDecodeOutput,
+} from "./shell.js";
 
 export type ChainOp = "|" | "||" | "&&" | ";";
 
@@ -294,11 +300,14 @@ export interface RunChainOptions {
   timeoutSec: number;
   maxOutputChars: number;
   signal?: AbortSignal;
+  /** Called with incremental stdout+stderr text while the chain runs. */
+  onOutput?: (text: string) => void;
 }
 
 export async function runChain(chain: CommandChain, opts: RunChainOptions): Promise<ChainResult> {
   const groups = groupChain(chain);
   const buf = new OutputBuffer(opts.maxOutputChars * 2 * 4);
+  const live = opts.onOutput ? new LiveOutputEmitter(opts.onOutput, opts.maxOutputChars * 2) : null;
   const deadline = Date.now() + opts.timeoutSec * 1000;
   let lastExit: number | null = 0;
   let timedOut = false;
@@ -314,8 +323,10 @@ export async function runChain(chain: CommandChain, opts: RunChainOptions): Prom
       cwd: opts.cwd,
       timeoutMs: remainingMs,
       buf,
+      live,
       signal: opts.signal,
     });
+    live?.flushPartial();
     lastExit = result.exitCode;
     if (result.timedOut) {
       timedOut = true;
@@ -323,6 +334,7 @@ export async function runChain(chain: CommandChain, opts: RunChainOptions): Prom
     }
     if (opts.signal?.aborted) break;
   }
+  live?.end();
   const output = buf.toString();
   const truncated =
     output.length > opts.maxOutputChars
@@ -340,6 +352,8 @@ interface PipeGroupOptions {
   cwd: string;
   timeoutMs: number;
   buf: OutputBuffer;
+  /** Optional live feed — the same chunks that land in `buf` also stream here. */
+  live: LiveOutputEmitter | null;
   signal?: AbortSignal;
 }
 
@@ -513,13 +527,25 @@ async function runPipeGroup(
         }
       }
       if (child.stderr && io.stderrFd === null && !(io.mergeStderrToStdout && !isLast)) {
-        child.stderr.on("data", (chunk: Buffer | string) => opts.buf.push(toBuf(chunk)));
+        child.stderr.on("data", (chunk: Buffer | string) => {
+          const b = toBuf(chunk);
+          opts.buf.push(b);
+          opts.live?.push(b);
+        });
       }
       if (isLast && child.stdout && io.stdoutFd === null) {
-        child.stdout.on("data", (chunk: Buffer | string) => opts.buf.push(toBuf(chunk)));
+        child.stdout.on("data", (chunk: Buffer | string) => {
+          const b = toBuf(chunk);
+          opts.buf.push(b);
+          opts.live?.push(b);
+        });
         if (io.mergeStderrToStdout && child.stderr && io.stderrFd === null) {
           child.stderr.removeAllListeners("data");
-          child.stderr.on("data", (chunk: Buffer | string) => opts.buf.push(toBuf(chunk)));
+          child.stderr.on("data", (chunk: Buffer | string) => {
+            const b = toBuf(chunk);
+            opts.buf.push(b);
+            opts.live?.push(b);
+          });
         }
       }
     }

@@ -1867,6 +1867,113 @@ describe("Desktop App reducer — subagent progress", () => {
   });
 });
 
+describe("Desktop App reducer — tool.output live shell output", () => {
+  function stateWithShellCall(turn = 1, callId = "tc-1") {
+    return {
+      ...initialState(),
+      messages: [
+        {
+          kind: "assistant" as const,
+          turn,
+          pending: true,
+          segments: [
+            {
+              kind: "tool" as const,
+              callId,
+              name: "run_command",
+              args: JSON.stringify({ command: "npm test" }),
+              startedAt: 1,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  function outputEvent(
+    text: string,
+    overrides: Partial<import("./protocol").ToolOutputEvent> = {},
+  ) {
+    return {
+      type: "tool.output" as const,
+      id: 1,
+      ts: "2026-06-01T00:00:00.000Z",
+      turn: 1,
+      callId: "tc-1",
+      name: "run_command",
+      text,
+      ...overrides,
+    };
+  }
+
+  it("accumulates streamed output onto the matching running shell segment", () => {
+    const afterFirst = reduce(stateWithShellCall(), {
+      t: "incoming",
+      event: outputEvent("pass 1\n"),
+    });
+    const assistant = afterFirst.messages[0];
+    if (assistant?.kind !== "assistant") throw new Error("expected assistant");
+    expect(assistant.segments[0]).toMatchObject({ liveOutput: "pass 1\n" });
+
+    const afterSecond = reduce(afterFirst, {
+      t: "incoming",
+      event: outputEvent("pass 2\n", { id: 2 }),
+    });
+    const settled = afterSecond.messages[0];
+    if (settled?.kind !== "assistant") throw new Error("expected assistant");
+    expect(settled.segments[0]).toMatchObject({ liveOutput: "pass 1\npass 2\n" });
+  });
+
+  it("ignores output that arrives after the tool result settled the segment", () => {
+    const state = stateWithShellCall();
+    const withResult = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "tool.result",
+        id: 5,
+        ts: "2026-06-01T00:00:00.000Z",
+        turn: 1,
+        callId: "tc-1",
+        ok: true,
+        output: "pass 1\npass 2\n",
+      },
+    });
+    const afterLate = reduce(withResult, {
+      t: "incoming",
+      event: outputEvent("stray\n", { id: 6 }),
+    });
+    const assistant = afterLate.messages[0];
+    if (assistant?.kind !== "assistant") throw new Error("expected assistant");
+    const seg = assistant.segments[0];
+    if (!seg || seg.kind !== "tool") throw new Error("expected tool segment");
+    expect(seg.result).toBe("pass 1\npass 2\n");
+    expect(seg.liveOutput).toBeUndefined();
+  });
+
+  it("does not attach output to segments on other turns or call ids", () => {
+    const state = {
+      ...stateWithShellCall(2, "tc-9"),
+      messages: [
+        ...stateWithShellCall(1, "tc-1").messages,
+        ...stateWithShellCall(2, "tc-9").messages,
+      ],
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: outputEvent("mine\n", { turn: 1, callId: "tc-1" }),
+    });
+    const first = next.messages[0];
+    const second = next.messages[1];
+    if (first?.kind !== "assistant" || second?.kind !== "assistant") {
+      throw new Error("expected assistant");
+    }
+    expect(first.segments[0]).toMatchObject({ liveOutput: "mine\n" });
+    const other = second.segments[0];
+    if (!other || other.kind !== "tool") throw new Error("expected tool segment");
+    expect(other.liveOutput).toBeUndefined();
+  });
+});
+
 describe("Desktop App reducer — plan timeline anchor", () => {
   it("selects the active plan only for its original submit_plan message", () => {
     const plan = {

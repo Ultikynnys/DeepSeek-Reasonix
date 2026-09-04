@@ -40,6 +40,7 @@ export {
   runCommand,
   smartDecodeOutput,
   withUtf8Codepage,
+  LiveOutputEmitter,
 } from "./shell/exec.js";
 
 export interface ShellToolsOptions {
@@ -55,7 +56,19 @@ export interface ShellToolsOptions {
   jobs?: JobRegistry;
   /** Fired after `run_background` / `stop_job` mutate the registry — used by the desktop popover for near-real-time updates without polling. */
   onJobsChanged?: () => void;
+  /** Fired with `run_command`'s incremental stdout+stderr while it runs — the
+   *  desktop wires this to stream live output rows into the shell card. */
+  onShellOutput?: (ev: ShellOutputEvent) => void;
   sensitivePaths?: { prefixes?: readonly string[]; patterns?: readonly string[] };
+}
+
+/** One incremental stdout/stderr feed for a blocking `run_command` call. */
+export interface ShellOutputEvent {
+  /** Loop call id of the running tool — the desktop maps it to the wire call id. */
+  callId?: string;
+  turn?: number;
+  /** Decoded text since the previous event (already line-coalesced upstream). */
+  text: string;
 }
 
 /** Error thrown by `run_command` when the command isn't allowlisted. */
@@ -140,6 +153,10 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         timeoutSec: effectiveTimeout,
         maxOutputChars,
         signal: mergeSignals(ctx?.signal, ctx?.cancelSignal),
+        onOutput:
+          opts.onShellOutput !== undefined
+            ? (text) => opts.onShellOutput!({ callId: ctx?.callId, turn: ctx?.turn, text })
+            : undefined,
       });
       if (ctx?.cancelSignal?.aborted) {
         return JSON.stringify({

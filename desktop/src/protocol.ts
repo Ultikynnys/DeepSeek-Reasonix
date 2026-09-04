@@ -271,6 +271,18 @@ export type ToolResultEvent = {
   output: string;
 };
 
+export type ToolOutputEvent = {
+  type: "tool.output";
+  id: number;
+  ts: string;
+  turn: number;
+  /** Wire call id of the running tool call — attaches rows to the exact segment. */
+  callId: string;
+  name: string;
+  /** Incremental decoded stdout+stderr since the previous event for this call. */
+  text: string;
+};
+
 export type SubagentProgressEvent = {
   type: "subagent.progress";
   id: number;
@@ -418,6 +430,7 @@ export type IncomingEvent = { tabId?: string } & (
   | ToolPreparingEvent
   | ToolIntentEvent
   | ToolResultEvent
+  | ToolOutputEvent
   | SubagentProgressEvent
   | StatusEvent
   | CompactionStartedEvent
