@@ -697,10 +697,18 @@ export class DeepSeekClient {
     if (topK !== undefined) options.top_k = topK;
     const repeatLastN = opts.ollama?.repeatLastN ?? resolved.repeatLastN;
     if (repeatLastN !== undefined) options.repeat_last_n = repeatLastN;
+    const filteredMessages = opts.messages.filter((m) => {
+      if (m.role === "assistant" && (!m.tool_calls || m.tool_calls.length === 0)) {
+        if (!m.content || (typeof m.content === "string" && m.content.trim().length === 0)) {
+          return false;
+        }
+      }
+      return true;
+    });
     const payload: Record<string, unknown> = {
       // `ollama/<id>` namespacing is client-side routing — the server wants the raw id.
       model: opts.model.replace(/^ollama\//, ""),
-      messages: opts.messages.map((m) => toNativeOllamaMessage(m)),
+      messages: filteredMessages.map((m) => toNativeOllamaMessage(m)),
       stream,
     };
     if (Object.keys(options).length > 0) payload.options = options;

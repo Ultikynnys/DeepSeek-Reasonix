@@ -4160,6 +4160,8 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
       events.some((ev) => ev.role === "assistant_final" && ev.content?.includes("rendered output")),
     ).toBe(false);
     expect(events.some((ev) => ev.role === "done")).toBe(true);
+    // The partial thinking-only assistant message was replaced, not duplicated
+    expect(loop.log.entries.filter((m) => m.role === "assistant")).toHaveLength(1);
   });
 
   it("latches after one continuation — a second thinking-only stop ends the turn via the promotion fallback", async () => {
@@ -4195,6 +4197,90 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
     ).toHaveLength(1);
     expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe(THINKING_ONLY);
     expect(events.some((ev) => ev.role === "done")).toBe(true);
+    // Even on fallback promotion, only 1 assistant message is retained
+    expect(loop.log.entries.filter((m) => m.role === "assistant")).toHaveLength(1);
+  });
+
+  it("does not trigger thinkingOnlyRetry or emptyResponseRetry when reasoning stream degenerates", async () => {
+    let chatCalls = 0;
+    const fetch = vi.fn(async (url: unknown) => {
+      if (String(url).includes("/api/show")) {
+        return new Response(JSON.stringify({ model_info: { "qwen3.32b.context_length": 32768 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      chatCalls++;
+      // Stream chunks that contain a repeating reasoning loop
+      const lines = [
+        JSON.stringify({
+          model: "qwen3:32b",
+          message: {
+            role: "assistant",
+            content: "",
+            thinking: "Initial reasoning before loop. ",
+          },
+          done: false,
+        }),
+        // Repeated reasoning tokens that will trip the repetition detector
+        ...Array.from({ length: 40 }, () =>
+          JSON.stringify({
+            model: "qwen3:32b",
+            message: {
+              role: "assistant",
+              content: "",
+              thinking: "repeating thought loop block. ",
+            },
+            done: false,
+          }),
+        ),
+      ];
+      return new Response(new TextEncoder().encode(`${lines.join("\n")}\n`), {
+        status: 200,
+        headers: { "Content-Type": "application/x-ndjson" },
+      });
+    }) as unknown as typeof fetch;
+
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const tools = registerNoop();
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: true,
+      model: "ollama/qwen3:32b",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("hello")) events.push(ev);
+
+    // Stalled stream should halt immediately and NOT re-request or loop
+    expect(chatCalls).toBe(1);
+    expect(
+      events.some(
+        (ev) =>
+          ev.role === "warning" && ev.content?.includes("Stopped a degenerating model stream"),
+      ),
+    ).toBe(true);
+    // Should NOT trigger empty response retry or thinking-only retry
+    expect(
+      events.some((ev) => ev.role === "warning" && ev.content?.includes("empty response")),
+    ).toBe(false);
+    expect(
+      events.some((ev) => ev.role === "warning" && ev.content?.includes("without an answer")),
+    ).toBe(false);
+    // Assistant content has the non-empty stall notice
+    const final = events.find((ev) => ev.role === "assistant_final");
+    expect(final?.content).toContain("repetitive output");
+    expect(events.some((ev) => ev.role === "done")).toBe(true);
+    // Exactly 1 valid assistant message in the log
+    const assistantEntries = loop.log.entries.filter((m) => m.role === "assistant");
+    expect(assistantEntries).toHaveLength(1);
+    expect(assistantEntries[0]!.content).toContain("repetitive output");
   });
 });
 

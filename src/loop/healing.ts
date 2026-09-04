@@ -75,6 +75,20 @@ export function fixToolCallPairing(messages: ChatMessage[]): {
       droppedStrayTools += 1;
       continue;
     }
+    // Drop phantom assistant messages with empty content and no tool calls.
+    // Only a tail message with active reasoning_content (in-flight thinking-only retry)
+    // is allowed to temporarily lack content/tool_calls.
+    const hasContent =
+      (typeof msg.content === "string" && msg.content.trim().length > 0) ||
+      (Array.isArray(msg.content) && msg.content.length > 0);
+    const hasCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+    const hasReasoning =
+      typeof msg.reasoning_content === "string" && msg.reasoning_content.trim().length > 0;
+    const isTail = i === messages.length - 1;
+    if (msg.role === "assistant" && !hasCalls && !hasContent && (!isTail || !hasReasoning)) {
+      droppedAssistantCalls += 1;
+      continue;
+    }
     out.push(msg);
   }
   return { messages: out, droppedAssistantCalls, droppedStrayTools };

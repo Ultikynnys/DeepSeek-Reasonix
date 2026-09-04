@@ -323,6 +323,9 @@ export class CacheFirstLoop {
   /** Latched once per turn — a thinking-only completion (no content, no tool call)
    *  is re-requested exactly once instead of ending the turn on the thinking dump. */
   private _thinkingOnlyRetried = false;
+  /** True when a thinking-only retry appended a partial assistant message to the log
+   *  that must be replaced by the subsequent answer or discarded on give-up. */
+  private _thinkingOnlyPartialAppended = false;
   /** Latched once per turn — replay one provider failure before any output reached the UI. */
   private _providerErrorRetried = false;
   /** Count of ollama length-truncation continuations this turn — caps the resume loop. */
@@ -1043,6 +1046,7 @@ export class CacheFirstLoop {
     this._foldedThisTurn = false;
     this._emptyResponseRetried = false;
     this._thinkingOnlyRetried = false;
+    this._thinkingOnlyPartialAppended = false;
     this._providerErrorRetried = false;
     this._ollamaContinuations = 0;
     this._lastReasoningSig = null;
@@ -1376,6 +1380,9 @@ export class CacheFirstLoop {
               afterMessages: this.log.length,
               replacementMessages: this.log.entries,
             };
+          } else if (this._thinkingOnlyPartialAppended) {
+            this._thinkingOnlyPartialAppended = false;
+            this.discardLogFrom(this.log.length - 1);
           }
           try {
             restoreModelIfNeeded();
@@ -1437,6 +1444,10 @@ export class CacheFirstLoop {
             recoverable: false,
           },
         };
+        if (this._thinkingOnlyPartialAppended) {
+          this._thinkingOnlyPartialAppended = false;
+          this.discardLogFrom(this.log.length - 1);
+        }
         this._steerQueue.length = 0;
         restoreModelIfNeeded();
         return;
@@ -1453,11 +1464,7 @@ export class CacheFirstLoop {
             repeatedChars: repetitionStall.repeatedChars,
           }),
         };
-        if (
-          assistantContent.length === 0 &&
-          reasoningContent.length === 0 &&
-          toolCalls.length === 0
-        ) {
+        if (assistantContent.trim().length === 0 && toolCalls.length === 0) {
           assistantContent = t("loop.repetitionStallNoPrefix");
         }
       }
@@ -1633,6 +1640,10 @@ export class CacheFirstLoop {
           severity: "high",
           content: t("loop.emptyResponseGiveUp"),
         };
+        if (this._thinkingOnlyPartialAppended) {
+          this._thinkingOnlyPartialAppended = false;
+          this.discardLogFrom(this.log.length - 1);
+        }
         this._steerQueue.length = 0;
         restoreModelIfNeeded();
         return;
@@ -1650,6 +1661,7 @@ export class CacheFirstLoop {
       // call; a second thinking-only stop falls through to the promotion so the
       // turn still ends (bounded, never silent).
       if (
+        !repetitionStall &&
         assistantContent.trim().length === 0 &&
         toolCalls.length === 0 &&
         reasoningContent.trim().length > 0 &&
@@ -1657,6 +1669,7 @@ export class CacheFirstLoop {
         !this._thinkingOnlyRetried
       ) {
         this._thinkingOnlyRetried = true;
+        this._thinkingOnlyPartialAppended = true;
         this.appendAndPersist(buildAssistantMessage("", [], callModel, reasoningContent));
         yield {
           turn: this._turn,
@@ -1703,9 +1716,28 @@ export class CacheFirstLoop {
         assistantContent = stripHallucinatedToolMarkup(assistantContent);
       }
 
-      this.appendAndPersist(
-        buildAssistantMessage(assistantContent, repairedCalls, callModel, reasoningContent, image),
-      );
+      if (this._thinkingOnlyPartialAppended) {
+        this._thinkingOnlyPartialAppended = false;
+        this.replaceTailAssistantMessage(
+          buildAssistantMessage(
+            assistantContent,
+            repairedCalls,
+            callModel,
+            reasoningContent,
+            image,
+          ),
+        );
+      } else {
+        this.appendAndPersist(
+          buildAssistantMessage(
+            assistantContent,
+            repairedCalls,
+            callModel,
+            reasoningContent,
+            image,
+          ),
+        );
+      }
 
       yield {
         turn: this._turn,

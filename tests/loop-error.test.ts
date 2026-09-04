@@ -313,6 +313,21 @@ describe("healLoadedMessages", () => {
     expect(healed).toEqual(messages);
   });
 
+  it("drops empty assistant messages that have no tool calls", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "" },
+      { role: "assistant", content: "   " },
+      { role: "user", content: "still there?" },
+    ];
+    const { messages: healed, healedCount } = healLoadedMessages(messages, 32_000);
+    expect(healedCount).toBe(2);
+    expect(healed).toEqual([
+      { role: "user", content: "hi" },
+      { role: "user", content: "still there?" },
+    ]);
+  });
+
   it("heals multiple oversized tool messages in one pass (all properly paired)", () => {
     // Each oversized tool MUST be the response to a preceding
     // assistant.tool_calls, otherwise the 0.4.12 validator prunes it.
