@@ -861,7 +861,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(events.find((e) => e.role === "assistant_final" && e.forcedSummary)).toBeUndefined();
   });
 
-  it("context-guard diverts to summary when promptTokens > 80% of the window, tagging forcedSummary", async () => {
+  it("context-guard auto-compacts history when promptTokens > 80% and continues the conversation", async () => {
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -886,6 +886,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
       },
       // Forced-summary response (no tools)
       { content: "based on what I saw, X." },
+      // Turn continuation: model continues after compaction without stopping conversation
+      { content: "Analysis complete: all findings verified." },
     ];
     const client = makeClient(responses);
     const loop = new CacheFirstLoop({
@@ -901,19 +903,19 @@ describe("CacheFirstLoop (non-streaming)", () => {
       events.push({ role: ev.role, forcedSummary: ev.forcedSummary, content: ev.content });
     }
 
-    // A warning must fire about the context guard. Accept both the
-    // auto-compact-saved-us variant and the nothing-to-compact variant
-    // — the message format shifted in 0.4.11 when we added the
-    // auto-compact attempt before forcing summary.
+    // A warning must fire about the context guard.
     const warn = events.find((e) => e.role === "warning");
     expect(warn).toBeDefined();
     expect(warn!.content).toMatch(/context [\d,]+\/[\d,]+/);
 
-    // The final assistant_final must be tagged forcedSummary and carry the context-guard prefix.
+    // Compaction card must have completed
+    const compactEnd = events.find((e) => e.role === "compaction_end");
+    expect(compactEnd).toBeDefined();
+
+    // The conversation must continue after compaction and finish with the model's final response
     const finals = events.filter((e) => e.role === "assistant_final");
-    const summary = finals[finals.length - 1];
-    expect(summary!.forcedSummary).toBe(true);
-    expect(summary!.content).toMatch(/context budget running low/);
+    expect(finals[finals.length - 1]!.content).toBe("Analysis complete: all findings verified.");
+    expect(events[events.length - 1]!.role).toBe("done");
   });
 
   it("context-guard force-summary runs inside the compaction card lifecycle (fold-equivalent events)", async () => {
@@ -938,6 +940,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
       },
       // Forced-summary response (no tools).
       { content: "based on what I saw, X." },
+      // Continuation response after compaction.
+      { content: "Resumed and finished." },
     ];
     const client = makeClient(responses);
     const loop = new CacheFirstLoop({
@@ -971,9 +975,56 @@ describe("CacheFirstLoop (non-streaming)", () => {
     // A force-summary now swaps the log like a fold — the replacement snapshot
     // rides the end event for the kernel view.
     expect((end as { replacementMessages?: unknown }).replacementMessages).toBeDefined();
-    // The forced summary message still lands as the annotated assistant final.
+    // The conversation continued to complete after compaction.
     const finals = events.filter((e) => e.role === "assistant_final");
-    expect(finals[finals.length - 1]!.forcedSummary).toBe(true);
+    expect(finals[finals.length - 1]!.content).toBe("Resumed and finished.");
+  });
+
+  it("turn-start auto-compaction does not stop conversation", async () => {
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 100_000;
+    const responses: FakeResponseShape[] = [
+      // Summary response for turn-start fold
+      { content: "Earlier turns covered topic A." },
+      // Model response for the new turn
+      { content: "I am ready to help with topic B." },
+    ];
+    const client = makeClient(responses);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: FOLD_TEST_MODEL,
+    });
+    // Populate history above 75%
+    const fillLines = (label: string, n: number) =>
+      Array.from(
+        { length: n },
+        (_, i) =>
+          `${label} line ${i}: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
+      ).join("\n");
+    for (let i = 0; i < 18; i++) {
+      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 100)}` });
+      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 100)}` });
+    }
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("start topic B")) events.push(ev);
+
+    // Turn-start compaction card must start and complete
+    const start = events.find(
+      (e) => e.role === "compaction_start" && e.compactionReason === "auto-context-pressure",
+    );
+    const end = events.find(
+      (e) => e.role === "compaction_end" && e.compactionReason === "auto-context-pressure",
+    );
+    expect(start).toBeDefined();
+    expect(end).toBeDefined();
+    expect(end!.folded).toBe(true);
+
+    // The conversation must continue and answer, not stop at compaction
+    const finals = events.filter((e) => e.role === "assistant_final");
+    expect(finals[finals.length - 1]!.content).toBe("I am ready to help with topic B.");
+    expect(events[events.length - 1]!.role).toBe("done");
   });
 
   it("force-cancels live tasks (onPreCompaction) BEFORE the compaction card opens", async () => {

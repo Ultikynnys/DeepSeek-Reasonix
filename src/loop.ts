@@ -1254,7 +1254,7 @@ export class CacheFirstLoop {
         };
       }
 
-      const requestBudget = this.context.requestBudget(messages, toolSpecs, this.model);
+      let requestBudget = this.context.requestBudget(messages, toolSpecs, this.model);
       if (!requestBudget.fits) {
         if (!this._disableAutoCompaction) {
           yield {
@@ -1267,10 +1267,24 @@ export class CacheFirstLoop {
               pct: Math.round(requestBudget.ratio * 100),
             }),
           };
-          yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "context-guard");
-          restoreModelIfNeeded();
-          this._steerQueue.length = 0;
-          return;
+          const result = yield* this.forcedSummaryEvents(
+            `compaction-${++this._compactionSeq}`,
+            "context-guard",
+          );
+          this._foldedThisTurn = true;
+          if (signal.aborted) this.resetAbortState();
+          if (!result.folded) {
+            restoreModelIfNeeded();
+            this._steerQueue.length = 0;
+            return;
+          }
+          messages = this.buildMessages();
+          requestBudget = this.context.requestBudget(messages, toolSpecs, this.model);
+          if (!requestBudget.fits) {
+            restoreModelIfNeeded();
+            this._steerQueue.length = 0;
+            return;
+          }
         }
       }
 
@@ -1739,10 +1753,18 @@ export class CacheFirstLoop {
         // the trailing in-flight tool call and summarizes in place — same card
         // lifecycle as a fold, so the UI renders one compaction shape and the
         // event log records the trim + summary as one action.
-        yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "context-guard");
-        restoreModelIfNeeded();
-        this._steerQueue.length = 0;
-        return;
+        const result = yield* this.forcedSummaryEvents(
+          `compaction-${++this._compactionSeq}`,
+          "context-guard",
+        );
+        this._foldedThisTurn = true;
+        if (signal.aborted) this.resetAbortState();
+        if (!result.folded) {
+          restoreModelIfNeeded();
+          this._steerQueue.length = 0;
+          return;
+        }
+        continue;
       }
 
       if (repairedCalls.length === 0) {
