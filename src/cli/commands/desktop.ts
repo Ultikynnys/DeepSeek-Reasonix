@@ -99,6 +99,7 @@ import {
   loadDesktopOpenTabs,
   loadDisableAutoCompaction,
   loadEditMode,
+  loadEffectiveMcpConfig,
   loadEndpoint,
   loadEndpointForModel,
   loadExaApiKey,
@@ -190,7 +191,7 @@ import {
   type LoopEvent,
 } from "../../index.js";
 import { createLogger } from "../../logging.js";
-import { parseMcpSpec } from "../../mcp/spec.js";
+import { parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
   type ModelPrefs,
   type SessionMeta,
@@ -1924,10 +1925,12 @@ function summarizeMcpSpec(raw: string): McpSpecInfo {
 }
 
 function emitMcpSpecs(tab: Tab): void {
-  const cfg = readConfig();
-  const specs = (cfg.mcp ?? []).map((raw) => {
+  const normalized = loadEffectiveMcpConfig(tab.rootDir);
+  const specs = normalized.map((spec) => {
+    const raw = specToRaw(spec);
     const base = summarizeMcpSpec(raw);
-    const live = tab.mcpStatuses.get(raw);
+    const live =
+      tab.mcpStatuses.get(raw) ?? (spec.name ? tab.mcpStatuses.get(spec.name) : undefined);
     if (!live) return base;
     return { ...base, status: live.kind, statusReason: live.reason, toolCount: live.toolCount };
   });
@@ -2092,6 +2095,7 @@ interface Tab {
   planTotalSteps: number;
   mcpRuntime: McpRuntime | null;
   mcpStatuses: Map<string, { kind: McpSpecStatus; reason?: string; toolCount?: number }>;
+  mcpBridgePromise: Promise<void> | null;
   /** True while a session switch is in progress — prevents stale events from the old turn. */
   switching: boolean;
   hooks: ResolvedHook[];
@@ -2663,6 +2667,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       planTotalSteps: 0,
       mcpRuntime: null,
       mcpStatuses: new Map(),
+      mcpBridgePromise: null,
       switching: false,
       hooks: loadHooks({ projectRoot: dir }),
     };
@@ -2816,14 +2821,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   function bridgeTabMcp(tab: Tab): Promise<void> {
     if (!tab.runtime || !tab.toolset) {
       emitTabDiagnostic(tab, "mcp.bridge.skipped", { reason: "runtime-or-toolset-not-ready" });
+      tab.mcpBridgePromise = null;
       return Promise.resolve();
     }
+    const configured = loadEffectiveMcpConfig(tab.rootDir);
     emitTabDiagnostic(tab, "mcp.bridge.started", {
-      configured: (readConfig().mcp ?? []).length,
+      configured: configured.length,
     });
     if (tab.mcpRuntime) {
       // Already constructed — reload so new/removed specs settle without restart.
-      return tab.mcpRuntime
+      const p = tab.mcpRuntime
         .reloadFromConfig(tab.runtime.loop)
         .then(() => {
           emitTabDiagnostic(tab, "mcp.bridge.completed", { mode: "reload" });
@@ -2836,10 +2843,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           });
           emit({ type: "$error", message: `mcp reload failed: ${(err as Error).message}` }, tab.id);
         });
+      tab.mcpBridgePromise = p;
+      return p;
     }
-    const requested = (readConfig().mcp ?? []).length;
+    const requested = configured.length;
     if (requested === 0) {
       emitTabDiagnostic(tab, "mcp.bridge.skipped", { reason: "no-configured-servers" });
+      tab.mcpBridgePromise = null;
       return Promise.resolve();
     }
     const runtime = createMcpRuntime({
@@ -2868,15 +2878,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         );
         return;
       }
-      const cfg = readConfig().mcp ?? [];
-      const target = cfg.find((raw) => {
-        try {
-          return parseMcpSpec(raw).name === notice.name;
-        } catch {
-          return false;
-        }
-      });
-      if (!target) {
+      const activeSpecs = loadEffectiveMcpConfig(tab.rootDir);
+      const targetSpec = activeSpecs.find((s) => s.name === notice.name);
+      const target = targetSpec ? specToRaw(targetSpec) : notice.name;
+      if (!targetSpec) {
         emitTabDiagnostic(
           tab,
           "mcp.lifecycle.unmatched",
@@ -2908,16 +2913,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       );
       if (notice.kind === "handshake") {
         tab.mcpStatuses.set(target, { kind: "handshake" });
+        if (targetSpec.name) tab.mcpStatuses.set(targetSpec.name, { kind: "handshake" });
       } else if (notice.kind === "connected") {
         tab.mcpStatuses.set(target, { kind: "connected", toolCount: notice.tools });
+        if (targetSpec.name)
+          tab.mcpStatuses.set(targetSpec.name, { kind: "connected", toolCount: notice.tools });
       } else if (notice.kind === "failed") {
         tab.mcpStatuses.set(target, { kind: "failed", reason: notice.reason });
+        if (targetSpec.name)
+          tab.mcpStatuses.set(targetSpec.name, { kind: "failed", reason: notice.reason });
       } else if (notice.kind === "disabled") {
         tab.mcpStatuses.set(target, { kind: "disabled" });
+        if (targetSpec.name) tab.mcpStatuses.set(targetSpec.name, { kind: "disabled" });
       }
       emitMcpSpecs(tab);
     });
-    return runtime
+    const p = runtime
       .reloadFromConfig(tab.runtime.loop)
       .then((result) => {
         emitTabDiagnostic(tab, "mcp.bridge.completed", {
@@ -2935,6 +2946,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         });
         emit({ type: "$error", message: `mcp bridge failed: ${(err as Error).message}` }, tab.id);
       });
+    tab.mcpBridgePromise = p;
+    return p;
   }
 
   /** Snapshot of every open tab — workspace dir, loaded session and focus, in tab order. Persisted after open/close/switch so a restart restores the full tab set and each conversation (issues #933, #1244). */
@@ -3009,6 +3022,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   async function runTurn(tab: Tab, text: string, images?: TurnImage[]): Promise<void> {
+    if (tab.mcpBridgePromise) {
+      await tab.mcpBridgePromise.catch(() => undefined);
+    }
     emitTabDiagnostic(
       tab,
       "turn.start.requested",
@@ -3330,6 +3346,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       modelId: tab.currentModel,
     });
     tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+    if (tab.mcpRuntime) {
+      await tab.mcpRuntime.closeAll().catch(() => undefined);
+      tab.mcpRuntime = null;
+    }
+    if (tab.runtime) {
+      void bridgeTabMcp(tab);
+    }
     void settleTabSemantic(tab, target, toolset);
     emit(
       {
@@ -4260,12 +4283,28 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "mcp_specs_remove") {
       try {
         const cfg = readConfig();
+        let changed = false;
         const list = cfg.mcp ?? [];
         if (list.includes(msg.spec)) {
           cfg.mcp = list.filter((s) => s !== msg.spec);
-          writeConfig(cfg);
+          changed = true;
         }
+        let parsedName: string | null = null;
+        try {
+          parsedName = parseMcpSpec(msg.spec).name;
+        } catch (err) {
+          emitDiagnosticError("mcp.spec.parse.ignored", err, {
+            tabId: tab.id,
+            details: { spec: msg.spec },
+          });
+        }
+        if (parsedName && cfg.mcpServers && parsedName in cfg.mcpServers) {
+          delete cfg.mcpServers[parsedName];
+          changed = true;
+        }
+        if (changed) writeConfig(cfg);
         tab.mcpStatuses.delete(msg.spec);
+        if (parsedName) tab.mcpStatuses.delete(parsedName);
         emitMcpSpecs(tab);
         void bridgeTabMcp(tab);
       } catch (err) {

@@ -236,4 +236,25 @@ describe("codeSystemPrompt", () => {
       expect(appendAt).toBeGreaterThan(gitignoreAt);
     });
   });
+
+  describe("MCP bridges awareness", () => {
+    it("injects configured MCP bridges block into the system prompt", () => {
+      writeFileSync(
+        join(root, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            blender: {
+              command: "uvx.exe",
+              args: ["--python", "3.11", "blender-mcp"],
+            },
+          },
+        }),
+        "utf8",
+      );
+      const out = codeSystemPrompt(root);
+      expect(out).toMatch(/# Configured MCP bridges/);
+      expect(out).toContain("- blender (stdio): uvx.exe --python 3.11 blender-mcp");
+      expect(out).toContain("list_mcp_bridges");
+    });
+  });
 });

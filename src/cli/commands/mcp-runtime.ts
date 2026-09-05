@@ -1,4 +1,4 @@
-import { normalizeMcpConfig, readConfig } from "../../config.js";
+import { loadEffectiveMcpConfig } from "../../config.js";
 import { formatMcpLifecycleEvent } from "../../desktop/mcp-lifecycle.js";
 import { formatMcpSlowToast } from "../../desktop/mcp-toast.js";
 import { t } from "../../i18n/index.js";
@@ -148,8 +148,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     failureMap.delete(raw);
     const tools = ctx.getTools();
     if (!tools) return { ok: false, reason: "no tool registry available" };
-    const cfg = readConfig();
-    const normalized = normalizeMcpConfig(cfg);
+    const normalized = loadEffectiveMcpConfig(ctx.getWorkspaceDir?.());
     let label = "anon";
     let mcp: McpClient | undefined;
     // Per-server readiness gate — tool dispatches via the bridge await
@@ -337,7 +336,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     failed: Array<{ spec: string; reason: string }>;
     summaries: McpServerSummary[];
   }> {
-    const normalized = normalizeMcpConfig(readConfig());
+    const normalized = loadEffectiveMcpConfig(ctx.getWorkspaceDir?.());
     const desired = normalized.map(specToRaw);
     const desiredSet = new Set(desired);
     const currentSet = new Set(records.keys());

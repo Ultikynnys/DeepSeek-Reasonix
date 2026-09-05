@@ -24,6 +24,7 @@ import {
   type ResolvedIndexConfig,
   resolveIndexConfig,
 } from "./index/config.js";
+import { loadDotMcpJson } from "./mcp/dot-mcp-json.js";
 import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
 import { isDiscoveredOpencodeModel } from "./opencode-models.js";
 import { reasonixHome } from "./reasonix-home.js";
@@ -1114,6 +1115,20 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
   }
 
   return result;
+}
+
+/** Load effective MCP server specs from global config and optional workspace `.mcp.json`. */
+export function loadEffectiveMcpConfig(
+  projectRoot?: string,
+  configPath: string = defaultConfigPath(),
+  extraLegacy?: string[],
+): McpServerSpec[] {
+  const cfg = readConfig(configPath);
+  const project = projectRoot ? loadDotMcpJson(projectRoot) : undefined;
+  const merged: ReasonixConfig = project
+    ? { ...cfg, mcpServers: { ...(cfg.mcpServers ?? {}), ...project } }
+    : cfg;
+  return normalizeMcpConfig(merged, extraLegacy);
 }
 
 export interface ResolvedEndpoint {

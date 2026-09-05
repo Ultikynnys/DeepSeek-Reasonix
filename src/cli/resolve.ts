@@ -3,11 +3,10 @@ import {
   type ReasoningEffort,
   type ReasonixConfig,
   isReasoningEffort,
+  loadEffectiveMcpConfig,
   loadReasoningEffort,
-  normalizeMcpConfig,
   readConfig,
 } from "../config.js";
-import { loadDotMcpJson } from "../mcp/dot-mcp-json.js";
 import { specToRaw } from "../mcp/spec.js";
 
 export interface ResolvedDefaults {
@@ -39,23 +38,18 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
       ? "high"
       : loadReasoningEffort();
 
-  const merged = flags.noConfig ? cfg : mergeDotMcpJson(cfg, process.cwd());
-
-  const normalizedMcp = normalizeMcpConfig(
-    merged,
-    flags.mcp && flags.mcp.length > 0 ? flags.mcp : undefined,
-  );
+  const normalizedMcp = flags.noConfig
+    ? []
+    : loadEffectiveMcpConfig(
+        process.cwd(),
+        undefined,
+        flags.mcp && flags.mcp.length > 0 ? flags.mcp : undefined,
+      );
   const mcp = normalizedMcp.map(specToRaw);
 
   const session = resolveSession(flags.session, cfg.session);
 
   return { model, reasoningEffort, mcp, session };
-}
-
-function mergeDotMcpJson(cfg: ReasonixConfig, projectRoot: string): ReasonixConfig {
-  const project = loadDotMcpJson(projectRoot);
-  if (!project) return cfg;
-  return { ...cfg, mcpServers: { ...(cfg.mcpServers ?? {}), ...project } };
 }
 
 function resolveSession(

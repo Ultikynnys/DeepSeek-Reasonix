@@ -1,9 +1,15 @@
 /** Agent-facing tools for scaffolding skills + MCP servers from chat. Persists via the same paths the wizard / `/skill new` use. */
 
-import { defaultConfigPath, loadResolvedSkillPaths, readConfig, writeConfig } from "../config.js";
+import {
+  defaultConfigPath,
+  loadEffectiveMcpConfig,
+  loadResolvedSkillPaths,
+  readConfig,
+  writeConfig,
+} from "../config.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import { preflightStdioSpec } from "../mcp/preflight.js";
-import { type McpSpec, parseMcpSpec } from "../mcp/spec.js";
+import { type McpSpec, parseMcpSpec, specToRaw } from "../mcp/spec.js";
 import { SkillStore } from "../skills.js";
 import type { ToolRegistry } from "../tools.js";
 
@@ -222,14 +228,15 @@ export function registerScaffoldTools(
         }
       }
 
-      const cfg = readConfig(configPath);
-      const existing = cfg.mcp ?? [];
-      const collision = existing.find((s) => parseSpecName(s) === name);
+      const existingSpecs = loadEffectiveMcpConfig(opts.projectRoot, configPath);
+      const collision = existingSpecs.find((s) => s.name === name);
       if (collision) {
         return JSON.stringify({
-          error: `MCP server ${JSON.stringify(name)} already registered: ${collision}`,
+          error: `MCP server ${JSON.stringify(name)} already registered: ${specToRaw(collision)}`,
         });
       }
+      const cfg = readConfig(configPath);
+      const existing = cfg.mcp ?? [];
       cfg.mcp = [...existing, specStr.spec];
       writeConfig(cfg, configPath);
       return JSON.stringify({
@@ -239,6 +246,58 @@ export function registerScaffoldTools(
         spec: specStr.spec,
         config_path: configPath,
         active_on_next_launch: true,
+      });
+    },
+  });
+
+  registry.register({
+    name: "list_mcp_bridges",
+    description:
+      "List all configured MCP servers and bridges, their transport type, status, and tools currently bridged into the session.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Optional: filter by exact server/bridge name.",
+        },
+      },
+    },
+    fn: async (args: { name?: unknown }) => {
+      const filterName = typeof args.name === "string" ? args.name.trim() : undefined;
+      const configured = loadEffectiveMcpConfig(opts.projectRoot, configPath);
+      const registeredSpecs = registry.specs();
+
+      const bridges = configured
+        .filter((s) => !filterName || s.name === filterName)
+        .map((s) => {
+          const prefix = s.name ? `${s.name}_` : "";
+          const tools = prefix
+            ? registeredSpecs
+                .filter((spec) => spec.function.name.startsWith(prefix))
+                .map((spec) => ({
+                  name: spec.function.name,
+                  description: spec.function.description ?? "",
+                }))
+            : [];
+          const isBridged = tools.length > 0;
+          const status = s.disabled ? "disabled" : isBridged ? "connected" : "configured";
+          return {
+            name: s.name ?? "anon",
+            transport: s.transport,
+            status,
+            disabled: s.disabled === true,
+            ...(s.transport === "stdio"
+              ? { command: s.command, args: s.args ?? [] }
+              : { url: s.url }),
+            tool_count: tools.length,
+            tools,
+          };
+        });
+
+      return JSON.stringify({
+        count: bridges.length,
+        bridges,
       });
     },
   });

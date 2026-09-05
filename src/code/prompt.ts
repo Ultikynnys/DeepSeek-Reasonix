@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { loadEffectiveMcpConfig } from "../config.js";
 import { readCappedTextFile } from "../memory/read-capped.js";
 import { applyMemoryStack } from "../memory/user.js";
 import { TUI_FORMATTING_RULES, escalationContract } from "../prompt-fragments.js";
@@ -163,6 +164,8 @@ export interface CodeSystemPromptOptions {
   modelId?: string;
   /** Back-compat no-op: lifecycle is runtime-only so strict/off do not change the cache prefix. */
   engineeringLifecycleMode?: "off" | "strict";
+  /** Override config path — tests point this at a tmp file. */
+  configPath?: string;
 }
 
 export function codeSystemPrompt(rootDir: string, opts: CodeSystemPromptOptions = {}): string {
@@ -174,6 +177,19 @@ export function codeSystemPrompt(rootDir: string, opts: CodeSystemPromptOptions 
   const gitignore = readCappedTextFile(gitignorePath, GITIGNORE_MAX_CHARS);
   if (gitignore) {
     result = `${result}\n\n# Project .gitignore\n\nThe user's repo ships this .gitignore — treat every pattern as "don't traverse or edit inside these paths unless explicitly asked":\n\n\`\`\`\n${gitignore.content}\n\`\`\`\n`;
+  }
+  const mcpSpecs = loadEffectiveMcpConfig(rootDir, opts.configPath);
+  if (mcpSpecs.length > 0) {
+    const lines = mcpSpecs.map((spec) => {
+      const name = spec.name ?? "anon";
+      const target =
+        spec.transport === "stdio"
+          ? `${spec.command} ${(spec.args ?? []).join(" ")}`.trim()
+          : spec.url;
+      const status = spec.disabled ? " [disabled]" : "";
+      return `- ${name} (${spec.transport}${status}): ${target}`;
+    });
+    result = `${result}\n\n# Configured MCP bridges\n\nThe following MCP protocol tool servers are configured. Their bridged tools are available in your tool definitions (prefixed with \`<name>_\`). You can also call \`list_mcp_bridges\` to check detailed status and available tools:\n\n${lines.join("\n")}\n`;
   }
   const appendParts = [opts.systemAppend, opts.systemAppendFile].filter(Boolean);
   if (appendParts.length > 0) {
