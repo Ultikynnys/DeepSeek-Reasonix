@@ -22,7 +22,7 @@
         "decorations": false,
         "transparent": false,
         "backgroundColor": "#0b0b0b",
-        "additionalBrowserArgs": "--enable-features=WebGPU --enable-unsafe-webgpu"
+        "additionalBrowserArgs": "--enable-features=WebGPU --enable-unsafe-webgpu --force_high_performance_gpu"
       }
     ],
     "security": {

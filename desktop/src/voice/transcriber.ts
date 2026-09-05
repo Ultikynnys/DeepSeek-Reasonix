@@ -96,6 +96,24 @@ export function suppressOnnxOptimizerNoise(): void {
     (filteredLog as unknown as Record<symbol, unknown>)[ONNX_NOISE_MARKER] = true;
     console.log = filteredLog;
   }
+
+  if (console.error && !(console.error as unknown as Record<symbol, unknown>)[ONNX_NOISE_MARKER]) {
+    const originalError = console.error;
+    const filteredError = (...args: unknown[]) => {
+      const first = args[0];
+      if (
+        typeof first === "string" &&
+        (first.includes("CleanUnusedInitializersAndNodeArgs") ||
+          first.includes("VerifyEachNodeIsAssignedToAnEp") ||
+          (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
+      ) {
+        return;
+      }
+      originalError.apply(console, args);
+    };
+    (filteredError as unknown as Record<symbol, unknown>)[ONNX_NOISE_MARKER] = true;
+    console.error = filteredError;
+  }
 }
 
 /**
@@ -122,7 +140,10 @@ function configureTransformersEnv(env: TransformersEnv): void {
 
 interface WebGPUNavigator {
   gpu?: {
-    requestAdapter(): Promise<unknown>;
+    requestAdapter(options?: { powerPreference?: string }): Promise<{
+      info?: Record<string, string>;
+      requestAdapterInfo?: () => Promise<Record<string, string>>;
+    } | null>;
   };
 }
 
@@ -134,12 +155,22 @@ export async function isWebGPUSupported(): Promise<boolean> {
     return false;
   }
   const nav = navigator as unknown as WebGPUNavigator;
-  if (!nav.gpu) {
+  if (!nav.gpu || typeof nav.gpu.requestAdapter !== "function") {
     return false;
   }
   try {
-    const adapter = await nav.gpu.requestAdapter();
-    return adapter !== null;
+    const adapter = await nav.gpu.requestAdapter({ powerPreference: "high-performance" });
+    if (!adapter) {
+      return false;
+    }
+    const info = adapter.info ?? (await adapter.requestAdapterInfo?.());
+    if (info) {
+      const parts = [info.vendor, info.architecture, info.description].filter(Boolean);
+      if (parts.length > 0) {
+        console.info(`[Voice] WebGPU hardware adapter: ${parts.join(" ")}`);
+      }
+    }
+    return true;
   } catch {
     return false;
   }
