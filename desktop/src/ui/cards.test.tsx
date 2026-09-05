@@ -94,6 +94,34 @@ describe("ToolCard — show-in-explorer button", () => {
     );
   });
 
+  it("handles long file paths without omitting the button or accessible name", async () => {
+    const longPath =
+      "CookingForBlockheads-1.4.4-GTNH/src/main/java/net/blay09/mods/cookingforblockheads/container/ContainerRecipeBook.java";
+    render(
+      wrap(
+        <ToolCard
+          name="read_file"
+          args={JSON.stringify({ path: longPath })}
+          result="ok"
+          durationMs={111}
+          ok
+        />,
+      ),
+    );
+
+    const btn = screen.getByRole("button", { name: longPath });
+    expect(btn).toBeTruthy();
+    expect(btn.getAttribute("title")).toBe(longPath);
+
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("reveal_in_explorer", {
+        path: `/repo/${longPath}`,
+        workspace: "/repo",
+      }),
+    );
+  });
+
   it("shows no file button for non-file tools", () => {
     render(
       wrap(

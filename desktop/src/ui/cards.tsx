@@ -106,6 +106,7 @@ export function Card({
           style={{
             flex: 1,
             minWidth: 0,
+            overflow: "hidden",
             background: "none",
             border: "none",
             textAlign: "left",

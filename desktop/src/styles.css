@@ -3192,14 +3192,21 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   color: var(--muted);
   letter-spacing: 0.02em;
   font-size: 12px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .card-head .name {
   color: var(--fg);
   font-weight: 500;
   font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .card-head .grow {
   flex: 1;
+  min-width: 8px;
 }
 .card-head .meta {
   display: flex;
@@ -3207,10 +3214,13 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   align-items: center;
   color: var(--muted);
   font-size: 12px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .card-head .chev {
   color: var(--muted-2);
   transition: transform 0.15s ease;
+  flex-shrink: 0;
 }
 .card[data-open="false"] .card-head .chev {
   transform: rotate(-90deg);
@@ -3573,6 +3583,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .card-head-row {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 .head-action {
   display: inline-flex;
@@ -3588,6 +3599,18 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   font-family: var(--font-sans, "Geist", system-ui, sans-serif);
   white-space: nowrap;
   cursor: pointer;
+  min-width: 0;
+  max-width: min(480px, 50%);
+  flex-shrink: 1;
+}
+.head-action svg {
+  flex-shrink: 0;
+}
+.head-action span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .head-action:hover {
   color: var(--fg);
