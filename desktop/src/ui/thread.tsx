@@ -2,7 +2,7 @@ import type { ApprovalPrompt } from "@reasonix/core-utils";
 import { isCompactionSummary, stripCompactionMarker } from "@reasonix/core-utils/compaction";
 import { derivePrefix } from "@reasonix/core-utils/derive-prefix";
 import { Copy } from "lucide-react";
-import { memo, useState } from "react";
+import { Fragment, memo, useState } from "react";
 import type {
   ActivePlan,
   AssistantSegment,
@@ -329,7 +329,7 @@ export const AssistantMsg = memo(function AssistantMsg({
           if (s.result && (s.name === "edit_file" || s.name === "multi_edit")) {
             const files = parseEditResult(s.result);
             return files.length > 0 ? (
-              <>
+              <Fragment key={s.callId ?? `edit-${i}`}>
                 {files.map((f, fi) => (
                   <DiffCard
                     // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
@@ -339,7 +339,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                     applied={s.ok !== false}
                   />
                 ))}
-              </>
+              </Fragment>
             ) : (
               <ToolCard
                 // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
