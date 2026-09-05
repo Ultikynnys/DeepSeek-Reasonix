@@ -45,3 +45,5 @@ desktop/src-tauri/binaries/
 # also hides team-level .reasonix/settings.json and .reasonix/skills/ — if you
 # want those tracked, force-add them (git add -f) or add explicit !-renegades.
 .reasonix/
+
+cookingforblockheads/
