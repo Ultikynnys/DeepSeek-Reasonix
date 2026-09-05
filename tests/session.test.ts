@@ -24,6 +24,7 @@ import {
   loadSessionMessages,
   loadSessionMeta,
   normalizeWorkspace,
+  parseSessionTimestamp,
   patchSessionMeta,
   patchSessionWorkspaceIfMissing,
   pruneStaleSessions,
@@ -33,7 +34,9 @@ import {
   rewriteSession,
   sanitizeName,
   sessionPath,
+  sessionRecency,
   sessionsDir,
+  sortSessionsDescending,
   timestampSuffix,
 } from "../src/memory/session.js";
 
@@ -149,6 +152,53 @@ describe("session persistence", () => {
     const beta = items.find((s) => s.name === "beta")!;
     expect(beta.messageCount).toBe(2);
     expect(beta.size).toBeGreaterThan(0);
+  });
+
+  it("parseSessionTimestamp extracts UTC millisecond timestamp from compact session names", () => {
+    const ts = parseSessionTimestamp("desktop-20260905143000-1");
+    expect(ts).toBe(Date.UTC(2026, 8, 5, 14, 30, 0));
+    const ts12 = parseSessionTimestamp("desktop-202609051430-1");
+    expect(ts12).toBe(Date.UTC(2026, 8, 5, 14, 30, 0));
+    expect(parseSessionTimestamp("custom-session-no-timestamp")).toBe(0);
+  });
+
+  it("sessionRecency takes the maximum of mtime and embedded creation timestamp", () => {
+    const embeddedTime = Date.UTC(2026, 8, 5, 12, 0, 0);
+    const earlierMtime = new Date(Date.UTC(2026, 8, 5, 10, 0, 0));
+    expect(sessionRecency({ name: "desktop-20260905120000-1", mtime: earlierMtime })).toBe(
+      embeddedTime,
+    );
+
+    const laterMtime = new Date(Date.UTC(2026, 8, 5, 15, 0, 0));
+    expect(sessionRecency({ name: "desktop-20260905120000-1", mtime: laterMtime })).toBe(
+      laterMtime.getTime(),
+    );
+  });
+
+  it("sortSessionsDescending deterministically orders newest sessions first with name tie-breaking", () => {
+    const sameMtime = new Date(1700000000000);
+    const sessions = [
+      { name: "desktop-20260901100000-1", mtime: sameMtime },
+      { name: "desktop-20260905140000-1", mtime: sameMtime },
+      { name: "desktop-20260903120000-1", mtime: sameMtime },
+    ];
+    sessions.sort(sortSessionsDescending);
+    expect(sessions.map((s) => s.name)).toEqual([
+      "desktop-20260905140000-1",
+      "desktop-20260903120000-1",
+      "desktop-20260901100000-1",
+    ]);
+  });
+
+  it("sortSessionsDescending breaks identical recency ties using descending session name", () => {
+    const fixedMtime = new Date(0);
+    const sessions = [
+      { name: "plain-alpha", mtime: fixedMtime },
+      { name: "plain-charlie", mtime: fixedMtime },
+      { name: "plain-bravo", mtime: fixedMtime },
+    ];
+    sessions.sort(sortSessionsDescending);
+    expect(sessions.map((s) => s.name)).toEqual(["plain-charlie", "plain-bravo", "plain-alpha"]);
   });
 
   it("listSessions excludes .events.jsonl sidecars", () => {

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, statSync, writeSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { stdin } from "node:process";
 import { createInterface } from "node:readline";
 import {
@@ -188,6 +188,7 @@ import { parseMcpSpec } from "../../mcp/spec.js";
 import {
   type ModelPrefs,
   type SessionMeta,
+  chmodPrivate,
   deleteSession,
   listSessionsForWorkspace,
   listSessionsForWorkspaceAsync,
@@ -1766,16 +1767,18 @@ function loadSessionIntoTab(
     } catch {
       void 0; /* file may not exist */
     }
-    emitTabDiagnostic(
-      tab,
-      "session.load.empty",
-      { name, sizeBytes, records: records.length },
-      "warn",
-    );
-    process.stderr.write(
-      `session_load: "${name}" returned 0 messages (file size=${sizeBytes}B) — empty or unreadable jsonl\n`,
-    );
-    emit({ type: "$session_empty", name, sizeBytes }, tab.id);
+    if (sizeBytes > 0) {
+      emitTabDiagnostic(
+        tab,
+        "session.load.empty",
+        { name, sizeBytes, records: records.length },
+        "warn",
+      );
+      process.stderr.write(
+        `session_load: "${name}" returned 0 messages (file size=${sizeBytes}B): empty or unreadable jsonl\n`,
+      );
+      emit({ type: "$session_empty", name, sizeBytes }, tab.id);
+    }
   }
   emit(
     {
@@ -2090,18 +2093,27 @@ function nextTabId(): string {
 }
 
 function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
-  // Seconds precision — a 12-digit (minute) timestamp would mint the same
-  // name for two new_chats in the same minute, silently resurrecting the
-  // previous conversation's jsonl in the "new" chat.
+  // Seconds precision: a 14-digit timestamp prevents name collision.
   const name = `desktop-${timestampSuffix(14)}-${tabCounter}`;
+  try {
+    const p = sessionPath(name);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, "", { flag: "w" });
+    chmodPrivate(p);
+  } catch (err) {
+    emitDiagnosticError("session.jsonl.create.failed", err, {
+      details: { session: name, workspaceDirChars: rootDir.length },
+    });
+    process.stderr.write(`reasonix: session jsonl create failed: ${messageOf(err)}\n`);
+  }
   try {
     patchSessionMeta(name, prefs ? { workspace: rootDir, ...prefs } : { workspace: rootDir });
   } catch (err) {
-    // session meta is for filtering only — failure shouldn't block chat, but LOG
+    // session meta is for filtering only: failure shouldn't block chat, but LOG
     emitDiagnosticError("session.meta.patch.failed", err, {
       details: { session: name, workspaceDirChars: rootDir.length },
     });
-    process.stderr.write(`reasonix: session meta patch failed — ${messageOf(err)}\n`);
+    process.stderr.write(`reasonix: session meta patch failed: ${messageOf(err)}\n`);
   }
   return name;
 }
@@ -3188,6 +3200,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.symbolBuilding = null;
     tab.recentMentions.length = 0;
     tab.hooks = loadHooks({ projectRoot: target });
+    if (tab.currentSession) {
+      try {
+        const prevPath = sessionPath(tab.currentSession);
+        if (existsSync(prevPath) && statSync(prevPath).size === 0) {
+          deleteSession(tab.currentSession);
+        }
+      } catch (err) {
+        emitDiagnosticError("session.empty.cleanup.failed", err, {
+          tabId: tab.id,
+          details: { session: tab.currentSession },
+        });
+      }
+    }
     tab.currentSession = mintSessionFor(target);
     const toolset = await buildCodeToolset({
       rootDir: target,
@@ -3206,6 +3231,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     });
     tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
     void settleTabSemantic(tab, target, toolset);
+    emit(
+      {
+        type: "$session_loaded",
+        name: tab.currentSession,
+        messages: [],
+        carryover: {
+          totalCostUsd: 0,
+          costByProvider: {},
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          totalCompletionTokens: 0,
+        },
+      },
+      tab.id,
+    );
     void emitSessions(tab);
     emitSettings(tab);
     emitSkills(tab);
@@ -3701,6 +3741,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               cacheHitTokens: meta.cacheHitTokens ?? 0,
               cacheMissTokens: meta.cacheMissTokens ?? 0,
               totalCompletionTokens: meta.totalCompletionTokens ?? 0,
+            },
+          },
+          tab.id,
+        );
+      } else if (tab.currentSession) {
+        emit(
+          {
+            type: "$session_loaded",
+            name: tab.currentSession,
+            messages: [],
+            carryover: {
+              totalCostUsd: 0,
+              costByProvider: {},
+              cacheHitTokens: 0,
+              cacheMissTokens: 0,
+              totalCompletionTokens: 0,
             },
           },
           tab.id,
@@ -4359,11 +4415,24 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "new_chat") {
       emitTabDiagnostic(tab, "session.new-chat.started", undefined, "info");
-      // Only set switching flag when there's a live turn to abort —
+      // Only set switching flag when there's a live turn to abort:
       // otherwise the flag stays true and suppresses the first turn's events (#1217).
       if (tab.aborter) tab.switching = true;
       abortTurn(tab);
       cancelPendingGates(tab);
+      if (tab.currentSession) {
+        try {
+          const prevPath = sessionPath(tab.currentSession);
+          if (existsSync(prevPath) && statSync(prevPath).size === 0) {
+            deleteSession(tab.currentSession);
+          }
+        } catch (err) {
+          emitDiagnosticError("session.empty.cleanup.failed", err, {
+            tabId: tab.id,
+            details: { session: tab.currentSession },
+          });
+        }
+      }
       tab.currentSession = mintSessionFor(tab.rootDir, {
         model: tab.currentModel,
         reasoningEffort: tab.currentReasoningEffort,
@@ -4371,6 +4440,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       });
       persistOpenTabs();
       tab.runtime = tab.toolset && tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+      emit(
+        {
+          type: "$session_loaded",
+          name: tab.currentSession,
+          messages: [],
+          carryover: {
+            totalCostUsd: 0,
+            costByProvider: {},
+            cacheHitTokens: 0,
+            cacheMissTokens: 0,
+            totalCompletionTokens: 0,
+          },
+        },
+        tab.id,
+      );
       void emitSessions(tab);
       emitTabDiagnostic(tab, "session.new-chat.completed", undefined, "info");
       return;

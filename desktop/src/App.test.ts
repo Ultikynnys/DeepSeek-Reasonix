@@ -34,7 +34,14 @@ vi.mock("./theme", () => ({
   themeForStyle: vi.fn(() => "dark"),
 }));
 
-import { activePlanForMessage, hasPendingIntervention, reduce } from "./App";
+import {
+  activePlanForMessage,
+  hasPendingIntervention,
+  parseSessionTimestamp,
+  reduce,
+  sessionRecency,
+  sortSessionsDescending,
+} from "./App";
 import type { ModelTurnStartedEvent } from "./protocol";
 import { getThreadMaxWidth } from "./ui/thread-layout";
 
@@ -1150,6 +1157,57 @@ describe("Desktop App reducer — $session_loaded resync echo", () => {
     const next = reduce(base, loaded("sess-2", false));
     expect(next.currentSession).toBe("sess-2");
     expect(next.messages).toHaveLength(2);
+  });
+});
+
+describe("Desktop App session sorting", () => {
+  it("parseSessionTimestamp extracts millisecond timestamp and sessionRecency computes max", () => {
+    expect(parseSessionTimestamp("desktop-20260905120000-1")).toBe(Date.UTC(2026, 8, 5, 12, 0, 0));
+    expect(parseSessionTimestamp("plain-session")).toBe(0);
+
+    const recency = sessionRecency({
+      name: "desktop-20260905120000-1",
+      messageCount: 0,
+      mtime: new Date(Date.UTC(2026, 8, 5, 10, 0, 0)).toISOString(),
+    });
+    expect(recency).toBe(Date.UTC(2026, 8, 5, 12, 0, 0));
+  });
+
+  it("sortSessionsDescending prioritizes newest sessions by recency and tie-breaks by name", () => {
+    const list = [
+      { name: "desktop-20260901100000-1", messageCount: 2, mtime: new Date(1000).toISOString() },
+      { name: "desktop-20260905120000-1", messageCount: 0, mtime: new Date(1000).toISOString() },
+      { name: "desktop-20260903110000-1", messageCount: 5, mtime: new Date(1000).toISOString() },
+    ];
+    const sorted = [...list].sort(sortSessionsDescending);
+    expect(sorted.map((s) => s.name)).toEqual([
+      "desktop-20260905120000-1",
+      "desktop-20260903110000-1",
+      "desktop-20260901100000-1",
+    ]);
+  });
+
+  it("reducer applies sortSessionsDescending on incoming $sessions event", () => {
+    const state = initialState();
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$sessions",
+        items: [
+          {
+            name: "desktop-20260901100000-1",
+            messageCount: 2,
+            mtime: new Date(1000).toISOString(),
+          },
+          {
+            name: "desktop-20260905120000-1",
+            messageCount: 0,
+            mtime: new Date(1000).toISOString(),
+          },
+        ],
+      },
+    });
+    expect(next.sessions[0]?.name).toBe("desktop-20260905120000-1");
   });
 });
 

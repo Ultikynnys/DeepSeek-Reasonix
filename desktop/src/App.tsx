@@ -355,6 +355,28 @@ export type SessionInfo = {
   workspaceStatus?: "matched" | "legacy_missing_meta";
 };
 
+export function parseSessionTimestamp(name: string): number {
+  const m = name.match(/(?:^|[-_])(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(?:(\d{2}))?(?:[-_]|$)/);
+  if (m) {
+    const [, y, mon, d, hh, mm, ss] = m;
+    return Date.UTC(+y!, +mon! - 1, +d!, +hh!, +mm!, ss ? +ss : 0);
+  }
+  return 0;
+}
+
+export function sessionRecency(session: SessionInfo): number {
+  const mtimeMs = Date.parse(session.mtime);
+  const validMtime = Number.isFinite(mtimeMs) ? mtimeMs : 0;
+  const nameMs = parseSessionTimestamp(session.name);
+  return Math.max(validMtime, nameMs);
+}
+
+export function sortSessionsDescending(a: SessionInfo, b: SessionInfo): number {
+  const recencyDiff = sessionRecency(b) - sessionRecency(a);
+  if (recencyDiff !== 0) return recencyDiff;
+  return b.name.localeCompare(a.name);
+}
+
 export type Settings = {
   reasoningEffort: ReasoningEffort;
   editMode: "review" | "auto" | "yolo" | "plan";
@@ -1532,7 +1554,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingRevisions: [],
       };
     case "$sessions":
-      return { ...state, sessions: ev.items };
+      return { ...state, sessions: [...ev.items].sort(sortSessionsDescending) };
     case "$session_import_sources":
       return { ...state, externalImportSources: ev.apps };
     case "$session_import_result":
@@ -3288,8 +3310,7 @@ function TabRuntime({
                                     ? t("app.status.thinking")
                                     : state.turnStatus === "reasoning"
                                       ? t("app.status.reasoning")
-                                      : state.turnStatus === "calling_tool" &&
-                                          state.turnStatusTool
+                                      : state.turnStatus === "calling_tool" && state.turnStatusTool
                                         ? `${t("app.status.callingTool")} ${state.turnStatusTool}`
                                         : state.turnStatus === "waiting_tool"
                                           ? t("app.status.waitingTool")

@@ -1,7 +1,7 @@
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { SessionInfo } from "../App";
+import { type SessionInfo, sortSessionsDescending } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { ExternalSessionApp, ExternalSessionSource } from "../protocol";
@@ -90,12 +90,17 @@ export function Sidebar({
   const workspaceLabel = workspaceDir
     ? workspaceDir.split(/[\\/]/).pop() || workspaceDir
     : t("sidebarPanel.noWorkspace");
+  const sortedSessions = [...sessions].sort(sortSessionsDescending);
+  const allSessions =
+    activeName && !sortedSessions.some((s) => s.name === activeName)
+      ? [{ name: activeName, messageCount: 0, mtime: new Date().toISOString() }, ...sortedSessions]
+      : sortedSessions;
   const filtered = query
-    ? sessions.filter((s) => {
+    ? allSessions.filter((s) => {
         const q = query.toLowerCase();
         return prettyName(s).toLowerCase().includes(q) || s.name.toLowerCase().includes(q);
       })
-    : sessions;
+    : allSessions;
 
   useEffect(() => {
     if (!pendingDelete && !pendingClear) return;

@@ -122,6 +122,33 @@ export function freshSessionName(currentName: string | undefined): string {
   return `${base || "default"}-${timestampSuffix(14)}`;
 }
 
+/** Parse compact timestamp (YYYYMMDDHHmmss or YYYYMMDDHHmm) from session names. */
+export function parseSessionTimestamp(name: string): number {
+  const m = name.match(/(?:^|[-_])(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(?:(\d{2}))?(?:[-_]|$)/);
+  if (m) {
+    const [, y, mon, d, hh, mm, ss] = m;
+    return Date.UTC(+y!, +mon! - 1, +d!, +hh!, +mm!, ss ? +ss : 0);
+  }
+  return 0;
+}
+
+/** Compute overall recency for a session based on mtime and creation timestamp in name. */
+export function sessionRecency(session: { name: string; mtime: Date }): number {
+  const mtimeMs = Number.isFinite(session.mtime.getTime()) ? session.mtime.getTime() : 0;
+  const nameMs = parseSessionTimestamp(session.name);
+  return Math.max(mtimeMs, nameMs);
+}
+
+/** Deterministic descending sort (newest first): recency with tie-break by name. */
+export function sortSessionsDescending<T extends { name: string; mtime: Date }>(
+  a: T,
+  b: T,
+): number {
+  const recencyDiff = sessionRecency(b) - sessionRecency(a);
+  if (recencyDiff !== 0) return recencyDiff;
+  return b.name.localeCompare(a.name);
+}
+
 /** Names of `.jsonl` sessions starting with `prefix`, newest-first by filename. */
 export function findSessionsByPrefix(prefix: string): string[] {
   const dir = sessionsDir();
@@ -277,7 +304,7 @@ export function listSessions(opts?: {
           { name, path, size: stat.size, messageCount, mtime: stat.mtime, meta, workspaceStatus },
         ];
       })
-      .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+      .sort(sortSessionsDescending);
   } catch {
     return [];
   }
@@ -344,7 +371,7 @@ export function listSessionsForWorkspaceAsync(workspace: string): {
             },
           ];
         })
-        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime()),
+        .sort(sortSessionsDescending),
     ),
   };
 }
