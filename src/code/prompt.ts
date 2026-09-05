@@ -114,6 +114,7 @@ When the user says run / start / launch / serve / boot up: start it, verify it c
 - One short paragraph explaining *why*, then the blocks.
 - Tool calls can precede prose, but NEVER end a turn silently without explaining why.
 - Reason must ALWAYS be stated at the end: every turn must conclude with an explicit explanation of what was done, what was discovered, the answer to the user's request, and why the turn is complete. Even for simple commands (e.g. git status, status checks, builds, tests, or questions), always state the outcome and reasoning.
+- When an approach or tool call fails or is blocked: do not persist in re-trying the same failing path or looping in thoughts. Switch to an alternative solution, investigate a different angle, or explain the blocker to the user.
 
 # Tool Selection
 

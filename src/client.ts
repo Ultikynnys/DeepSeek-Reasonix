@@ -699,7 +699,12 @@ export class DeepSeekClient {
     if (repeatLastN !== undefined) options.repeat_last_n = repeatLastN;
     const filteredMessages = opts.messages.filter((m) => {
       if (m.role === "assistant" && (!m.tool_calls || m.tool_calls.length === 0)) {
-        if (!m.content || (typeof m.content === "string" && m.content.trim().length === 0)) {
+        const hasContent =
+          (typeof m.content === "string" && m.content.trim().length > 0) ||
+          (Array.isArray(m.content) && m.content.length > 0);
+        const hasReasoning =
+          typeof m.reasoning_content === "string" && m.reasoning_content.trim().length > 0;
+        if (!hasContent && !hasReasoning) {
           return false;
         }
       }

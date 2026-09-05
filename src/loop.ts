@@ -1612,6 +1612,19 @@ export class CacheFirstLoop {
         return;
       }
 
+      // If the model leaked literal <think> tags into content (common with local
+      // Ollama DeepSeek R1/Distill models when using native chat transport), extract
+      // them into reasoningContent so they don't corrupt history or cause tag doom loops.
+      if (assistantContent.includes("<think>") || assistantContent.includes("</think>")) {
+        const { content: cleanContent, extractedReasoning } = extractThinkingTags(assistantContent);
+        assistantContent = cleanContent;
+        if (extractedReasoning) {
+          reasoningContent = reasoningContent
+            ? `${reasoningContent}\n\n${extractedReasoning}`
+            : extractedReasoning;
+        }
+      }
+
       // Empty-completion guard: content, reasoning AND tool calls all empty is
       // never a legitimate model answer — the API glitched (empty stream,
       // truncated queue slot, provider hiccup). Ending the turn silently here
@@ -1649,60 +1662,6 @@ export class CacheFirstLoop {
         return;
       }
 
-      // Thinking-only completion guard: a response that ended with reasoning but
-      // no content and no tool call is a degenerate stop, not a finished turn.
-      // Ollama-hosted reasoning models (deepseek-r1 / v4 with `think` enabled)
-      // intermittently end generation right after emitting their thinking, having
-      // neither answered nor called a tool. The empty guard above cannot catch it
-      // (reasoning is non-empty) and the promotion below would commit the thinking
-      // dump as the final answer, closing the conversation on a non-answer. When
-      // tools were offered, append the partial (reasoning-only) assistant message
-      // and re-request ONCE so the model can continue into a real answer or tool
-      // call; a second thinking-only stop falls through to the promotion so the
-      // turn still ends (bounded, never silent).
-      if (
-        !repetitionStall &&
-        assistantContent.trim().length === 0 &&
-        toolCalls.length === 0 &&
-        reasoningContent.trim().length > 0 &&
-        toolSpecs.length > 0 &&
-        !this._thinkingOnlyRetried
-      ) {
-        this._thinkingOnlyRetried = true;
-        this._thinkingOnlyPartialAppended = true;
-        this.appendAndPersist(buildAssistantMessage("", [], callModel, reasoningContent));
-        yield {
-          turn: this._turn,
-          role: "warning",
-          severity: "low",
-          content: t("loop.thinkingOnlyRetry"),
-        };
-        continue;
-      }
-
-      // If the model produced reasoning but no content and no tool calls,
-      // promote reasoning to assistant content so the turn never ends silently.
-      if (
-        assistantContent.trim().length === 0 &&
-        toolCalls.length === 0 &&
-        reasoningContent.trim().length > 0
-      ) {
-        assistantContent = reasoningContent.trim();
-      }
-
-      // If the model leaked literal <think> tags into content (common with local
-      // Ollama DeepSeek R1/Distill models when using native chat transport), extract
-      // them into reasoningContent so they don't corrupt history or cause tag doom loops.
-      if (assistantContent.includes("<think>") || assistantContent.includes("</think>")) {
-        const { content: cleanContent, extractedReasoning } = extractThinkingTags(assistantContent);
-        assistantContent = cleanContent;
-        if (extractedReasoning) {
-          reasoningContent = reasoningContent
-            ? `${reasoningContent}\n\n${extractedReasoning}`
-            : extractedReasoning;
-        }
-      }
-
       const { calls: repairedCalls, report } = this.repair.process(
         toolCalls,
         reasoningContent || null,
@@ -1714,6 +1673,52 @@ export class CacheFirstLoop {
       // preventing the model from seeing its own raw tool tags and looping on them.
       if (assistantContent.includes("DSML") || assistantContent.includes("<function_calls>")) {
         assistantContent = stripHallucinatedToolMarkup(assistantContent);
+      }
+
+      // Thinking-only completion guard: a response that ended with reasoning but
+      // no content and no tool call is a degenerate stop, not a finished turn.
+      // Ollama-hosted reasoning models (deepseek-r1 / v4 with `think` enabled)
+      // intermittently end generation right after emitting their thinking, having
+      // neither answered nor called a tool, or emit single-token fragments like "p".
+      // When tools were offered or output is degenerate noise, retry once bounded;
+      // on give-up, exit loudly without claiming the turn succeeded or promoting
+      // the reasoning dump as a completion.
+      if (
+        assistantContent.trim().length === 0 &&
+        toolCalls.length === 0 &&
+        repairedCalls.length === 0 &&
+        reasoningContent.trim().length > 0
+      ) {
+        const isDegenerate = reasoningContent.trim().length <= 5;
+        if (toolSpecs.length > 0 || isDegenerate) {
+          if (!repetitionStall && !this._thinkingOnlyRetried && !isDegenerate) {
+            this._thinkingOnlyRetried = true;
+            this._thinkingOnlyPartialAppended = true;
+            this.appendAndPersist(buildAssistantMessage("", [], callModel, reasoningContent));
+            yield {
+              turn: this._turn,
+              role: "warning",
+              severity: "low",
+              content: t("loop.thinkingOnlyRetry"),
+            };
+            continue;
+          }
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "high",
+            content: t("loop.thinkingOnlyGiveUp"),
+          };
+          if (this._thinkingOnlyPartialAppended) {
+            this._thinkingOnlyPartialAppended = false;
+            this.discardLogFrom(this.log.length - 1);
+          }
+          this._steerQueue.length = 0;
+          restoreModelIfNeeded();
+          return;
+        }
+        // Conversational non-tool turns with substantial reasoning: promote so the turn isn't silent
+        assistantContent = reasoningContent.trim();
       }
 
       if (this._thinkingOnlyPartialAppended) {

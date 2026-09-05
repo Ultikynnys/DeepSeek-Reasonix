@@ -3,6 +3,7 @@ import {
   GPT56_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
+  isAntigravityModel,
   isUsableAntigravityModel,
   modelAcceptsImages,
   modelDisplayName,
@@ -815,13 +816,30 @@ function ModelList({
   onRefreshAntigravityModels?: () => void;
 }) {
   const [draft, setDraft] = useState(activeModel);
-  const usableAntigravityModels = antigravityModels
+  const hasAntigravityEvidence =
+    Boolean(antigravityModels) || Boolean(customModels?.some(isAntigravityModel));
+  const usableAntigravityModels = hasAntigravityEvidence
     ? Array.from(
-        new Set([...antigravityModels.filter(isUsableAntigravityModel), ...ANTIGRAVITY_MODELS]),
+        new Set([
+          ...(antigravityModels?.filter(isUsableAntigravityModel) ?? []),
+          ...ANTIGRAVITY_MODELS,
+          ...(customModels?.filter(isAntigravityModel) ?? []),
+        ]),
       )
     : undefined;
   const antigravityGroup = Boolean(usableAntigravityModels && usableAntigravityModels.length > 0);
   const ollamaGroup = Boolean(ollamaModels && ollamaModels.length > 0);
+
+  const antigravitySet = new Set(usableAntigravityModels ?? []);
+  const knownSet = new Set([
+    ...SUPPORTED_OFFICIAL_MODELS,
+    ...GPT56_MODELS,
+    ...ZAI_MODELS,
+    ...(usableAntigravityModels ?? []),
+  ]);
+  const filteredCustomModels = (customModels ?? []).filter(
+    (id) => !knownSet.has(id) && !antigravitySet.has(id) && !isAntigravityModel(id),
+  );
 
   type GroupDef = {
     key: string;
@@ -850,12 +868,12 @@ function ModelList({
       title: t("composer.modelZaiGroup"),
       models: ZAI_MODELS,
     },
-    ...(customModels && customModels.length > 0
+    ...(filteredCustomModels.length > 0
       ? [
           {
             key: "custom",
             title: t("composer.modelCustomGroup"),
-            models: customModels,
+            models: filteredCustomModels,
           },
         ]
       : []),

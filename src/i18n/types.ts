@@ -292,6 +292,7 @@ export interface TranslationSchema {
     emptyResponseRetry: string;
     emptyResponseGiveUp: string;
     thinkingOnlyRetry: string;
+    thinkingOnlyGiveUp: string;
     providerErrorRetry: string;
     ollamaTruncatedRetry: string;
     ollamaTruncatedGiveUp: string;

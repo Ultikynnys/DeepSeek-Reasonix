@@ -3,6 +3,7 @@ import {
   GPT56_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
+  isAntigravityModel,
   isUsableAntigravityModel,
   modelAcceptsImages,
   modelDisplayName,
@@ -1460,25 +1461,36 @@ function PageModels({
     models: readonly string[];
   };
 
+  const antigravityModelsList = Array.from(
+    new Set([
+      ...(settings.antigravityOAuth?.models?.filter(isUsableAntigravityModel) ?? []),
+      ...ANTIGRAVITY_MODELS,
+      ...(settings.customModels?.filter(isAntigravityModel) ?? []),
+    ]),
+  );
+  const antigravitySet = new Set(antigravityModelsList);
+  const knownSet = new Set([
+    ...SUPPORTED_OFFICIAL_MODELS,
+    ...GPT56_MODELS,
+    ...ZAI_MODELS,
+    ...antigravityModelsList,
+  ]);
+  const customModelsList = (settings.customModels ?? []).filter(
+    (id) => !knownSet.has(id) && !antigravitySet.has(id) && !isAntigravityModel(id),
+  );
+
   const groups: ModelGroup[] = [
     { title: t("composer.modelDeepSeekGroup"), models: SUPPORTED_OFFICIAL_MODELS },
     { title: t("composer.modelOpenAIGroup"), models: GPT56_MODELS },
     { title: t("composer.modelZaiGroup"), models: ZAI_MODELS },
-    ...(settings.customModels && settings.customModels.length > 0
-      ? [{ title: t("composer.modelCustomGroup"), models: settings.customModels }]
+    ...(customModelsList.length > 0
+      ? [{ title: t("composer.modelCustomGroup"), models: customModelsList }]
       : []),
-    ...(settings.antigravityOAuth?.signedIn ||
-    (settings.antigravityOAuth?.models &&
-      settings.antigravityOAuth.models.filter(isUsableAntigravityModel).length > 0)
+    ...(settings.antigravityOAuth?.signedIn || antigravityModelsList.length > 0
       ? [
           {
             title: t("composer.modelAntigravityGroup"),
-            models: Array.from(
-              new Set([
-                ...(settings.antigravityOAuth?.models?.filter(isUsableAntigravityModel) ?? []),
-                ...ANTIGRAVITY_MODELS,
-              ]),
-            ),
+            models: antigravityModelsList,
           },
         ]
       : []),

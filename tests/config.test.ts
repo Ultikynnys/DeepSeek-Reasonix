@@ -371,7 +371,9 @@ describe("config", () => {
       // consistent with loadModel's stale-config clamp.
       expect(providerForModel("gpt-5.6")).toBe("deepseek");
       expect(providerForModel("gpt-oss-120b-medium")).toBe("gemini");
+      expect(providerForModel("claude-sonnet-4-6")).toBe("gemini");
       expect(providerForModel("claude-sonnet-4-6-thinking")).toBe("gemini");
+      expect(providerForModel("claude-opus-4-6-thinking")).toBe("gemini");
       expect(providerForModel("gemini-3.7-flash")).toBe("gemini");
       expect(providerForModel("gemini-3.5-flash-low")).toBe("gemini");
       expect(providerForModel("glm-5.3-flash")).toBe("zai");

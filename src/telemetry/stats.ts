@@ -66,6 +66,7 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
   "gemini-3.7-flash-tiered": 1_000_000,
   "gemini-3.8-flash": 1_000_000,
   "gemini-3.8-flash-tiered": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
   "claude-sonnet-4-6-thinking": 1_000_000,
   "claude-opus-4-6-thinking": 1_000_000,
 };

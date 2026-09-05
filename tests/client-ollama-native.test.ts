@@ -606,4 +606,34 @@ describe("ollama num_ctx learning", () => {
       num_ctx: 131072,
     });
   });
+
+  it("retains assistant messages with reasoning_content when content is empty", async () => {
+    let capturedInit: RequestInit | undefined;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      capturedInit = init as RequestInit;
+      return new Response(JSON.stringify(nativeChatResponse()), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "https://ollama.example.com",
+      apiKey: "sk-cloud",
+      fetch,
+    });
+    await client.chat({
+      model: "ollama/deepseek-v4-flash",
+      messages: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "", reasoning_content: "thinking about it" },
+        { role: "assistant", content: "" }, // completely empty, should be dropped
+      ],
+    });
+    const body = JSON.parse(String(capturedInit!.body)) as Record<string, unknown>;
+    const messages = body.messages as Array<Record<string, unknown>>;
+    expect(messages).toHaveLength(2);
+    expect(messages[0]!.role).toBe("user");
+    expect(messages[1]!.role).toBe("assistant");
+    expect(messages[1]!.thinking).toBe("thinking about it");
+  });
 });

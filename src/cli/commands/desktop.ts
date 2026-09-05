@@ -8,6 +8,7 @@ import {
   ANTIGRAVITY_MODELS,
   MAX_IMAGE_BYTES,
   flattenText,
+  isAntigravityModel,
   isUsableAntigravityModel,
   messageOf,
   redactDiagnosticText,
@@ -79,6 +80,7 @@ import {
   DEFAULT_MODEL,
   DEFAULT_OLLAMA_CHAT_URL,
   DEFAULT_ZAI_CHAT_URL,
+  SUPPORTED_MODELS,
   addProjectPathAllowed,
   addProjectShellAllowed,
   anyProviderConfigured,
@@ -919,7 +921,15 @@ function emitSettings(tab: Tab): void {
       workspaceDir: tab.rootDir,
       recentWorkspaces: recent,
       model: tab.currentModel,
-      customModels: Object.keys(config.models ?? {}).sort(),
+      customModels: Object.keys(config.models ?? {})
+        .filter((id) => {
+          if (config.models?.[id]?.provider === "gemini") return false;
+          if (providerForModel(id) === "gemini") return false;
+          if (isUsableAntigravityModel(id) && isAntigravityModel(id)) return false;
+          if (SUPPORTED_MODELS.includes(id)) return false;
+          return true;
+        })
+        .sort(),
       ollamaBaseUrl: config.ollamaBaseUrl,
       webSearchEngine: readWebSearchEngine(),
       webSearchEndpoint: readConfig().webSearchEndpoint,
@@ -941,15 +951,20 @@ function emitSettings(tab: Tab): void {
           !!antigravityOAuth?.accessToken &&
           antigravityOAuth.clientId === ANTIGRAVITY_OAUTH_CLIENT_ID,
         account: antigravityOAuth?.account,
-        models: antigravityOAuth?.models
-          ? Array.from(
-              new Set([
-                ...antigravityOAuth.models.filter(isUsableAntigravityModel),
-                ...ANTIGRAVITY_MODELS,
-              ]),
-            )
-          : antigravityOAuth?.accessToken
-            ? [...ANTIGRAVITY_MODELS]
+        models:
+          antigravityOAuth?.models ||
+          antigravityOAuth?.accessToken ||
+          Object.keys(config.models ?? {}).some((id) => config.models?.[id]?.provider === "gemini")
+            ? Array.from(
+                new Set([
+                  ...(antigravityOAuth?.models?.filter(isUsableAntigravityModel) ?? []),
+                  ...ANTIGRAVITY_MODELS,
+                  ...Object.keys(config.models ?? {}).filter(
+                    (id) =>
+                      config.models?.[id]?.provider === "gemini" && isUsableAntigravityModel(id),
+                  ),
+                ]),
+              )
             : undefined,
         flowError:
           lastAntigravityOAuthError ??

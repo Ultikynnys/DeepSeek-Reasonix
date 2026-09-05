@@ -4164,7 +4164,7 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
     expect(loop.log.entries.filter((m) => m.role === "assistant")).toHaveLength(1);
   });
 
-  it("latches after one continuation — a second thinking-only stop ends the turn via the promotion fallback", async () => {
+  it("latches after one continuation — a second thinking-only stop gives up with a warning and does not complete the task", async () => {
     const { fetch, chatCalls } = thinkingOnlyFetch([
       { thinking: THINKING_ONLY },
       { thinking: THINKING_ONLY },
@@ -4186,19 +4186,61 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
     const events: LoopEvent[] = [];
     for await (const ev of loop.step("hello")) events.push(ev);
 
-    // Exactly one extra call (bounded), one warning, and the second thinking
-    // dump is promoted so the turn still ends rather than looping or dying
-    // silently.
+    // Exactly one extra call (bounded), one low-severity retry warning,
+    // and on the second failure it gives up loudly without promoting the thinking
+    // dump as a fake task completion.
     expect(chatCalls()).toBe(2);
     expect(
       events
         .filter((ev) => ev.role === "warning")
         .filter((ev) => ev.content?.includes("retrying once")),
     ).toHaveLength(1);
-    expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe(THINKING_ONLY);
-    expect(events.some((ev) => ev.role === "done")).toBe(true);
-    // Even on fallback promotion, only 1 assistant message is retained
-    expect(loop.log.entries.filter((m) => m.role === "assistant")).toHaveLength(1);
+    expect(
+      events.some(
+        (ev) =>
+          ev.role === "warning" &&
+          ev.severity === "high" &&
+          ev.content?.includes("ending the turn without an answer"),
+      ),
+    ).toBe(true);
+    // Never claims the task was completed
+    expect(events.some((ev) => ev.role === "assistant_final")).toBe(false);
+    expect(events.some((ev) => ev.role === "done")).toBe(false);
+    // Partial assistant message discarded on give-up
+    expect(loop.log.entries.filter((m) => m.role === "assistant")).toHaveLength(0);
+  });
+
+  it("rejects degenerate single-character thinking fragments like 'p' immediately without completing the task", async () => {
+    const { fetch, chatCalls } = thinkingOnlyFetch([{ thinking: " p" }]);
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const tools = registerNoop();
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: true,
+      model: "ollama/deepseek-v4-flash",
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("fix both")) events.push(ev);
+
+    expect(chatCalls()).toBe(1);
+    expect(
+      events.some(
+        (ev) =>
+          ev.role === "warning" &&
+          ev.severity === "high" &&
+          ev.content?.includes("ending the turn without an answer"),
+      ),
+    ).toBe(true);
+    expect(events.some((ev) => ev.role === "assistant_final")).toBe(false);
+    expect(events.some((ev) => ev.role === "done")).toBe(false);
+    expect(loop.log.entries.filter((m) => m.role === "assistant")).toHaveLength(0);
   });
 
   it("does not trigger thinkingOnlyRetry or emptyResponseRetry when reasoning stream degenerates", async () => {

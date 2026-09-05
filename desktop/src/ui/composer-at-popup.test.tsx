@@ -141,4 +141,47 @@ describe("desktop Composer model catalog", () => {
     expect(subText).toContain("Google Antigravity");
     expect(subText).toContain("Ollama");
   });
+
+  it("does not sort antigravity models into custom group even if passed in customModels", () => {
+    const { container } = renderComposer({
+      customModels: [
+        "claude-opus-4-6-thinking",
+        "claude-sonnet-4-6",
+        "gemini-3.7-flash-tiered",
+        "my-real-custom-gateway",
+      ],
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+
+    const getItemsForGroup = (groupTitle: string) => {
+      const groupEl = Array.from(container.querySelectorAll(".model-menu-group")).find(
+        (el) => el.querySelector(".grow")?.textContent === groupTitle,
+      );
+      if (!groupEl) return [];
+      const items: string[] = [];
+      let next = groupEl.nextElementSibling;
+      while (
+        next &&
+        !next.classList.contains("model-menu-group") &&
+        !next.classList.contains("model-menu-custom")
+      ) {
+        if (next.classList.contains("popup-item")) {
+          items.push(next.textContent ?? "");
+        }
+        next = next.nextElementSibling;
+      }
+      return items;
+    };
+
+    const customItems = getItemsForGroup("Custom");
+    expect(customItems.some((t) => t.includes("my-real-custom-gateway"))).toBe(true);
+    expect(customItems.some((t) => t.includes("claude-opus-4-6-thinking"))).toBe(false);
+    expect(customItems.some((t) => t.includes("claude-sonnet-4-6"))).toBe(false);
+    expect(customItems.some((t) => t.includes("gemini-3.7-flash-tiered"))).toBe(false);
+
+    const antigravityItems = getItemsForGroup("Google Antigravity");
+    expect(antigravityItems.some((t) => t.includes("claude-opus-4-6-thinking"))).toBe(true);
+    expect(antigravityItems.some((t) => t.includes("claude-sonnet-4-6"))).toBe(true);
+    expect(antigravityItems.some((t) => t.includes("gemini-3.7-flash-tiered"))).toBe(true);
+  });
 });

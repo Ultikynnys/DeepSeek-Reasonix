@@ -674,7 +674,9 @@ export const EN: TranslationSchema = {
     emptyResponseGiveUp:
       "The model returned an empty response twice in a row — ending the turn without an answer. Try again or /retry.",
     thinkingOnlyRetry:
-      "The model returned thinking without an answer or tool call — retrying once so it can finish.",
+      "The model returned thinking without an answer or tool call: retrying once so it can finish.",
+    thinkingOnlyGiveUp:
+      "The model produced only thinking without an answer or tool call: ending the turn without an answer. Try again or /retry.",
     providerErrorRetry:
       "The model provider returned an error before producing a visible response — retrying automatically.",
     ollamaTruncatedRetry:
