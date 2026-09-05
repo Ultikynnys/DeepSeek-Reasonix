@@ -1951,6 +1951,17 @@ export function pushRecentWorkspace(dir: string, path: string = defaultConfigPat
   writeConfig(cfg, path);
 }
 
+export function removeRecentWorkspace(dir: string, path: string = defaultConfigPath()): void {
+  const trimmed = dir.trim();
+  if (!trimmed) return;
+  const cfg = readConfig(path);
+  const normalized = resolve(trimmed);
+  cfg.recentWorkspaces = (cfg.recentWorkspaces ?? []).filter(
+    (s) => s !== trimmed && resolve(s) !== normalized,
+  );
+  writeConfig(cfg, path);
+}
+
 /** Desktop only — one open tab's restorable state. */
 export interface DesktopOpenTab {
   dir: string;

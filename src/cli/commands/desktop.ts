@@ -124,6 +124,7 @@ import {
   webSearchEngine as readWebSearchEngine,
   removeProjectPathAllowed,
   removeProjectShellAllowed,
+  removeRecentWorkspace,
   saveAntigravityOAuth,
   saveApiKey,
   saveBaseUrl,
@@ -4033,6 +4034,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         });
         process.stderr.write(`reasonix: closeTab rejected — ${messageOf(err)}\n`);
       });
+      return;
+    }
+    if (msg.cmd === "workspace_recent_remove") {
+      try {
+        removeRecentWorkspace(msg.path);
+        for (const openTab of tabs.values()) {
+          emitSettings(openTab);
+        }
+      } catch (err) {
+        emitDiagnosticError("workspace.recent.remove.failed", err);
+        emit({
+          type: "$error",
+          message: `workspace_recent_remove failed: ${(err as Error).message}`,
+        });
+      }
       return;
     }
     if (msg.cmd === "mcp_specs_get") {

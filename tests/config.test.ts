@@ -41,6 +41,7 @@ import {
   loadProxyConfig,
   loadRateLimit,
   loadReasoningEffort,
+  loadRecentWorkspaces,
   loadSemanticEmbeddingUserConfig,
   loadSubagentModels,
   loadTheme,
@@ -48,11 +49,13 @@ import {
   loadZaiApiKey,
   markEditModeHintShown,
   providerForModel,
+  pushRecentWorkspace,
   readConfig,
   redactKey,
   redactSemanticEmbeddingConfig,
   removeProjectPathAllowed,
   removeProjectShellAllowed,
+  removeRecentWorkspace,
   resolveSemanticEmbeddingConfig,
   resolveThemePreference,
   saveAntigravityOAuth,
@@ -1705,6 +1708,37 @@ describe("config", () => {
     it("loadModel keeps a persisted ollama/* id without a custom baseUrl", () => {
       writeConfig({ model: "ollama/qwen3:32b" }, path);
       expect(loadModel(path)).toBe("ollama/qwen3:32b");
+    });
+  });
+
+  describe("recentWorkspaces management", () => {
+    it("pushRecentWorkspace prepends workspaces and caps at 8", () => {
+      for (let i = 1; i <= 10; i++) {
+        pushRecentWorkspace(`/repo/project-${i}`, path);
+      }
+      const list = loadRecentWorkspaces(path);
+      expect(list.length).toBe(8);
+      expect(list[0]).toBe("/repo/project-10");
+      expect(list[7]).toBe("/repo/project-3");
+    });
+
+    it("removeRecentWorkspace removes by exact or normalized path", () => {
+      pushRecentWorkspace("/repo/alpha", path);
+      pushRecentWorkspace("/repo/beta", path);
+      pushRecentWorkspace("/repo/gamma", path);
+
+      removeRecentWorkspace("/repo/beta", path);
+      expect(loadRecentWorkspaces(path)).toEqual(["/repo/gamma", "/repo/alpha"]);
+
+      removeRecentWorkspace("/repo/gamma/", path);
+      expect(loadRecentWorkspaces(path)).toEqual(["/repo/alpha"]);
+    });
+
+    it("removeRecentWorkspace ignores empty or missing path", () => {
+      pushRecentWorkspace("/repo/alpha", path);
+      removeRecentWorkspace("   ", path);
+      removeRecentWorkspace("/repo/nonexistent", path);
+      expect(loadRecentWorkspaces(path)).toEqual(["/repo/alpha"]);
     });
   });
 });

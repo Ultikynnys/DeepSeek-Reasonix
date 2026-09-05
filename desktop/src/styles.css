@@ -8480,6 +8480,37 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 }
 .wd-row .pin {
   color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wd-row .wd-del {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms, background 120ms, color 120ms;
+}
+.wd-row:hover .wd-del,
+.wd-row:focus-within .wd-del,
+.wd-row .wd-del:focus-visible {
+  opacity: 1;
+}
+.wd-row .wd-del:hover {
+  background: var(--panel-2, rgba(255, 80, 80, 0.12));
+  color: var(--danger, #e25555);
+}
+.wd-row .wd-del:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .wd-foot {
   display: flex;

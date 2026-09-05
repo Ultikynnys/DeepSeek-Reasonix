@@ -22,6 +22,7 @@ export const en = {
     searchPlaceholder: "Search recent paths…",
     empty: "No recent workspaces",
     browse: "Browse local…",
+    removeRecent: "Remove from recent",
   },
   sidebar: {
     newChat: "New chat",

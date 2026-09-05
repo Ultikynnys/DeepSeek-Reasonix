@@ -13,6 +13,7 @@ export function WorkdirPop({
   current,
   anchor,
   onPick,
+  onRemove,
   onBrowse,
 }: {
   open: boolean;
@@ -21,6 +22,7 @@ export function WorkdirPop({
   current?: string;
   anchor?: Anchor;
   onPick: (path: string) => void;
+  onRemove?: (path: string) => void;
   onBrowse: () => void;
 }) {
   useLang();
@@ -122,6 +124,25 @@ export function WorkdirPop({
                   <span className="pin">
                     <I.check size={11} />
                   </span>
+                ) : onRemove ? (
+                  <button
+                    type="button"
+                    className="wd-del"
+                    title={t("workdir.removeRecent")}
+                    aria-label={t("workdir.removeRecent")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemove(p);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.stopPropagation();
+                        onRemove(p);
+                      }
+                    }}
+                  >
+                    <I.x size={11} />
+                  </button>
                 ) : null}
               </div>
             );

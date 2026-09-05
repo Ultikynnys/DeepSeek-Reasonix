@@ -582,6 +582,7 @@ type Action =
   | { t: "dequeue_send"; index: number }
   | { t: "shift_queued_send" }
   | { t: "settings_patch"; patch: SettingsPatch }
+  | { t: "workspace_recent_removed"; path: string }
   | { t: "oauth_waiting"; waiting: boolean }
   | { t: "antigravity_oauth_waiting"; waiting: boolean }
   | { t: "codex_quota_refreshing" }
@@ -710,6 +711,16 @@ export function reduce(state: State, action: Action): State {
     case "settings_patch":
       return state.settings
         ? { ...state, settings: { ...state.settings, ...sanitizeSettingsPatch(action.patch) } }
+        : state;
+    case "workspace_recent_removed":
+      return state.settings
+        ? {
+            ...state,
+            settings: {
+              ...state.settings,
+              recentWorkspaces: state.settings.recentWorkspaces.filter((p) => p !== action.path),
+            },
+          }
         : state;
     case "oauth_waiting":
       return { ...state, oauthWaiting: action.waiting };
@@ -3414,6 +3425,10 @@ function TabRuntime({
           onPick={(path) => {
             clearAbortDraft();
             saveSettings({ workspaceDir: path });
+          }}
+          onRemove={(path) => {
+            dispatch({ t: "workspace_recent_removed", path });
+            sendRpc({ cmd: "workspace_recent_remove", path });
           }}
           onBrowse={pickWorkspace}
         />

@@ -794,6 +794,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "tab_open"; workspaceDir?: string }
   | { cmd: "tab_close" }
   | { cmd: "tab_activate"; tabId: string }
+  | { cmd: "workspace_recent_remove"; path: string }
   | { cmd: "mcp_specs_get" }
   | { cmd: "mcp_specs_add"; spec: string }
   | { cmd: "mcp_specs_remove"; spec: string }
