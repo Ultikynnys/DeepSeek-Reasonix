@@ -180,10 +180,10 @@ describe("VoiceModelSettings", () => {
     render(<SettingsModal {...baseProps} onSave={onSave} initialPage="general" />);
 
     expect(screen.getByText("Quick send action")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Proceed" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Commit and Push all changes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "proceed" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "commit and push" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Commit and Push all changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "commit and push" }));
     expect(onSave).toHaveBeenCalledWith({ quickSendId: "commit-and-push" });
   });
 
@@ -191,7 +191,7 @@ describe("VoiceModelSettings", () => {
     const onSave = vi.fn();
     render(<SettingsModal {...baseProps} onSave={onSave} initialPage="general" />);
 
-    fireEvent.change(screen.getByPlaceholderText("Name (action title)"), {
+    fireEvent.change(screen.getByPlaceholderText("Shorthand (button label, max 20 chars)"), {
       target: { value: "Deploy" },
     });
     fireEvent.change(screen.getByPlaceholderText("Message sent to the model"), {
@@ -203,7 +203,6 @@ describe("VoiceModelSettings", () => {
       quickSends: [
         expect.objectContaining({
           id: expect.stringMatching(/^custom-/),
-          label: "Deploy",
           message: "deploy to production",
           shorthand: "Deploy",
         }),
@@ -215,9 +214,6 @@ describe("VoiceModelSettings", () => {
     const onSave = vi.fn();
     render(<SettingsModal {...baseProps} onSave={onSave} initialPage="general" />);
 
-    fireEvent.change(screen.getByPlaceholderText("Name (action title)"), {
-      target: { value: "Deploy to production immediately" },
-    });
     fireEvent.change(screen.getByPlaceholderText("Shorthand (button label, max 20 chars)"), {
       target: { value: "Deploy to production immediately" },
     });
@@ -230,7 +226,6 @@ describe("VoiceModelSettings", () => {
       quickSends: [
         expect.objectContaining({
           id: expect.stringMatching(/^custom-/),
-          label: "Deploy to production immediately",
           message: "deploy to production",
           shorthand: "Deploy to production",
         }),

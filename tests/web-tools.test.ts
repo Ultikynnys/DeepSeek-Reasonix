@@ -1352,6 +1352,15 @@ describe("formatSearchResults", () => {
     expect(out).toMatch(/2\. Citation B/);
     expect(out).not.toMatch(/^results \(/m);
   });
+
+  it("renders zero-result guidance when results are empty", () => {
+    const out = formatSearchResults("obscure item 2881", [], "brave");
+    expect(out).toMatch(/query: obscure item 2881/);
+    expect(out).toMatch(/engine: brave/);
+    expect(out).toMatch(/results \(0\): \(no matches found\)/);
+    expect(out).toMatch(/\[Guidance\] Search returned 0 results/);
+    expect(out).toMatch(/Do not repeat searches for this topic/);
+  });
 });
 
 describe("registerWebTools", () => {
@@ -1391,6 +1400,34 @@ describe("registerWebTools", () => {
       expect(out).toContain("engine: bing");
       expect(out).toContain("https://example.com/a");
       expect(out).toContain("snippet A");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("appends consecutive search directive on repeated empty searches", async () => {
+    const emptyHtml = "<html><body><div id='b_content'></div></body></html>";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(emptyHtml, { status: 200, headers: { "Content-Type": "text/html" } }),
+    ) as unknown as typeof fetch;
+    try {
+      const registry = new ToolRegistry();
+      registerWebTools(registry, { configPath: isolatedConfigPath });
+      const first = await registry.dispatch(
+        "web_search",
+        JSON.stringify({ query: "obscure-tool-1", topK: 2 }),
+      );
+      expect(first).toContain("[Guidance] Search returned 0 results");
+      expect(first).not.toContain("[Directive]");
+
+      const second = await registry.dispatch(
+        "web_search",
+        JSON.stringify({ query: "obscure-tool-2", topK: 2 }),
+      );
+      expect(second).toContain("[Directive] Consecutive web searches returned 0 results");
+      expect(second).toContain("STOP web searches for this issue");
     } finally {
       globalThis.fetch = originalFetch;
     }

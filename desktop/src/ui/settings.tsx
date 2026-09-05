@@ -371,7 +371,6 @@ function PageGeneral({
   useEffect(() => {
     setCustomFontDraft(customFontFamily);
   }, [customFontFamily]);
-  const [quickSendLabel, setQuickSendLabel] = useState("");
   const [quickSendShorthand, setQuickSendShorthand] = useState("");
   const [quickSendMessage, setQuickSendMessage] = useState("");
   const commitCustomFont = (value: string) => {
@@ -641,7 +640,7 @@ function PageGeneral({
                 data-on={settings.quickSendId === q.id}
                 onClick={() => onSave({ quickSendId: q.id })}
               >
-                {q.label}
+                {q.shorthand}
               </button>
             ))}
           </div>
@@ -652,17 +651,12 @@ function PageGeneral({
             {(settings.quickSends ?? []).map((q) => (
               <div className="rule" key={q.id}>
                 <div className="top">
-                  <span className="pat">{q.label}</span>
-                  {q.shorthand && q.shorthand !== q.label ? (
-                    <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 6 }}>
-                      ({q.shorthand})
-                    </span>
-                  ) : null}
+                  <span className="pat">{q.shorthand}</span>
                   <button
                     type="button"
                     className="mini-btn"
                     title={t("settings.quickSendRemove")}
-                    aria-label={`Remove quick send: ${q.label}`}
+                    aria-label={`Remove quick send: ${q.shorthand}`}
                     onClick={() =>
                       onSave({
                         quickSends: (settings.quickSends ?? []).filter((x) => x.id !== q.id),
@@ -688,30 +682,20 @@ function PageGeneral({
           className="rule-composer"
           onSubmit={(e) => {
             e.preventDefault();
-            const label = quickSendLabel.trim();
-            const shorthand = enforceQuickSendShorthand(quickSendShorthand.trim() || label);
+            const shorthand = enforceQuickSendShorthand(quickSendShorthand.trim());
             const message = quickSendMessage.trim();
-            if (!label || !message || !shorthand) return;
+            if (!message || !shorthand) return;
             onSave({
               quickSends: [
                 ...(settings.quickSends ?? []),
-                { id: `custom-${Date.now()}`, label, message, shorthand },
+                { id: `custom-${Date.now()}`, message, shorthand },
               ],
             });
-            setQuickSendLabel("");
             setQuickSendShorthand("");
             setQuickSendMessage("");
           }}
         >
           <div className="rule-composer-row">
-            <input
-              type="text"
-              className="rule-input"
-              placeholder={t("settings.quickSendNamePlaceholder")}
-              value={quickSendLabel}
-              onChange={(e) => setQuickSendLabel(e.target.value)}
-              aria-label={t("settings.quickSendName")}
-            />
             <input
               type="text"
               className="rule-input"
@@ -732,7 +716,7 @@ function PageGeneral({
             <button
               type="submit"
               className="btn small"
-              disabled={!quickSendLabel.trim() || !quickSendMessage.trim()}
+              disabled={!quickSendShorthand.trim() || !quickSendMessage.trim()}
               title={t("settings.quickSendAdd")}
               aria-label={t("settings.quickSendAdd")}
             >

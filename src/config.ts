@@ -1696,19 +1696,27 @@ export function saveQuickSendId(id: string, path: string = defaultConfigPath()):
 export function loadCustomQuickSends(path: string = defaultConfigPath()): QuickSend[] {
   const v = readConfig(path).quickSends;
   if (!Array.isArray(v)) return [];
-  return v.filter(isQuickSend).map((q) => ({
-    ...q,
-    shorthand: enforceQuickSendShorthand(q.shorthand || q.label),
-  }));
+  return v.filter(isQuickSend).map((q) => {
+    const rawShorthand = q.shorthand || (q as { label?: string }).label || "";
+    return {
+      id: q.id,
+      shorthand: enforceQuickSendShorthand(rawShorthand),
+      message: q.message,
+    };
+  });
 }
 
 /** Persist the full user-defined quick-send list. */
 export function saveCustomQuickSends(list: QuickSend[], path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
-  cfg.quickSends = list.map((q) => ({
-    ...q,
-    shorthand: enforceQuickSendShorthand(q.shorthand || q.label),
-  }));
+  cfg.quickSends = list.map((q) => {
+    const rawShorthand = q.shorthand || (q as { label?: string }).label || "";
+    return {
+      id: q.id,
+      shorthand: enforceQuickSendShorthand(rawShorthand),
+      message: q.message,
+    };
+  });
   writeConfig(cfg, path);
 }
 

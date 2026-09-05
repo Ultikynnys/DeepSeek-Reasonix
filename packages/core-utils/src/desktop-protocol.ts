@@ -13,7 +13,7 @@ export type EditMode = "review" | "auto" | "yolo" | "plan";
  *  short form shown in the chat when the message is long. */
 export interface QuickSend {
   id: string;
-  label: string;
+  label?: string;
   message: string;
   shorthand: string;
 }
@@ -29,10 +29,9 @@ export function enforceQuickSendShorthand(raw: string): string {
 /** Built-in quick sends — always available; the active one is selected in
  *  Settings → General and defaults to Proceed. */
 export const BUILTIN_QUICK_SENDS: readonly QuickSend[] = [
-  { id: "proceed", label: "Proceed", message: "proceed", shorthand: "proceed" },
+  { id: "proceed", message: "proceed", shorthand: "proceed" },
   {
     id: "commit-and-push",
-    label: "Commit and Push all changes",
     message: "commit and push all changes",
     shorthand: "commit and push",
   },
@@ -43,18 +42,21 @@ export function isQuickSend(v: unknown): v is QuickSend {
   const q = v as Record<string, unknown>;
   return (
     typeof q.id === "string" &&
-    typeof q.label === "string" &&
     typeof q.message === "string" &&
-    typeof q.shorthand === "string"
+    (typeof q.shorthand === "string" || typeof q.label === "string")
   );
 }
 
 /** Built-ins plus user-defined customs — the full set of selectable quick sends. */
 export function allQuickSends(customs: readonly QuickSend[]): QuickSend[] {
-  return [...BUILTIN_QUICK_SENDS, ...customs].map((q) => ({
-    ...q,
-    shorthand: enforceQuickSendShorthand(q.shorthand || q.label),
-  }));
+  return [...BUILTIN_QUICK_SENDS, ...customs].map((q) => {
+    const rawShorthand = q.shorthand || q.label || "";
+    return {
+      id: q.id,
+      shorthand: enforceQuickSendShorthand(rawShorthand),
+      message: q.message,
+    };
+  });
 }
 
 /** The active quick send by id, falling back to Proceed when unknown/absent. */
@@ -65,7 +67,7 @@ export function resolveActiveQuickSend(
   const found = allQuickSends(customs).find((q) => q.id === id) ?? BUILTIN_QUICK_SENDS[0]!;
   return {
     ...found,
-    shorthand: enforceQuickSendShorthand(found.shorthand || found.label),
+    shorthand: enforceQuickSendShorthand(found.shorthand),
   };
 }
 

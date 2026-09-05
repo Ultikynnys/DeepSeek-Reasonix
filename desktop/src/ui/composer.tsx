@@ -126,7 +126,7 @@ export function Composer({
   setDraft: React.Dispatch<React.SetStateAction<string>>;
   onSend: (text?: string | QueuedSend) => void;
   /** The active quick-send action — drives the composer's quick button. Absent → "proceed". */
-  quickSend?: { label: string; message: string; shorthand: string };
+  quickSend?: { message: string; shorthand: string; label?: string };
   onAbort: () => void;
   disabled?: boolean;
   busy?: boolean;
@@ -286,7 +286,7 @@ export function Composer({
     if (trimmed) {
       historyRef.current.push(trimmed);
     }
-    const shorthand = quickSend?.shorthand || quickSend?.label || "proceed";
+    const shorthand = quickSend?.shorthand || "proceed";
     historyRef.current.push(shorthand);
     if (historyRef.current.length > 100) {
       historyRef.current.splice(0, historyRef.current.length - 100);
@@ -716,12 +716,12 @@ export function Composer({
               onClick={handleProceed}
               title={
                 quickSend
-                  ? `${quickSend.label}: ${quickSend.message}`
+                  ? `${quickSend.shorthand}: ${quickSend.message}`
                   : t("composer.quickSendTitle")
               }
             >
               <I.play size={11} />
-              <span>{quickSend?.shorthand || quickSend?.label || t("composer.proceed")}</span>
+              <span>{quickSend?.shorthand || t("composer.proceed")}</span>
             </button>
             <button
               type="button"

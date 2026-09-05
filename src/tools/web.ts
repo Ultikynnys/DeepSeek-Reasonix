@@ -1237,6 +1237,7 @@ export interface WebToolsOptions {
 export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions = {}): ToolRegistry {
   const defaultTopK = opts.defaultTopK ?? DEFAULT_TOPK;
   const maxFetchChars = opts.maxFetchChars ?? DEFAULT_FETCH_MAX_CHARS;
+  let consecutiveEmptySearches = 0;
 
   registry.register({
     name: "web_search",
@@ -1266,7 +1267,17 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
         endpoint,
         configPath: opts.configPath,
       });
-      return formatSearchResults(args.query, results, engine);
+      if (results.length === 0) {
+        consecutiveEmptySearches++;
+      } else {
+        consecutiveEmptySearches = 0;
+      }
+      let formatted = formatSearchResults(args.query, results, engine);
+      if (consecutiveEmptySearches >= 2) {
+        formatted +=
+          "\n\n[Directive] Consecutive web searches returned 0 results. STOP web searches for this issue. You must pivot to an alternative solution in the codebase or prompt the user for clarification.";
+      }
+      return formatted;
     },
   });
 
@@ -1318,6 +1329,14 @@ export function formatSearchResults(
 
   // Check if the first result carries an AI answer (Perplexity/Exa)
   const hasAnswer = results.length > 0 && results[0]?.url === "" && results[0]?.answer;
+
+  if (results.length === 0) {
+    lines.push("\nresults (0): (no matches found)");
+    lines.push(
+      "\n[Guidance] Search returned 0 results. If looking up internal, mod-specific, or obscure identifiers, web search will likely not find them. Do not repeat searches for this topic: pivot to local code inspection, design around the missing detail (e.g. logging names instead of resolving internal numeric IDs), or ask the user.",
+    );
+    return lines.join("\n");
+  }
 
   if (hasAnswer) {
     lines.push("\nanswer:");
