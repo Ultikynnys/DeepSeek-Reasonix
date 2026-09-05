@@ -23,7 +23,7 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
-import { memo, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { WorkspaceProvider } from "./Markdown";
 import { type AbortDraftSource, nextAbortDraftCandidate, restoreAbortedDraft } from "./abort-draft";
 import { formatBytes } from "./format";
@@ -2219,6 +2219,7 @@ interface TabRuntimeProps {
   tabsList: { id: string; workspaceDir?: string }[];
   activeTabId: string;
   setActiveTabId: (id: string) => void;
+  onRemoveWorkspace: (path: string) => void;
 }
 
 function TabRuntime({
@@ -2258,6 +2259,7 @@ function TabRuntime({
   tabsList,
   activeTabId,
   setActiveTabId,
+  onRemoveWorkspace,
 }: TabRuntimeProps) {
   const [state, dispatch] = useReducer(reduce, {
     ready: false,
@@ -2460,6 +2462,32 @@ function TabRuntime({
       console.error("[reasonix frontend] pickWorkspace failed", err);
     }
   }, [clearAbortDraft, saveSettings, state.settings?.workspaceDir]);
+
+  const openTabWorkspaces = useMemo(() => {
+    return (tabsList ?? [])
+      .map((t) => t.workspaceDir)
+      .filter((ws): ws is string => typeof ws === "string" && ws.length > 0);
+  }, [tabsList]);
+
+  const mergedWorkspaces = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const ws of openTabWorkspaces) {
+      const key = ws.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(ws);
+      }
+    }
+    for (const ws of state.settings?.recentWorkspaces ?? []) {
+      const key = ws.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(ws);
+      }
+    }
+    return list;
+  }, [openTabWorkspaces, state.settings?.recentWorkspaces]);
 
   const appendNotice = useCallback((text: string, severity: NoticeSeverity = "info") => {
     dispatch({ t: "push_notice", text, severity });
@@ -3440,17 +3468,23 @@ function TabRuntime({
         <WorkdirPop
           open={wdOpen}
           onClose={() => setWdOpen(false)}
-          recent={state.settings?.recentWorkspaces ?? []}
+          recent={mergedWorkspaces}
           current={state.settings?.workspaceDir}
           anchor={wdAnchor}
           onPick={(path) => {
             clearAbortDraft();
-            saveSettings({ workspaceDir: path });
+            const existing = tabsList?.find(
+              (t) =>
+                t.workspaceDir &&
+                (t.workspaceDir === path || t.workspaceDir.toLowerCase() === path.toLowerCase()),
+            );
+            if (existing && existing.id !== tabId) {
+              setActiveTabId(existing.id);
+            } else {
+              saveSettings({ workspaceDir: path });
+            }
           }}
-          onRemove={(path) => {
-            dispatch({ t: "workspace_recent_removed", path });
-            sendRpc({ cmd: "workspace_recent_remove", path });
-          }}
+          onRemove={onRemoveWorkspace}
           onBrowse={pickWorkspace}
         />
 
@@ -5138,6 +5172,15 @@ export function App() {
     });
   }, []);
 
+  const onRemoveWorkspace = useCallback((path: string) => {
+    for (const d of dispatchersRef.current.values()) {
+      d({ t: "workspace_recent_removed", path });
+    }
+    rpcSend({ cmd: "workspace_recent_remove", path }).catch((err) =>
+      console.error("[reasonix frontend] workspace_recent_remove failed", err),
+    );
+  }, []);
+
   if (startupFailure && tabs.length === 0) {
     return <StartupFailure details={startupFailure.details} onRetry={retryStartup} />;
   }
@@ -5183,6 +5226,7 @@ export function App() {
           tabsList={tabs}
           activeTabId={activeTabId}
           setActiveTabId={setActiveTabId}
+          onRemoveWorkspace={onRemoveWorkspace}
         />
       ))}
       {pendingUpdate ? (

@@ -1740,5 +1740,15 @@ describe("config", () => {
       removeRecentWorkspace("/repo/nonexistent", path);
       expect(loadRecentWorkspaces(path)).toEqual(["/repo/alpha"]);
     });
+
+    it("removeRecentWorkspace also cleans up matching desktopOpenTabs", () => {
+      pushRecentWorkspace("/repo/alpha", path);
+      pushRecentWorkspace("/repo/beta", path);
+      saveDesktopOpenTabs([{ dir: "/repo/alpha" }, { dir: "/repo/beta" }], path);
+
+      removeRecentWorkspace("/repo/beta", path);
+      expect(loadRecentWorkspaces(path)).toEqual(["/repo/alpha"]);
+      expect(loadDesktopOpenTabs(path)).toEqual([{ dir: "/repo/alpha" }]);
+    });
   });
 });

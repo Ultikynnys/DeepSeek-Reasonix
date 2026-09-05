@@ -579,6 +579,28 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
     });
     expect(noOverride.settings?.subagentModel).toBeUndefined();
   });
+
+  it("removes workspace from recentWorkspaces on workspace_recent_removed action", () => {
+    const base: Parameters<typeof reduce>[0] = {
+      ...initialState(),
+      settings: {
+        reasoningEffort: "high",
+        editMode: "review",
+        budgetUsd: null,
+        workspaceDir: "/workspace",
+        recentWorkspaces: ["/repo/alpha", "/repo/beta", "/repo/gamma"],
+        model: "deepseek-v4-flash",
+        version: "0.50.1",
+      },
+    };
+
+    const next = reduce(base, {
+      t: "workspace_recent_removed",
+      path: "/repo/beta",
+    });
+
+    expect(next.settings?.recentWorkspaces).toEqual(["/repo/alpha", "/repo/gamma"]);
+  });
 });
 
 describe("Desktop App reducer — yolo interactive countdown", () => {

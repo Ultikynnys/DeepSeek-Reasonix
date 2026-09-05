@@ -1959,6 +1959,13 @@ export function removeRecentWorkspace(dir: string, path: string = defaultConfigP
   cfg.recentWorkspaces = (cfg.recentWorkspaces ?? []).filter(
     (s) => s !== trimmed && resolve(s) !== normalized,
   );
+  if (Array.isArray(cfg.desktopOpenTabs)) {
+    cfg.desktopOpenTabs = cfg.desktopOpenTabs.filter((t) => {
+      const tabDir = typeof t === "string" ? t : t?.dir;
+      return typeof tabDir === "string" && tabDir !== trimmed && resolve(tabDir) !== normalized;
+    });
+    if (cfg.desktopOpenTabs.length === 0) cfg.desktopOpenTabs = undefined;
+  }
   writeConfig(cfg, path);
 }
 

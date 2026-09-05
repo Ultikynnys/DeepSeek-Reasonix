@@ -2903,7 +2903,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tabs.delete(tab.id);
     if (first && first.id === tab.id) {
       const next = tabs.values().next().value;
-      if (next) first = next;
+      if (next) {
+        first = next;
+      } else {
+        const clean = bootstrapTab(undefined, { active: true });
+        first = clean;
+        lastActiveTabId = clean.id;
+      }
     }
     persistOpenTabs();
     emitTabDiagnostic(tab, "tab.close.completed", undefined, "info");
@@ -4048,6 +4054,36 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       void stopAllJobs().finally(() => emitJobs());
       return;
     }
+    if (msg.cmd === "workspace_recent_remove") {
+      try {
+        removeRecentWorkspace(msg.path);
+        const targetPath = resolve(msg.path.trim());
+        const matchingTabs = Array.from(tabs.values()).filter(
+          (t) => resolve(t.rootDir) === targetPath || t.rootDir === msg.path.trim(),
+        );
+        if (matchingTabs.length > 0) {
+          if (tabs.size <= matchingTabs.length) {
+            const clean = bootstrapTab(undefined, { active: true });
+            first = clean;
+            lastActiveTabId = clean.id;
+          }
+          for (const t of matchingTabs) {
+            void closeTab(t);
+          }
+        }
+        persistOpenTabs();
+        for (const openTab of tabs.values()) {
+          emitSettings(openTab);
+        }
+      } catch (err) {
+        emitDiagnosticError("workspace.recent.remove.failed", err);
+        emit({
+          type: "$error",
+          message: `workspace_recent_remove failed: ${(err as Error).message}`,
+        });
+      }
+      return;
+    }
 
     const tab = msg.tabId ? tabs.get(msg.tabId) : first;
     if (!tab) {
@@ -4090,21 +4126,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         });
         process.stderr.write(`reasonix: closeTab rejected — ${messageOf(err)}\n`);
       });
-      return;
-    }
-    if (msg.cmd === "workspace_recent_remove") {
-      try {
-        removeRecentWorkspace(msg.path);
-        for (const openTab of tabs.values()) {
-          emitSettings(openTab);
-        }
-      } catch (err) {
-        emitDiagnosticError("workspace.recent.remove.failed", err);
-        emit({
-          type: "$error",
-          message: `workspace_recent_remove failed: ${(err as Error).message}`,
-        });
-      }
       return;
     }
     if (msg.cmd === "mcp_specs_get") {

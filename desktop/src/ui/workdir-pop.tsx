@@ -130,6 +130,7 @@ export function WorkdirPop({
                     className="wd-del"
                     title={t("workdir.removeRecent")}
                     aria-label={t("workdir.removeRecent")}
+                    onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation();
                       onRemove(p);

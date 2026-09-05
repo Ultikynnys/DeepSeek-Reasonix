@@ -162,7 +162,6 @@ export function recordDiagnostic(
       process.stderr.write(`[diagnostics] durable write failed: ${message}\n`);
       recordingFailure = false;
     }
-    throw error;
   }
 }
 
