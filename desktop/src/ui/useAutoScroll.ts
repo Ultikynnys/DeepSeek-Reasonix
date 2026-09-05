@@ -3,13 +3,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const PIN_THRESHOLD = 80; // px from bottom to consider "pinned"
 
 /**
- * Auto-scroll to bottom while content grows; un-pin only on real user input.
+ * Auto-scroll to bottom while content grows; un-pin immediately on user scroll-up.
  *
- * The "user scrolled up" signal comes from wheel / touchmove / keydown,
- * NOT from scroll events. Scroll events fire for both user gestures and
- * our own scrollTo, and a smooth scrollTo can keep dispatching scroll
- * events for 200-500 ms — long enough to misread "smooth scroll
- * mid-flight" as "user scrolled up" and freeze the view (issue #1103).
+ * Sticky-bottom auto-scroll rules:
+ * 1. User scrolling UP (wheel deltaY < 0, touch dragging down, PageUp/ArrowUp,
+ *    or dragging scrollbar up) immediately un-pins the view so auto-scroll
+ *    never snaps the viewport back to the bottom while the user reads earlier content.
+ * 2. User scrolling DOWN re-pins only when the viewport actually reaches the bottom
+ *    (within PIN_THRESHOLD).
+ * 3. While the user is actively dragging the scrollbar, ResizeObserver auto-scroll
+ *    is disabled so the scrollbar thumb never rubber-bands.
+ * 4. Turn start re-pins so the user sees the new turn's incoming tokens.
+ * 5. Turn end only settles at the bottom if the user remained pinned. If the user
+ *    scrolled up to read, turn end does not yank them back to the bottom.
  */
 export function useAutoScroll(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -26,6 +32,8 @@ export function useAutoScroll(
   const isPinnedRef = useRef(true);
   const wasBusyRef = useRef(busy);
   const rafIdRef = useRef<number>(0);
+  const draggingRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
 
   const isAtBottom = useCallback(() => {
     const el = containerRef.current;
@@ -53,56 +61,127 @@ export function useAutoScroll(
     [containerRef],
   );
 
-  // Un-pin only on real user gestures; scroll events can't tell our own
-  // scrollTo from the user, so they're only honored during an active drag.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    // rAF lets the gesture's scroll delta land before we measure.
     let pendingFrame = 0;
-    const onUserGesture = () => {
+
+    const unpin = () => {
+      if (pendingFrame) {
+        cancelAnimationFrame(pendingFrame);
+        pendingFrame = 0;
+      }
+      isPinnedRef.current = false;
+      refreshJumpButton();
+    };
+
+    const checkPinAfterScroll = () => {
       if (pendingFrame) cancelAnimationFrame(pendingFrame);
       pendingFrame = requestAnimationFrame(() => {
         pendingFrame = 0;
-        isPinnedRef.current = isAtBottom();
-        refreshJumpButton();
+        if (isAtBottom()) {
+          isPinnedRef.current = true;
+          setShowJumpButton(false);
+        } else {
+          refreshJumpButton();
+        }
       });
     };
 
-    // Scrollbar drag fires no wheel/touch; without scroll-watching here,
-    // the ResizeObserver re-pins mid-drag and the thumb rubber-bands.
-    let dragging = false;
-    const onScrollDuringDrag = () => {
-      isPinnedRef.current = isAtBottom();
-      refreshJumpButton();
-    };
-    const onPointerDown = () => {
-      onUserGesture();
-      if (dragging) return;
-      dragging = true;
-      el.addEventListener("scroll", onScrollDuringDrag, { passive: true });
-    };
-    const endDrag = () => {
-      if (!dragging) return;
-      dragging = false;
-      el.removeEventListener("scroll", onScrollDuringDrag);
-      onUserGesture();
+    // Wheel: deltaY < 0 is an unambiguous user intent to scroll UP.
+    // Un-pin immediately so a concurrent ResizeObserver cannot snap the view
+    // back to the bottom mid-gesture.
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        unpin();
+      } else if (e.deltaY > 0) {
+        checkPinAfterScroll();
+      }
     };
 
-    el.addEventListener("wheel", onUserGesture, { passive: true });
-    el.addEventListener("touchmove", onUserGesture, { passive: true });
-    el.addEventListener("keydown", onUserGesture);
+    // Touch: track touch movement. deltaY < 0 (finger moving down) scrolls UP.
+    let touchStartY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      touchStartY = e.touches[0]?.clientY ?? 0;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const currentY = e.touches[0]?.clientY ?? 0;
+      const deltaY = touchStartY - currentY;
+      touchStartY = currentY;
+      if (deltaY < 0) {
+        unpin();
+      } else if (deltaY > 0) {
+        checkPinAfterScroll();
+      }
+    };
+
+    // Keyboard: keys that move viewport UP immediately un-pin.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "PageUp" ||
+        e.key === "ArrowUp" ||
+        e.key === "Home" ||
+        (e.key === " " && e.shiftKey)
+      ) {
+        unpin();
+      } else if (
+        e.key === "PageDown" ||
+        e.key === "ArrowDown" ||
+        e.key === "End" ||
+        (e.key === " " && !e.shiftKey)
+      ) {
+        checkPinAfterScroll();
+      }
+    };
+
+    // Scrollbar drag / selection: while dragging, disable ResizeObserver auto-scroll
+    // and track directional scroll changes.
+    const onScrollDuringDrag = () => {
+      const currentScrollTop = el.scrollTop;
+      const delta = currentScrollTop - lastScrollTopRef.current;
+      lastScrollTopRef.current = currentScrollTop;
+      if (delta < 0) {
+        unpin();
+      } else if (delta > 0 && isAtBottom()) {
+        isPinnedRef.current = true;
+        setShowJumpButton(false);
+      }
+    };
+
+    const onPointerDown = () => {
+      lastScrollTopRef.current = el.scrollTop;
+      if (draggingRef.current) return;
+      draggingRef.current = true;
+      el.addEventListener("scroll", onScrollDuringDrag, { passive: true });
+    };
+
+    const endDrag = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      el.removeEventListener("scroll", onScrollDuringDrag);
+      if (isAtBottom()) {
+        isPinnedRef.current = true;
+        setShowJumpButton(false);
+      } else {
+        refreshJumpButton();
+      }
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
+    el.addEventListener("keydown", onKeyDown);
     el.addEventListener("pointerdown", onPointerDown);
-    // Release may land outside the container if the pointer drifts.
     window.addEventListener("pointerup", endDrag);
     window.addEventListener("pointercancel", endDrag);
 
     return () => {
       if (pendingFrame) cancelAnimationFrame(pendingFrame);
-      el.removeEventListener("wheel", onUserGesture);
-      el.removeEventListener("touchmove", onUserGesture);
-      el.removeEventListener("keydown", onUserGesture);
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("keydown", onKeyDown);
       el.removeEventListener("pointerdown", onPointerDown);
       el.removeEventListener("scroll", onScrollDuringDrag);
       window.removeEventListener("pointerup", endDrag);
@@ -110,17 +189,22 @@ export function useAutoScroll(
     };
   }, [containerRef, isAtBottom, refreshJumpButton]);
 
-  // Both busy edges re-pin: turn start = user just sent and expects to
-  // see the reply; turn end = settle on the final answer (issue #1182).
+  // Turn start: user just sent a message and expects to see the new turn.
+  // Turn end: settle on final answer ONLY if the user was already following along.
+  // If the user scrolled up, do not yank them away from what they are reading.
   useEffect(() => {
     if (wasBusyRef.current !== busy) {
-      scrollToBottom(true);
+      if (busy) {
+        scrollToBottom(true);
+      } else if (isPinnedRef.current) {
+        scrollToBottom(true);
+      }
     }
     wasBusyRef.current = busy;
   }, [busy, scrollToBottom]);
 
-  // Watch content size changes (streaming text, tool results, new
-  // messages) and follow the bottom while pinned.
+  // Watch content size changes (streaming text, tool results, new messages)
+  // and follow the bottom while pinned (unless actively dragging scrollbar).
   useEffect(() => {
     const content = contentRef.current;
     if (!content) return;
@@ -131,7 +215,7 @@ export function useAutoScroll(
         rafIdRef.current = 0;
         const el = containerRef.current;
         if (!el) return;
-        if (isPinnedRef.current) {
+        if (isPinnedRef.current && !draggingRef.current) {
           el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
         } else {
           refreshJumpButton();
@@ -149,12 +233,7 @@ export function useAutoScroll(
     };
   }, [containerRef, contentRef, refreshJumpButton]);
 
-  // Initial scroll when the hook mounts or the tab becomes active (e.g.
-  // session loaded, or an inactive tab's content mounts on first activation).
-  // Restores the saved offset if there is one (#1244), otherwise pins to the
-  // bottom. Inactive tabs render no thread content, so their container height
-  // is ~0 until activated — deferring this to the active edge prevents a
-  // pointless pin-to-bottom against empty content.
+  // Initial scroll when the hook mounts or the tab becomes active.
   useEffect(() => {
     if (active === false) return;
     const el = containerRef.current;
@@ -162,8 +241,6 @@ export function useAutoScroll(
     const id = setTimeout(() => {
       const restore = getRestoreScrollTop?.() ?? null;
       if (restore != null && restore > PIN_THRESHOLD) {
-        // Mid-transcript restore: stay un-pinned so content growth and the
-        // ResizeObserver don't yank the view back to the bottom.
         isPinnedRef.current = false;
         el.scrollTop = restore;
         refreshJumpButton();
