@@ -20,7 +20,33 @@ export interface OllamaVerdictEntry {
    *  `model_info.llama.context_length` — the model's maximum sequence length,
    *  not the runner's default num_ctx (4096). Absent/undefined = unknown. */
   contextTokens?: number;
+  /** Learned sampling options from `/api/show` `parameters` string (Modelfile). */
+  parameters?: Partial<Record<OllamaGenerationParameterKey, number>>;
 }
+
+export type OllamaGenerationParameterKey =
+  | "temperature"
+  | "topP"
+  | "topK"
+  | "minP"
+  | "seed"
+  | "repeatPenalty"
+  | "repeatLastN"
+  | "frequencyPenalty"
+  | "presencePenalty";
+
+/** Official Ollama runtime defaults when unconfigured in Modelfile. */
+export const DEFAULT_OLLAMA_GENERATION_VALUES: Record<OllamaGenerationParameterKey, number> = {
+  temperature: 0.8,
+  topP: 0.9,
+  topK: 40,
+  minP: 0,
+  seed: 0,
+  repeatPenalty: 1.1,
+  repeatLastN: 64,
+  frequencyPenalty: 0,
+  presencePenalty: 0,
+};
 
 /** Persistent verdict map: `plan -> (endpoint|keyHash) -> model -> entry`.
  *  Scoping by plan means a plan change (free -> pro) starts a fresh catalog
@@ -59,6 +85,7 @@ function isVerdictEntry(value: unknown): value is OllamaVerdictEntry {
   const at = (value as { at?: unknown }).at;
   const vision = (value as { vision?: unknown }).vision;
   const contextTokens = (value as { contextTokens?: unknown }).contextTokens;
+  const parameters = (value as { parameters?: unknown }).parameters;
   if ((result !== "ok" && result !== "gated") || typeof at !== "number" || !Number.isFinite(at)) {
     return false;
   }
@@ -69,7 +96,16 @@ function isVerdictEntry(value: unknown): value is OllamaVerdictEntry {
     return false;
   }
   // `vision` is optional — a legacy entry without it is still valid (means unknown).
-  return vision === undefined || typeof vision === "boolean";
+  if (vision !== undefined && typeof vision !== "boolean") return false;
+  if (parameters !== undefined) {
+    if (typeof parameters !== "object" || parameters === null || Array.isArray(parameters)) {
+      return false;
+    }
+    for (const v of Object.values(parameters)) {
+      if (typeof v !== "number" || !Number.isFinite(v)) return false;
+    }
+  }
+  return true;
 }
 
 function isVerdictStore(value: unknown): value is OllamaVerdictStore {
@@ -127,6 +163,7 @@ export function setVerdict(
   at: number,
   vision?: boolean,
   contextTokens?: number,
+  parameters?: Partial<Record<OllamaGenerationParameterKey, number>>,
 ): void {
   let plans = store.plans[plan];
   if (!plans) plans = store.plans[plan] = {};
@@ -137,7 +174,59 @@ export function setVerdict(
     at,
     ...(vision === undefined ? {} : { vision }),
     ...(contextTokens === undefined ? {} : { contextTokens }),
+    ...(parameters === undefined ? {} : { parameters }),
   };
+}
+
+/** Parse generation parameters from a native `/api/show` payload.
+ *  Ollama returns a multiline `parameters` string like "temperature 0.7\ntop_p 0.9". */
+export function showPayloadParameters(
+  data: unknown,
+): Partial<Record<OllamaGenerationParameterKey, number>> | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const rec = data as Record<string, unknown>;
+  const raw = rec.parameters;
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  const params: Partial<Record<OllamaGenerationParameterKey, number>> = {};
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = trimmed.match(/^([a-z_]+)\s+([^\s]+)/);
+    if (!match) continue;
+    const [, name, valStr] = match;
+    const num = Number(valStr);
+    if (!Number.isFinite(num)) continue;
+    switch (name) {
+      case "temperature":
+        params.temperature = num;
+        break;
+      case "top_p":
+        params.topP = num;
+        break;
+      case "top_k":
+        params.topK = Math.floor(num);
+        break;
+      case "min_p":
+        params.minP = num;
+        break;
+      case "seed":
+        params.seed = Math.floor(num);
+        break;
+      case "repeat_penalty":
+        params.repeatPenalty = num;
+        break;
+      case "repeat_last_n":
+        params.repeatLastN = Math.floor(num);
+        break;
+      case "frequency_penalty":
+        params.frequencyPenalty = num;
+        break;
+      case "presence_penalty":
+        params.presencePenalty = num;
+        break;
+    }
+  }
+  return Object.keys(params).length > 0 ? params : undefined;
 }
 
 /** Context window in tokens from a native `/api/show` payload — the
@@ -179,6 +268,43 @@ export function contextTokensForModel(
     }
   }
   return best;
+}
+
+/** Best-effort sampling parameter lookup across every plan/scope bucket.
+ *  Returns the freshest entry's parameters within the TTL. */
+export function parametersForModel(
+  store: OllamaVerdictStore,
+  model: string,
+  now: number,
+  ttlMs: number = OLLAMA_VERDICT_TTL_MS,
+): Partial<Record<OllamaGenerationParameterKey, number>> | undefined {
+  const normalized = model.replace(/^ollama\//, "");
+  let bestAt = Number.NEGATIVE_INFINITY;
+  let best: Partial<Record<OllamaGenerationParameterKey, number>> | undefined;
+  for (const scopes of Object.values(store.plans)) {
+    for (const perModel of Object.values(scopes)) {
+      const entry = perModel[model] ?? perModel[normalized];
+      if (entry?.parameters && now - entry.at < ttlMs && entry.at > bestAt) {
+        bestAt = entry.at;
+        best = entry.parameters;
+      }
+    }
+  }
+  return best;
+}
+
+/** Resolve effective Ollama defaults for a model: standard Ollama defaults
+ *  plus any model-specific Modelfile parameters learned from /api/show. */
+export function resolveOllamaModelDefaults(
+  model: string,
+  store?: OllamaVerdictStore,
+): Record<OllamaGenerationParameterKey, number> {
+  const verdictStore = store ?? loadOllamaVerdicts(ollamaVerdictsPath());
+  const learned = parametersForModel(verdictStore, model, Date.now());
+  return {
+    ...DEFAULT_OLLAMA_GENERATION_VALUES,
+    ...(learned ?? {}),
+  };
 }
 
 /** Split the model list into `known` (fresh cached verdicts) and `unknown`

@@ -407,18 +407,27 @@ const OLLAMA_NUMBER_FIELDS: Array<{
   min: number;
   max: number;
   step: number;
+  defaultValue: number;
   advanced?: boolean;
 }> = [
-  { key: "temperature", labelKey: "contextPanel.ollamaTemperature", min: 0, max: 2, step: 0.05 },
-  { key: "topP", labelKey: "contextPanel.ollamaTopP", min: 0, max: 1, step: 0.01 },
-  { key: "topK", labelKey: "contextPanel.ollamaTopK", min: 0, max: 1_000, step: 1 },
-  { key: "minP", labelKey: "contextPanel.ollamaMinP", min: 0, max: 1, step: 0.01 },
+  {
+    key: "temperature",
+    labelKey: "contextPanel.ollamaTemperature",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    defaultValue: 0.8,
+  },
+  { key: "topP", labelKey: "contextPanel.ollamaTopP", min: 0, max: 1, step: 0.01, defaultValue: 0.9 },
+  { key: "topK", labelKey: "contextPanel.ollamaTopK", min: 0, max: 1_000, step: 1, defaultValue: 40 },
+  { key: "minP", labelKey: "contextPanel.ollamaMinP", min: 0, max: 1, step: 0.01, defaultValue: 0 },
   {
     key: "seed",
     labelKey: "contextPanel.ollamaSeed",
     min: 0,
     max: 2_147_483_647,
     step: 1,
+    defaultValue: 0,
     advanced: true,
   },
   {
@@ -427,6 +436,7 @@ const OLLAMA_NUMBER_FIELDS: Array<{
     min: 0,
     max: 2,
     step: 0.05,
+    defaultValue: 1.1,
     advanced: true,
   },
   {
@@ -435,6 +445,7 @@ const OLLAMA_NUMBER_FIELDS: Array<{
     min: -1,
     max: 1_000_000,
     step: 1,
+    defaultValue: 64,
     advanced: true,
   },
   {
@@ -443,6 +454,7 @@ const OLLAMA_NUMBER_FIELDS: Array<{
     min: -2,
     max: 2,
     step: 0.05,
+    defaultValue: 0,
     advanced: true,
   },
   {
@@ -451,6 +463,7 @@ const OLLAMA_NUMBER_FIELDS: Array<{
     min: -2,
     max: 2,
     step: 0.05,
+    defaultValue: 0,
     advanced: true,
   },
 ];
@@ -564,11 +577,13 @@ function isPresetActive(
 function OllamaNumberField({
   field,
   value,
+  defaultValue,
   overridden,
   onSaveSettings,
 }: {
   field: (typeof OLLAMA_NUMBER_FIELDS)[number];
   value: number | undefined;
+  defaultValue: number;
   overridden: boolean;
   onSaveSettings?: (patch: SettingsPatch) => void;
 }) {
@@ -614,7 +629,7 @@ function OllamaNumberField({
           min={field.min}
           max={field.max}
           step={field.step}
-          placeholder={t("contextPanel.ollamaModelDefault")}
+          placeholder={String(defaultValue)}
           aria-label={t(field.labelKey)}
           onChange={(event) => {
             setDraft(event.target.value);
@@ -656,6 +671,7 @@ function OllamaGenerationControls({
 }) {
   const values = settings.ollamaGeneration;
   const overrides = settings.ollamaGenerationOverrides;
+  const modelDefaults = settings.ollamaModelDefaults;
   const [keepAlive, setKeepAlive] = useState(values?.keepAlive ?? "30m");
   const [keepAliveEditing, setKeepAliveEditing] = useState(false);
   const keepAliveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -677,6 +693,7 @@ function OllamaGenerationControls({
         key={field.key}
         field={field}
         value={values?.[field.key]}
+        defaultValue={modelDefaults?.[field.key] ?? field.defaultValue}
         overridden={overrides?.[field.key] !== undefined}
         onSaveSettings={onSaveSettings}
       />

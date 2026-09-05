@@ -5,6 +5,7 @@ import {
   GPT56_MODELS,
   KNOWN_MODELS,
   MODEL_DISPLAY_NAMES,
+  OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
   modelAcceptsImages,
@@ -18,11 +19,14 @@ describe("modelAcceptsImages", () => {
     expect(modelAcceptsImages("gpt-5.6-luna")).toBe(true);
   });
 
-  it("accepts DeepSeek and Z.AI vision models", () => {
+  it("accepts DeepSeek, Z.AI, and OpenCode vision models", () => {
     expect(modelAcceptsImages("deepseek-v4-flash-vision-exp")).toBe(true);
     expect(modelAcceptsImages("glm-5.3-flash")).toBe(true);
     expect(modelAcceptsImages("glm-4.6v")).toBe(true);
     expect(modelAcceptsImages("glm-5.3")).toBe(false);
+    expect(modelAcceptsImages("mimo-v2.5-free")).toBe(true);
+    expect(modelAcceptsImages("muse-spark-1.3-contributor-free")).toBe(true);
+    expect(modelAcceptsImages("big-pickle")).toBe(false);
   });
 
   it("accepts every Antigravity model exposed by the unified gateway", () => {
@@ -97,11 +101,18 @@ describe("KNOWN_MODELS", () => {
     for (const model of GEMINI_MODELS) expect(KNOWN_MODELS).toContain(model);
   });
 
+  it("offers free OpenCode models", () => {
+    expect(KNOWN_MODELS).toContain("big-pickle");
+    expect(KNOWN_MODELS).toContain("nemotron-3-ultra-free");
+    expect(KNOWN_MODELS).toContain("mimo-v2.5-free");
+  });
+
   it("is exactly the combined built-in provider catalog", () => {
     expect(KNOWN_MODELS).toEqual([
       ...SUPPORTED_OFFICIAL_MODELS,
       ...GPT56_MODELS,
       ...ZAI_MODELS,
+      ...OPENCODE_MODELS,
       ...ANTIGRAVITY_MODELS,
     ]);
   });

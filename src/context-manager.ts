@@ -91,6 +91,7 @@ export function compactModelForProvider(activeModel: string): string {
       return "glm-5.3-flash";
     case "gemini":
     case "ollama":
+    case "opencode":
       return activeModel;
     default:
       return "deepseek-v4-flash";

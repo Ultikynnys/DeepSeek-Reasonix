@@ -143,6 +143,7 @@ describe("formatLoopError", () => {
     ["ollama", "Ollama 401: bad key", "OLLAMA_API_KEY"],
     ["gemini", "Antigravity 401: expired", "Google Antigravity"],
     ["zai", "Z.AI 401: bad key", "ZAI_API_KEY"],
+    ["opencode", "OpenCode 401: bad key", "OPENCODE_API_KEY"],
   ] as const)("%s authentication has provider-only guidance", (provider, message, marker) => {
     const out = formatLoopError(new Error(message), undefined, { provider });
     expect(out).toContain(marker);
@@ -151,6 +152,7 @@ describe("formatLoopError", () => {
       "OPENAI_API_KEY",
       "OLLAMA_API_KEY",
       "ZAI_API_KEY",
+      "OPENCODE_API_KEY",
     ]) {
       if (forbidden !== marker) expect(out).not.toContain(forbidden);
     }
@@ -161,6 +163,7 @@ describe("formatLoopError", () => {
     ["Ollama 404: model missing", "ollama"],
     ["Antigravity 403: forbidden", "gemini"],
     ["Z.AI 429: rate limit", "zai"],
+    ["OpenCode 429: rate limit", "opencode"],
   ] as const)("recognizes %s as a non-retryable provider 4xx", (message) => {
     expect(formatLoopError(new Error(message))).not.toBe(message);
   });

@@ -1,6 +1,7 @@
 import {
   ANTIGRAVITY_MODELS,
   GPT56_MODELS,
+  OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
   isAntigravityModel,
@@ -116,6 +117,9 @@ export function SettingsModal({
   ollamaHiddenCount,
   ollamaVisionModels,
   onRefreshOllamaModels,
+  opencodeModels,
+  opencodeModelsError,
+  onRefreshOpencodeModels,
   onPickWorkspace,
   onAddMcpSpec,
   onRemoveMcpSpec,
@@ -167,6 +171,9 @@ export function SettingsModal({
   onRefreshOllamaModels?: (force?: boolean) => void;
   /** Prefixed vision-capable Ollama ids (`ollama/llava`) — shown as a badge. */
   ollamaVisionModels?: ReadonlySet<string>;
+  opencodeModels?: string[];
+  opencodeModelsError?: string;
+  onRefreshOpencodeModels?: (force?: boolean) => void;
   oauthWaiting: boolean;
   onOAuthBegin: () => void;
   onOAuthCancel: () => void;
@@ -281,6 +288,9 @@ export function SettingsModal({
                 ollamaHiddenCount={ollamaHiddenCount}
                 ollamaVisionModels={ollamaVisionModels}
                 onRefreshOllamaModels={onRefreshOllamaModels}
+                opencodeModels={opencodeModels}
+                opencodeModelsError={opencodeModelsError}
+                onRefreshOpencodeModels={onRefreshOpencodeModels}
                 oauthSignedIn={settings.openaiOAuth?.signedIn ?? false}
                 oauthAccount={settings.openaiOAuth?.account}
                 oauthFlowError={settings.openaiOAuth?.flowError}
@@ -1386,6 +1396,9 @@ function PageModels({
   ollamaHiddenCount,
   ollamaVisionModels,
   onRefreshOllamaModels,
+  opencodeModels,
+  opencodeModelsError,
+  onRefreshOpencodeModels,
   oauthSignedIn,
   oauthAccount,
   oauthFlowError,
@@ -1421,6 +1434,9 @@ function PageModels({
   ollamaVisionModels?: ReadonlySet<string>;
   /** Re-fetch the Ollama model catalog (`force` bypasses the backend's cache). */
   onRefreshOllamaModels?: (force?: boolean) => void;
+  opencodeModels?: string[];
+  opencodeModelsError?: string;
+  onRefreshOpencodeModels?: (force?: boolean) => void;
   oauthSignedIn: boolean;
   oauthAccount?: string;
   oauthFlowError?: string;
@@ -1457,6 +1473,7 @@ function PageModels({
     ...SUPPORTED_OFFICIAL_MODELS,
     ...GPT56_MODELS,
     ...ZAI_MODELS,
+    ...OPENCODE_MODELS,
     ...antigravityModelsList,
   ]);
   const customModelsList = (settings.customModels ?? []).filter(
@@ -1467,6 +1484,10 @@ function PageModels({
     { title: t("composer.modelDeepSeekGroup"), models: SUPPORTED_OFFICIAL_MODELS },
     { title: t("composer.modelOpenAIGroup"), models: GPT56_MODELS },
     { title: t("composer.modelZaiGroup"), models: ZAI_MODELS },
+    {
+      title: t("composer.modelOpencodeGroup"),
+      models: opencodeModels && opencodeModels.length > 0 ? opencodeModels : OPENCODE_MODELS,
+    },
     ...(customModelsList.length > 0
       ? [{ title: t("composer.modelCustomGroup"), models: customModelsList }]
       : []),
@@ -1618,6 +1639,19 @@ function PageModels({
             })}
           </div>
         ) : null}
+        <div className="setting-row" style={{ marginTop: 12 }}>
+          <div className="l">
+            <div className="n">{t("settings.opencodeModels")}</div>
+            <div className="h">
+              {opencodeModelsError
+                ? t("composer.modelOpencodeError", { error: opencodeModelsError })
+                : t("settings.opencodeModelsHint")}
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={() => onRefreshOpencodeModels?.(true)}>
+            {t("settings.opencodeModelsRefresh")}
+          </button>
+        </div>
       </section>
       <section className="section">
         <div className="stitle">{t("settings.effortSection")}</div>

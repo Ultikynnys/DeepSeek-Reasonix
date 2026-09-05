@@ -430,6 +430,7 @@ export type Settings = {
   subagentModel?: string;
   ollamaGeneration?: import("./protocol").OllamaGenerationSettings;
   ollamaGenerationOverrides?: import("./protocol").OllamaGenerationPatch;
+  ollamaModelDefaults?: Record<string, number>;
   showSystemEvents?: boolean;
   /** Per-field visibility toggles for the bottom status row. Absent = all default to true. */
   statusBar?: {
@@ -1684,6 +1685,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           subagentModel: ev.subagentModel,
           ollamaGeneration: ev.ollamaGeneration,
           ollamaGenerationOverrides: ev.ollamaGenerationOverrides,
+          ollamaModelDefaults: ev.ollamaModelDefaults,
           showSystemEvents: ev.showSystemEvents,
           statusBar: ev.statusBar,
           modelEndpoint: ev.modelEndpoint,
@@ -2216,6 +2218,11 @@ interface TabRuntimeProps {
   onRefreshOllamaModels: (force?: boolean) => void;
   /** Re-fetch the signed-in account's Antigravity quota model ids. */
   onRefreshAntigravityModels: () => void;
+  /** App-global OpenCode free model catalog. */
+  opencodeModels: string[];
+  opencodeModelsError: string | null;
+  opencodeVisionModels: ReadonlySet<string>;
+  onRefreshOpencodeModels: (force?: boolean) => void;
   tabsList: { id: string; workspaceDir?: string }[];
   activeTabId: string;
   setActiveTabId: (id: string) => void;
@@ -2256,6 +2263,10 @@ function TabRuntime({
   ollamaVisionModels,
   onRefreshOllamaModels,
   onRefreshAntigravityModels,
+  opencodeModels,
+  opencodeModelsError,
+  opencodeVisionModels,
+  onRefreshOpencodeModels,
   tabsList,
   activeTabId,
   setActiveTabId,
@@ -2500,7 +2511,11 @@ function TabRuntime({
   // daemon's $settings): the top-level state.model only updates when a turn
   // starts, so right after a switch to a vision model it still reports the
   // previous model and would misroute pastes to the non-vision path.
-  const imageCapable = modelAcceptsImages(state.settings?.model, ollamaVisionModels);
+  const imageCapable = modelAcceptsImages(
+    state.settings?.model,
+    ollamaVisionModels,
+    opencodeVisionModels,
+  );
   const attachPastedImage = useCallback(
     async (file: File) => {
       try {
@@ -2582,7 +2597,11 @@ function TabRuntime({
           delete document.body.dataset.dragOver;
           const paths = event.payload.paths ?? [];
           if (paths.length === 0) return;
-          const imageCapable = modelAcceptsImages(state.settings?.model, ollamaVisionModels);
+          const imageCapable = modelAcceptsImages(
+            state.settings?.model,
+            ollamaVisionModels,
+            opencodeVisionModels,
+          );
           const imagePaths = imageCapable ? paths.filter(isImagePath) : [];
           const mentionPaths = imageCapable ? paths.filter((p) => !isImagePath(p)) : paths;
           for (const p of imagePaths) attachPickedImage(p);
@@ -2615,7 +2634,13 @@ function TabRuntime({
       unlisten?.();
       delete document.body.dataset.dragOver;
     };
-  }, [state.settings?.workspaceDir, state.settings?.model, attachPickedImage, ollamaVisionModels]);
+  }, [
+    state.settings?.workspaceDir,
+    state.settings?.model,
+    attachPickedImage,
+    ollamaVisionModels,
+    opencodeVisionModels,
+  ]);
 
   const send = useCallback(
     (override?: string | QueuedSend) => {
@@ -3361,9 +3386,12 @@ function TabRuntime({
                 ollamaVisionModels={ollamaVisionModels}
                 antigravityModels={state.settings?.antigravityOAuth?.models}
                 antigravityModelsError={state.settings?.antigravityOAuth?.flowError}
+                opencodeModels={opencodeModels}
+                opencodeModelsError={opencodeModelsError ?? undefined}
                 customModels={state.settings?.customModels}
                 onRefreshOllamaModels={onRefreshOllamaModels}
                 onRefreshAntigravityModels={onRefreshAntigravityModels}
+                onRefreshOpencodeModels={onRefreshOpencodeModels}
                 onModelChange={(model) => {
                   applySettingsPatch({ model });
                   appendNotice(t("app.toast.modelSwitched", { model }));
@@ -3544,6 +3572,9 @@ function TabRuntime({
             ollamaHiddenCount={ollamaHiddenCount}
             ollamaVisionModels={ollamaVisionModels}
             onRefreshOllamaModels={onRefreshOllamaModels}
+            opencodeModels={opencodeModels}
+            opencodeModelsError={opencodeModelsError ?? undefined}
+            onRefreshOpencodeModels={onRefreshOpencodeModels}
             oauthWaiting={state.oauthWaiting}
             onOAuthBegin={() => sendRpc({ cmd: "oauth_begin" })}
             onOAuthCancel={() => {
@@ -4550,6 +4581,11 @@ export function App() {
     plan: string | null;
     hiddenCount: number;
   }>({ models: [], visionModels: new Set(), error: null, plan: null, hiddenCount: 0 });
+  const [opencodeCatalog, setOpencodeCatalog] = useState<{
+    models: string[];
+    visionModels: Set<string>;
+    error: string | null;
+  }>({ models: [], visionModels: new Set(), error: null });
   const [startupRetryNonce, setStartupRetryNonce] = useState(0);
   const dispatchersRef = useRef<Map<string, TabDispatcher>>(new Map());
   const pendingEventsRef = useRef<Map<string, TabAction[]>>(new Map());
@@ -4582,6 +4618,14 @@ export function App() {
       tabId: activeTabIdRef.current,
       cmd: "antigravity_models_refresh",
     }).catch((err) => console.error("antigravity_models_refresh failed", err));
+  }, []);
+
+  const requestOpencodeModels = useCallback((force?: boolean) => {
+    rpcSend({
+      tabId: activeTabIdRef.current,
+      cmd: "opencode_models_refresh",
+      force,
+    }).catch((err) => console.error("opencode_models_refresh failed", err));
   }, []);
 
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
@@ -4980,6 +5024,15 @@ export function App() {
               return;
             }
 
+            if (ev.type === "$opencode_models") {
+              setOpencodeCatalog({
+                models: ev.models,
+                visionModels: new Set(ev.visionModels ?? []),
+                error: ev.error ?? null,
+              });
+              return;
+            }
+
             const target = tabId;
             if (target) {
               flushTabDeltas(target);
@@ -5223,6 +5276,10 @@ export function App() {
           ollamaVisionModels={ollamaCatalog.visionModels}
           onRefreshOllamaModels={requestOllamaModels}
           onRefreshAntigravityModels={requestAntigravityModels}
+          opencodeModels={opencodeCatalog.models}
+          opencodeModelsError={opencodeCatalog.error}
+          opencodeVisionModels={opencodeCatalog.visionModels}
+          onRefreshOpencodeModels={requestOpencodeModels}
           tabsList={tabs}
           activeTabId={activeTabId}
           setActiveTabId={setActiveTabId}

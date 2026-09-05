@@ -495,6 +495,8 @@ export interface SettingsEvent {
   ollamaGeneration?: OllamaGenerationSettings;
   /** Explicit persisted values, used to expose per-field reset actions. */
   ollamaGenerationOverrides?: OllamaGenerationPatch;
+  /** Effective model default sampling values (Modelfile /api/show or Ollama defaults). */
+  ollamaModelDefaults?: Record<string, number>;
   /** Endpoint + auth state for the tab's current model — per tab, follows model switches. */
   modelEndpoint?: ModelEndpointInfo;
   /** Resolved endpoint for the tab's effective subagent model. */
@@ -525,7 +527,7 @@ export interface SettingsEvent {
 /** Endpoint + auth state for the tab's CURRENT model — the status bar's API
  *  chip is per tab and flips between DeepSeek, OpenAI, Ollama and Gemini with the model. */
 export interface ModelEndpointInfo {
-  provider: "deepseek" | "openai" | "ollama" | "gemini" | "zai";
+  provider: "deepseek" | "openai" | "ollama" | "gemini" | "zai" | "opencode";
   baseUrl: string;
   /** Auth source for OpenAI endpoints — absent for the DeepSeek provider. */
   openaiAuth?: "oauth" | "apiKey" | "none";
@@ -688,6 +690,14 @@ export interface OllamaModelsEvent {
   error?: string;
 }
 
+/** Dynamically fetched free model list for the OpenCode provider from models.dev. */
+export interface OpencodeModelsEvent {
+  type: "$opencode_models";
+  models: string[];
+  visionModels?: string[];
+  error?: string;
+}
+
 // ---- commands ----
 
 export interface SettingsPatch {
@@ -784,6 +794,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "gemini_oauth_cancel" }
   | { cmd: "gemini_oauth_signout" }
   | { cmd: "antigravity_models_refresh" }
+  | { cmd: "opencode_models_refresh"; force?: boolean }
   | { cmd: "settings_get" }
   | ({ cmd: "settings_save" } & SettingsPatch)
   | { cmd: "codex_quota_get" }

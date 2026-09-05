@@ -791,6 +791,20 @@ export const EN: TranslationSchema = {
       "Z.AI rate limit hit (429): {inner}. Wait and retry, or review the Z.AI API/Coding Plan rate limits.",
     zaiServer:
       "Z.AI service failure ({status}): {inner}. Check the configured Z.AI endpoint and retry later.",
+    opencodeAuth:
+      "OpenCode authentication failed (401): {inner}. Check OPENCODE_API_KEY in environment or opencodeApiKey in settings.",
+    opencodeCredits:
+      "OpenCode reports exhausted quota or rate limits: {inner}. Wait and retry, or configure an OpenCode API key.",
+    opencodePermission:
+      "OpenCode denied this request (403): {inner}. Check permissions and model availability.",
+    opencodeNotFound:
+      "OpenCode could not find the requested model or endpoint (404): {inner}. Check the model ID and OPENCODE_BASE_URL.",
+    opencodeRequest: "OpenCode rejected the request: {inner}. Check parameters and tool schema.",
+    opencodeContext:
+      "OpenCode context overflow: session history is {requested}. Start a new conversation or reduce content.",
+    opencodeTimeout: "OpenCode request timed out: {inner}. Check network connectivity and retry.",
+    opencodeRate: "OpenCode rate limit hit (429): {inner}. Wait and retry.",
+    opencodeServer: "OpenCode service failure ({status}): {inner}. Retry later.",
     customAuth:
       "Authentication failed (custom model endpoint 401): {inner}. Check that endpoint's configured API key.",
     customCredits:

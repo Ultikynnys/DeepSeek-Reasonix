@@ -44,6 +44,7 @@ import type {
   NeedsSetupEvent,
   OllamaModelsEvent,
   OllamaQuotaEvent,
+  OpencodeModelsEvent,
   PathAccessRequiredEvent,
   PlanClearedEvent,
   PlanRequiredEvent,
@@ -79,7 +80,9 @@ import {
   DEFAULT_GEMINI_CHAT_URL,
   DEFAULT_MODEL,
   DEFAULT_OLLAMA_CHAT_URL,
+  DEFAULT_OPENCODE_CHAT_URL,
   DEFAULT_ZAI_CHAT_URL,
+  OPENCODE_MODELS,
   SUPPORTED_MODELS,
   addProjectPathAllowed,
   addProjectShellAllowed,
@@ -215,13 +218,16 @@ import {
   loadOllamaVerdicts,
   ollamaVerdictsPath,
   partitionByVerdicts,
+  resolveOllamaModelDefaults,
   saveOllamaVerdicts,
   scopeKeyFor,
   setVerdict,
   showPayloadContextLength,
+  showPayloadParameters,
   verdictFor,
   visionModelsFor,
 } from "../../ollama-model-map.js";
+import { fetchOpencodeModels } from "../../opencode-models.js";
 import { registerSeeImageTool } from "../../tools/see-image.js";
 import type { SubagentEvent } from "../../tools/subagent.js";
 
@@ -309,6 +315,7 @@ type EmittableEvent =
   | CodexQuotaEvent
   | OllamaQuotaEvent
   | OllamaModelsEvent
+  | OpencodeModelsEvent
   | AntigravityQuotaEvent
   | MentionResultsEvent
   | MentionPreviewEvent
@@ -878,6 +885,13 @@ export function modelEndpointFor(model: string, path?: string): ModelEndpointInf
       baseUrl: ep.baseUrl ?? DEFAULT_ZAI_CHAT_URL,
     };
   }
+  if (provider === "opencode") {
+    const ep = loadEndpointForModel(model, path);
+    return {
+      provider: "opencode",
+      baseUrl: ep.baseUrl ?? DEFAULT_OPENCODE_CHAT_URL,
+    };
+  }
   if (provider !== "openai") {
     return {
       provider: "deepseek",
@@ -937,6 +951,11 @@ function emitSettings(tab: Tab): void {
       subagentModel: tab.currentSubagentModel,
       ollamaGeneration: loadOllamaGenerationSettings(),
       ollamaGenerationOverrides: loadOllamaGenerationOverrides(),
+      ollamaModelDefaults:
+        modelEndpointFor(tab.currentModel).provider === "ollama" ||
+        modelEndpointFor(tab.currentSubagentModel ?? tab.currentModel).provider === "ollama"
+          ? resolveOllamaModelDefaults(tab.currentModel)
+          : undefined,
       showSystemEvents: loadShowSystemEvents(),
       statusBar: config.statusBar,
       modelEndpoint: modelEndpointFor(tab.currentModel),
@@ -1122,7 +1141,14 @@ export async function fetchOllamaShowInfo(
   model: string,
   apiKey: string,
   timeoutMs = 15_000,
-): Promise<{ vision?: boolean; contextTokens?: number } | undefined> {
+): Promise<
+  | {
+      vision?: boolean;
+      contextTokens?: number;
+      parameters?: Partial<Record<string, number>>;
+    }
+  | undefined
+> {
   const origin = deriveNativeOllamaOrigin(baseUrl);
   try {
     const show = await fetch(`${origin}/api/show?model=${encodeURIComponent(model)}`, {
@@ -1132,9 +1158,11 @@ export async function fetchOllamaShowInfo(
     if (show.ok) {
       const data = (await show.json().catch(() => undefined)) as unknown;
       const contextTokens = showPayloadContextLength(data);
+      const parameters = showPayloadParameters(data);
       return {
         vision: showPayloadIsVision(data),
         ...(contextTokens !== undefined ? { contextTokens } : {}),
+        ...(parameters !== undefined ? { parameters } : {}),
       };
     }
     // 404 / 405 on /api/show — cloud gateway likely; fall through to the probe.
@@ -1205,6 +1233,33 @@ function emitOllamaCatalog(snap: OllamaCatalogSnapshot): void {
     ...(snap.plan !== undefined ? { plan: snap.plan } : {}),
     ...(snap.hiddenCount !== undefined ? { hiddenCount: snap.hiddenCount } : {}),
   });
+}
+
+function emitOpencodeCatalog(snap: {
+  models: string[];
+  visionModels?: string[];
+  error?: string;
+}): void {
+  emit({
+    type: "$opencode_models",
+    models: snap.models,
+    ...(snap.visionModels !== undefined ? { visionModels: snap.visionModels } : {}),
+    ...(snap.error !== undefined ? { error: snap.error } : {}),
+  });
+}
+
+export async function refreshOpencodeModels(force = false, tab?: Tab): Promise<void> {
+  try {
+    const snap = await fetchOpencodeModels({ force });
+    emitOpencodeCatalog(snap);
+    if (tab && snap.error) {
+      emit({ type: "$error", message: `OpenCode model sync warning: ${snap.error}` }, tab.id);
+    }
+  } catch (err) {
+    const message = `OpenCode model sync failed: ${(err as Error).message}`;
+    emitOpencodeCatalog({ models: [...OPENCODE_MODELS], error: message });
+    if (tab) emit({ type: "$error", message }, tab.id);
+  }
 }
 
 /** Fetch the Ollama catalog — `GET {base}/models` on the resolved endpoint;
@@ -1328,6 +1383,7 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
             existing?.at ?? Date.now(),
             info.vision,
             info.contextTokens,
+            info.parameters,
           );
           visionPersisted = true;
         }
@@ -2227,6 +2283,8 @@ function notConfiguredMessage(model: string): string {
       return "Not configured yet — sign in to Google Antigravity (Settings → Google) to use Gemini models.";
     case "zai":
       return "Not configured yet — add a Z.AI API key in Settings → General to use GLM models.";
+    case "opencode":
+      return "Not configured yet — OpenCode endpoint is unavailable.";
     default:
       return "Not configured yet — paste your DeepSeek API key first.";
   }
@@ -2253,6 +2311,9 @@ export function tabCurrentModelUsable(tab: Tab): boolean {
   }
   if (providerForModel(tab.currentModel) === "zai") {
     return !!loadZaiApiKey();
+  }
+  if (providerForModel(tab.currentModel) === "opencode") {
+    return true;
   }
   return !!loadApiKey();
 }
@@ -2320,6 +2381,10 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     );
   } else if (provider === "zai") {
     log.debug(`model ${tab.currentModel} → Z.AI; endpoint ${ep.baseUrl ?? DEFAULT_ZAI_CHAT_URL}`);
+  } else if (provider === "opencode") {
+    log.debug(
+      `model ${tab.currentModel} → OpenCode; endpoint ${ep.baseUrl ?? DEFAULT_OPENCODE_CHAT_URL}`,
+    );
   } else {
     log.debug(`model ${tab.currentModel} → DeepSeek; endpoint ${ep.baseUrl ?? "default"}`);
   }
@@ -2327,7 +2392,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     apiKey: ep.apiKey,
     baseUrl: ep.baseUrl,
     // Local Ollama is keyless — the client omits the Authorization header.
-    allowMissingKey: provider === "ollama",
+    allowMissingKey: provider === "ollama" || provider === "opencode",
     // OAuth tokens refresh per request — fallback for when the Codex backend
     // transport declines (no OAuth creds or token refresh failed). Without
     // OAuth, the static API key is used and requests bill to platform credits.
@@ -2957,7 +3022,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               ? "Not signed in to Google Antigravity — sign in from Settings to use Gemini models."
               : provider === "zai"
                 ? `No Z.AI credential for ${tab.currentModel} — add a Z.AI key in Settings → Models.`
-                : "No API key configured — paste your DeepSeek API key first.";
+                : provider === "opencode"
+                  ? `No OpenCode configuration for ${tab.currentModel}.`
+                  : "No API key configured — paste your DeepSeek API key first.";
       emit({ type: "$error", message }, tab.id);
       return;
     }
@@ -4055,6 +4122,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // failure only surfaces on the Models settings page (the composer hides
       // the error unless the tab's model is an Ollama model).
       void refreshOllamaModels(true);
+      void refreshOpencodeModels(false);
       return;
     }
     if (msg.cmd === "jobs_list") {
@@ -4693,6 +4761,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "antigravity_models_refresh") {
       void refreshAntigravityModels(tab);
+      return;
+    }
+    if (msg.cmd === "opencode_models_refresh") {
+      void refreshOpencodeModels(!!msg.force, tab);
       return;
     }
     if (msg.cmd === "settings_save") {

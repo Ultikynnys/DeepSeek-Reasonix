@@ -352,6 +352,15 @@ export interface TranslationSchema {
     zaiTimeout: string;
     zaiRate: string;
     zaiServer: string;
+    opencodeAuth: string;
+    opencodeCredits: string;
+    opencodePermission: string;
+    opencodeNotFound: string;
+    opencodeRequest: string;
+    opencodeContext: string;
+    opencodeTimeout: string;
+    opencodeRate: string;
+    opencodeServer: string;
     customAuth: string;
     customCredits: string;
     customPermission: string;

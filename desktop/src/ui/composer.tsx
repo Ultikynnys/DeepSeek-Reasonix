@@ -1,6 +1,7 @@
 import {
   ANTIGRAVITY_MODELS,
   GPT56_MODELS,
+  OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
   isAntigravityModel,
@@ -106,6 +107,9 @@ export function Composer({
   antigravityModels,
   antigravityModelsError,
   onRefreshAntigravityModels,
+  opencodeModels,
+  opencodeModelsError,
+  onRefreshOpencodeModels,
   customModels,
   textareaRef,
   workspaceDir,
@@ -158,6 +162,9 @@ export function Composer({
   antigravityModelsError?: string;
   /** Re-fetch the signed-in account's Antigravity model ids. */
   onRefreshAntigravityModels?: () => void;
+  opencodeModels?: string[];
+  opencodeModelsError?: string;
+  onRefreshOpencodeModels?: (force?: boolean) => void;
   /** Ids with an explicit `models` provider mapping in config.json — offered
    *  in the general list because the user declared them. */
   customModels?: string[];
@@ -450,9 +457,12 @@ export function Composer({
     ollamaVisionModels,
     antigravityModels,
     antigravityModelsError,
+    opencodeModels,
+    opencodeModelsError,
     customModels,
     onRefreshOllamaModels,
     onRefreshAntigravityModels,
+    onRefreshOpencodeModels,
   };
 
   return (
@@ -798,9 +808,12 @@ function ModelList({
   ollamaVisionModels,
   antigravityModels,
   antigravityModelsError,
+  opencodeModels,
+  opencodeModelsError,
   customModels,
   onRefreshOllamaModels,
   onRefreshAntigravityModels,
+  onRefreshOpencodeModels,
 }: {
   activeModel: string;
   onPick: (model: string) => void;
@@ -810,10 +823,13 @@ function ModelList({
   ollamaVisionModels?: ReadonlySet<string>;
   antigravityModels?: string[];
   antigravityModelsError?: string;
+  opencodeModels?: string[];
+  opencodeModelsError?: string;
   /** Ids with an explicit `models` provider mapping — user-declared, so offered. */
   customModels?: string[];
   onRefreshOllamaModels?: (force?: boolean) => void;
   onRefreshAntigravityModels?: () => void;
+  onRefreshOpencodeModels?: (force?: boolean) => void;
 }) {
   const [draft, setDraft] = useState(activeModel);
   const hasAntigravityEvidence =
@@ -835,6 +851,7 @@ function ModelList({
     ...SUPPORTED_OFFICIAL_MODELS,
     ...GPT56_MODELS,
     ...ZAI_MODELS,
+    ...OPENCODE_MODELS,
     ...(usableAntigravityModels ?? []),
   ]);
   const filteredCustomModels = (customModels ?? []).filter(
@@ -867,6 +884,16 @@ function ModelList({
       key: "zai",
       title: t("composer.modelZaiGroup"),
       models: ZAI_MODELS,
+    },
+    {
+      key: "opencode",
+      title: t("composer.modelOpencodeGroup"),
+      models: opencodeModels && opencodeModels.length > 0 ? opencodeModels : OPENCODE_MODELS,
+      refresh: onRefreshOpencodeModels ? () => onRefreshOpencodeModels(true) : undefined,
+      refreshTitle: t("composer.modelOpencodeRefresh"),
+      error: opencodeModelsError
+        ? t("composer.modelOpencodeError", { error: opencodeModelsError })
+        : undefined,
     },
     ...(filteredCustomModels.length > 0
       ? [

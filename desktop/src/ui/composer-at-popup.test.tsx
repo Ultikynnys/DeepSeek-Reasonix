@@ -111,6 +111,7 @@ describe("desktop Composer model catalog", () => {
       "DeepSeek",
       "ChatGPT",
       "Z.AI",
+      "OpenCode",
       "Custom",
       "Google Antigravity",
       "Ollama",

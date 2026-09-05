@@ -50,6 +50,7 @@ import type {
   OllamaQuota,
   OllamaQuotaEvent,
   OllamaQuotaWindow,
+  OpencodeModelsEvent,
   OutgoingCommand,
   PathAccessRequiredEvent,
   PlanClearedEvent,
@@ -108,6 +109,7 @@ export type {
   OllamaQuota,
   OllamaQuotaEvent,
   OllamaQuotaWindow,
+  OpencodeModelsEvent,
   CheckpointRequiredEvent,
   CheckpointVerdict,
   ChoiceOption,
@@ -405,6 +407,7 @@ export type IncomingEvent = { tabId?: string } & (
   | CodexQuotaEvent
   | OllamaQuotaEvent
   | OllamaModelsEvent
+  | OpencodeModelsEvent
   | AntigravityQuotaEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent

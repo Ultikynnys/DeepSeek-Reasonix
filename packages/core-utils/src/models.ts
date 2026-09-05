@@ -35,6 +35,41 @@ export const ZAI_MODELS: readonly string[] = [
   "glm-4-32b-0414-128k",
 ];
 
+/** Free models served through OpenCode Zen. */
+export const OPENCODE_MODELS: readonly string[] = [
+  "big-pickle",
+  "nemotron-3-ultra-free",
+  "nemotron-3.5-lightning-free",
+  "mimo-v2.5-free",
+  "muse-spark-1.3-contributor-free",
+  "muse-spark-1.2-contributor-free",
+  "ling-3.0-flash-fin-free",
+  "deepseek-v4-flash-free",
+  "glm-4.7-free",
+  "glm-5-free",
+  "minimax-m2.5-free",
+  "minimax-m3-free",
+  "qwen3.6-plus-free",
+  "mimo-v2-flash-free",
+  "mimo-v2-pro-free",
+  "mimo-v2-omni-free",
+  "kimi-k2.5-free",
+  "grok-code",
+  "hy3-free",
+  "ring-2.6-1t-free",
+  "longcat-2.0-free",
+  "laguna-s-2.1-free",
+  "nemotron-3-super-free",
+  "ling-3.0-flash-free",
+  "ling-3.0-tiny-free",
+  "ling-2.6-flash-free",
+  "north-mini-code-free",
+  "minimax-m2.1-free",
+  "hy3-preview-free",
+  "x-preview-f-free",
+  "trinity-large-preview-free",
+];
+
 /** Unified models served through Google Antigravity OAuth and Cloud Code. */
 export const ANTIGRAVITY_MODELS: readonly string[] = [
   "gemini-3.5-flash-low",
@@ -87,6 +122,7 @@ export const KNOWN_MODELS: readonly string[] = [
   ...SUPPORTED_OFFICIAL_MODELS,
   ...GPT56_MODELS,
   ...ZAI_MODELS,
+  ...OPENCODE_MODELS,
   ...ANTIGRAVITY_MODELS,
 ];
 
@@ -101,6 +137,17 @@ export function modelDisplayName(model: string | undefined | null): string {
   return MODEL_DISPLAY_NAMES[model] ?? model;
 }
 
+export const OPENCODE_VISION_MODELS: ReadonlySet<string> = new Set([
+  "mimo-v2.5-free",
+  "muse-spark-1.3-contributor-free",
+  "muse-spark-1.2-contributor-free",
+  "qwen3.6-plus-free",
+  "mimo-v2-omni-free",
+  "mimo-v2-pro-free",
+  "kimi-k2.5-free",
+  "x-preview-f-free",
+]);
+
 /** Model ids that accept image attachments in user messages — the GPT-5.6
  *  family, DeepSeek's vision line, and every Gemini model (natively
  *  multimodal). Drives the composer's paste/drop affordance, the daemon's
@@ -110,15 +157,20 @@ export function modelDisplayName(model: string | undefined | null): string {
  *  by runtime probing (see the daemon's `$ollama_models.visionModels`). When
  *  provided, an Ollama model in that set accepts images; when omitted, all
  *  Ollama models are treated as non-vision (conservative default). Non-Ollama
- *  ids are unaffected by this argument. */
+ *  ids are unaffected by this argument.
+ *
+ *  `opencodeVision` is the set of OpenCode model ids dynamically confirmed vision-capable
+ *  via models.dev sync. When provided, it overrides the static OpenCode vision catalog. */
 export function modelAcceptsImages(
   model: string | undefined | null,
   ollamaVision?: ReadonlySet<string> | null,
+  opencodeVision?: ReadonlySet<string> | null,
 ): boolean {
   if (typeof model !== "string") return false;
   if (model.startsWith("gpt-")) return true;
   if (model === "deepseek-v4-flash-vision-exp") return true;
   if (model === "glm-5.3-flash" || /^glm-\d+(?:\.\d+)?v(?:-|$)/.test(model)) return true;
+  if (opencodeVision ? opencodeVision.has(model) : OPENCODE_VISION_MODELS.has(model)) return true;
   if (isAntigravityModel(model)) return true;
   if (model.startsWith("ollama/") && ollamaVision && ollamaVision.has(model)) return true;
   return false;

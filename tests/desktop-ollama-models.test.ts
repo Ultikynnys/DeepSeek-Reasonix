@@ -13,6 +13,13 @@ import {
   showPayloadIsVision,
 } from "../src/cli/commands/desktop.js";
 import { deriveNativeOllamaOrigin } from "../src/config.js";
+import {
+  DEFAULT_OLLAMA_GENERATION_VALUES,
+  emptyOllamaVerdicts,
+  resolveOllamaModelDefaults,
+  setVerdict,
+  showPayloadParameters,
+} from "../src/ollama-model-map.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -221,6 +228,68 @@ describe("showPayloadIsVision", () => {
     expect(showPayloadIsVision(undefined)).toBe(false);
     expect(showPayloadIsVision("x")).toBe(false);
     expect(showPayloadIsVision({})).toBe(false);
+  });
+});
+
+describe("showPayloadParameters", () => {
+  it("parses valid Modelfile parameter lines", () => {
+    const raw = [
+      "stop <|im_start|>",
+      "temperature 0.65",
+      "top_p 0.95",
+      "top_k 50",
+      "min_p 0.05",
+      "seed 1234",
+      "repeat_penalty 1.25",
+      "repeat_last_n 128",
+      "frequency_penalty 0.1",
+      "presence_penalty 0.2",
+    ].join("\n");
+    expect(showPayloadParameters({ parameters: raw })).toEqual({
+      temperature: 0.65,
+      topP: 0.95,
+      topK: 50,
+      minP: 0.05,
+      seed: 1234,
+      repeatPenalty: 1.25,
+      repeatLastN: 128,
+      frequencyPenalty: 0.1,
+      presencePenalty: 0.2,
+    });
+  });
+
+  it("returns undefined for empty, missing, or malformed parameters", () => {
+    expect(showPayloadParameters(null)).toBeUndefined();
+    expect(showPayloadParameters({})).toBeUndefined();
+    expect(showPayloadParameters({ parameters: "" })).toBeUndefined();
+    expect(showPayloadParameters({ parameters: "   \n# comment only" })).toBeUndefined();
+  });
+});
+
+describe("resolveOllamaModelDefaults", () => {
+  it("returns standard Ollama defaults when store is empty", () => {
+    const store = emptyOllamaVerdicts();
+    expect(resolveOllamaModelDefaults("llama3.2", store)).toEqual(DEFAULT_OLLAMA_GENERATION_VALUES);
+  });
+
+  it("merges learned model parameters with base defaults", () => {
+    const store = emptyOllamaVerdicts();
+    setVerdict(
+      store,
+      "free",
+      "http://localhost:11434|12345678",
+      "custom-model",
+      "ok",
+      Date.now(),
+      false,
+      8192,
+      { temperature: 0.3, topP: 0.8 },
+    );
+    const resolved = resolveOllamaModelDefaults("custom-model", store);
+    expect(resolved.temperature).toBe(0.3);
+    expect(resolved.topP).toBe(0.8);
+    expect(resolved.topK).toBe(40);
+    expect(resolved.repeatPenalty).toBe(1.1);
   });
 });
 

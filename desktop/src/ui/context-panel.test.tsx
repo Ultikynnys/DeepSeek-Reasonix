@@ -583,6 +583,106 @@ describe("ContextPanel files", () => {
     expect(screen.getByTestId("ollama-generation-settings")).toBeTruthy();
   });
 
+  it("displays actual numeric default values in placeholders instead of 'model default'", () => {
+    render(
+      <ContextPanel
+        settings={{
+          ...settings,
+          modelEndpoint: { provider: "ollama", baseUrl: "http://localhost:11434" },
+          subagentModelEndpoint: { provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+          ollamaGeneration: { keepAlive: "30m" },
+          ollamaGenerationOverrides: {},
+        }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    expect(screen.getByRole("spinbutton", { name: "Temperature" }).getAttribute("placeholder")).toBe(
+      "0.8",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Top P" }).getAttribute("placeholder")).toBe(
+      "0.9",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Top K" }).getAttribute("placeholder")).toBe(
+      "40",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Min P" }).getAttribute("placeholder")).toBe(
+      "0",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Repeat penalty" }).getAttribute("placeholder")).toBe(
+      "1.1",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Repeat last N" }).getAttribute("placeholder")).toBe(
+      "64",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Frequency penalty" }).getAttribute("placeholder")).toBe(
+      "0",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Presence penalty" }).getAttribute("placeholder")).toBe(
+      "0",
+    );
+    expect(screen.queryByPlaceholderText("model default")).toBeNull();
+  });
+
+  it("displays learned model-specific default values when provided in settings", () => {
+    render(
+      <ContextPanel
+        settings={{
+          ...settings,
+          modelEndpoint: { provider: "ollama", baseUrl: "http://localhost:11434" },
+          subagentModelEndpoint: { provider: "deepseek", baseUrl: "https://api.deepseek.com" },
+          ollamaGeneration: { keepAlive: "30m" },
+          ollamaGenerationOverrides: {},
+          ollamaModelDefaults: {
+            temperature: 0.6,
+            topP: 0.95,
+            topK: 50,
+          },
+        }}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    expect(screen.getByRole("spinbutton", { name: "Temperature" }).getAttribute("placeholder")).toBe(
+      "0.6",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Top P" }).getAttribute("placeholder")).toBe(
+      "0.95",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Top K" }).getAttribute("placeholder")).toBe(
+      "50",
+    );
+    expect(screen.getByRole("spinbutton", { name: "Repeat penalty" }).getAttribute("placeholder")).toBe(
+      "1.1",
+    );
+  });
+
   it("renders Auto-compaction toggle in Tools section and updates setting", () => {
     const onSaveSettings = vi.fn();
     render(

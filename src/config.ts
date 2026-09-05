@@ -8,6 +8,7 @@ import {
   GEMINI_MODELS,
   GPT56_MODELS,
   KNOWN_MODELS,
+  OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
   allQuickSends,
@@ -24,6 +25,7 @@ import {
   resolveIndexConfig,
 } from "./index/config.js";
 import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
+import { isDiscoveredOpencodeModel } from "./opencode-models.js";
 import { reasonixHome } from "./reasonix-home.js";
 import { MAX_CONTEXT_TOKENS, MIN_CONTEXT_TOKENS } from "./telemetry/stats.js";
 import { type ThemeName, isThemeName, resolveThemeName } from "./theme/tokens.js";
@@ -36,7 +38,7 @@ import {
 export const DEFAULT_MODEL = "deepseek-v4-flash";
 
 /** Built-in model groups remain public from config for existing library consumers. */
-export { GEMINI_MODELS, GPT56_MODELS, SUPPORTED_OFFICIAL_MODELS, ZAI_MODELS };
+export { GEMINI_MODELS, GPT56_MODELS, OPENCODE_MODELS, SUPPORTED_OFFICIAL_MODELS, ZAI_MODELS };
 
 /** Everything the default endpoints accept without a custom baseUrl, across providers. */
 export const SUPPORTED_MODELS: readonly string[] = KNOWN_MODELS;
@@ -44,10 +46,17 @@ export const SUPPORTED_MODELS: readonly string[] = KNOWN_MODELS;
 /** Which provider a model id routes to — resolved from positive evidence, never
  *  the id's name shape (a name doesn't imply its provider). Resolution order:
  *  `models` config > Antigravity discovery > catalogs > `ollama/` scheme > DeepSeek default. */
-export type ModelProvider = "deepseek" | "openai" | "ollama" | "gemini" | "zai";
+export type ModelProvider = "deepseek" | "openai" | "ollama" | "gemini" | "zai" | "opencode";
 
 /** Valid ModelProvider literals — config validation for the `models` map. */
-const PROVIDER_IDS: readonly ModelProvider[] = ["deepseek", "openai", "ollama", "gemini", "zai"];
+const PROVIDER_IDS: readonly ModelProvider[] = [
+  "deepseek",
+  "openai",
+  "ollama",
+  "gemini",
+  "zai",
+  "opencode",
+];
 
 export function isModelProvider(value: unknown): value is ModelProvider {
   return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
@@ -58,6 +67,7 @@ const CATALOG_PROVIDERS: ReadonlyArray<{ ids: ReadonlySet<string>; provider: Mod
   { ids: new Set(SUPPORTED_OFFICIAL_MODELS), provider: "deepseek" },
   { ids: new Set(GPT56_MODELS), provider: "openai" },
   { ids: new Set(ZAI_MODELS), provider: "zai" },
+  { ids: new Set(OPENCODE_MODELS), provider: "opencode" },
   { ids: new Set(ANTIGRAVITY_MODELS), provider: "gemini" },
 ];
 
@@ -77,13 +87,15 @@ export function providerForModel(
   if (isModelProvider(mapped)) return mapped;
   // 2. Server-discovered Antigravity models.
   if (isUsableAntigravityModel(id) && cfg.antigravityOAuth?.models?.includes(id)) return "gemini";
-  // 3. Curated catalogs — exact id membership.
+  // 3. Server-discovered OpenCode models.
+  if (isDiscoveredOpencodeModel(id)) return "opencode";
+  // 4. Curated catalogs — exact id membership.
   for (const catalog of CATALOG_PROVIDERS) {
     if (catalog.ids.has(id)) return catalog.provider;
   }
-  // 4. The `ollama/` addressing namespace.
+  // 5. The `ollama/` addressing namespace.
   if (id.startsWith("ollama/")) return "ollama";
-  // 5. Documented default endpoint family.
+  // 6. Documented default endpoint family.
   return "deepseek";
 }
 
@@ -100,6 +112,7 @@ export function isKnownModelId(model: string, path: string = defaultConfigPath()
   return (
     Boolean(cfg.models?.[id]) ||
     antigravityMatch ||
+    isDiscoveredOpencodeModel(id) ||
     KNOWN_MODEL_IDS.has(id) ||
     id.startsWith("ollama/")
   );
@@ -119,6 +132,9 @@ export const DEFAULT_GEMINI_CHAT_URL = "https://daily-cloudcode-pa.googleapis.co
 
 /** Z.AI OpenAI-compatible endpoint used for glm-* models. */
 export const DEFAULT_ZAI_CHAT_URL = "https://api.z.ai/api/paas/v4";
+
+/** OpenCode Zen OpenAI-compatible endpoint used for free/paid OpenCode models. */
+export const DEFAULT_OPENCODE_CHAT_URL = "https://opencode.ai/zen/v1";
 
 /** Native Ollama API origin: strip a trailing `/v1` — the `/api/*` endpoints
  *  live at that root (localhost:11434/v1 → localhost:11434). */
@@ -309,6 +325,10 @@ export interface ReasonixConfig {
   zaiApiKey?: string;
   /** Z.AI OpenAI-compatible endpoint override. Falls back to ZAI_BASE_URL. */
   zaiBaseUrl?: string;
+  /** OpenCode API key for free/paid OpenCode models. Falls back to OPENCODE_API_KEY env or defaults to "public". */
+  opencodeApiKey?: string;
+  /** OpenCode OpenAI-compatible endpoint override. Falls back to OPENCODE_BASE_URL. */
+  opencodeBaseUrl?: string;
   /** Set by the browser OAuth sign-in; auto-refreshed from refreshToken on expiry. */
   openaiOAuth?: OpenAIOAuthCreds;
   /** Google Antigravity OAuth tokens — set by the "Sign in with Google" flow;
@@ -608,6 +628,14 @@ export function loadExaApiKey(path: string = defaultConfigPath()): string | unde
 export function loadZaiApiKey(path: string = defaultConfigPath()): string | undefined {
   if (process.env.ZAI_API_KEY) return process.env.ZAI_API_KEY.trim();
   const cfg = readConfig(path).zaiApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
+/** OpenCode API key: env > config > undefined. Defaults to "public" for free models when unconfigured. */
+export function loadOpencodeApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.OPENCODE_API_KEY) return process.env.OPENCODE_API_KEY.trim();
+  const cfg = readConfig(path).opencodeApiKey;
   if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
   return undefined;
 }
@@ -1153,6 +1181,20 @@ export function loadEndpointForModel(
     }
     return { baseUrl: DEFAULT_ZAI_CHAT_URL, apiKey: loadZaiApiKey(path) };
   }
+  if (providerForModel(model, path) === "opencode") {
+    const envBaseUrl = process.env.OPENCODE_BASE_URL?.trim();
+    if (envBaseUrl) {
+      return { baseUrl: envBaseUrl, apiKey: process.env.OPENCODE_API_KEY ?? "public" };
+    }
+    const cfg = readConfig(path);
+    if (cfg.opencodeBaseUrl?.trim()) {
+      return { baseUrl: cfg.opencodeBaseUrl.trim(), apiKey: cfg.opencodeApiKey ?? "public" };
+    }
+    return {
+      baseUrl: DEFAULT_OPENCODE_CHAT_URL,
+      apiKey: loadOpencodeApiKey(path) ?? "public",
+    };
+  }
   return loadEndpoint(path);
 }
 
@@ -1176,6 +1218,7 @@ export function anyProviderConfigured(path: string = defaultConfigPath()): boole
   if (process.env.OPENAI_API_KEY || cfg.openaiApiKey || cfg.openaiOAuth?.accessToken) return true;
   if (process.env.OLLAMA_API_KEY || cfg.ollamaApiKey) return true;
   if (process.env.ZAI_API_KEY || cfg.zaiApiKey) return true;
+  if (process.env.OPENCODE_API_KEY || cfg.opencodeApiKey || cfg.opencodeBaseUrl) return true;
   if (cfg.antigravityOAuth?.accessToken) return true;
   return !!process.env.OLLAMA_BASE_URL || !!cfg.ollamaBaseUrl;
 }

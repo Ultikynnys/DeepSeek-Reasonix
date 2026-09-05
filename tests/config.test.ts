@@ -35,6 +35,7 @@ import {
   loadMouseWheelRows,
   loadOllamaGenerationOverrides,
   loadOllamaGenerationSettings,
+  loadOpencodeApiKey,
   loadPricingOverride,
   loadProjectPathAllowed,
   loadProjectShellAllowed,
@@ -200,6 +201,11 @@ describe("config", () => {
 
   it("anyProviderConfigured is true with an Ollama cloud key, no DeepSeek key", () => {
     writeConfig({ ollamaApiKey: "sk-ollama-cloud" }, path);
+    expect(anyProviderConfigured(path)).toBe(true);
+  });
+
+  it("anyProviderConfigured is true with OpenCode credentials, no DeepSeek key", () => {
+    writeConfig({ opencodeApiKey: "sk-opencode-test" }, path);
     expect(anyProviderConfigured(path)).toBe(true);
   });
 
@@ -377,6 +383,9 @@ describe("config", () => {
       expect(providerForModel("gemini-3.7-flash")).toBe("gemini");
       expect(providerForModel("gemini-3.5-flash-low")).toBe("gemini");
       expect(providerForModel("glm-5.3-flash")).toBe("zai");
+      expect(providerForModel("big-pickle")).toBe("opencode");
+      expect(providerForModel("nemotron-3-ultra-free")).toBe("opencode");
+      expect(providerForModel("mimo-v2.5-free")).toBe("opencode");
       expect(providerForModel("deepseek-v4-flash")).toBe("deepseek");
       expect(providerForModel(undefined)).toBe("deepseek");
     });
@@ -1602,6 +1611,31 @@ describe("config", () => {
       expect(loadEndpointForModel("glm-5.3", path)).toEqual({
         baseUrl: "https://zai.example.com/v4",
         apiKey: "zai-config-key",
+      });
+    });
+
+    it("uses the official OpenCode Zen endpoint and defaults to public key for free models", () => {
+      writeConfig({}, path);
+      expect(providerForModel("big-pickle")).toBe("opencode");
+      expect(loadOpencodeApiKey(path)).toBeUndefined();
+      expect(loadEndpointForModel("big-pickle", path)).toEqual({
+        baseUrl: "https://opencode.ai/zen/v1",
+        apiKey: "public",
+      });
+    });
+
+    it("uses configured OpenCode API key and custom base URL when provided", () => {
+      writeConfig(
+        {
+          opencodeBaseUrl: "https://custom-zen.example.com/v1",
+          opencodeApiKey: "opencode-key-123",
+        },
+        path,
+      );
+      expect(loadOpencodeApiKey(path)).toBe("opencode-key-123");
+      expect(loadEndpointForModel("big-pickle", path)).toEqual({
+        baseUrl: "https://custom-zen.example.com/v1",
+        apiKey: "opencode-key-123",
       });
     });
   });

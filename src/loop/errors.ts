@@ -20,9 +20,8 @@ export function formatLoopError(
   opts?: FormatLoopErrorOptions,
 ): string {
   const msg = err.message ?? "";
-  const match = /^(DeepSeek|OpenAI|Ollama|Antigravity|Z\.AI|Upstream) (\d{3}):\s*([\s\S]*)$/.exec(
-    msg,
-  );
+  const match =
+    /^(DeepSeek|OpenAI|Ollama|Antigravity|Z\.AI|OpenCode|Upstream) (\d{3}):\s*([\s\S]*)$/.exec(msg);
   const provider = resolveErrorProvider(opts?.provider, match?.[1], opts?.upstreamHost);
   if (
     match &&
@@ -69,7 +68,7 @@ export function formatLoopError(
   return msg;
 }
 
-const PROVIDER_ERROR_PREFIX = "(?:DeepSeek|OpenAI|Ollama|Antigravity|Z\\.AI|Upstream)";
+const PROVIDER_ERROR_PREFIX = "(?:DeepSeek|OpenAI|Ollama|Antigravity|Z\\.AI|OpenCode|Upstream)";
 
 export function is5xxError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -188,6 +187,17 @@ const ERROR_KEYS: Record<ErrorProvider, Record<ErrorKind, keyof TranslationSchem
     rate: "zaiRate",
     server: "zaiServer",
   },
+  opencode: {
+    auth: "opencodeAuth",
+    credits: "opencodeCredits",
+    permission: "opencodePermission",
+    notFound: "opencodeNotFound",
+    request: "opencodeRequest",
+    context: "opencodeContext",
+    timeout: "opencodeTimeout",
+    rate: "opencodeRate",
+    server: "opencodeServer",
+  },
   upstream: {
     auth: "customAuth",
     credits: "customCredits",
@@ -220,6 +230,7 @@ function resolveErrorProvider(
   if (prefix === "Ollama") return "ollama";
   if (prefix === "Antigravity") return "gemini";
   if (prefix === "Z.AI") return "zai";
+  if (prefix === "OpenCode") return "opencode";
   if (upstreamHost) {
     try {
       const host = new URL(upstreamHost).hostname.toLowerCase();
@@ -230,6 +241,7 @@ function resolveErrorProvider(
       }
       if (host.endsWith("googleapis.com")) return "gemini";
       if (host.endsWith("z.ai")) return "zai";
+      if (host.endsWith("opencode.ai")) return "opencode";
     } catch {
       return "upstream";
     }

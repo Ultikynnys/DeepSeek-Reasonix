@@ -203,6 +203,8 @@ export function billingKindForModel(model: string): BillingKind {
     case "ollama":
     case "gemini":
       return "quota";
+    case "opencode":
+      return "none";
     default:
       return "usd";
   }

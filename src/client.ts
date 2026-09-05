@@ -653,7 +653,13 @@ export class DeepSeekClient {
         payload.thinking = { type: "enabled", clear_thinking: false };
       }
       if (stream && opts.tools?.length) payload.tool_stream = true;
-    } else if (opts.thinking && !this._isAzureEndpoint() && !isOllama && provider !== "openai") {
+    } else if (
+      opts.thinking &&
+      !this._isAzureEndpoint() &&
+      !isOllama &&
+      provider !== "openai" &&
+      provider !== "opencode"
+    ) {
       payload.extra_body = { thinking: { type: opts.thinking } };
     }
     if (opts.reasoningEffort && !isOllama) {
@@ -751,6 +757,8 @@ export class DeepSeekClient {
         return "Antigravity";
       case "zai":
         return "Z.AI";
+      case "opencode":
+        return "OpenCode";
     }
   }
 
