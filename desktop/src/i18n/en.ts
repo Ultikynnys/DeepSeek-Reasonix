@@ -479,6 +479,9 @@ export const en = {
     tab: {
       newTabTitle: "New tab ⌘T",
       newTab: "New tab",
+      clearAll: "Clear all tabs",
+      clearRight: "Clear tabs to the right",
+      clearLeft: "Clear tabs to the left",
     },
     header: {
       noWorkspace: "No workspace selected",

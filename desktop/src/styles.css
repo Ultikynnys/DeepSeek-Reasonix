@@ -1399,6 +1399,10 @@ html[data-platform="macos"] .titlebar .tb-left {
   color: var(--accent);
 }
 
+.tab-menu {
+  min-width: 190px;
+}
+
 .search-row {
   padding: 0 12px 10px;
 }

@@ -109,6 +109,7 @@ import {
   coerceStartupFailure,
 } from "./ui/startup-failure";
 import { StatusBar } from "./ui/statusbar";
+import { type ClearTabsScope, TabMenu, getTabsToClear } from "./ui/tab-menu";
 import {
   AssistantMsg,
   CheckpointApprovalCard,
@@ -3032,6 +3033,18 @@ function TabRuntime({
             );
           }}
           onNew={onNewTab}
+          onClearTabs={(scope) => {
+            const targets = getTabsToClear(tabsList, activeTabId, scope);
+            if (targets.length === 0) return;
+            if (scope === "all") {
+              onNewTab();
+            }
+            for (const t of targets) {
+              rpcSend({ cmd: "tab_close", tabId: t.id }).catch((err) =>
+                console.error("tab_close failed", err),
+              );
+            }
+          }}
           singleTab={tabsList.length <= 1}
         />
 
@@ -3949,12 +3962,13 @@ function TitleBar({
   );
 }
 
-function TabBar({
+export function TabBar({
   tabs,
   activeId,
   setActive,
   onClose,
   onNew,
+  onClearTabs,
   singleTab,
 }: {
   tabs: { id: string; workspaceDir?: string }[];
@@ -3962,11 +3976,30 @@ function TabBar({
   setActive: (id: string) => void;
   onClose: (id: string) => void;
   onNew: () => void;
+  onClearTabs?: (scope: ClearTabsScope) => void;
   singleTab?: boolean;
 }) {
   useLang();
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+
+  const handleClear = (scope: ClearTabsScope) => {
+    if (onClearTabs) {
+      onClearTabs(scope);
+    } else {
+      const targets = getTabsToClear(tabs, activeId, scope);
+      if (scope === "all") onNew();
+      for (const t of targets) onClose(t.id);
+    }
+  };
+
   return (
-    <div className="tabbar">
+    <div
+      className="tabbar"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenuAnchor({ x: e.clientX, y: e.clientY });
+      }}
+    >
       {tabs.map((t) => {
         const ws = t.workspaceDir ?? "";
         const label =
@@ -4012,6 +4045,15 @@ function TabBar({
         <I.plus size={12} />
         <span style={{ fontSize: 11, marginLeft: 4 }}>{t("app.tab.newTab")}</span>
       </div>
+      {menuAnchor ? (
+        <TabMenu
+          anchor={menuAnchor}
+          tabs={tabs}
+          activeId={activeId}
+          onClear={handleClear}
+          onClose={() => setMenuAnchor(null)}
+        />
+      ) : null}
     </div>
   );
 }
