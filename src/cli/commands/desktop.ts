@@ -2399,7 +2399,15 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     apiKeyResolver: isOpenAI ? () => resolveOpenAIToken() : undefined,
     // Primary path: when OAuth creds exist, route through the ChatGPT Codex
     // backend so requests consume plan quota (free), not platform credits.
-    transportResolver: isOpenAI ? () => resolveCodexTransport() : undefined,
+    transportResolver: isOpenAI
+      ? () => resolveCodexTransport()
+      : provider === "opencode" && tab.currentModel.startsWith("muse-")
+        ? async () => ({
+            endpoint: `${ep.baseUrl ?? DEFAULT_OPENCODE_CHAT_URL}/responses`,
+            headers: { Authorization: `Bearer ${ep.apiKey ?? "public"}` },
+            api: "responses",
+          })
+        : undefined,
     // Gemini models authenticate via Google Antigravity OAuth (Starter quota).
     geminiAuthResolver: provider === "gemini" ? () => resolveGeminiAuth() : undefined,
   });

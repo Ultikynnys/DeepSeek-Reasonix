@@ -254,7 +254,7 @@ function is5xxStatus(status: string): boolean {
 }
 
 const OUT_OF_CREDITS_429 =
-  /no credits? remaining|insufficient (?:credits?|balance)|out of credits|usage limit|current quota|insufficient_quota|no resource package|resource package|weekly limit|monthly limit|quota exceeded|resource_exhausted/i;
+  /no credits? remaining|insufficient (?:credits?|balance)|out of credits|usage limit|current quota|insufficient_quota|no resource package|resource package|weekly limit|monthly limit|quota exceeded|resource_exhausted|freeusagelimit|free.?usage|rate_limit_exceeded/i;
 
 function isOutOfCredits429(inner: string): boolean {
   return OUT_OF_CREDITS_429.test(inner);
