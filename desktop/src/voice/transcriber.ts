@@ -70,6 +70,7 @@ export function suppressOnnxOptimizerNoise(): void {
         (first.includes("CleanUnusedInitializersAndNodeArgs") ||
           first.includes("VerifyEachNodeIsAssignedToAnEp") ||
           first.includes("powerPreference option is currently ignored") ||
+          first.includes("Unable to determine content-length") ||
           (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
       ) {
         return;
@@ -89,6 +90,7 @@ export function suppressOnnxOptimizerNoise(): void {
         (first.includes("CleanUnusedInitializersAndNodeArgs") ||
           first.includes("VerifyEachNodeIsAssignedToAnEp") ||
           first.includes("powerPreference option is currently ignored") ||
+          first.includes("Unable to determine content-length") ||
           (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
       ) {
         return;
@@ -108,6 +110,7 @@ export function suppressOnnxOptimizerNoise(): void {
         (first.includes("CleanUnusedInitializersAndNodeArgs") ||
           first.includes("VerifyEachNodeIsAssignedToAnEp") ||
           first.includes("powerPreference option is currently ignored") ||
+          first.includes("Unable to determine content-length") ||
           (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
       ) {
         return;
@@ -162,7 +165,7 @@ export async function isWebGPUSupported(): Promise<boolean> {
     return false;
   }
   try {
-    const adapter = await nav.gpu.requestAdapter({ powerPreference: "high-performance" });
+    const adapter = await nav.gpu.requestAdapter();
     if (!adapter) {
       return false;
     }

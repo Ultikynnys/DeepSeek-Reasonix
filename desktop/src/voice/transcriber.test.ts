@@ -155,6 +155,9 @@ describe("LocalSpeechTranscriber", () => {
     console.warn(
       "2026-09-05 00:44:21.507599 [W:onnxruntime:, session_state.cc:1280 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance.",
     );
+    console.warn(
+      "Unable to determine content-length from response headers. Will expand buffer when needed.",
+    );
     console.error(
       "2026-09-05 04:04:01.164499 [W:onnxruntime:, session_state.cc:1280 VerifyEachNodeIsAssignedToAnEp] Some nodes were not assigned to the preferred execution providers which may or may not have an negative impact on performance.",
     );
