@@ -110,6 +110,7 @@ import {
   loadOllamaEndpoint,
   loadOllamaGenerationOverrides,
   loadOllamaGenerationSettings,
+  loadOpencodeApiKey,
   loadPerplexityApiKey,
   loadProjectPathAllowed,
   loadProjectShellAllowed,
@@ -812,6 +813,7 @@ function collectWebSearchApiKeyPrefixes(): {
   ollama?: string;
   brave?: string;
   zai?: string;
+  opencode?: string;
 } {
   return {
     metaso: maskApiKey(loadMetasoApiKey()),
@@ -821,6 +823,7 @@ function collectWebSearchApiKeyPrefixes(): {
     ollama: maskApiKey(loadOllamaApiKey()),
     brave: maskApiKey(loadBraveApiKey()),
     zai: maskApiKey(loadZaiApiKey()),
+    opencode: maskApiKey(loadOpencodeApiKey()),
   };
 }
 
@@ -945,6 +948,7 @@ function emitSettings(tab: Tab): void {
         })
         .sort(),
       ollamaBaseUrl: config.ollamaBaseUrl,
+      opencodeBaseUrl: config.opencodeBaseUrl,
       webSearchEngine: readWebSearchEngine(),
       webSearchEndpoint: readConfig().webSearchEndpoint,
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
@@ -4848,7 +4852,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           msg.exaApiKey !== undefined ||
           msg.ollamaApiKey !== undefined ||
           msg.braveApiKey !== undefined ||
-          msg.zaiApiKey !== undefined
+          msg.zaiApiKey !== undefined ||
+          msg.opencodeApiKey !== undefined ||
+          msg.opencodeBaseUrl !== undefined
         ) {
           const cfg = readConfig();
           if (msg.webSearchEngine !== undefined) cfg.webSearchEngine = msg.webSearchEngine;
@@ -4878,6 +4884,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           if (msg.zaiApiKey !== undefined) {
             cfg.zaiApiKey = msg.zaiApiKey?.trim() || undefined;
+          }
+          if (msg.opencodeApiKey !== undefined) {
+            cfg.opencodeApiKey = msg.opencodeApiKey?.trim() || undefined;
+          }
+          if (msg.opencodeBaseUrl !== undefined) {
+            cfg.opencodeBaseUrl = msg.opencodeBaseUrl?.trim() || undefined;
           }
           writeConfig(cfg);
         }

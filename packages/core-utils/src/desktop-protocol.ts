@@ -477,7 +477,9 @@ export interface SettingsEvent {
     ollama?: string;
     brave?: string;
     zai?: string;
+    opencode?: string;
   };
+  opencodeBaseUrl?: string;
   /** Per-tab subagent model — the default model used when a subagent skill has no explicit `model:` frontmatter override. Absent = deepseek-v4-flash. */
   subagentModel?: string;
   showSystemEvents?: boolean;
@@ -731,6 +733,8 @@ export interface SettingsPatch {
   ollamaApiKey?: string | null;
   braveApiKey?: string | null;
   zaiApiKey?: string | null;
+  opencodeApiKey?: string | null;
+  opencodeBaseUrl?: string | null;
   showSystemEvents?: boolean;
 }
 

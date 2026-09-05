@@ -425,7 +425,9 @@ export type Settings = {
     ollama?: string;
     brave?: string;
     zai?: string;
+    opencode?: string;
   };
+  opencodeBaseUrl?: string | null;
   /** Per-tab subagent model — default for subagent skills without an explicit `model:` frontmatter. */
   subagentModel?: string;
   ollamaGeneration?: import("./protocol").OllamaGenerationSettings;
@@ -1682,6 +1684,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           webSearchEngine: ev.webSearchEngine,
           webSearchEndpoint: ev.webSearchEndpoint,
           webSearchApiKeys: ev.webSearchApiKeys,
+          opencodeBaseUrl: ev.opencodeBaseUrl,
           subagentModel: ev.subagentModel,
           ollamaGeneration: ev.ollamaGeneration,
           ollamaGenerationOverrides: ev.ollamaGenerationOverrides,

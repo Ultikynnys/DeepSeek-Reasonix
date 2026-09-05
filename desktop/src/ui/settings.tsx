@@ -1081,7 +1081,7 @@ function WebSearchApiKeyRow({
   prefix,
   onSave,
 }: {
-  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama" | "zai";
+  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama" | "zai" | "opencode";
   patchKey:
     | "metasoApiKey"
     | "baiduApiKey"
@@ -1090,7 +1090,8 @@ function WebSearchApiKeyRow({
     | "exaApiKey"
     | "braveApiKey"
     | "ollamaApiKey"
-    | "zaiApiKey";
+    | "zaiApiKey"
+    | "opencodeApiKey";
   signupUrl: string;
   prefix?: string;
   onSave: (patch: SettingsPatch) => void;
@@ -1565,6 +1566,32 @@ function PageModels({
           patchKey="zaiApiKey"
           signupUrl="https://z.ai/manage-apikey/apikey-list"
           prefix={settings.webSearchApiKeys?.zai}
+          onSave={onSave}
+        />
+      </section>
+      <section className="section">
+        <div className="stitle">{t("settings.opencodeSection")}</div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.opencodeBaseUrl")}</div>
+            <div className="h">{t("settings.opencodeBaseUrlHint")}</div>
+          </div>
+          <input
+            className="field mono"
+            defaultValue={settings.opencodeBaseUrl ?? ""}
+            placeholder="https://opencode.ai/zen/v1"
+            onBlur={(e) => {
+              const next = e.target.value.trim();
+              if (next === (settings.opencodeBaseUrl ?? "")) return;
+              onSave({ opencodeBaseUrl: next || null });
+            }}
+          />
+        </div>
+        <WebSearchApiKeyRow
+          engine="opencode"
+          patchKey="opencodeApiKey"
+          signupUrl="https://opencode.ai/auth"
+          prefix={settings.webSearchApiKeys?.opencode}
           onSave={onSave}
         />
       </section>
