@@ -1406,7 +1406,7 @@ describe("registerWebTools", () => {
   });
 
   it("appends consecutive search directive on repeated empty searches", async () => {
-    const emptyHtml = "<html><body><div id='b_content'></div></body></html>";
+    const emptyHtml = "<html><body>Your search did not match any documents.</body></html>";
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
       async () =>
