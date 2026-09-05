@@ -23,6 +23,9 @@ function serveOnnxWasm(): Plugin {
     name: "serve-onnx-wasm",
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
+        res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+        res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+
         const rawUrl = req.url ?? "";
         const pathname = rawUrl.split("?")[0] ?? "";
         if (pathname.startsWith("/wasm/")) {
@@ -33,8 +36,6 @@ function serveOnnxWasm(): Plugin {
             } else if (filePath.endsWith(".mjs") || filePath.endsWith(".js")) {
               res.setHeader("Content-Type", "application/javascript");
             }
-            res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-            res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.end(readFileSync(filePath));
             return;

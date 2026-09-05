@@ -310,6 +310,10 @@ async function invoke(
     case "plugin:window-state|restore_state":
       return null;
 
+    // ---- Telemetry / diagnostics: handled in daemon, ignored in browser shim ----
+    case "record_frontend_diagnostic":
+      return null;
+
     default:
       console.warn(`[browser-tauri] unhandled command "${cmd}" — resolved null`, args);
       return null;

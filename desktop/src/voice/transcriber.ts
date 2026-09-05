@@ -69,6 +69,7 @@ export function suppressOnnxOptimizerNoise(): void {
         typeof first === "string" &&
         (first.includes("CleanUnusedInitializersAndNodeArgs") ||
           first.includes("VerifyEachNodeIsAssignedToAnEp") ||
+          first.includes("powerPreference option is currently ignored") ||
           (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
       ) {
         return;
@@ -87,6 +88,7 @@ export function suppressOnnxOptimizerNoise(): void {
         typeof first === "string" &&
         (first.includes("CleanUnusedInitializersAndNodeArgs") ||
           first.includes("VerifyEachNodeIsAssignedToAnEp") ||
+          first.includes("powerPreference option is currently ignored") ||
           (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
       ) {
         return;
@@ -105,6 +107,7 @@ export function suppressOnnxOptimizerNoise(): void {
         typeof first === "string" &&
         (first.includes("CleanUnusedInitializersAndNodeArgs") ||
           first.includes("VerifyEachNodeIsAssignedToAnEp") ||
+          first.includes("powerPreference option is currently ignored") ||
           (first.includes("[W:onnxruntime:") && first.includes("Removing initializer")))
       ) {
         return;
