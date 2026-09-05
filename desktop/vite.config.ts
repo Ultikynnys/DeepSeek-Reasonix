@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
@@ -8,6 +8,43 @@ import { browserBridge } from "./plugins/browser-bridge";
 const pkg = JSON.parse(
   readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"),
 ) as { version: string };
+
+/**
+ * Serves ONNX Runtime WASM and JSEP modules directly from public/wasm.
+ * Vite dev server by default rejects dynamic import() calls targeting files
+ * inside the /public directory ("This file is in /public and will be copied
+ * as-is during build without going through plugin transforms...").
+ * This middleware intercepts /wasm/* requests and serves the files directly
+ * with the correct MIME types and Cross-Origin isolation headers before Vite's
+ * module transform middleware intercepts them.
+ */
+function serveOnnxWasm(): Plugin {
+  return {
+    name: "serve-onnx-wasm",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const rawUrl = req.url ?? "";
+        const pathname = rawUrl.split("?")[0] ?? "";
+        if (pathname.startsWith("/wasm/")) {
+          const filePath = resolve(__dirname, "public", pathname.slice(1));
+          if (existsSync(filePath)) {
+            if (filePath.endsWith(".wasm")) {
+              res.setHeader("Content-Type", "application/wasm");
+            } else if (filePath.endsWith(".mjs") || filePath.endsWith(".js")) {
+              res.setHeader("Content-Type", "application/javascript");
+            }
+            res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+            res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.end(readFileSync(filePath));
+            return;
+          }
+        }
+        next();
+      });
+    },
+  };
+}
 
 /**
  * Strip variable-length lookbehind from mdast-util-gfm-autolink-literal's
@@ -33,12 +70,16 @@ function patchGfmAutolinkLookbehind(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), patchGfmAutolinkLookbehind(), browserBridge()],
+  plugins: [react(), patchGfmAutolinkLookbehind(), serveOnnxWasm(), browserBridge()],
   clearScreen: false,
   server: {
     host: "127.0.0.1",
     port: 1420,
     strictPort: true,
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
   define: {
