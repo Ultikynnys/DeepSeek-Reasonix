@@ -682,11 +682,3 @@ const defaultFs: NonNullable<AtMentionOptions["fs"]> = {
   },
   read: (p) => readFileSync(p, "utf8"),
 };
-
-export {
-  AT_URL_PATTERN,
-  DEFAULT_AT_URL_MAX_CHARS,
-  expandAtUrls,
-  stripUrlTail,
-} from "./at-mentions-url.js";
-export type { AtUrlExpansion, AtUrlOptions } from "./at-mentions-url.js";

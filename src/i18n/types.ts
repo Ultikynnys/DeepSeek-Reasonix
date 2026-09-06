@@ -201,8 +201,6 @@ export interface TranslationSchema {
     hookUserPromptSubmit: string;
     hookStop: string;
     atMentions: string;
-    atUrl: string;
-    atUrlFailed: string;
     sessionTitleNoSession: string;
     sessionTitleNoContent: string;
     sessionTitleNoTitle: string;

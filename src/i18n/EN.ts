@@ -576,8 +576,6 @@ export const EN: TranslationSchema = {
     hookUserPromptSubmit: "UserPromptSubmit hook",
     hookStop: "Stop hook",
     atMentions: "▸ @mentions: {parts}",
-    atUrl: "▸ @url: {parts}",
-    atUrlFailed: "@url expansion failed",
     sessionTitleNoSession: "▸ no persisted session is active, so there is nothing to rename.",
     sessionTitleNoContent: "▸ not enough conversation content to name this session yet.",
     sessionTitleNoTitle: "▸ the model did not return a usable session title.",
