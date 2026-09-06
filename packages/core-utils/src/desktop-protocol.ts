@@ -84,7 +84,7 @@ export type WebSearchEngineName =
   | "ollama"
   | "zai";
 
-export type ExternalSessionSource = "claude" | "codex";
+export type ExternalSessionSource = "claude" | "codex" | "reasonix";
 
 export interface OllamaGenerationSettings {
   temperature?: number;

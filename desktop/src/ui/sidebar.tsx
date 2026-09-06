@@ -581,7 +581,13 @@ export function SessionImportPopover({
                   }}
                 >
                   <span className="app-icon">
-                    {app.source === "claude" ? <I.terminal size={15} /> : <I.bot size={15} />}
+                    {app.source === "claude" ? (
+                      <I.terminal size={15} />
+                    ) : app.source === "codex" ? (
+                      <I.bot size={15} />
+                    ) : (
+                      <I.database size={15} />
+                    )}
                   </span>
                   <span className="app-body">
                     <span className="app-name">{app.label}</span>
@@ -627,6 +633,13 @@ export function SessionImportPopover({
               </button>
               <button type="button" data-on={source === "codex"} onClick={() => setSource("codex")}>
                 {t("sidebarPanel.importFromCodex")}
+              </button>
+              <button
+                type="button"
+                data-on={source === "reasonix"}
+                onClick={() => setSource("reasonix")}
+              >
+                {t("sidebarPanel.importFromReasonix")}
               </button>
             </div>
           </div>

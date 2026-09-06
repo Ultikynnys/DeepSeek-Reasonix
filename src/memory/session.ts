@@ -94,7 +94,7 @@ export interface SessionMeta {
   /** Per-tab subagent model the conversation last ran with — same resume semantics as `model`. Only the desktop UI's subagent selector writes this. */
   subagentModel?: string;
   /** Source app when the session was imported from another local AI client. */
-  importedSource?: "claude" | "codex";
+  importedSource?: "claude" | "codex" | "reasonix";
   /** Absolute path of the source transcript used for import. */
   importedPath?: string;
 }

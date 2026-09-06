@@ -841,6 +841,7 @@ export const en = {
     importSource: "Source",
     importFromClaude: "Claude",
     importFromCodex: "Codex",
+    importFromReasonix: "Reasonix",
     importPath: "Session file path",
     importName: "Session name",
     importNamePlaceholder: "Optional custom name",

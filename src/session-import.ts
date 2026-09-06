@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
 import {
@@ -10,13 +10,16 @@ import {
 import { readJsonlLines } from "./core/jsonl.js";
 import {
   SESSION_EVENTS_SUFFIX,
+  type SessionMeta,
   detectGitBranch,
   loadSessionMeta,
+  normalizeWorkspace,
   patchSessionMeta,
   rewriteSession,
   sessionPath,
   sessionsDir,
 } from "./memory/session.js";
+import { estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
 export type { ExternalSessionApp, ExternalSessionSource };
@@ -26,6 +29,9 @@ export interface ImportedSession {
   workspace?: string;
   nameHint?: string;
   summary?: string;
+  model?: SessionMeta["model"];
+  reasoningEffort?: SessionMeta["reasoningEffort"];
+  subagentModel?: SessionMeta["subagentModel"];
 }
 
 export interface ImportExternalSessionOptions {
@@ -82,6 +88,30 @@ interface CodexRecord {
   };
 }
 
+interface SessionImportSourceDefinition {
+  label: string;
+  root: () => string;
+  parse: (path: string) => ImportedSession;
+}
+
+const SESSION_IMPORT_SOURCES: Record<ExternalSessionSource, SessionImportSourceDefinition> = {
+  claude: {
+    label: "Claude Code",
+    root: () => join(homedir(), ".claude", "projects"),
+    parse: parseClaudeSessionFile,
+  },
+  codex: {
+    label: "Codex",
+    root: () => join(homedir(), ".codex", "sessions"),
+    parse: parseCodexSessionFile,
+  },
+  reasonix: {
+    label: "Reasonix",
+    root: sessionsDir,
+    parse: parseReasonixSessionFile,
+  },
+};
+
 export function parseExternalSessionFile(
   source: ExternalSessionSource,
   path: string,
@@ -89,7 +119,7 @@ export function parseExternalSessionFile(
   if (!existsSync(path)) {
     throw new Error(`source file not found: ${path}`);
   }
-  return source === "claude" ? parseClaudeSessionFile(path) : parseCodexSessionFile(path);
+  return SESSION_IMPORT_SOURCES[source].parse(path);
 }
 
 export function buildImportedSessionName(
@@ -110,7 +140,10 @@ export function importExternalSession(
     throw new Error(`no importable chat messages found in ${opts.path}`);
   }
 
-  const name = opts.name?.trim() || buildImportedSessionName(opts.source, opts.path, imported);
+  const requestedName =
+    opts.name?.trim() || buildImportedSessionName(opts.source, opts.path, imported);
+  const name =
+    opts.source === "reasonix" && !opts.force ? availableSessionName(requestedName) : requestedName;
   const outputPath = sessionPath(name);
   if (existsSync(outputPath) && !opts.force) {
     throw new Error(`target session already exists: ${name}`);
@@ -125,6 +158,9 @@ export function importExternalSession(
     workspace,
     summary,
     branch,
+    model: imported.model,
+    reasoningEffort: imported.reasoningEffort,
+    subagentModel: imported.subagentModel,
     importedSource: opts.source,
     importedPath: opts.path,
   });
@@ -140,14 +176,15 @@ export function importExternalSession(
   };
 }
 
-export function discoverExternalSessionApps(): ExternalSessionApp[] {
-  return (["claude", "codex"] as const).map((source) => {
-    const root = defaultSessionRoot(source);
-    const files = scanExternalSessionFiles(source);
+export function discoverExternalSessionApps(workspace?: string): ExternalSessionApp[] {
+  return (Object.keys(SESSION_IMPORT_SOURCES) as ExternalSessionSource[]).map((source) => {
+    const definition = SESSION_IMPORT_SOURCES[source];
+    const root = definition.root();
+    const files = scanExternalSessionFiles(source, workspace);
     const latest = files[0];
     return {
       source,
-      label: source === "claude" ? "Claude Code" : "Codex",
+      label: definition.label,
       root,
       available: files.length > 0,
       sessionCount: files.length,
@@ -167,7 +204,7 @@ export function importExternalSessions(opts: {
 
   const existing = importedPathKeys();
   for (const source of opts.sources) {
-    const files = scanExternalSessionFiles(source);
+    const files = scanExternalSessionFiles(source, opts.workspace);
     for (const file of files) {
       const key = importKey(source, file.path);
       if (existing.has(key)) {
@@ -193,17 +230,26 @@ export function importExternalSessions(opts: {
 }
 
 function defaultSessionRoot(source: ExternalSessionSource): string {
-  return source === "claude"
-    ? join(homedir(), ".claude", "projects")
-    : join(homedir(), ".codex", "sessions");
+  return SESSION_IMPORT_SOURCES[source].root();
 }
 
-function scanExternalSessionFiles(source: ExternalSessionSource): ExternalSessionFile[] {
+function scanExternalSessionFiles(
+  source: ExternalSessionSource,
+  destinationWorkspace?: string,
+): ExternalSessionFile[] {
   const root = defaultSessionRoot(source);
   const out: ExternalSessionFile[] = [];
   collectJsonl(root, source, out);
-  out.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return out;
+  const destination = normalizeWorkspace(destinationWorkspace);
+  const filtered =
+    source === "reasonix" && destination
+      ? out.filter((file) => {
+          const meta = readReasonixSessionMeta(file.path);
+          return !!meta.workspace && normalizeWorkspace(meta.workspace) !== destination;
+        })
+      : out;
+  filtered.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return filtered;
 }
 
 function collectJsonl(
@@ -228,7 +274,11 @@ function collectJsonl(
     }
     if (stat.isDirectory()) {
       collectJsonl(path, source, out);
-    } else if (stat.isFile() && entry.endsWith(".jsonl")) {
+    } else if (
+      stat.isFile() &&
+      entry.endsWith(".jsonl") &&
+      !(source === "reasonix" && entry.endsWith(SESSION_EVENTS_SUFFIX))
+    ) {
       out.push({ source, path, mtimeMs: stat.mtimeMs });
     }
   }
@@ -257,6 +307,126 @@ function importedPathKeys(): Set<string> {
 
 function importKey(source: ExternalSessionSource, path: string): string {
   return `${source}:${path}`;
+}
+
+function parseReasonixSessionFile(path: string): ImportedSession {
+  const meta = readReasonixSessionMeta(path, true);
+  if (!meta.workspace?.trim()) {
+    throw new Error(`Reasonix session metadata is missing a workspace: ${path}`);
+  }
+  const records = readJsonlLines(path);
+  if (records.length === 0) {
+    throw new Error(`Reasonix session contains no readable messages: ${path}`);
+  }
+  if (!records.every(isChatMessage)) {
+    throw new Error(`Reasonix session contains an invalid chat message: ${path}`);
+  }
+  const textOnlyMessages = records.flatMap(toTextOnlyMessage);
+  if (textOnlyMessages.length === 0) {
+    throw new Error(`Reasonix session contains no importable conversation text: ${path}`);
+  }
+  textOnlyMessages.push({
+    role: "user",
+    content:
+      "Continue from here using the imported conversation as context. Do not repeat work already completed.",
+  });
+  const messages = enforceReasonixImportTokenLimit(textOnlyMessages);
+  return {
+    messages,
+    workspace: meta.workspace,
+    nameHint: meta.summary || basename(path, extname(path)),
+    summary: meta.summary,
+    model: meta.model,
+    reasoningEffort: meta.reasoningEffort,
+    subagentModel: meta.subagentModel,
+  };
+}
+
+function readReasonixSessionMeta(path: string, required = false): SessionMeta {
+  const metaPath = path.replace(/\.jsonl$/, ".meta.json");
+  if (metaPath === path || !existsSync(metaPath)) {
+    if (required) throw new Error(`Reasonix session metadata not found: ${metaPath}`);
+    return {};
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(metaPath, "utf8"));
+  } catch (error) {
+    if (required) {
+      throw new Error(`Reasonix session metadata is invalid: ${metaPath}`, { cause: error });
+    }
+    return {};
+  }
+  if (!value || typeof value !== "object") {
+    if (required) throw new Error(`Reasonix session metadata is invalid: ${metaPath}`);
+    return {};
+  }
+  return value as SessionMeta;
+}
+
+function isChatMessage(value: unknown): value is ChatMessage {
+  if (!value || typeof value !== "object") return false;
+  const role = (value as { role?: unknown }).role;
+  return role === "system" || role === "user" || role === "assistant" || role === "tool";
+}
+
+function toTextOnlyMessage(message: ChatMessage): ChatMessage[] {
+  if (message.role === "tool") return [];
+  const content = textContent(message.content);
+  if (message.role !== "assistant") {
+    return content ? [{ role: message.role, content }] : [];
+  }
+
+  const reasoning = message.reasoning_content?.trim() || "";
+  if (!reasoning) return content ? [{ role: "assistant", content }] : [];
+
+  const sections = [`Prior reasoning/work context:\n${reasoning}`];
+  if (content) sections.push(`Assistant response:\n${content}`);
+  return [{ role: "assistant", content: sections.join("\n\n") }];
+}
+
+function textContent(content: ChatMessage["content"]): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((part) => (part.type === "text" && part.text.trim() ? [part.text.trim()] : []))
+    .join("\n\n");
+}
+
+export const REASONIX_IMPORT_MAX_TOKENS = 30_000;
+
+const IMPORT_TRUNCATION_NOTICE: ChatMessage = {
+  role: "user",
+  content:
+    "Import notice: older conversation messages were truncated to keep the imported context within 30,000 tokens. Continue from the remaining recent context and do not assume omitted details are still available.",
+};
+
+export function enforceReasonixImportTokenLimit(messages: ChatMessage[]): ChatMessage[] {
+  if (estimateRequestTokens(messages) <= REASONIX_IMPORT_MAX_TOKENS) return messages;
+
+  const kept: ChatMessage[] = [];
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const candidate = [IMPORT_TRUNCATION_NOTICE, messages[index]!, ...kept];
+    if (estimateRequestTokens(candidate) > REASONIX_IMPORT_MAX_TOKENS) break;
+    kept.unshift(messages[index]!);
+  }
+  const result = [IMPORT_TRUNCATION_NOTICE, ...kept];
+  const finalTokens = estimateRequestTokens(result);
+  if (finalTokens > REASONIX_IMPORT_MAX_TOKENS) {
+    throw new Error(
+      `Reasonix import token limit invariant failed: ${finalTokens} > ${REASONIX_IMPORT_MAX_TOKENS}`,
+    );
+  }
+  return result;
+}
+
+function availableSessionName(base: string): string {
+  if (!existsSync(sessionPath(base))) return base;
+  for (let suffix = 2; suffix < 10_000; suffix++) {
+    const candidate = `${base}-${suffix}`;
+    if (!existsSync(sessionPath(candidate))) return candidate;
+  }
+  throw new Error(`could not allocate a unique imported session name for: ${base}`);
 }
 
 function parseClaudeSessionFile(path: string): ImportedSession {

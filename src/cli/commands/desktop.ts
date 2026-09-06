@@ -4432,7 +4432,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "session_import_scan") {
       try {
-        emit({ type: "$session_import_sources", apps: discoverExternalSessionApps() }, tab.id);
+        emit(
+          { type: "$session_import_sources", apps: discoverExternalSessionApps(tab.rootDir) },
+          tab.id,
+        );
       } catch (err) {
         emit(
           { type: "$error", message: `session_import_scan failed: ${(err as Error).message}` },
