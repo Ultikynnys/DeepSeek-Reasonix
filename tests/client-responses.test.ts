@@ -212,6 +212,22 @@ describe("Responses chat() → internal streaming (Codex requires stream:true)",
       client.chat({ model: "gpt-5.6-sol", messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toThrow(/^OpenAI 400: quota exceeded/);
   });
+
+  it("preserves server_error metadata from response.failed", async () => {
+    const client = codexClient(
+      sseFetch([
+        'data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"An error occurred while processing your request."}}}\n\n',
+      ]),
+    );
+
+    await expect(
+      client.chat({ model: "gpt-5.6-sol", messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/^OpenAI 500: .*\(server_error\)$/),
+      code: "server_error",
+      phase: "stream_body_read",
+    });
+  });
 });
 
 describe("Responses streaming", () => {

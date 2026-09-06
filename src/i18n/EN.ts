@@ -679,6 +679,8 @@ export const EN: TranslationSchema = {
       "The model produced only thinking without an answer or tool call: ending the turn without an answer. Try again or /retry.",
     providerErrorRetry:
       "The model provider returned an error before producing a visible response — retrying automatically.",
+    providerServerErrorRetry:
+      "The model provider reported a temporary server error before producing a visible response: retrying automatically in 10 seconds.",
     ollamaTruncatedRetry:
       "The model hit its output-token limit mid-response — continuing generation from where it stopped.",
     ollamaTruncatedGiveUp:

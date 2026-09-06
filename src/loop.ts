@@ -1,4 +1,4 @@
-import { messageOf } from "@reasonix/core-utils";
+import { messageOf, sleep } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "./client.js";
 import { type EditMode, type ReasoningEffort, providerForModel } from "./config.js";
 import { tryParseJson } from "./core/parse-json.js";
@@ -77,6 +77,7 @@ import { ReadTracker } from "./tools/read-tracker.js";
 import { USER_CANCEL_NOTE } from "./tools/shell.js";
 import type { ChatMessage, ToolCall, ToolSpec, TurnImage, UserContentPart } from "./types.js";
 
+export const PROVIDER_SERVER_ERROR_RETRY_DELAY_MS = 10_000;
 export const MID_TURN_STEER_WRAPPER =
   "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]";
 
@@ -1412,12 +1413,20 @@ export class CacheFirstLoop {
           (!is4xxError(cause) || phase === "stream_body_read");
         if (providerErrorRetryable) {
           this._providerErrorRetried = true;
+          const serverError = code === "server_error";
           yield {
             turn: this._turn,
             role: "warning",
             severity: "high",
-            content: t("loop.providerErrorRetry"),
+            content: t(serverError ? "loop.providerServerErrorRetry" : "loop.providerErrorRetry"),
           };
+          if (serverError) {
+            try {
+              await sleep(PROVIDER_SERVER_ERROR_RETRY_DELAY_MS, signal);
+            } catch (delayError) {
+              if (!signal.aborted) throw delayError;
+            }
+          }
           continue;
         }
         const streamBodyError = this.stream && phase === "stream_body_read";

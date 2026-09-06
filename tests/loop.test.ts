@@ -10,7 +10,7 @@ import {
   HISTORY_FOLD_THRESHOLD,
 } from "../src/context-manager.js";
 import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
-import { CacheFirstLoop } from "../src/loop.js";
+import { CacheFirstLoop, PROVIDER_SERVER_ERROR_RETRY_DELAY_MS } from "../src/loop.js";
 import type { LoopEvent } from "../src/loop/types.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
@@ -3685,6 +3685,119 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     expect(calls).toBe(2);
     expect(events.some((ev) => ev.role === "error")).toBe(false);
     expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("recovered");
+  });
+
+  it("waits 10 seconds before retrying an OpenAI server_error", async () => {
+    vi.useFakeTimers();
+    try {
+      const transport: ResolvedTransport = {
+        endpoint: "https://chatgpt.com/backend-api/codex/responses",
+        headers: { Authorization: "Bearer oauth", "ChatGPT-Account-Id": "acct-1" },
+        api: "responses",
+      };
+      let calls = 0;
+      const fetch = vi.fn(async () => {
+        calls++;
+        const events =
+          calls === 1
+            ? [
+                'data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"An error occurred while processing your request."}}}\n\n',
+              ]
+            : [
+                'data: {"type":"response.output_text.delta","delta":"recovered"}\n\n',
+                'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}\n\n',
+              ];
+        const bytes = new TextEncoder().encode(events.join(""));
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(bytes);
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }) as unknown as typeof fetch;
+      const client = new DeepSeekClient({
+        baseUrl: "https://api.openai.com/v1",
+        fetch,
+        transportResolver: async () => transport,
+        retry: { maxAttempts: 1 },
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "be brief" }),
+        stream: true,
+        model: "gpt-5.6-sol",
+      });
+      const events: LoopEvent[] = [];
+      const run = (async () => {
+        for await (const ev of loop.step("hello")) events.push(ev);
+      })();
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(PROVIDER_SERVER_ERROR_RETRY_DELAY_MS - 1);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await run;
+
+      expect(calls).toBe(2);
+      expect(events.some((ev) => ev.role === "error")).toBe(false);
+      expect(events.find((ev) => ev.role === "warning")?.content).toContain("in 10 seconds");
+      expect(events.find((ev) => ev.role === "assistant_final")?.content).toBe("recovered");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts cleanly during the server_error retry delay", async () => {
+    vi.useFakeTimers();
+    try {
+      const transport: ResolvedTransport = {
+        endpoint: "https://chatgpt.com/backend-api/codex/responses",
+        headers: { Authorization: "Bearer oauth", "ChatGPT-Account-Id": "acct-1" },
+        api: "responses",
+      };
+      const fetch = vi.fn(async () => {
+        const bytes = new TextEncoder().encode(
+          'data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"temporary failure"}}}\n\n',
+        );
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(bytes);
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }) as unknown as typeof fetch;
+      const client = new DeepSeekClient({
+        baseUrl: "https://api.openai.com/v1",
+        fetch,
+        transportResolver: async () => transport,
+        retry: { maxAttempts: 1 },
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "be brief" }),
+        stream: true,
+        model: "gpt-5.6-sol",
+      });
+      const events: LoopEvent[] = [];
+
+      for await (const ev of loop.step("hello")) {
+        events.push(ev);
+        if (ev.role === "warning") loop.abort();
+      }
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(events.some((ev) => ev.role === "error")).toBe(false);
+      expect(events.at(-1)?.role).toBe("done");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not replay an OpenAI response.failed event after visible output", async () => {

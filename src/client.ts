@@ -1590,14 +1590,19 @@ export class DeepSeekClient {
               case "response.incomplete":
                 chunk.finishReason = "incomplete";
                 break;
-              case "response.failed":
+              case "response.failed": {
+                const failure = responsesFailure(json);
                 streamError = Object.assign(
                   new Error(
-                    `${this._errorPrefix(opts.model)} 400: ${responsesFailureDetail(json)}`,
+                    `${this._errorPrefix(opts.model)} ${failure.status}: ${failure.detail}`,
                   ),
-                  { phase: "stream_body_read" as const },
+                  {
+                    phase: "stream_body_read" as const,
+                    ...(failure.code ? { code: failure.code } : {}),
+                  },
                 );
                 break;
+              }
             }
             if (
               chunk.contentDelta !== undefined ||
@@ -1683,8 +1688,10 @@ export class DeepSeekClient {
   }
 }
 
-function responsesFailureDetail(event: unknown): string {
-  if (!event || typeof event !== "object") return "response failed";
+function responsesFailure(event: unknown): { detail: string; code?: string; status: number } {
+  if (!event || typeof event !== "object") {
+    return { detail: "response failed", status: 400 };
+  }
   const root = event as Record<string, unknown>;
   const response =
     root.response && typeof root.response === "object"
@@ -1700,8 +1707,13 @@ function responsesFailureDetail(event: unknown): string {
   const code =
     (typeof nested?.code === "string" && nested.code) ||
     (typeof root.code === "string" && root.code);
-  if (message && code && !message.includes(code)) return `${message} (${code})`;
-  return message || code || "response failed";
+  const detail =
+    message && code && !message.includes(code) ? `${message} (${code})` : message || code;
+  return {
+    detail: detail || "response failed",
+    ...(code ? { code } : {}),
+    status: code === "server_error" ? 500 : 400,
+  };
 }
 
 export type { ChatMessage, ToolCall, ToolSpec };
