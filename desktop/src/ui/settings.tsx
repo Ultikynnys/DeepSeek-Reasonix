@@ -25,8 +25,6 @@ import {
   FONT_SCALE,
   type FontFamily,
   type FontScale,
-  THEME,
-  type Theme,
 } from "../theme";
 import {
   type AudioInputDevice,
@@ -79,8 +77,6 @@ export function SettingsModal({
   balance,
   usage,
   currency,
-  theme,
-  onSetTheme,
   fontScale,
   onSetFontScale,
   fontFamily,
@@ -130,8 +126,6 @@ export function SettingsModal({
   balance: Balance | null;
   usage: UsageStats;
   currency: "CNY" | "USD";
-  theme: Theme;
-  onSetTheme: (theme: Theme) => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
   fontFamily: FontFamily;
@@ -251,8 +245,6 @@ export function SettingsModal({
             {page === "general" && (
               <PageGeneral
                 settings={settings}
-                theme={theme}
-                onSetTheme={onSetTheme}
                 fontScale={fontScale}
                 onSetFontScale={onSetFontScale}
                 fontFamily={fontFamily}
@@ -338,8 +330,6 @@ export function SettingsModal({
 
 function PageGeneral({
   settings,
-  theme,
-  onSetTheme,
   fontScale,
   onSetFontScale,
   fontFamily,
@@ -349,8 +339,6 @@ function PageGeneral({
   onSave,
 }: {
   settings: SettingsType;
-  theme: Theme;
-  onSetTheme: (theme: Theme) => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
   fontFamily: FontFamily;
@@ -374,28 +362,6 @@ function PageGeneral({
     <>
       <section className="section">
         <div className="stitle">{t("settings.appearanceSection")}</div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.theme")}</div>
-            <div className="h">{t("settings.themeHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            <button
-              type="button"
-              data-on={theme === THEME.DARK}
-              onClick={() => onSetTheme(THEME.DARK)}
-            >
-              {t("settings.themeDark")}
-            </button>
-            <button
-              type="button"
-              data-on={theme === THEME.LIGHT}
-              onClick={() => onSetTheme(THEME.LIGHT)}
-            >
-              {t("settings.themeLight")}
-            </button>
-          </div>
-        </div>
         <div className="setting-row">
           <div className="l">
             <div className="n">{t("settings.fontScale")}</div>

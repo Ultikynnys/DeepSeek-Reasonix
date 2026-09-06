@@ -80,7 +80,6 @@ import {
   type FontScale,
   type Theme,
   type ThemeStyle,
-  defaultStyleForTheme,
   isFontFamily,
   isFontScale,
   themeForStyle,
@@ -2162,7 +2161,6 @@ interface TabRuntimeProps {
   onNewTab: () => void;
   theme: Theme;
   themeStyle: ThemeStyle;
-  onSetTheme: (theme: Theme) => void;
   onSetThemeStyle: (style: ThemeStyle) => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
@@ -2216,7 +2214,6 @@ function TabRuntime({
   onNewTab,
   theme,
   themeStyle,
-  onSetTheme,
   onSetThemeStyle,
   fontScale,
   onSetFontScale,
@@ -3466,8 +3463,6 @@ function TabRuntime({
             balance={state.balance}
             usage={state.usage}
             currency={currency}
-            theme={theme}
-            onSetTheme={onSetTheme}
             fontScale={fontScale}
             onSetFontScale={onSetFontScale}
             fontFamily={fontFamily}
@@ -5064,19 +5059,6 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [openTab, closeTab, activeTabId, tabs, onToggleCtx, onToggleSide]);
 
-  const onSetTheme = useCallback(
-    (nextTheme: Theme) => {
-      setTabThemes((prev) => {
-        const cur = prev[activeTabId];
-        if (!cur) return prev;
-        const next: TabTheme = { theme: nextTheme, themeStyle: defaultStyleForTheme(nextTheme) };
-        writeTabTheme(localStorage, activeTabId, next);
-        return { ...prev, [activeTabId]: next };
-      });
-    },
-    [activeTabId],
-  );
-
   const onSetThemeStyle = useCallback(
     (nextStyle: ThemeStyle) => {
       setTabThemes((prev) => {
@@ -5125,7 +5107,6 @@ export function App() {
           onNewTab={openTab}
           theme={tabThemes[t.id]?.theme ?? DEFAULT_TAB_THEME.theme}
           themeStyle={tabThemes[t.id]?.themeStyle ?? DEFAULT_TAB_THEME.themeStyle}
-          onSetTheme={onSetTheme}
           onSetThemeStyle={onSetThemeStyle}
           fontScale={fontScale}
           onSetFontScale={setFontScale}
