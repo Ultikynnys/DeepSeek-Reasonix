@@ -1,6 +1,6 @@
 /** Shared plumbing for MCP transports: closed-guard, close semantics, and the incoming message queue. */
 
-import { MessageQueue, consumeSseStream } from "./message-queue.js";
+import { MessageQueue, consumeSseStream, parseSseMessageEvent } from "./message-queue.js";
 import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
 
@@ -38,6 +38,14 @@ export abstract class BaseMcpTransport {
     } catch {
       /* already aborted */
     }
+  }
+
+  /** Parse an SSE `message` event and push it onto the incoming queue.
+   *  Unknown event types (server pings, custom extensions) are ignored and
+   *  malformed JSON is dropped. Shared by the SSE and Streamable HTTP transports. */
+  protected pushSseMessage(type: string | undefined, data: string): void {
+    const msg = parseSseMessageEvent(type ?? "message", data);
+    if (msg) this.incoming.push(msg);
   }
 
   /** Consume an SSE body, pushing a synthetic error notification if the stream dies while open. Shared by the SSE and Streamable HTTP transports. */

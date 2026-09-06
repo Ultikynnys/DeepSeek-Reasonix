@@ -1,8 +1,6 @@
 /** OpenAI website-account OAuth (PKCE) — browser sign-in powers gpt-5.6
  *  requests; client_id / endpoints env-overridable. */
 
-import { createHash, randomBytes } from "node:crypto";
-import { type Server, createServer } from "node:http";
 import {
   type OpenAIOAuthCreds,
   clearOpenAIOAuth,
@@ -10,7 +8,16 @@ import {
   readConfig,
   saveOpenAIOAuth,
 } from "./config.js";
-import { type TokenResponse, errorPage, postTokenForm } from "./oauth-shared.js";
+import {
+  type LocalhostOAuthFlow,
+  type TokenResponse,
+  beginLocalhostOAuthFlow,
+  envOr,
+  fetchUserEmail,
+  isTokenFresh,
+  makePkcePair,
+  postTokenForm,
+} from "./oauth-shared.js";
 
 export const OPENAI_DEFAULT_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
 export const OPENAI_DEFAULT_TOKEN_URL = "https://auth.openai.com/oauth/token";
@@ -22,15 +29,9 @@ export const OPENAI_DEFAULT_USERINFO_URL = "https://auth.openai.com/oauth/userin
 export const OPENAI_DEFAULT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 
 const DEFAULT_SCOPE = "openid profile email offline_access";
-const REFRESH_SLACK_MS = 5 * 60_000;
-const OAUTH_FLOW_TIMEOUT_MS = 10 * 60_000;
 /** Callback port the Codex client allowlists (mirrors the Codex CLI / opencode). */
 const OAUTH_CALLBACK_PORT = 1455;
-
-function envOr(def: string, name: string): string {
-  const v = process.env[name]?.trim();
-  return v ? v : def;
-}
+const OAUTH_CALLBACK_PATH = "/auth/callback";
 
 export function openAIAuthorizeUrl(): string {
   return envOr(OPENAI_DEFAULT_AUTHORIZE_URL, "OPENAI_AUTH_URL");
@@ -52,19 +53,9 @@ export function openAIClientId(): string {
   return envOr(OPENAI_DEFAULT_CLIENT_ID, "OPENAI_OAUTH_CLIENT_ID");
 }
 
-function base64Url(buf: Buffer): string {
-  return buf.toString("base64url");
-}
-
 /** RFC 7636 PKCE pair — verifier is 64 random bytes, challenge is S256. */
 export function pkcePair(): { verifier: string; challenge: string } {
-  const verifier = base64Url(randomBytes(64));
-  const challenge = base64Url(createHash("sha256").update(verifier).digest());
-  return { verifier, challenge };
-}
-
-function randomOAuthState(): string {
-  return randomBytes(24).toString("hex");
+  return makePkcePair(64);
 }
 
 export interface AuthorizeParams {
@@ -173,16 +164,7 @@ export async function revokeOAuthToken(token: string, clientId: string): Promise
 
 /** Account email from userinfo, for the settings card. Undefined on failure. */
 export async function oauthAccount(accessToken: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(openAIUserinfoUrl(), {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return undefined;
-    const info = (await res.json()) as { email?: string };
-    return info.email;
-  } catch {
-    return undefined;
-  }
+  return fetchUserEmail(openAIUserinfoUrl(), accessToken);
 }
 
 let refreshInFlight: Promise<string | undefined> | null = null;
@@ -195,8 +177,7 @@ export async function resolveOpenAIToken(
 ): Promise<string | undefined> {
   const creds = readConfig(path).openaiOAuth;
   if (!creds?.accessToken) return undefined;
-  if (!creds.refreshToken || creds.expiresAt - Date.now() > REFRESH_SLACK_MS)
-    return creds.accessToken;
+  if (isTokenFresh(creds.expiresAt, creds.refreshToken)) return creds.accessToken;
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     try {
@@ -213,17 +194,7 @@ export async function resolveOpenAIToken(
   return refreshInFlight;
 }
 
-export interface OAuthFlow {
-  /** Authorize URL to open in the system browser. */
-  url: string;
-  /** Resolves with exchanged tokens; rejects on error / cancel / timeout. */
-  done: Promise<OpenAIOAuthCreds>;
-  cancel: () => void;
-}
-
-const SUCCESS_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Signed in</title></head>
-<body style="font-family:system-ui;max-width:34em;margin:4em auto;line-height:1.6">
-<h2>Signed in to OpenAI</h2><p>You can close this window and return to Reasonix.</p></body></html>`;
+export interface OAuthFlow extends LocalhostOAuthFlow<OpenAIOAuthCreds> {}
 
 function redirectPort(uri: string): number {
   try {
@@ -237,113 +208,36 @@ function redirectPort(uri: string): number {
 /** Starts the browser OAuth dance: PKCE + state, a one-shot localhost
  *  callback server on the Codex client's allowlisted port, and the authorize
  *  URL. `done` rejects on error, cancel, or the 10-minute timeout. */
-export async function beginOAuthFlow(opts: { timeoutMs?: number } = {}): Promise<OAuthFlow> {
+export async function beginOAuthFlow(
+  opts: { timeoutMs?: number } = {},
+): Promise<LocalhostOAuthFlow<OpenAIOAuthCreds>> {
   const { verifier, challenge } = pkcePair();
-  const state = randomOAuthState();
-  const timeoutMs = opts.timeoutMs ?? OAUTH_FLOW_TIMEOUT_MS;
-  let settled = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let resolveDone: (creds: OpenAIOAuthCreds) => void = () => {};
-  let rejectDone: (err: Error) => void = () => {};
-  const done = new Promise<OpenAIOAuthCreds>((resolve, reject) => {
-    resolveDone = resolve;
-    rejectDone = reject;
-  });
-
   const envRedirect = process.env.OPENAI_OAUTH_REDIRECT_URI?.trim();
-  let redirectUri = envRedirect ?? `http://localhost:${OAUTH_CALLBACK_PORT}/auth/callback`;
-
-  const settle = (fn: () => void) => {
-    if (settled) return;
-    settled = true;
-    if (timer) clearTimeout(timer);
-    fn();
-    // Close idle keep-alive sockets only — an in-flight response (the
-    // success/error page) must reach the browser before the server closes.
-    server.closeIdleConnections();
-    server.close(() => {});
-  };
-
-  const server: Server = createServer((req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname !== "/auth/callback") {
-      res.writeHead(404).end("Not found");
-      return;
-    }
-    const q = url.searchParams;
-    if (q.get("error")) {
-      const msg = q.get("error_description") ?? q.get("error") ?? "access_denied";
-      res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
-      res.end(errorPage(msg));
-      settle(() => rejectDone(new Error(`OAuth sign-in failed: ${msg}`)));
-      return;
-    }
-    const code = q.get("code");
-    if (!code || q.get("state") !== state) {
-      res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
-      res.end(errorPage("State mismatch — this sign-in attempt is invalid. Retry from Reasonix."));
-      settle(() => rejectDone(new Error("OAuth state mismatch")));
-      return;
-    }
-    void exchangeOAuthCode({ clientId: openAIClientId(), redirectUri, code, verifier })
-      .then((creds) => {
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(SUCCESS_PAGE);
-        settle(() => resolveDone(creds));
-      })
-      .catch((err: unknown) => {
-        const msg = (err as Error).message;
-        res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
-        res.end(errorPage(msg));
-        settle(() => rejectDone(err as Error));
-      });
-  });
-  server.on("error", () => {
-    /* surfaced via the listening promise / settle-close */
-  });
-
-  const listen = (port: number) =>
-    new Promise<void>((resolve, reject) => {
-      const onError = (err: Error) => reject(err);
-      server.once("error", onError);
-      server.once("listening", () => {
-        server.removeListener("error", onError);
-        resolve();
-      });
-      // No host: dual-stack bind — both localhost (::1) and 127.0.0.1 reach it.
-      server.listen(port);
-    });
-
-  let port = envRedirect ? redirectPort(envRedirect) : OAUTH_CALLBACK_PORT;
-  try {
-    await listen(port);
-  } catch {
-    // Fixed port taken — fall back to an ephemeral port; the redirect URI is
-    // recomputed from the actual port below (best-effort: the upstream
-    // allowlist may only cover 1455).
-    await listen(0);
-  }
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("OAuth callback server failed to bind");
-  port = addr.port;
-  if (!envRedirect) redirectUri = `http://localhost:${port}/auth/callback`;
-
-  const url = buildAuthorizeUrl({
-    clientId: openAIClientId(),
+  const port = envRedirect ? redirectPort(envRedirect) : OAUTH_CALLBACK_PORT;
+  const redirectUri = envRedirect ?? `http://localhost:${port}${OAUTH_CALLBACK_PATH}`;
+  return beginLocalhostOAuthFlow<OpenAIOAuthCreds>({
+    callbackPath: OAUTH_CALLBACK_PATH,
     redirectUri,
-    state,
-    codeChallenge: challenge,
+    port,
+    timeoutMs: opts.timeoutMs,
+    successTitle: "Signed in",
+    successHeading: "Signed in to OpenAI",
+    stateMismatchMessage: "State mismatch — this sign-in attempt is invalid. Retry from Reasonix.",
+    allowPortFallback: true,
+    redirectUriForPort: envRedirect
+      ? undefined
+      : (p) => `http://localhost:${p}${OAUTH_CALLBACK_PATH}`,
+    buildUrl: (uri, state) =>
+      buildAuthorizeUrl({
+        clientId: openAIClientId(),
+        redirectUri: uri,
+        state,
+        codeChallenge: challenge,
+      }),
+    exchange: (code, uri) =>
+      exchangeOAuthCode({ clientId: openAIClientId(), redirectUri: uri, code, verifier }),
+    timeoutMessage: "OAuth sign-in timed out — retry from settings",
   });
-
-  timer = setTimeout(() => {
-    settle(() => rejectDone(new Error("OAuth sign-in timed out — retry from settings")));
-  }, timeoutMs);
-
-  return {
-    url,
-    done,
-    cancel: () => settle(() => rejectDone(new Error("OAuth sign-in cancelled"))),
-  };
 }
 
 /** Convenience for sign-out: revoke (best-effort) then wipe local creds. */

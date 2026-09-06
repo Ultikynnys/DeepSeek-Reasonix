@@ -1,8 +1,8 @@
 /** MCP Streamable HTTP transport (2025-03-26) — POST-only; no long-lived GET stream, no Last-Event-ID resume. */
 
 import { BaseMcpTransport } from "./base-transport.js";
-import { parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
+import { drainBody, postJson, pushJsonRpcPayload } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
 
 export interface StreamableHttpTransportOptions {
@@ -40,17 +40,10 @@ export class StreamableHttpTransport extends BaseMcpTransport implements McpTran
     };
     if (this.sessionId !== null) headers["mcp-session-id"] = this.sessionId;
 
-    let res: Response;
-    try {
-      res = await fetch(this.url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(message),
-        signal: this.controller.signal,
-      });
-    } catch (err) {
-      throw new Error(`MCP Streamable HTTP POST ${this.url} failed: ${(err as Error).message}`);
-    }
+    const res = await postJson(this.url, message, "Streamable HTTP", {
+      headers,
+      signal: this.controller.signal,
+    });
 
     // Capture session id the first time the server hands one out.
     const serverSessionId = res.headers.get(SESSION_HEADER);
@@ -62,7 +55,7 @@ export class StreamableHttpTransport extends BaseMcpTransport implements McpTran
       // Session expired / unknown to the server. Surface as an error so
       // McpClient can recreate; drain the body so the socket goes back
       // to the pool.
-      await res.body?.cancel().catch(() => undefined);
+      await drainBody(res);
       throw new Error(
         `MCP Streamable HTTP session expired (server returned 404 with Mcp-Session-Id "${this.sessionId}"). Reinitialize the client.`,
       );
@@ -77,7 +70,7 @@ export class StreamableHttpTransport extends BaseMcpTransport implements McpTran
 
     // 202 Accepted: request was a notification or pure ack — no body.
     if (res.status === 202) {
-      await res.body?.cancel().catch(() => undefined);
+      await drainBody(res);
       return;
     }
 
@@ -89,11 +82,7 @@ export class StreamableHttpTransport extends BaseMcpTransport implements McpTran
       } catch (err) {
         throw new Error(`MCP Streamable HTTP body wasn't valid JSON: ${(err as Error).message}`);
       }
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) this.incoming.push(item as JsonRpcMessage);
-      } else {
-        this.incoming.push(parsed as JsonRpcMessage);
-      }
+      pushJsonRpcPayload((msg) => this.incoming.push(msg), parsed);
       return;
     }
 
@@ -114,7 +103,7 @@ export class StreamableHttpTransport extends BaseMcpTransport implements McpTran
     // Unknown content type — drain and treat as a no-op rather than
     // hanging. Servers that want to extend the protocol should not
     // wedge older clients with an unexpected MIME.
-    await res.body?.cancel().catch(() => undefined);
+    await drainBody(res);
   }
 
   async close(): Promise<void> {
@@ -139,8 +128,7 @@ export class StreamableHttpTransport extends BaseMcpTransport implements McpTran
         // (default if `event:` line is missing). Other event types
         // (server pings, custom extensions) we silently ignore;
         // malformed JSON is dropped, mirroring the SSE transport.
-        const msg = parseSseMessageEvent(ev.event ?? "message", ev.data);
-        if (msg) this.incoming.push(msg);
+        this.pushSseMessage(ev.event, ev.data);
       },
       "Streamable HTTP",
       { shouldStop: () => this.closed },

@@ -1,7 +1,5 @@
 /** Antigravity browser OAuth: same client, redirect, and callback the app uses. */
 
-import { createHash, randomBytes } from "node:crypto";
-import { type Server, createServer } from "node:http";
 import { isUsableAntigravityModel } from "@reasonix/core-utils";
 import {
   type AntigravityOAuthCreds,
@@ -10,7 +8,16 @@ import {
   readConfig,
   saveAntigravityOAuth,
 } from "./config.js";
-import { type TokenResponse, errorPage, postTokenForm } from "./oauth-shared.js";
+import {
+  type LocalhostOAuthFlow,
+  type TokenResponse,
+  beginLocalhostOAuthFlow,
+  envOr,
+  fetchUserEmail,
+  isTokenFresh,
+  makePkcePair,
+  postTokenForm,
+} from "./oauth-shared.js";
 
 /** Published installed-app OAuth identity used by Antigravity's browser flow. */
 export const ANTIGRAVITY_OAUTH_CLIENT_ID =
@@ -33,19 +40,12 @@ const DEFAULT_SCOPE = [
   "https://www.googleapis.com/auth/aicode",
 ].join(" ");
 
-const REFRESH_SLACK_MS = 5 * 60_000;
-const OAUTH_FLOW_TIMEOUT_MS = 10 * 60_000;
 const ONBOARD_TIMEOUT_MS = 10 * 60_000;
 const ONBOARD_POLL_INTERVAL_MS = 5_000;
 /** Registered callback the Antigravity client accepts. */
 const OAUTH_CALLBACK_PATH = "/auth/callback";
 const OAUTH_CALLBACK_PORT = 50510;
 export const ANTIGRAVITY_REDIRECT_URI = `http://localhost:${OAUTH_CALLBACK_PORT}${OAUTH_CALLBACK_PATH}`;
-
-function envOr(def: string, name: string): string {
-  const v = process.env[name]?.trim();
-  return v ? v : def;
-}
 
 export function antigravityAuthorizeUrl(): string {
   return envOr(ANTIGRAVITY_DEFAULT_AUTHORIZE_URL, "ANTIGRAVITY_AUTH_URL");
@@ -57,10 +57,6 @@ export function antigravityTokenUrl(): string {
 
 export function antigravityUserinfoUrl(): string {
   return envOr(ANTIGRAVITY_DEFAULT_USERINFO_URL, "ANTIGRAVITY_USERINFO_URL");
-}
-
-function randomOAuthState(): string {
-  return randomBytes(24).toString("hex");
 }
 
 export interface AuthorizeParams {
@@ -127,16 +123,7 @@ export async function refreshAntigravityToken(
 
 /** Account email from userinfo, for the settings card. Undefined on failure. */
 export async function antigravityAccount(accessToken: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(antigravityUserinfoUrl(), {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return undefined;
-    const info = (await res.json()) as { email?: string };
-    return info.email;
-  } catch {
-    return undefined;
-  }
+  return fetchUserEmail(antigravityUserinfoUrl(), accessToken);
 }
 
 let refreshInFlight: Promise<string | undefined> | null = null;
@@ -152,8 +139,7 @@ export async function resolveAntigravityToken(
     clearAntigravityOAuth(path);
     throw new Error("Stored Antigravity OAuth credentials use an obsolete client; sign in again");
   }
-  if (!creds.refreshToken || creds.expiresAt - Date.now() > REFRESH_SLACK_MS)
-    return creds.accessToken;
+  if (isTokenFresh(creds.expiresAt, creds.refreshToken)) return creds.accessToken;
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     try {
@@ -444,17 +430,7 @@ export async function resolveGeminiAuth(
 
 // ── Browser OAuth flow ─────────────────────────────────────────────────────
 
-export interface OAuthFlow {
-  /** Authorize URL to open in the system browser. */
-  url: string;
-  /** Resolves with exchanged tokens; rejects on error / cancel / timeout. */
-  done: Promise<AntigravityOAuthCreds>;
-  cancel: () => void;
-}
-
-const SUCCESS_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Signed in</title></head>
-<body style="font-family:system-ui;max-width:34em;margin:4em auto;line-height:1.6">
-<h2>Signed in to Google</h2><p>You can close this window and return to Reasonix.</p></body></html>`;
+export interface OAuthFlow extends LocalhostOAuthFlow<AntigravityOAuthCreds> {}
 
 /** Starts the browser OAuth dance: a one-shot localhost callback server and the
  *  authorize URL. `done` rejects on error, cancel, or the 10-minute timeout. */
@@ -462,107 +438,35 @@ export async function beginAntigravityOAuthFlow(
   opts: {
     timeoutMs?: number;
   } = {},
-): Promise<OAuthFlow> {
-  const state = randomOAuthState();
-  const codeVerifier = randomBytes(32).toString("base64url");
-  const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
-  const timeoutMs = opts.timeoutMs ?? OAUTH_FLOW_TIMEOUT_MS;
-  let settled = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let resolveDone: (creds: AntigravityOAuthCreds) => void = () => {};
-  let rejectDone: (err: Error) => void = () => {};
-  const done = new Promise<AntigravityOAuthCreds>((resolve, reject) => {
-    resolveDone = resolve;
-    rejectDone = reject;
-  });
-
+): Promise<LocalhostOAuthFlow<AntigravityOAuthCreds>> {
+  const { verifier: codeVerifier, challenge: codeChallenge } = makePkcePair(32);
   const redirectUri =
     process.env.ANTIGRAVITY_OAUTH_REDIRECT_URI?.trim() || ANTIGRAVITY_REDIRECT_URI;
-
-  const settle = (fn: () => void) => {
-    if (settled) return;
-    settled = true;
-    if (timer) clearTimeout(timer);
-    fn();
-    server.closeIdleConnections();
-    server.close(() => {});
-  };
-
-  const server: Server = createServer((req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname !== OAUTH_CALLBACK_PATH) {
-      res.writeHead(404).end("Not found");
-      return;
-    }
-    const q = url.searchParams;
-    if (q.get("error")) {
-      const msg = q.get("error_description") ?? q.get("error") ?? "access_denied";
-      res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
-      res.end(errorPage(msg));
-      settle(() => rejectDone(new Error(`OAuth sign-in failed: ${msg}`)));
-      return;
-    }
-    const code = q.get("code");
-    if (!code || q.get("state") !== state) {
-      res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
-      res.end(errorPage("State mismatch — this sign-in attempt is invalid. Retry from settings."));
-      settle(() => rejectDone(new Error("OAuth state mismatch")));
-      return;
-    }
-    void exchangeAntigravityCode({ redirectUri, code, codeVerifier })
-      .then((creds) => {
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(SUCCESS_PAGE);
-        settle(() => resolveDone(creds));
-      })
-      .catch((err: unknown) => {
-        const msg = (err as Error).message;
-        res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
-        res.end(errorPage(msg));
-        settle(() => rejectDone(err as Error));
-      });
-  });
-  server.on("error", () => {
-    /* surfaced via the listening promise / settle-close */
-  });
-
-  const listen = (port: number) =>
-    new Promise<void>((resolve, reject) => {
-      const onError = (err: Error) => reject(err);
-      server.once("error", onError);
-      server.once("listening", () => {
-        server.removeListener("error", onError);
-        resolve();
-      });
-      server.listen(port, "localhost");
-    });
-
   const callbackPort = Number(new URL(redirectUri).port);
   if (!Number.isInteger(callbackPort) || callbackPort <= 0) {
     throw new Error("Antigravity OAuth redirect URI must include a valid callback port");
   }
-  try {
-    await listen(callbackPort);
-  } catch {
-    throw new Error(`Antigravity OAuth callback server failed to bind port ${callbackPort}`);
-  }
-
-  const url = buildAuthorizeUrl({
-    clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
+  return beginLocalhostOAuthFlow<AntigravityOAuthCreds>({
+    callbackPath: OAUTH_CALLBACK_PATH,
     redirectUri,
-    state,
-    codeChallenge,
+    port: callbackPort,
+    host: "localhost",
+    timeoutMs: opts.timeoutMs,
+    successTitle: "Signed in",
+    successHeading: "Signed in to Google",
+    stateMismatchMessage: "State mismatch — this sign-in attempt is invalid. Retry from settings.",
+    allowPortFallback: false,
+    bindErrorMessage: `Antigravity OAuth callback server failed to bind port ${callbackPort}`,
+    buildUrl: (uri, state) =>
+      buildAuthorizeUrl({
+        clientId: ANTIGRAVITY_OAUTH_CLIENT_ID,
+        redirectUri: uri,
+        state,
+        codeChallenge,
+      }),
+    exchange: (code, uri) => exchangeAntigravityCode({ redirectUri: uri, code, codeVerifier }),
+    timeoutMessage: "OAuth sign-in timed out — retry from settings",
   });
-
-  timer = setTimeout(() => {
-    settle(() => rejectDone(new Error("OAuth sign-in timed out — retry from settings")));
-  }, timeoutMs);
-
-  return {
-    url,
-    done,
-    cancel: () => settle(() => rejectDone(new Error("OAuth sign-in cancelled"))),
-  };
 }
 
 /** Convenience for sign-out: wipe local creds (Google has no simple revoke

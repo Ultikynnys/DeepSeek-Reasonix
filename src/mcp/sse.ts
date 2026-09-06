@@ -1,9 +1,8 @@
 /** MCP HTTP+SSE transport (spec 2024-11-05) — POST endpoint URL arrives as the first `event: endpoint` SSE frame. */
 
 import { BaseMcpTransport } from "./base-transport.js";
-import { parseSseMessageEvent } from "./message-queue.js";
 import type { McpTransport } from "./stdio.js";
-import { syntheticRpcError } from "./transport-utils.js";
+import { discardBody, drainBody, postJson, syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
 
 export interface SseTransportOptions {
@@ -37,16 +36,14 @@ export class SseTransport extends BaseMcpTransport implements McpTransport {
   async send(message: JsonRpcMessage): Promise<void> {
     this.assertOpen("SSE");
     const postUrl = await this.endpointReady;
-    const res = await fetch(postUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...this.headers },
-      body: JSON.stringify(message),
+    const res = await postJson(postUrl, message, "SSE", {
+      headers: this.headers,
       signal: this.controller.signal,
     });
     // Drain body so the socket returns to the pool even if the server
     // elected to write one. We explicitly don't parse it — responses
     // arrive on the SSE channel.
-    await res.arrayBuffer().catch(() => undefined);
+    await discardBody(res);
     if (!res.ok) {
       throw new Error(`MCP SSE POST ${postUrl} failed: ${res.status} ${res.statusText}`);
     }
@@ -73,7 +70,7 @@ export class SseTransport extends BaseMcpTransport implements McpTransport {
     }
     if (!res.ok || !res.body) {
       // Drain body to free the socket before giving up.
-      await res.body?.cancel().catch(() => undefined);
+      await drainBody(res);
       this.failHandshake(`SSE handshake ${this.url} → ${res.status} ${res.statusText}`);
       return;
     }
@@ -99,8 +96,7 @@ export class SseTransport extends BaseMcpTransport implements McpTransport {
     }
     // `message` events carry JSON-RPC; unknown event types (server pings,
     // custom extensions) are ignored. Malformed JSON is dropped, same as stdio.
-    const msg = parseSseMessageEvent(type, data);
-    if (msg) this.incoming.push(msg);
+    this.pushSseMessage(type, data);
   }
 
   private failHandshake(reason: string): void {
