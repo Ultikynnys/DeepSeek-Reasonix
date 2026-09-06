@@ -26,10 +26,7 @@ import {
   type FontFamily,
   type FontScale,
   THEME,
-  THEME_STYLES,
   type Theme,
-  type ThemeStyle,
-  themeForStyle,
 } from "../theme";
 import {
   type AudioInputDevice,
@@ -83,9 +80,7 @@ export function SettingsModal({
   usage,
   currency,
   theme,
-  themeStyle,
   onSetTheme,
-  onSetThemeStyle,
   fontScale,
   onSetFontScale,
   fontFamily,
@@ -120,7 +115,6 @@ export function SettingsModal({
   opencodeModels,
   opencodeModelsError,
   onRefreshOpencodeModels,
-  onPickWorkspace,
   onAddMcpSpec,
   onRemoveMcpSpec,
   onReadMemory,
@@ -137,9 +131,7 @@ export function SettingsModal({
   usage: UsageStats;
   currency: "CNY" | "USD";
   theme: Theme;
-  themeStyle: ThemeStyle;
   onSetTheme: (theme: Theme) => void;
-  onSetThemeStyle: (style: ThemeStyle) => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
   fontFamily: FontFamily;
@@ -183,7 +175,6 @@ export function SettingsModal({
   onAntigravityOAuthBegin: () => void;
   onAntigravityOAuthCancel: () => void;
   onAntigravityOAuthSignOut: () => void;
-  onPickWorkspace: () => void;
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
   onReadMemory: (path: string) => void;
@@ -261,9 +252,7 @@ export function SettingsModal({
               <PageGeneral
                 settings={settings}
                 theme={theme}
-                themeStyle={themeStyle}
                 onSetTheme={onSetTheme}
-                onSetThemeStyle={onSetThemeStyle}
                 fontScale={fontScale}
                 onSetFontScale={onSetFontScale}
                 fontFamily={fontFamily}
@@ -271,7 +260,6 @@ export function SettingsModal({
                 customFontFamily={customFontFamily}
                 onSetCustomFontFamily={onSetCustomFontFamily}
                 onSave={onSave}
-                onPickWorkspace={onPickWorkspace}
               />
             )}
             {page === "models" && (
@@ -351,9 +339,7 @@ export function SettingsModal({
 function PageGeneral({
   settings,
   theme,
-  themeStyle,
   onSetTheme,
-  onSetThemeStyle,
   fontScale,
   onSetFontScale,
   fontFamily,
@@ -361,13 +347,10 @@ function PageGeneral({
   customFontFamily,
   onSetCustomFontFamily,
   onSave,
-  onPickWorkspace,
 }: {
   settings: SettingsType;
   theme: Theme;
-  themeStyle: ThemeStyle;
   onSetTheme: (theme: Theme) => void;
-  onSetThemeStyle: (style: ThemeStyle) => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
   fontFamily: FontFamily;
@@ -375,7 +358,6 @@ function PageGeneral({
   customFontFamily: string;
   onSetCustomFontFamily: (family: string) => void;
   onSave: (patch: SettingsPatch) => void;
-  onPickWorkspace: () => void;
 }) {
   const [customFontDraft, setCustomFontDraft] = useState(customFontFamily);
   useEffect(() => {
@@ -412,43 +394,6 @@ function PageGeneral({
             >
               {t("settings.themeLight")}
             </button>
-          </div>
-        </div>
-        <div className="setting-row theme-style-row">
-          <div className="l">
-            <div className="n">{t("settings.themeStyle")}</div>
-            <div className="h">{t("settings.themeStyleHint")}</div>
-          </div>
-          <div className="style-grid">
-            {THEME_STYLES.map((style) => (
-              <button
-                key={style}
-                type="button"
-                className="style-card"
-                data-on={themeStyle === style}
-                data-style={style}
-                onClick={() => onSetThemeStyle(style)}
-              >
-                <span className="style-card-head">
-                  <span className="style-name">
-                    {t(`settings.themeStyle${style[0]!.toUpperCase()}${style.slice(1)}` as any)}
-                  </span>
-                  <span className="style-mode">
-                    {themeForStyle(style) === THEME.DARK
-                      ? t("settings.themeDark")
-                      : t("settings.themeLight")}
-                  </span>
-                </span>
-                <span className="style-swatches" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-                <span className="style-desc">
-                  {t(`settings.themeStyle${style[0]!.toUpperCase()}${style.slice(1)}Desc` as any)}
-                </span>
-              </button>
-            ))}
           </div>
         </div>
         <div className="setting-row">
@@ -542,58 +487,7 @@ function PageGeneral({
       </section>
 
       <section className="section">
-        <div className="stitle">{t("settings.workspaceSection")}</div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.currentWorkspace")}</div>
-            <div className="h">{settings.workspaceDir || t("settings.notSelected")}</div>
-          </div>
-          <button type="button" className="btn" onClick={onPickWorkspace}>
-            {t("settings.workspaceChange")}
-          </button>
-        </div>
-      </section>
-
-      <section className="section">
         <div className="stitle">{t("settings.behaviorSection")}</div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.showSystemEvents")}</div>
-            <div className="h">{t("settings.showSystemEventsHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            <button
-              type="button"
-              data-on={settings.showSystemEvents !== false}
-              onClick={() => onSave({ showSystemEvents: true })}
-            >
-              {t("settings.shown")}
-            </button>
-            <button
-              type="button"
-              data-on={settings.showSystemEvents === false}
-              onClick={() => onSave({ showSystemEvents: false })}
-            >
-              {t("settings.hidden")}
-            </button>
-          </div>
-        </div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.budget")}</div>
-            <div className="h">{t("settings.budgetHint")}</div>
-          </div>
-          <input
-            className="field"
-            type="number"
-            defaultValue={settings.budgetUsd ?? ""}
-            placeholder={t("settings.budgetPlaceholder")}
-            onBlur={(e) => {
-              const v = e.target.value.trim();
-              onSave({ budgetUsd: v === "" ? null : Number(v) });
-            }}
-          />
-        </div>
         <div className="setting-row">
           <div className="l">
             <div className="n">{t("settings.webSearchEngine")}</div>
@@ -1381,9 +1275,6 @@ export function AntigravitySection({
   );
 }
 
-const EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const;
-type EffortValue = (typeof EFFORT_VALUES)[number];
-
 function PageModels({
   settings,
   onSave,
@@ -1678,27 +1569,6 @@ function PageModels({
           <button type="button" className="btn" onClick={() => onRefreshOpencodeModels?.(true)}>
             {t("settings.opencodeModelsRefresh")}
           </button>
-        </div>
-      </section>
-      <section className="section">
-        <div className="stitle">{t("settings.effortSection")}</div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.reasoningEffort")}</div>
-            <div className="h">{t("settings.reasoningEffortHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            {EFFORT_VALUES.map((e) => (
-              <button
-                type="button"
-                key={e}
-                data-on={settings.reasoningEffort === e}
-                onClick={() => onSave({ reasoningEffort: e as EffortValue })}
-              >
-                {e}
-              </button>
-            ))}
-          </div>
         </div>
       </section>
       <ApiKeySection

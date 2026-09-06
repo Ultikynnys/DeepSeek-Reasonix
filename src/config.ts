@@ -463,12 +463,6 @@ export interface ReasonixConfig {
     /** Stable URL token (#968). If unset, a fresh token is minted each boot. Min 16 chars enforced at load time. */
     token?: string;
   };
-  /** Thread-area visibility toggles. */
-  thread?: {
-    /** When false, suppresses the quiet inline dividers for fold / abort / rate-limit
-     *  warnings (severity="high" from the kernel). Default true. */
-    showSystemEvents?: boolean;
-  };
   /** Per-field visibility toggles for the bottom status row. All default to true (visible). */
   statusBar?: {
     showBalance?: boolean;
@@ -1986,18 +1980,6 @@ export function saveWorkspaceDir(dir: string, path: string = defaultConfigPath()
   const trimmed = dir.trim();
   if (trimmed) cfg.workspaceDir = trimmed;
   else cfg.workspaceDir = undefined;
-  writeConfig(cfg, path);
-}
-
-/** Default true — quiet inline dividers (fold / abort / rate-limit) are valuable
- *  for transparency; users opt out only if they want a fully clean thread. */
-export function loadShowSystemEvents(path: string = defaultConfigPath()): boolean {
-  return readConfig(path).thread?.showSystemEvents !== false;
-}
-
-export function saveShowSystemEvents(on: boolean, path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  cfg.thread = { ...(cfg.thread ?? {}), showSystemEvents: on };
   writeConfig(cfg, path);
 }
 

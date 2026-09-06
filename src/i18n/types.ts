@@ -109,7 +109,6 @@ export interface TranslationSchema {
     resumeHint: string;
     newHint: string;
     transcriptHint: string;
-    budgetHint: string;
     modelIdHint: string;
     systemPromptHint: string;
     effortHint: string;
@@ -119,7 +118,6 @@ export interface TranslationSchema {
     mcpPrefixHint: string;
     noConfigHint: string;
     effortHintShort: string;
-    budgetHintShort: string;
     transcriptHintShort: string;
     mcpSpecHintShort: string;
     mcpPrefixHintShort: string;
@@ -281,8 +279,6 @@ export interface TranslationSchema {
     failedAfterReason: string;
   };
   loop: {
-    budgetExhausted: string;
-    budget80Pct: string;
     proArmed: string;
     toolUploadStatus: string;
     harvestStatus: string;
@@ -727,7 +723,6 @@ export interface TranslationSchema {
     modeAuto: string;
     modeReview: string;
     pro: string;
-    budget: string;
   };
   welcomeBanner: {
     workspace: string;

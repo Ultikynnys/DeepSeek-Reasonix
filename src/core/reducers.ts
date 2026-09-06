@@ -3,7 +3,6 @@
 import type { ChatMessage } from "../types.js";
 import { EventType } from "./events.js";
 import type {
-  BudgetView,
   CapabilityView,
   ConversationView,
   Event,
@@ -18,19 +17,6 @@ import type {
 
 export function emptyConversation(): ConversationView {
   return { messages: [], pendingToolCalls: [] };
-}
-
-export function emptyBudget(capUsd: number | null = null): BudgetView {
-  return {
-    spentUsd: 0,
-    capUsd,
-    promptTokens: 0,
-    completionTokens: 0,
-    cacheHitTokens: 0,
-    cacheMissTokens: 0,
-    warned: false,
-    blocked: false,
-  };
 }
 
 export function emptyPlan(): PlanView {
@@ -59,10 +45,9 @@ export function emptySessionMeta(): SessionMetaView {
   };
 }
 
-export function emptyProjections(capUsd: number | null = null): ProjectionSet {
+export function emptyProjections(): ProjectionSet {
   return {
     conversation: emptyConversation(),
-    budget: emptyBudget(capUsd),
     plan: emptyPlan(),
     workspace: emptyWorkspace(),
     capabilities: emptyCapabilities(),
@@ -115,28 +100,6 @@ export const conversation: Reducer<ConversationView> = (v, ev) => {
     case EventType.sessionCompacted:
     case EventType.sessionRetracted:
       return { messages: [...ev.replacementMessages], pendingToolCalls: [] };
-    default:
-      return v;
-  }
-};
-
-export const budget: Reducer<BudgetView> = (v, ev) => {
-  switch (ev.type) {
-    case EventType.modelFinal: {
-      const u = ev.usage;
-      return {
-        ...v,
-        spentUsd: v.spentUsd + ev.costUsd,
-        promptTokens: v.promptTokens + (u.prompt_tokens ?? 0),
-        completionTokens: v.completionTokens + (u.completion_tokens ?? 0),
-        cacheHitTokens: v.cacheHitTokens + (u.prompt_cache_hit_tokens ?? 0),
-        cacheMissTokens: v.cacheMissTokens + (u.prompt_cache_miss_tokens ?? 0),
-      };
-    }
-    case EventType.policyBudgetWarning:
-      return { ...v, warned: true };
-    case EventType.policyBudgetBlocked:
-      return { ...v, blocked: true };
     default:
       return v;
   }
@@ -230,7 +193,6 @@ export const sessionMeta: Reducer<SessionMetaView> = (v, ev) => {
 export function apply(state: ProjectionSet, ev: Event): ProjectionSet {
   return {
     conversation: conversation(state.conversation, ev),
-    budget: budget(state.budget, ev),
     plan: plan(state.plan, ev),
     workspace: workspace(state.workspace, ev),
     capabilities: capabilities(state.capabilities, ev),
@@ -239,8 +201,8 @@ export function apply(state: ProjectionSet, ev: Event): ProjectionSet {
   };
 }
 
-export function replay(events: Iterable<Event>, capUsd: number | null = null): ProjectionSet {
-  let s = emptyProjections(capUsd);
+export function replay(events: Iterable<Event>): ProjectionSet {
+  let s = emptyProjections();
   for (const ev of events) s = apply(s, ev);
   return s;
 }

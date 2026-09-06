@@ -26,7 +26,6 @@ const usage: UsageStats = {
 const settings: Settings = {
   reasoningEffort: "high",
   editMode: "review",
-  budgetUsd: null,
   maxIterPerTurn: 50,
   maxIterPerTurnOverride: null,
   workspaceDir: "/repo",

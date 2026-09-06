@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Event } from "../src/core/events.js";
 import {
   apply,
-  budget,
   capabilities,
   conversation,
-  emptyBudget,
   emptyCapabilities,
   emptyConversation,
   emptyPlan,
@@ -181,57 +179,6 @@ describe("conversation reducer", () => {
     );
     expect(v.messages).toEqual([{ role: "user", content: "kept" }]);
     expect(v.pendingToolCalls).toEqual([]);
-  });
-});
-
-describe("budget reducer", () => {
-  it("accumulates cost and token usage from model.final", () => {
-    let v = emptyBudget(10);
-    v = budget(
-      v,
-      ev<Event>({
-        type: "model.final",
-        ts,
-        turn: 1,
-        content: "",
-        toolCalls: [],
-        usage: { prompt_tokens: 100, completion_tokens: 50, prompt_cache_hit_tokens: 80 },
-        costUsd: 0.002,
-      }),
-    );
-    v = budget(
-      v,
-      ev<Event>({
-        type: "model.final",
-        ts,
-        turn: 2,
-        content: "",
-        toolCalls: [],
-        usage: { prompt_tokens: 200, prompt_cache_miss_tokens: 200 },
-        costUsd: 0.005,
-      }),
-    );
-    expect(v.spentUsd).toBeCloseTo(0.007);
-    expect(v.promptTokens).toBe(300);
-    expect(v.completionTokens).toBe(50);
-    expect(v.cacheHitTokens).toBe(80);
-    expect(v.cacheMissTokens).toBe(200);
-    expect(v.capUsd).toBe(10);
-  });
-
-  it("warned and blocked latch", () => {
-    let v = emptyBudget(1);
-    v = budget(
-      v,
-      ev<Event>({ type: "policy.budget.warning", ts, turn: 1, spentUsd: 0.8, capUsd: 1 }),
-    );
-    v = budget(v, ev<Event>({ type: "user.message", ts, turn: 2, text: "ignored" }));
-    expect(v.warned).toBe(true);
-    v = budget(
-      v,
-      ev<Event>({ type: "policy.budget.blocked", ts, turn: 2, spentUsd: 1.05, capUsd: 1 }),
-    );
-    expect(v.blocked).toBe(true);
   });
 });
 
@@ -440,13 +387,11 @@ describe("replay determinism", () => {
         durationMs: 3,
       }),
     ];
-    const a = replay(events, 5);
-    const b = replay(events, 5);
+    const a = replay(events);
+    const b = replay(events);
     expect(a).toEqual(b);
     expect(a.conversation.messages).toHaveLength(3);
     expect(a.conversation.pendingToolCalls).toHaveLength(0);
-    expect(a.budget.spentUsd).toBeCloseTo(0.001);
-    expect(a.budget.capUsd).toBe(5);
     expect(a.session.currentTurn).toBe(1);
   });
 

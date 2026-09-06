@@ -202,7 +202,6 @@ export const EN: TranslationSchema = {
     resumeHint: "force-resume the named session (even if idle)",
     newHint: "force a fresh session (ignore --session / --continue)",
     transcriptHint: "path to write the JSONL transcript",
-    budgetHint: "session USD cap — warns at 80%, refuses next turn at 100%",
     modelIdHint: "DeepSeek model id (e.g. deepseek-v4-flash)",
     systemPromptHint: "override the default system prompt",
     effortHint: "reasoning effort — low|medium|high|xhigh|max",
@@ -212,7 +211,6 @@ export const EN: TranslationSchema = {
     mcpPrefixHint: "prefix MCP tool names with this string",
     noConfigHint: "ignore ~/.reasonix/config.json for this run",
     effortHintShort: "reasoning effort — low|medium|high|xhigh|max",
-    budgetHintShort: "session USD cap",
     transcriptHintShort: "JSONL transcript path",
     mcpSpecHintShort: "MCP server spec (repeatable)",
     mcpPrefixHintShort: "MCP tool name prefix",
@@ -276,11 +274,6 @@ export const EN: TranslationSchema = {
     theme: {
       description: "show or persist the terminal theme preference. Bare opens picker.",
       argsHint: "[auto|dark|light|midnight|deep-blue|high-contrast]",
-    },
-    budget: {
-      description:
-        "session USD cap — warns at 80%, refuses next turn at 100%. Off by default. /budget alone shows status",
-      argsHint: "[usd|off]",
     },
     mcp: { description: "list MCP servers + tools attached to this session" },
     resource: {
@@ -658,9 +651,6 @@ export const EN: TranslationSchema = {
       "{label} and the fallback summary call failed: {message}. The conversation is intact — try /retry or continue from here. If the iteration cap keeps tripping, raise `maxIterPerTurn` in config or set REASONIX_MAX_ITER.",
   },
   loop: {
-    budgetExhausted:
-      "session budget exhausted — spent ${spent} ≥ cap ${cap}. Bump the cap with /budget <usd>, clear it with /budget off, or end the session.",
-    budget80Pct: "▲ budget 80% used — ${spent} of ${cap}. Next turn or two likely trips the cap.",
     proArmed: "⇧ /pro armed — this turn runs on deepseek-v4-pro (one-shot · disarms after turn)",
     toolUploadStatus: "tool result uploaded · model thinking before next response…",
     harvestStatus: "extracting plan state from reasoning…",
@@ -990,17 +980,6 @@ export const EN: TranslationSchema = {
         "usage: /effort <{list}>   (high is the safe default; max is a DeepSeek/GPT-5.6 extension)",
       effortUsageNoMax: "usage: /effort <{list}>",
       effortSet: "effort → {effort}",
-      budgetNoCap:
-        "no session budget set — Reasonix will keep going until you stop it. Set one with: /budget <usd>   (e.g. /budget 5)",
-      budgetStatus:
-        "budget: ${spent} of ${cap} ({pct}%) · /budget off to clear, /budget <usd> to change",
-      budgetOff: "budget → off (no cap)",
-      budgetUsage:
-        'usage: /budget <usd>   (got "{arg}" — must be a positive number, e.g. /budget 5 or /budget 12.50)',
-      budgetExhausted:
-        "▲ budget → ${cap} but already spent ${spent}. Next turn will be refused — bump the cap higher to keep going, or end the session.",
-      budgetSet:
-        "budget → ${cap}  (so far: ${spent} · warns at 80%, refuses next turn at 100% · /budget off to clear)",
     },
     permissions: {
       mutateCodeOnly:
@@ -1081,7 +1060,6 @@ export const EN: TranslationSchema = {
       statusCtxNone: "  ctx     no turns yet",
       statusCost: "  cost    ${cost} · cache {bar} {pct}% · turns {turns}",
       statusCostCold: "  cost    ${cost} · turns {turns} (cache warming up)",
-      statusBudget: "  budget  ${spent} / ${cap} ({pct}%){tag}",
       statusSession: '  session "{name}" · {count} messages in log (resumed {resumed})',
       statusSessionEphemeral: "  session (ephemeral — no persistence)",
       statusWorkspace:
@@ -1554,7 +1532,6 @@ export const EN: TranslationSchema = {
     modeAuto: "auto",
     modeReview: "review",
     pro: "\u21e7 pro",
-    budget: "  budget  ",
   },
   welcomeBanner: {
     workspace: "\u25b8 workspace",

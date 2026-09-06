@@ -627,17 +627,6 @@ export class Eventizer {
         reason: c.includes("armed") ? "user-request" : "self-report",
       };
     }
-    if (/budget\b.*\$|\$\d.*\/\s*\$\d/.test(c)) {
-      const blocked = /blocked|exceeded|refus/i.test(c);
-      return {
-        id: ++this.nextId,
-        ts: new Date().toISOString(),
-        turn: ev.turn,
-        type: blocked ? EventType.policyBudgetBlocked : EventType.policyBudgetWarning,
-        spentUsd: 0,
-        capUsd: 0,
-      };
-    }
     if (ev.severity === "low") return null;
     return {
       id: ++this.nextId,

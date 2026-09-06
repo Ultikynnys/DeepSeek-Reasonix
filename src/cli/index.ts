@@ -45,18 +45,6 @@ function persistEffortFlag(flag: unknown): void {
   }
 }
 
-/** Lenient: malformed → undefined (no cap) so a bad flag doesn't abort launch. */
-function parseBudgetFlag(raw: number | undefined): number | undefined {
-  if (raw === undefined) return undefined;
-  if (!Number.isFinite(raw) || raw <= 0) {
-    process.stderr.write(
-      `▲ ignoring --budget=${raw} (must be a positive number) — running with no cap\n`,
-    );
-    return undefined;
-  }
-  return raw;
-}
-
 const program = new Command();
 program
   .name("reasonix")
@@ -73,7 +61,6 @@ program
   .option("-m, --model <id>", t("ui.modelIdHint"))
   .option("--dir <path>", "root directory for filesystem tools (default: cwd)")
   .option("--effort <level>", t("ui.effortHintShort"))
-  .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
   .action(async (opts) => {
     persistEffortFlag(opts.effort);
     const defaults = resolveDefaults({
@@ -87,7 +74,6 @@ program
     markPhase("desktop_import_completed");
     await desktopCommand({
       model: defaults.model,
-      budgetUsd: parseBudgetFlag(opts.budget),
       dir: opts.dir,
     });
   });

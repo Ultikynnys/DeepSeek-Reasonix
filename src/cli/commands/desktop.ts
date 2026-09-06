@@ -53,8 +53,6 @@ import type {
   RevisionRequiredEvent,
   SessionCompactedEvent,
   SessionEmptyEvent,
-  SessionImportResultEvent,
-  SessionImportSourcesEvent,
   SessionLoadedEvent,
   SessionsEvent,
   SettingsEvent,
@@ -119,7 +117,6 @@ import {
   loadReasoningEffort,
   loadRecentWorkspaces,
   loadResolvedSkillPaths,
-  loadShowSystemEvents,
   loadSubagentModels,
   loadTavilyApiKey,
   loadWorkspaceDir,
@@ -147,7 +144,6 @@ import {
   saveOpenAIOAuth,
   saveQuickSendId,
   saveReasoningEffort,
-  saveShowSystemEvents,
   saveWorkspaceDir,
   writeConfig,
 } from "../../config.js";
@@ -233,11 +229,6 @@ import { fetchOpencodeModels } from "../../opencode-models.js";
 import { registerSeeImageTool } from "../../tools/see-image.js";
 import type { SubagentEvent } from "../../tools/subagent.js";
 
-import {
-  discoverExternalSessionApps,
-  importExternalSession,
-  importExternalSessions,
-} from "../../session-import.js";
 import { SkillStore } from "../../skills.js";
 import { resolveContextTokens } from "../../telemetry/stats.js";
 import { countTokensBounded } from "../../tokenizer.js";
@@ -249,7 +240,6 @@ import { type McpRuntime, createMcpRuntime } from "./mcp-runtime.js";
 
 export interface DesktopOptions {
   model: string;
-  budgetUsd?: number;
   /** Root directory the agent's filesystem tools operate inside. Defaults to cwd. */
   dir?: string;
 }
@@ -307,8 +297,6 @@ type EmittableEvent =
   | StepCompletedEvent
   | PlanClearedEvent
   | SessionsEvent
-  | SessionImportSourcesEvent
-  | SessionImportResultEvent
   | SessionLoadedEvent
   | SessionEmptyEvent
   | NeedsSetupEvent
@@ -928,7 +916,6 @@ function emitSettings(tab: Tab): void {
       editMode,
       quickSendId: loadQuickSendId(),
       quickSends: loadCustomQuickSends(),
-      budgetUsd: tab.runtime?.loop.budgetUsd ?? null,
       contextTokens: tab.ctxMaxOverride ?? null,
       maxIterPerTurn: tab.runtime?.loop.maxIterPerTurn ?? loadMaxIterPerTurn(),
       maxIterPerTurnOverride:
@@ -961,7 +948,6 @@ function emitSettings(tab: Tab): void {
         modelEndpointFor(tab.currentSubagentModel ?? tab.currentModel).provider === "ollama"
           ? resolveOllamaModelDefaults(tab.currentModel)
           : undefined,
-      showSystemEvents: loadShowSystemEvents(),
       statusBar: config.statusBar,
       modelEndpoint: modelEndpointFor(tab.currentModel),
       subagentModelEndpoint: modelEndpointFor(tab.currentSubagentModel ?? tab.currentModel),
@@ -1008,7 +994,6 @@ function emitSettings(tab: Tab): void {
     provider: providerForModel(tab.currentModel),
     modelEndpoint: modelEndpointFor(tab.currentModel),
     editMode,
-    budgetConfigured: tab.runtime?.loop.budgetUsd !== undefined,
     oauthSignedIn: !!oauth?.accessToken,
   });
 }
@@ -2072,7 +2057,6 @@ interface Tab {
   currentSubagentModel?: string;
   /** Per-tab reasoning effort — restored from the session's meta on load so a config reset doesn't flip it back to the global default. */
   currentReasoningEffort: import("../../config.js").ReasoningEffort;
-  budgetUsd: number | undefined;
   /** User-configured context-window cap (tokens); undefined = per-model default (300K). */
   ctxMaxOverride: number | undefined;
   /** null while the tab is bootstrapping — see `initTabToolset`. UI gates input on `$ready`, which only fires once this is set. */
@@ -2430,7 +2414,6 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     prefix,
     tools: toolset.tools,
     model: tab.currentModel,
-    budgetUsd: tab.budgetUsd,
     ctxMaxOverride,
     session: tab.currentSession,
     reasoningEffort,
@@ -2650,7 +2633,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       currentSession: "",
       currentModel: model,
       currentReasoningEffort: loadReasoningEffort(),
-      budgetUsd: opts.budgetUsd,
       ctxMaxOverride: loadContextTokens(),
       toolset: null,
       system: "",
@@ -4408,73 +4390,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       return;
     }
-    if (msg.cmd === "session_import") {
-      try {
-        const result = importExternalSession({
-          source: msg.source,
-          path: msg.path,
-          name: msg.name,
-          workspace: tab.rootDir,
-        });
-        void emitSessions(tab);
-        loadSessionIntoTab(tab, result.name, {
-          abortTurn,
-          cancelPendingGates,
-          persistOpenTabs,
-        });
-      } catch (err) {
-        emit(
-          { type: "$error", message: `session_import failed: ${(err as Error).message}` },
-          tab.id,
-        );
-      }
-      return;
-    }
-    if (msg.cmd === "session_import_scan") {
-      try {
-        emit(
-          { type: "$session_import_sources", apps: discoverExternalSessionApps(tab.rootDir) },
-          tab.id,
-        );
-      } catch (err) {
-        emit(
-          { type: "$error", message: `session_import_scan failed: ${(err as Error).message}` },
-          tab.id,
-        );
-      }
-      return;
-    }
-    if (msg.cmd === "session_import_bulk") {
-      try {
-        const result = importExternalSessions({
-          sources: msg.sources,
-          workspace: tab.rootDir,
-        });
-        void emitSessions(tab);
-        emit(
-          {
-            type: "$session_import_result",
-            imported: result.imported,
-            skipped: result.skipped,
-            failed: result.failed,
-          },
-          tab.id,
-        );
-        if (result.latestName) {
-          loadSessionIntoTab(tab, result.latestName, {
-            abortTurn,
-            cancelPendingGates,
-            persistOpenTabs,
-          });
-        }
-      } catch (err) {
-        emit(
-          { type: "$error", message: `session_import_bulk failed: ${(err as Error).message}` },
-          tab.id,
-        );
-      }
-      return;
-    }
     if (msg.cmd === "session_load") {
       try {
         loadSessionIntoTab(tab, msg.name, {
@@ -4839,10 +4754,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         if (msg.quickSends !== undefined) {
           saveCustomQuickSends(msg.quickSends);
         }
-        if (msg.budgetUsd !== undefined) {
-          tab.budgetUsd = msg.budgetUsd ?? undefined;
-          tab.runtime?.loop.setBudget(msg.budgetUsd);
-        }
         if (msg.contextTokens !== undefined) {
           saveContextTokens(msg.contextTokens);
           const next = loadContextTokens();
@@ -4878,7 +4789,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           void switchWorkspace(tab, msg.workspaceDir);
           return;
         }
-        if (msg.showSystemEvents !== undefined) saveShowSystemEvents(msg.showSystemEvents);
         if (msg.ollamaBaseUrl !== undefined) {
           const cfg = readConfig();
           cfg.ollamaBaseUrl = msg.ollamaBaseUrl?.trim() || undefined;

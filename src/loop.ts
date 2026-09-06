@@ -150,8 +150,6 @@ export interface CacheFirstLoopOptions {
    *  (not a snapshot) so a mid-session Shift+Tab flip takes effect, same
    *  pattern as shell.ts's `allowAll`. */
   getEditMode?: () => EditMode;
-  /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
-  budgetUsd?: number;
   /** Resolves the native billing unit for a model id ("usd" | "quota" | "none").
    *  Defaults to a provider-based guess; the desktop passes a resolver that knows
    *  keyless local Ollama is "none". Quota turns record 0 USD — never converted. */
@@ -241,9 +239,6 @@ export class CacheFirstLoop {
   maxOutputTokens: number | undefined;
   /** Maximum tool-call iterations per turn. Config > env > default (50). */
   maxIterPerTurn: number;
-  budgetUsd: number | null;
-  /** One-shot 80% warning latch — cleared by setBudget so a bump re-arms at the new boundary. */
-  private _budgetWarned = false;
   /** Context-window cap override (tokens) — mutable via configure(); undefined = per-model default. */
   ctxMaxOverride: number | undefined;
   sessionName: string | null;
@@ -380,8 +375,6 @@ export class CacheFirstLoop {
     this.maxIterPerTurn = opts.maxIterPerTurn ?? CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN;
     this._getEditMode = opts.getEditMode;
     this._disableAutoCompaction = Boolean(opts.disableAutoCompaction);
-    this.budgetUsd =
-      typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
     this.ctxMaxOverride = opts.ctxMaxOverride;
 
     this.hooks = opts.hooks ?? [];
@@ -565,7 +558,6 @@ export class CacheFirstLoop {
     this.resetTransientState();
     this.stats.reset();
     this._turn = 0;
-    this._budgetWarned = false;
     this._lastCacheShape = null;
     const systemRebuilt = this.rebuildSystemPrompt();
     return { dropped, archived, systemRebuilt };
@@ -606,12 +598,6 @@ export class CacheFirstLoop {
       this._disableAutoCompaction = v;
       this.context.disableAutoCompaction = v;
     }
-  }
-
-  /** `null` disables the cap; any change re-arms the 80% warning. */
-  setBudget(usd: number | null): void {
-    this.budgetUsd = typeof usd === "number" && usd > 0 ? usd : null;
-    this._budgetWarned = false;
   }
 
   /** UI surface — model id of the call about to run (or running) right now. */
@@ -982,44 +968,6 @@ export class CacheFirstLoop {
     this._steerConsumed = false;
     this._turnImages = toTurnImages(images);
 
-    // Budget gate runs FIRST, before any per-turn state mutation, so a
-    // refusal leaves the loop unchanged and the user can correct the
-    // cap and re-issue. Default `null` short-circuits the whole check
-    // so the no-budget path is one comparison, no behavior delta.
-    if (this.budgetUsd !== null) {
-      const spent = this.stats.totalCost;
-      if (spent >= this.budgetUsd) {
-        const message = t("loop.budgetExhausted", {
-          spent: spent.toFixed(4),
-          cap: this.budgetUsd.toFixed(2),
-        });
-        yield {
-          turn: this._turn,
-          role: "error",
-          content: "",
-          error: message,
-          errorDetail: {
-            name: "BudgetExhausted",
-            message,
-            retryable: false,
-            recoverable: false,
-          },
-        };
-        this._steerQueue.length = 0;
-        return;
-      }
-      if (!this._budgetWarned && spent >= this.budgetUsd * 0.8) {
-        this._budgetWarned = true;
-        yield {
-          turn: this._turn,
-          role: "warning",
-          content: t("loop.budget80Pct", {
-            spent: spent.toFixed(4),
-            cap: this.budgetUsd.toFixed(2),
-          }),
-        };
-      }
-    }
     this._turn++;
     const baseModelForTurn = this.model;
     let restoreModelAfterTurn = false;

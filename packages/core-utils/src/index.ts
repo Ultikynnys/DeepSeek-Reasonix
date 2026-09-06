@@ -75,8 +75,6 @@ export type {
 } from "./approval-prompt.js";
 export type {
   EditMode,
-  ExternalSessionApp,
-  ExternalSessionSource,
   WebSearchEngineName,
   ConnectedEvent,
   ReadyEvent,
@@ -93,8 +91,6 @@ export type {
   StepCompletedEvent,
   PlanClearedEvent,
   SessionsEvent,
-  SessionImportSourcesEvent,
-  SessionImportResultEvent,
   MentionResultsEvent,
   MentionPreviewEvent,
   TabOpenedEvent,

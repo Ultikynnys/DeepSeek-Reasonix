@@ -43,7 +43,6 @@ import {
   type CodexQuota,
   type ConfirmationChoice,
   type DesktopDiagnosticEvent,
-  type ExternalSessionApp,
   type IncomingEvent,
   type JobInfo,
   type LoadedMessage,
@@ -101,7 +100,7 @@ import { JumpBar } from "./ui/jump-bar";
 import { activationHandler, escapeHandler } from "./ui/keyboard";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { Shortcut, localizeShortcutText } from "./ui/shortcut";
-import { type PendingImport, SessionImportPopover, Sidebar } from "./ui/sidebar";
+import { Sidebar } from "./ui/sidebar";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import {
   StartupFailure,
@@ -384,7 +383,6 @@ export type Settings = {
   quickSendId?: string;
   /** User-defined quick sends (built-ins are code-defined). */
   quickSends?: QuickSend[];
-  budgetUsd: number | null;
   /** User-configured context-window cap (tokens); null = per-model default. */
   contextTokens?: number | null;
   /** Effective per-turn iteration cap after config, environment, and default resolution. */
@@ -433,7 +431,6 @@ export type Settings = {
   ollamaGeneration?: import("./protocol").OllamaGenerationSettings;
   ollamaGenerationOverrides?: import("./protocol").OllamaGenerationPatch;
   ollamaModelDefaults?: Record<string, number>;
-  showSystemEvents?: boolean;
   /** Per-field visibility toggles for the bottom status row. Absent = all default to true. */
   statusBar?: {
     showBalance?: boolean;
@@ -512,7 +509,6 @@ type State = {
   activePlan: ActivePlan | null;
   usage: UsageStats;
   sessions: SessionInfo[];
-  externalImportSources: ExternalSessionApp[];
   settings: Settings | null;
   balance: Balance | null;
   codexQuota: CodexQuota | null;
@@ -1558,25 +1554,6 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "$sessions":
       return { ...state, sessions: [...ev.items].sort(sortSessionsDescending) };
-    case "$session_import_sources":
-      return { ...state, externalImportSources: ev.apps };
-    case "$session_import_result":
-      return {
-        ...state,
-        messages: [
-          ...state.messages,
-          {
-            kind: "notice",
-            id: nextNoticeId(),
-            text: t("sidebarPanel.importResult", {
-              imported: ev.imported,
-              skipped: ev.skipped,
-              failed: ev.failed,
-            }),
-            severity: ev.failed > 0 ? "warning" : "success",
-          },
-        ],
-      };
     case "$mcp_specs":
       return {
         ...state,
@@ -1670,7 +1647,6 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           editMode: ev.editMode,
           quickSendId: ev.quickSendId,
           quickSends: ev.quickSends,
-          budgetUsd: ev.budgetUsd,
           contextTokens: ev.contextTokens ?? null,
           maxIterPerTurn: ev.maxIterPerTurn ?? null,
           maxIterPerTurnOverride: ev.maxIterPerTurnOverride ?? null,
@@ -1689,7 +1665,6 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           ollamaGeneration: ev.ollamaGeneration,
           ollamaGenerationOverrides: ev.ollamaGenerationOverrides,
           ollamaModelDefaults: ev.ollamaModelDefaults,
-          showSystemEvents: ev.showSystemEvents,
           statusBar: ev.statusBar,
           modelEndpoint: ev.modelEndpoint,
           subagentModelEndpoint: ev.subagentModelEndpoint,
@@ -2289,7 +2264,6 @@ function TabRuntime({
     activePlan: null,
     usage: zeroUsage(),
     sessions: [],
-    externalImportSources: [],
     settings: null,
     balance: null,
     codexQuota: null,
@@ -2334,7 +2308,6 @@ function TabRuntime({
   const [wdAnchor, setWdAnchor] = useState<
     { top?: number; bottom?: number; left: number } | undefined
   >(undefined);
-  const [importAnchor, setImportAnchor] = useState<PendingImport | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const threadInnerRef = useRef<HTMLDivElement>(null);
@@ -2990,23 +2963,6 @@ function TabRuntime({
     openSettingsAt,
   ]);
 
-  useEffect(() => {
-    if (!importAnchor) return;
-    const onMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target?.closest(".session-import-popover")) setImportAnchor(null);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setImportAnchor(null);
-    };
-    window.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [importAnchor]);
-
   // Track how long the current turn has been stuck (no events received)
   const [stuckSec, setStuckSec] = useState(0);
   useEffect(() => {
@@ -3070,17 +3026,6 @@ function TabRuntime({
     }
   }, [state.messages, session, appendNotice]);
 
-  const conversationCopy = useCallback(() => {
-    const userLabel = t("app.exportUserLabel");
-    const md = formatConversationMarkdown(state.messages, userLabel);
-    if (!md) {
-      appendNotice(t("app.toast.emptySession"));
-      return;
-    }
-    void navigator.clipboard.writeText(md);
-    appendNotice(t("app.toast.copiedMd"), "success");
-  }, [state.messages, appendNotice]);
-
   return (
     <WorkspaceProvider value={{ dir: state.settings?.workspaceDir }}>
       <div
@@ -3104,7 +3049,6 @@ function TabRuntime({
           onToggleSide={onToggleSide}
           onToggleCtx={onToggleCtx}
           onOpenSettings={() => openSettingsAt("general")}
-          onCopy={conversationCopy}
           onExport={exportConversation}
           onCompact={() => sendRpc({ cmd: "compact_history" })}
           onClear={clearConversation}
@@ -3191,12 +3135,7 @@ function TabRuntime({
                 workspaceDir={state.settings?.workspaceDir}
                 busy={state.busy}
                 hasMessages={state.messages.length > 0}
-                onCopy={conversationCopy}
                 onExport={exportConversation}
-                onOpenImport={(anchor) => {
-                  sendRpc({ cmd: "session_import_scan" });
-                  setImportAnchor(anchor);
-                }}
                 onOpenWorkdir={(anchor) => {
                   setWdAnchor(anchor);
                   setWdOpen(true);
@@ -3519,28 +3458,6 @@ function TabRuntime({
           onBrowse={pickWorkspace}
         />
 
-        {importAnchor ? (
-          <SessionImportPopover
-            target={importAnchor}
-            importSources={state.externalImportSources}
-            onRefresh={() => sendRpc({ cmd: "session_import_scan" })}
-            onCancel={() => setImportAnchor(null)}
-            onImportDetected={(sources) => {
-              sendRpc({ cmd: "session_import_bulk", sources });
-              setImportAnchor(null);
-            }}
-            onImport={(payload) => {
-              sendRpc({
-                cmd: "session_import",
-                source: payload.source,
-                path: payload.path,
-                ...(payload.name ? { name: payload.name } : {}),
-              });
-              setImportAnchor(null);
-            }}
-          />
-        ) : null}
-
         {aboutOpen ? <AboutModal onClose={() => setAboutOpen(false)} /> : null}
 
         {settingsOpen && state.settings ? (
@@ -3550,9 +3467,7 @@ function TabRuntime({
             usage={state.usage}
             currency={currency}
             theme={theme}
-            themeStyle={themeStyle}
             onSetTheme={onSetTheme}
-            onSetThemeStyle={onSetThemeStyle}
             fontScale={fontScale}
             onSetFontScale={onSetFontScale}
             fontFamily={fontFamily}
@@ -3593,7 +3508,6 @@ function TabRuntime({
               sendRpc({ cmd: "gemini_oauth_cancel" });
             }}
             onAntigravityOAuthSignOut={() => sendRpc({ cmd: "gemini_oauth_signout" })}
-            onPickWorkspace={pickWorkspace}
             onAddMcpSpec={addMcpSpec}
             onRemoveMcpSpec={removeMcpSpec}
             onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
@@ -3780,7 +3694,6 @@ function TitleBar({
   onToggleSide,
   onToggleCtx,
   onOpenSettings,
-  onCopy,
   onExport,
   onCompact,
   onClear,
@@ -3793,7 +3706,6 @@ function TitleBar({
   onToggleSide: () => void;
   onToggleCtx: () => void;
   onOpenSettings: () => void;
-  onCopy: () => void;
   onExport: () => void;
   onCompact?: () => void;
   onClear: () => void;
@@ -3940,23 +3852,6 @@ function TitleBar({
               }}
             >
               <div className="popup-list">
-                <div
-                  className="popup-item"
-                  onClick={closeAnd(() => {
-                    if (hasMessages) onCopy();
-                  })}
-                  onKeyDown={activationHandler(() => {
-                    if (hasMessages) onCopy();
-                  })}
-                  style={{ opacity: hasMessages ? 1 : 0.5 }}
-                >
-                  <span className="ico">
-                    <I.copy size={12} />
-                  </span>
-                  <div className="nm">
-                    <span>{t("app.titlebar.copyMd")}</span>
-                  </div>
-                </div>
                 <div
                   className="popup-item"
                   onClick={closeAnd(() => {
@@ -4168,9 +4063,7 @@ function MainHead({
   workspaceDir,
   busy,
   hasMessages,
-  onCopy,
   onExport,
-  onOpenImport,
   onOpenWorkdir,
 }: {
   session: string;
@@ -4178,9 +4071,7 @@ function MainHead({
   workspaceDir?: string;
   busy: boolean;
   hasMessages: boolean;
-  onCopy: () => void;
   onExport: () => void;
-  onOpenImport: (anchor: { x: number; y: number }) => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
 }) {
   useLang();
@@ -4226,31 +4117,11 @@ function MainHead({
       <button
         type="button"
         className="h-btn"
-        onClick={onCopy}
-        disabled={!hasMessages}
-        title={t("app.header.copyMd")}
-      >
-        <I.copy size={12} /> {t("app.header.copy")}
-      </button>
-      <button
-        type="button"
-        className="h-btn"
         onClick={onExport}
         disabled={!hasMessages}
         title={t("app.header.exportMd")}
       >
         <I.download size={12} /> {t("app.header.export")}
-      </button>
-      <button
-        type="button"
-        className="h-btn"
-        onClick={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          onOpenImport({ x: rect.right, y: rect.bottom });
-        }}
-        title={t("sidebarPanel.importSessions")}
-      >
-        <I.upload size={12} /> {t("app.header.import")}
       </button>
     </div>
   );

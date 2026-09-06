@@ -84,8 +84,6 @@ export type WebSearchEngineName =
   | "ollama"
   | "zai";
 
-export type ExternalSessionSource = "claude" | "codex" | "reasonix";
-
 export interface OllamaGenerationSettings {
   temperature?: number;
   topP?: number;
@@ -102,15 +100,6 @@ export interface OllamaGenerationSettings {
 export type OllamaGenerationPatch = {
   [K in keyof OllamaGenerationSettings]?: OllamaGenerationSettings[K] | null;
 };
-
-export interface ExternalSessionApp {
-  source: ExternalSessionSource;
-  label: string;
-  root: string;
-  available: boolean;
-  sessionCount: number;
-  latestMtime?: string;
-}
 
 // ---- events ----
 
@@ -214,18 +203,6 @@ export interface SessionsEvent {
     summary?: string;
     workspaceStatus?: "matched" | "legacy_missing_meta";
   }[];
-}
-
-export interface SessionImportSourcesEvent {
-  type: "$session_import_sources";
-  apps: ExternalSessionApp[];
-}
-
-export interface SessionImportResultEvent {
-  type: "$session_import_result";
-  imported: number;
-  skipped: number;
-  failed: number;
 }
 
 export interface MentionResultsEvent {
@@ -448,7 +425,6 @@ export interface SettingsEvent {
   quickSendId: string;
   /** User-defined quick sends (built-ins are code-defined). */
   quickSends: QuickSend[];
-  budgetUsd: number | null;
   /** User-configured context-window cap (tokens); null = per-model default (300K). */
   contextTokens?: number | null;
   /** Effective per-turn iteration cap after config, environment, and default resolution. */
@@ -482,7 +458,6 @@ export interface SettingsEvent {
   opencodeBaseUrl?: string;
   /** Per-tab subagent model — the default model used when a subagent skill has no explicit `model:` frontmatter override. Absent = deepseek-v4-flash. */
   subagentModel?: string;
-  showSystemEvents?: boolean;
   /** Per-field visibility toggles for the bottom status row. Absent = all default to true. */
   statusBar?: {
     showBalance?: boolean;
@@ -707,7 +682,6 @@ export interface SettingsPatch {
   editMode?: EditMode;
   quickSendId?: string;
   quickSends?: QuickSend[];
-  budgetUsd?: number | null;
   /** Context-window cap in tokens, clamped to [128000, 1000000]; null/undefined = per-model default. */
   contextTokens?: number | null;
   /** Per-turn iteration cap, clamped to [50, 100]; null/undefined = default (50). */
@@ -735,7 +709,6 @@ export interface SettingsPatch {
   zaiApiKey?: string | null;
   opencodeApiKey?: string | null;
   opencodeBaseUrl?: string | null;
-  showSystemEvents?: boolean;
 }
 
 /** An image to attach to a user message. Clipboard paste flows ship the
@@ -772,9 +745,6 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "session_clear" }
   | { cmd: "session_load"; name: string }
   | { cmd: "session_rename"; name: string; title: string }
-  | { cmd: "session_import"; source: ExternalSessionSource; path: string; name?: string }
-  | { cmd: "session_import_scan" }
-  | { cmd: "session_import_bulk"; sources: ExternalSessionSource[] }
   | { cmd: "memory_read"; path: string }
   | {
       cmd: "memory_write";

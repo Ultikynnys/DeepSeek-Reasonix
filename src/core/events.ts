@@ -36,8 +36,6 @@ export const EventType = {
   planSubmitted: "plan.submitted",
   planStepCompleted: "plan.step.completed",
   hookFired: "hook.fired",
-  policyBudgetWarning: "policy.budget.warning",
-  policyBudgetBlocked: "policy.budget.blocked",
   policyEscalated: "policy.escalated",
   sessionOpened: "session.opened",
   sessionCompacted: "session.compacted",
@@ -234,18 +232,6 @@ export interface HookFiredEvent extends EventBase {
   outcome: "ok" | "blocked" | "modified" | "error";
 }
 
-export interface BudgetWarningEvent extends EventBase {
-  type: typeof EventType.policyBudgetWarning;
-  spentUsd: number;
-  capUsd: number;
-}
-
-export interface BudgetBlockedEvent extends EventBase {
-  type: typeof EventType.policyBudgetBlocked;
-  spentUsd: number;
-  capUsd: number;
-}
-
 export interface EscalatedEvent extends EventBase {
   type: typeof EventType.policyEscalated;
   fromModel: string;
@@ -375,8 +361,6 @@ export type Event =
   | PlanSubmittedEvent
   | PlanStepCompletedEvent
   | HookFiredEvent
-  | BudgetWarningEvent
-  | BudgetBlockedEvent
   | EscalatedEvent
   | SessionOpenedEvent
   | SessionCompactedEvent
@@ -397,17 +381,6 @@ export type Reducer<TView> = (view: TView, ev: Event) => TView;
 export interface ConversationView {
   messages: ReadonlyArray<ChatMessage>;
   pendingToolCalls: ReadonlyArray<{ callId: string; name: string }>;
-}
-
-export interface BudgetView {
-  spentUsd: number;
-  capUsd: number | null;
-  promptTokens: number;
-  completionTokens: number;
-  cacheHitTokens: number;
-  cacheMissTokens: number;
-  warned: boolean;
-  blocked: boolean;
 }
 
 export interface PlanStepView {
@@ -447,7 +420,6 @@ export interface SessionMetaView {
 
 export interface ProjectionSet {
   conversation: ConversationView;
-  budget: BudgetView;
   plan: PlanView;
   workspace: WorkspaceView;
   capabilities: CapabilityView;

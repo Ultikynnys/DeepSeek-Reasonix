@@ -24,8 +24,6 @@ import type {
   DesktopDiagnosticEvent,
   DesktopDiagnosticLevel,
   EditMode,
-  ExternalSessionApp,
-  ExternalSessionSource,
   JobInfo,
   JobsEvent,
   LoadedMessage,
@@ -65,8 +63,6 @@ import type {
   RevisionVerdict,
   SessionCompactedEvent,
   SessionEmptyEvent,
-  SessionImportResultEvent,
-  SessionImportSourcesEvent,
   SessionLoadedEvent,
   SessionsEvent,
   SettingsEvent,
@@ -121,8 +117,6 @@ export type {
   ConfirmationChoice,
   CtxBreakdownEvent,
   EditMode,
-  ExternalSessionApp,
-  ExternalSessionSource,
   JobInfo,
   JobsEvent,
   LoadedMessage,
@@ -157,8 +151,6 @@ export type {
   RevisionVerdict,
   SessionCompactedEvent,
   SessionEmptyEvent,
-  SessionImportResultEvent,
-  SessionImportSourcesEvent,
   SessionLoadedEvent,
   SessionsEvent,
   SettingsEvent,
@@ -396,8 +388,6 @@ export type IncomingEvent = { tabId?: string } & (
   | ChoiceRequiredEvent
   | PlanRequiredEvent
   | SessionsEvent
-  | SessionImportSourcesEvent
-  | SessionImportResultEvent
   | SessionLoadedEvent
   | SessionCompactedEvent
   | SessionEmptyEvent
