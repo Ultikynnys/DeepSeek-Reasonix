@@ -312,7 +312,6 @@ export function SettingsModal({
             {page === "rules" && (
               <PageRules
                 settings={settings}
-                onSave={onSave}
                 onAddRule={onAddRule}
                 onRemoveRule={onRemoveRule}
               />
@@ -1836,12 +1835,10 @@ function PageMemory({
 
 function PageRules({
   settings,
-  onSave,
   onAddRule,
   onRemoveRule,
 }: {
   settings: SettingsType;
-  onSave: (patch: SettingsPatch) => void;
   onAddRule?: (ruleType: "shell" | "path", pattern: string) => void;
   onRemoveRule?: (ruleType: "shell" | "path", pattern: string) => void;
 }) {
@@ -1862,27 +1859,6 @@ function PageRules({
 
   return (
     <>
-      <section className="section">
-        <div className="stitle">{t("settings.editMode")}</div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.appMode")}</div>
-            <div className="h">{t("settings.editModeHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            {(["plan", "review", "auto", "yolo"] as const).map((m) => (
-              <button
-                type="button"
-                key={m}
-                data-on={settings.editMode === m}
-                onClick={() => onSave({ editMode: m })}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
       <section className="section">
         <div className="stitle">{t("settings.ruleAutoApprovalSection")}</div>
         <div
