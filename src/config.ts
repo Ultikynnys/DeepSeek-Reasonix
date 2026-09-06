@@ -1,6 +1,5 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
-import { randomBytes } from "node:crypto";
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
@@ -11,7 +10,6 @@ import {
   OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
-  allQuickSends,
   enforceQuickSendShorthand,
   isQuickSend,
   isUsableAntigravityModel,

@@ -400,11 +400,6 @@ function buildSpecString(input: BuildSpecInput): { spec: string } | { error: str
   return { error: `unknown transport: ${JSON.stringify(transport)}` };
 }
 
-function parseSpecName(spec: string): string | null {
-  const m = spec.trim().match(/^([a-zA-Z_][a-zA-Z0-9_-]*)=/);
-  return m ? (m[1] ?? null) : null;
-}
-
 function quoteIfNeeded(s: string): string {
   return /\s|"/.test(s) ? `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : s;
 }
