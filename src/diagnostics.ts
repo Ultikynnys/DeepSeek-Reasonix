@@ -14,7 +14,7 @@ import {
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { redactDiagnosticText, redactDiagnosticValue } from "@reasonix/core-utils";
+import { messageOf, redactDiagnosticText, redactDiagnosticValue } from "@reasonix/core-utils";
 import { reasonixHome } from "./reasonix-home.js";
 
 export type DiagnosticLevel = "error" | "warn" | "info" | "debug" | "verbose";
@@ -158,7 +158,7 @@ export function recordDiagnostic(
   } catch (error) {
     if (!recordingFailure) {
       recordingFailure = true;
-      const message = error instanceof Error ? error.message : String(error);
+      const message = messageOf(error);
       process.stderr.write(`[diagnostics] durable write failed: ${message}\n`);
       recordingFailure = false;
     }

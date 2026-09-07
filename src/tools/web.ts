@@ -2,6 +2,7 @@
 
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { flattenText } from "@reasonix/core-utils";
 import { parse as parseHtml } from "node-html-parser";
 import {
   loadBaiduApiKey,
@@ -389,7 +390,7 @@ async function searchBing(
     throw new Error(
       t("webErrors.bingNoResults", {
         chars: html.length,
-        preview: html.slice(0, 120).replace(/\s+/g, " "),
+        preview: flattenText(html.slice(0, 120)),
       }),
     );
   }
@@ -1036,7 +1037,7 @@ export function parseBingResults(html: string): SearchResult[] {
     const title = anchor.textContent.trim();
     if (!title) continue;
     const cap = li.querySelector("div.b_caption p");
-    const snippet = cap ? cap.textContent.trim().replace(/\s+/g, " ") : "";
+    const snippet = cap ? flattenText(cap.textContent) : "";
     results.push({ title, url: href, snippet });
   }
   return results;
@@ -1222,7 +1223,7 @@ function decodeHtmlEntities(s: string): string {
 function extractTitle(html: string): string | undefined {
   const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   if (!m?.[1]) return undefined;
-  return m[1].replace(/\s+/g, " ").trim() || undefined;
+  return flattenText(m[1]) || undefined;
 }
 
 export interface WebToolsOptions {

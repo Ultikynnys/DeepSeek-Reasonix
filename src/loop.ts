@@ -1,4 +1,4 @@
-import { messageOf, sleep } from "@reasonix/core-utils";
+import { flattenText, messageOf, sleep } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "./client.js";
 import { type EditMode, type ReasoningEffort, providerForModel } from "./config.js";
 import { tryParseJson } from "./core/parse-json.js";
@@ -2174,9 +2174,7 @@ function parsePositiveIntEnv(raw: string | undefined): number | undefined {
  *  normalizes internal whitespace, and drops punctuation/trailing filler so
  *  re-worded but semantically identical thoughts still match. */
 function normalizeReasoning(raw: string): string {
-  return raw
-    .trim()
-    .replace(/\s+/g, " ")
+  return flattenText(raw)
     .replace(/[.,;:!?]+$/g, "")
     .toLowerCase();
 }

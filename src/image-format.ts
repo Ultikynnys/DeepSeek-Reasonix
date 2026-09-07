@@ -1,6 +1,6 @@
 /** Normalize image bytes so a vision API that validates the real bytes accepts them. */
 
-import { MAX_IMAGE_BYTES, formatBytes } from "@reasonix/core-utils";
+import { MAX_IMAGE_BYTES, formatBytes, messageOf } from "@reasonix/core-utils";
 import { Jimp } from "jimp";
 
 /** Actual raster format sniffed from magic bytes, or undefined if none match. */
@@ -142,7 +142,7 @@ export async function normalizeImageToDataUrl(
       mime: "image/png",
     };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = messageOf(err);
     return { ok: false, message: `not a decodable image (${detail})` };
   }
 }

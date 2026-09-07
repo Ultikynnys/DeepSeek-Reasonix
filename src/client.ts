@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { messageOf } from "@reasonix/core-utils";
 import { type EventSourceMessage, createParser } from "eventsource-parser";
 import { ANTIGRAVITY_CLOUD_CODE_URL, antigravityHeaders } from "./antigravity-oauth.js";
 import {
@@ -589,7 +590,7 @@ export class DeepSeekClient {
       recordDiagnostic("model.request.failed", {
         level: "error",
         durationMs: performance.now() - startedAt,
-        message: error instanceof Error ? error.message : String(error),
+        message: messageOf(error),
         details: {
           model: opts.model,
           provider: providerForModel(opts.model),

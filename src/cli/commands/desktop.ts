@@ -1346,11 +1346,7 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
         try {
           saveOllamaVerdicts(store, path);
         } catch (err) {
-          diag(
-            "ollama.verdicts.save_failed",
-            { message: err instanceof Error ? err.message : String(err) },
-            "warn",
-          );
+          diag("ollama.verdicts.save_failed", { message: messageOf(err) }, "warn");
         }
         diag("ollama.probe.done", {
           total: unknown.length,
@@ -1402,11 +1398,7 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
         try {
           saveOllamaVerdicts(visionStore, visionPath);
         } catch (err) {
-          diag(
-            "ollama.vision.save_failed",
-            { message: err instanceof Error ? err.message : String(err) },
-            "warn",
-          );
+          diag("ollama.vision.save_failed", { message: messageOf(err) }, "warn");
         }
       }
       diag("ollama.vision.done", { total: visible.length, vision: vision.size });
@@ -1419,7 +1411,7 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
       fetchedAt: Date.now(),
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = messageOf(err);
     diag("ollama.models_fetch.error", { message });
     return { models: [], error: `Ollama unreachable: ${message}`, fetchedAt: Date.now() };
   }

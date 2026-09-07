@@ -1,3 +1,4 @@
+import { messageOf } from "@reasonix/core-utils";
 import type { CodexQuotaResult } from "../codex-backend.js";
 
 interface CachedQuota {
@@ -59,7 +60,7 @@ export class AccountQuotaCoordinator {
         return value;
       })
       .catch((error) => {
-        this.observer.failed?.(requestId, error instanceof Error ? error.message : String(error));
+        this.observer.failed?.(requestId, messageOf(error));
         throw error;
       })
       .finally(() => {

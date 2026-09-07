@@ -1,3 +1,4 @@
+import { messageOf } from "@reasonix/core-utils";
 import { withDeadline } from "../core/with-deadline.js";
 import { recordDiagnostic } from "../diagnostics.js";
 import { countTokens, countTokensBounded } from "../tokenizer.js";
@@ -115,7 +116,7 @@ export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string 
         recordDiagnostic("mcp.tool.completed", {
           level: "error",
           durationMs: performance.now() - t0,
-          message: error instanceof Error ? error.message : String(error),
+          message: messageOf(error),
           details: { server: env.serverName, tool: registeredName, ok: false },
         });
         throw error;
