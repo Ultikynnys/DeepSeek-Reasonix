@@ -23,7 +23,10 @@ type PendingClear = {
 
 function prettyName(s: SessionInfo): string {
   if (s.summary?.trim()) return s.summary.trim();
-  const m = s.name.match(/^desktop-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(?:-(\d+))?$/);
+  // Session names are `desktop-<14-digit timestamp>-<tabCounter>` with an
+  // optional `-N` dedupe suffix when two chats mint in the same second —
+  // match the timestamp first, then let the trailing counters fall through.
+  const m = s.name.match(/^desktop-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(?:\d{2})?-(\d+)(?:-\d+)?$/);
   if (m) {
     const [, , month, day, hh, mm, tab] = m;
     return `${t("sidebarPanel.sessionTitle", {

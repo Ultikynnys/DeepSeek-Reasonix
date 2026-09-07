@@ -196,6 +196,7 @@ import {
   type SessionMeta,
   chmodPrivate,
   deleteSession,
+  firstFreeSessionName,
   listSessionsForWorkspace,
   listSessionsForWorkspaceAsync,
   loadSessionMessages,
@@ -2169,8 +2170,17 @@ function nextTabId(): string {
 }
 
 function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
-  // Seconds precision: a 14-digit timestamp prevents name collision.
-  const name = `desktop-${timestampSuffix(14)}-${tabCounter}`;
+  // Seconds precision repeats when `new_chat` fires twice within one second —
+  // reuse the collision loop so the second mint takes `-1`, `-2`, … instead
+  // of truncating a session that already holds messages.
+  const name = firstFreeSessionName(`desktop-${timestampSuffix(14)}-${tabCounter}`, (candidate) => {
+    try {
+      const cp = sessionPath(candidate);
+      return existsSync(cp) && statSync(cp).size > 0;
+    } catch {
+      return false; /* stat failure: treat as free, create below */
+    }
+  });
   try {
     const p = sessionPath(name);
     mkdirSync(dirname(p), { recursive: true });
@@ -4509,8 +4519,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // Only set switching flag when there's a live turn to abort:
       // otherwise the flag stays true and suppresses the first turn's events (#1217).
       if (tab.aborter) tab.switching = true;
-      abortTurn(tab);
-      cancelPendingGates(tab);
+      // Full conversation teardown: abortTurn alone leaves spawned shell
+      // jobs running after the transcript is cleared.
+      cancelConversation(tab);
       if (tab.currentSession) {
         try {
           const prevPath = sessionPath(tab.currentSession);
@@ -4524,13 +4535,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           });
         }
       }
-      tab.currentSession = mintSessionFor(tab.rootDir, {
-        model: tab.currentModel,
-        reasoningEffort: tab.currentReasoningEffort,
-        subagentModel: tab.currentSubagentModel,
-      });
-      persistOpenTabs();
-      tab.runtime = tab.toolset && tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+      try {
+        tab.currentSession = mintSessionFor(tab.rootDir, {
+          model: tab.currentModel,
+          reasoningEffort: tab.currentReasoningEffort,
+          subagentModel: tab.currentSubagentModel,
+        });
+        persistOpenTabs();
+        tab.runtime = tab.toolset && tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+      } catch (err) {
+        emitDiagnosticError("session.new-chat.failed", err, {
+          tabId: tab.id,
+          details: tabDiagnosticState(tab),
+        });
+        emit({ type: "$error", message: `new_chat failed: ${(err as Error).message}` }, tab.id);
+        return;
+      }
       emit(
         {
           type: "$session_loaded",
@@ -4878,21 +4898,53 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
         if (msg.model !== undefined) {
           const next = msg.model.trim();
-          if (next) {
-            tab.currentModel = next;
-            saveModel(next);
-            persistSessionModelPrefs(tab);
-            if (tab.toolset) {
-              tab.system = codeSystemPrompt(tab.rootDir, {
-                hasSemanticSearch: tab.toolset.semantic.enabled,
-                modelId: tab.currentModel,
-              });
-              syncVisionTool(tab);
-              // Build even when the tab had no runtime (e.g. a gated welcome
-              // tab that just picked an Ollama model) — only if the new model
-              // is actually usable, else drop a stale runtime.
-              if (tabCurrentModelUsable(tab)) tab.runtime = buildRuntimeFor(tab);
-              else tab.runtime = null;
+          if (next && next !== tab.currentModel) {
+            // Snapshot so a failed switch can roll back: without this the UI
+            // (optimistic settings_patch) shows a model the daemon never
+            // built a runtime for, and every later send misfires.
+            const prevModel = tab.currentModel;
+            const prevSystem = tab.system;
+            try {
+              tab.currentModel = next;
+              saveModel(next);
+              persistSessionModelPrefs(tab);
+              if (tab.toolset) {
+                tab.system = codeSystemPrompt(tab.rootDir, {
+                  hasSemanticSearch: tab.toolset.semantic.enabled,
+                  modelId: tab.currentModel,
+                });
+                syncVisionTool(tab);
+                // Build even when the tab had no runtime (e.g. a gated welcome
+                // tab that just picked an Ollama model) — only if the new model
+                // is actually usable, else drop a stale runtime.
+                if (tabCurrentModelUsable(tab)) tab.runtime = buildRuntimeFor(tab);
+                else tab.runtime = null;
+              }
+            } catch (modelErr) {
+              // Best-effort restore of the last working model so the daemon
+              // keeps serving the conversation the UI still displays.
+              tab.currentModel = prevModel;
+              try {
+                saveModel(prevModel);
+              } catch {
+                /* config rewrite failed — runtime state still restored below */
+              }
+              persistSessionModelPrefs(tab);
+              if (tab.toolset) {
+                tab.system = prevSystem;
+                try {
+                  syncVisionTool(tab);
+                } catch {
+                  /* keep previous system prompt on vision-sync failure */
+                }
+                try {
+                  if (tabCurrentModelUsable(tab)) tab.runtime = buildRuntimeFor(tab);
+                  else tab.runtime = null;
+                } catch {
+                  tab.runtime = null;
+                }
+              }
+              throw modelErr;
             }
           }
         }
@@ -4903,6 +4955,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           { type: "$error", message: `settings_save failed: ${(err as Error).message}` },
           tab.id,
         );
+        // Re-sync even on failure: the UI applied the patch optimistically,
+        // so without this it permanently displays settings the daemon rejected.
+        try {
+          emitSettings(tab);
+        } catch {
+          /* emit must not mask the original error */
+        }
+        emitTabGate(tab);
       }
       return;
     }

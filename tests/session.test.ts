@@ -18,6 +18,7 @@ import {
   archiveSession,
   deleteSession,
   findSessionsByPrefix,
+  firstFreeSessionName,
   freshSessionName,
   listSessions,
   listSessionsForWorkspace,
@@ -547,6 +548,36 @@ describe("session persistence", () => {
 
     it("keeps dashed bases intact (only the trailing timestamp is stripped)", () => {
       expect(freshSessionName("my-app-bar")).toMatch(/^my-app-bar-\d{14}$/);
+    });
+  });
+
+  describe("firstFreeSessionName", () => {
+    it("returns the base when it holds no live session", () => {
+      expect(firstFreeSessionName("desktop-20260905143000-1", () => false)).toBe(
+        "desktop-20260905143000-1",
+      );
+    });
+
+    it("takes a -1 suffix when the base file already holds messages (same-second double new_chat)", () => {
+      const occupied = (name: string) => name === "desktop-20260905143000-1";
+      expect(firstFreeSessionName("desktop-20260905143000-1", occupied)).toBe(
+        "desktop-20260905143000-1-1",
+      );
+    });
+
+    it("skips past multiple occupied names", () => {
+      const taken = new Set(["desktop-20260905143000-1", "desktop-20260905143000-1-1"]);
+      expect(firstFreeSessionName("desktop-20260905143000-1", (n) => taken.has(n))).toBe(
+        "desktop-20260905143000-1-2",
+      );
+    });
+
+    it("reuses an empty (0-byte) session file instead of suffixing", () => {
+      // Empty files are deleted by new_chat's cleanup pass, so they are free.
+      const occupied = (name: string) => name === "other-session";
+      expect(firstFreeSessionName("desktop-20260905143000-1", occupied)).toBe(
+        "desktop-20260905143000-1",
+      );
     });
   });
 

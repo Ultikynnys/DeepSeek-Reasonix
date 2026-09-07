@@ -2435,9 +2435,22 @@ function TabRuntime({
   );
   const newChat = useCallback(() => {
     clearAbortDraft();
-    sendRpc({ cmd: "new_chat" });
-    dispatch({ t: "clear" });
-  }, [clearAbortDraft, sendRpc]);
+    // Composer state belongs to the old conversation — drop it now so a
+    // half-typed draft can't leak into the fresh session.
+    setDraft("");
+    setPendingImages([]);
+    // The transcript clear comes from the daemon's $session_loaded reply —
+    // clearing optimistically here orphans the UI on a blank screen when the
+    // RPC fails while the backend still points at the old session.
+    rpcSend({ tabId, cmd: "new_chat" }).catch((err) => {
+      console.error("new_chat failed", err);
+      dispatch({
+        t: "push_notice",
+        text: `Couldn't start a new chat: ${messageOf(err)} — your current conversation is untouched.`,
+        severity: "error",
+      });
+    });
+  }, [clearAbortDraft, tabId]);
 
   const pickWorkspace = useCallback(async () => {
     try {
