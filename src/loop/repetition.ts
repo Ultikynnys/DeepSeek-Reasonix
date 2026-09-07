@@ -18,6 +18,13 @@ const LONG_ANCHOR_CHARS = 48;
 const LONG_MIN_REPEATS = 3;
 const MAX_LONG_CANDIDATES = 128;
 
+/** Word-scale period cap: 5+ consecutive identical words is never legitimate output. */
+const WORD_PERIOD_CAP = 32;
+/** A phrase/paragraph-scale run this long is unambiguous degeneration. */
+const LONG_RUN_CHARS = 1024;
+/** Minimum run length before a dominant periodic tail may abort the stream. */
+const MIN_DOMINANT_RUN_CHARS = 256;
+
 /** Default adaptive threshold biased towards detecting repeating words and short periods early. */
 function defaultRequiredChars(period: number, minRepeatsOverride?: number): number {
   if (minRepeatsOverride !== undefined) {
@@ -146,6 +153,23 @@ export class StreamRepetitionDetector {
       }
       const rawRunStart = this.rawOffsets[runStart];
       if (rawRunStart === undefined) continue;
+
+      // Degeneracy gate for phrase/paragraph-scale periods: healthy long-form
+      // output legitimately contains short exact runs (restated hypotheses,
+      // echoed refrains), so a run that small only proves a stall when it is
+      // either unambiguously long or already dominates the stream so far.
+      // Word-scale periods (≤ WORD_PERIOD_CAP) keep their early word-bias
+      // thresholds. Keep watching otherwise: a genuinely stuck model's run
+      // keeps growing and re-qualifies on a later delta, while a momentary
+      // echo is forgiven as soon as diverging content breaks periodicity.
+      if (this.minRepeatedChars === undefined && actualPeriod > WORD_PERIOD_CAP) {
+        const runChars = this.buffer.length - runStart;
+        const dominant = runStart * 2 <= this.buffer.length;
+        if (runChars < LONG_RUN_CHARS && !(runChars >= MIN_DOMINANT_RUN_CHARS && dominant)) {
+          continue;
+        }
+      }
+
       return {
         period: actualPeriod,
         repeatedChars: this.totalChars - rawRunStart,

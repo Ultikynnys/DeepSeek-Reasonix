@@ -5,6 +5,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed — repetition detection no longer aborts productive streams on short exact runs.**
+
+- The stream repetition detector now requires phrase/paragraph-scale periodic runs (period > 32 chars) to be genuinely degenerate before it kills a stream: the run must either exceed 1024 chars or dominate the stream so far (start in its first half). Healthy long-form reasoning legitimately restates a hypothesis or echoes a refrain a few times; such momentary runs no longer end the turn with "produced only repetitive output" and discard the accumulated analysis. A truly stuck model's run keeps growing and still trips the guard within ~1KB of repetition; prefix-free degenerate streams (repetition from the start) are still caught immediately. Word-scale periods (≤ 32 chars) keep the early word-bias thresholds.
+- `write_file` / `edit_file` / `multi_edit` arguments are exempt from tool-args repetition monitoring: their args are arbitrary file bytes, and repetitive lines are the requested content — a code file with several identical lines must not abort the call mid-write. Tool-name monitoring and the content/reasoning guards are unchanged.
+- Regression tests pin both behaviors at the detector and `streamModelResponse` levels.
+
 **Added — hide models you never use; a global persistent `disabledModels` setting.**
 
 - Settings → Models now has a Hide/Show toggle on every model card (including the Ollama grid) plus a Show-all reset. Hidden ids are stored in a `disabledModels: string[]` field in `~/.reasonix/config.json` (same string-array sanitization as `mcpDisabled`), emitted on every `$settings` event, and persisted through `settings_save`.

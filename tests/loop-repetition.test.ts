@@ -115,6 +115,56 @@ describe("StreamRepetitionDetector", () => {
     expect(detect(["0123456789abcdef".repeat(60)])).toMatchObject({ period: 16, safeLength: 0 });
   });
 
+  it("does not abort a healthy stream over a short repeated paragraph tail", () => {
+    // Regression: a productive reasoning stream that restates one hypothesis
+    // verbatim 3x near the end must not be killed as "repetitive output".
+    const healthy = Array.from(
+      { length: 30 },
+      (_, i) =>
+        `Step ${i}: inspected the retry branch, confirmed the 5xx path retries once, and noted finding ${i * 7}.`,
+    ).join("\n\n");
+    const para =
+      "Let me reconsider the providerErrorRetryable check. For a 500 error it should be true, unless the error is being thrown as a 4xx by the parse path. But opencode uses chat-completions, not responses, so that is unlikely.";
+    const text = `${healthy}\n\n${`${para}\n`.repeat(3)}`;
+    const chunks = Array.from({ length: Math.ceil(text.length / 11) }, (_, i) =>
+      text.slice(i * 11, i * 11 + 11),
+    );
+    expect(detect(chunks)).toBeNull();
+  });
+
+  it("aborts once the repeated paragraph run grows unambiguous", () => {
+    const healthy = Array.from(
+      { length: 30 },
+      (_, i) =>
+        `Step ${i}: inspected the retry branch, confirmed the 5xx path retries once, and noted finding ${i * 7}.`,
+    ).join("\n\n");
+    const para =
+      "Let me reconsider the providerErrorRetryable check. For a 500 error it should be true, unless the error is being thrown as a 4xx by the parse path. But opencode uses chat-completions, not responses, so that is unlikely.";
+    // "END" (no trailing period) keeps the healthy tail from matching the
+    // paragraph's final '.', so the run boundary is exact.
+    const bridge = " END";
+    const separator = "\n\n";
+    const text = `${healthy}${bridge}${separator}${para.repeat(8)}`;
+    const chunks = Array.from({ length: Math.ceil(text.length / 11) }, (_, i) =>
+      text.slice(i * 11, i * 11 + 11),
+    );
+    const result = detect(chunks);
+    expect(result).not.toBeNull();
+    // The healthy prefix, its bridge, and the separator must be preserved.
+    expect(result!.safeLength).toBe(healthy.length + bridge.length + separator.length);
+    expect(result!.repeatedChars).toBeGreaterThanOrEqual(1024);
+  });
+
+  it("aborts a prefix-free short paragraph cycle (repetition dominates the stream)", () => {
+    const para =
+      "Let me reconsider the providerErrorRetryable check. For a 500 error it should be true, unless the error is being thrown as a 4xx by the parse path. But opencode uses chat-completions, not responses, so that is unlikely.";
+    const text = `${para}\n${para}\n${para}`;
+    const chunks = Array.from({ length: Math.ceil(text.length / 13) }, (_, i) =>
+      text.slice(i * 13, i * 13 + 13),
+    );
+    expect(detect(chunks)).toMatchObject({ safeLength: 0 });
+  });
+
   it("keeps memory bounded while preserving absolute safe offsets", () => {
     const detector = new StreamRepetitionDetector({
       minRepeatedChars: 256,

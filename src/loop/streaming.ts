@@ -51,6 +51,10 @@ export async function* streamModelResponse(
   const reasoningRepetition = new StreamRepetitionDetector();
   const toolNameRepetitions = new Map<number, StreamRepetitionDetector>();
   const toolArgsRepetitions = new Map<number, StreamRepetitionDetector>();
+  // File-editing tools stream arbitrary file bytes as arguments: repetitive
+  // lines are the requested content, not a degenerating stream. A code file
+  // with several identical lines must not abort the call mid-write.
+  const argsRepetitionExempt = new Set(["write_file", "edit_file", "multi_edit"]);
   const stallAbort = new AbortController();
   const requestSignal = AbortSignal.any([signal, stallAbort.signal]);
   const callBuf: Map<number, ToolCall> = new Map();
@@ -140,12 +144,13 @@ export async function* streamModelResponse(
         }
         if (d.argumentsDelta) {
           cur.function.arguments = (cur.function.arguments ?? "") + d.argumentsDelta;
-          let argsRep = toolArgsRepetitions.get(d.index);
-          if (!argsRep) {
+          const exempt = argsRepetitionExempt.has(cur.function.name);
+          let argsRep = exempt ? undefined : toolArgsRepetitions.get(d.index);
+          if (!argsRep && !exempt) {
             argsRep = new StreamRepetitionDetector();
             toolArgsRepetitions.set(d.index, argsRep);
           }
-          const repetition = argsRep.append(d.argumentsDelta);
+          const repetition = argsRep?.append(d.argumentsDelta);
           if (repetition) {
             cur.function.arguments = cur.function.arguments.slice(0, repetition.safeLength);
             repetitionStall = {
