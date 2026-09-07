@@ -36,6 +36,7 @@ export {
   isPeakRate,
   isRateScheduleWeekend,
   minutesUntilRateChangeForSchedule,
+  normalizeOllamaModelId,
 } from "./rate-periods.js";
 export type { RateSchedule } from "./rate-periods.js";
 export {

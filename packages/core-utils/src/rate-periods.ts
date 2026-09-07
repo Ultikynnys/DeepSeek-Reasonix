@@ -21,9 +21,14 @@ export const OLLAMA_RATE_SCHEDULE: RateSchedule = {
   weekendOffsetMinutes: 0,
 };
 
+/** Strip the `ollama/` namespace prefix and any `:tag` suffix from an Ollama model id. */
+export function normalizeOllamaModelId(model: string): string {
+  return model.replace(/^ollama\//, "").replace(/:[^:]*$/, "");
+}
+
 /** Models whose Ollama Cloud token price changes with OLLAMA_RATE_SCHEDULE. */
 export function isOllamaPeakPricedModel(model: string): boolean {
-  const id = model.replace(/^ollama\//, "").replace(/:cloud$/, "");
+  const id = normalizeOllamaModelId(model);
   return id === "deepseek-v4-flash" || id === "deepseek-v4-pro";
 }
 

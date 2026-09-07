@@ -112,6 +112,13 @@ describe("costUsd", () => {
         at: saturday,
       }),
     ).toBeCloseTo(0.022 + 0.66 + 1.98, 10);
+    // A version-tagged id (e.g. :0731) resolves to the same base-model row.
+    expect(
+      costUsd("ollama/deepseek-v4-flash:0731", usage, undefined, {
+        provider: "ollama",
+        at: saturday,
+      }),
+    ).toBeCloseTo(0.007 + 0.22 + 0.66, 10);
   });
 
   it("uses 2x Ollama pricing from 12:00 through 18:00 UTC on weekdays", () => {

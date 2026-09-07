@@ -1,4 +1,4 @@
-import { OLLAMA_RATE_SCHEDULE } from "@reasonix/core-utils";
+import { OLLAMA_RATE_SCHEDULE, isOllamaPeakPricedModel } from "@reasonix/core-utils";
 import { describe, expect, it } from "vitest";
 import {
   isBeijingWeekendDay,
@@ -89,6 +89,17 @@ describe("Ollama Cloud rate periods", () => {
       minutesUntilRateChange(new Date(Date.UTC(2026, 8, 4, 18)), OLLAMA_RATE_SCHEDULE),
     ).toBe(3960);
     expect(minutesUntilRateChange(sunday(12), OLLAMA_RATE_SCHEDULE)).toBe(1440);
+  });
+
+  it("matches peak-priced models regardless of the Ollama tag suffix", () => {
+    expect(isOllamaPeakPricedModel("ollama/deepseek-v4-flash:0731")).toBe(true);
+    expect(isOllamaPeakPricedModel("ollama/deepseek-v4-pro:0731")).toBe(true);
+    expect(isOllamaPeakPricedModel("ollama/deepseek-v4-pro:0813")).toBe(true);
+    expect(isOllamaPeakPricedModel("ollama/deepseek-v4-flash:cloud")).toBe(true);
+    expect(isOllamaPeakPricedModel("ollama/deepseek-v4-flash")).toBe(true);
+    expect(isOllamaPeakPricedModel("deepseek-v4-flash")).toBe(true);
+    expect(isOllamaPeakPricedModel("ollama/llama3.1:latest")).toBe(false);
+    expect(isOllamaPeakPricedModel("ollama/deepseek-v4-flash-vision-exp")).toBe(false);
   });
 });
 

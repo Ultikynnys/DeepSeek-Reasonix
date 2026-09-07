@@ -3,6 +3,7 @@ import {
   OLLAMA_RATE_SCHEDULE,
   isOllamaPeakPricedModel,
   isPeakRate,
+  normalizeOllamaModelId,
 } from "@reasonix/core-utils";
 import type { Usage } from "../client.js";
 import {
@@ -62,7 +63,7 @@ const DEEPSEEK_PRICED_MODELS = new Set([
 const OPENAI_PRICED_MODELS = new Set(["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
 
 function ollamaPricingModel(model: string): string {
-  return model.replace(/^ollama\//, "").replace(/:cloud$/, "");
+  return normalizeOllamaModelId(model);
 }
 
 function defaultPricingFor(model: string, context?: PricingContext): ModelPricing | undefined {
