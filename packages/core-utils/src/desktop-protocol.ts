@@ -440,6 +440,8 @@ export interface SettingsEvent {
   maxIterPerTurnOverride?: number | null;
   /** When true, all automatic compaction sources (turn-start folds, post-response folds, context guards) are disabled. Only manual compaction runs. */
   disableAutoCompaction?: boolean;
+  /** Whether subagent skills may run. Defaults to true when absent. */
+  enableSubagents?: boolean;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -702,6 +704,8 @@ export interface SettingsPatch {
   maxIterPerTurn?: number | null;
   /** Disable automatic compaction from all sources except the manual button. */
   disableAutoCompaction?: boolean;
+  /** Allow dedicated and skill-based subagents to run. */
+  enableSubagents?: boolean;
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;

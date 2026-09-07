@@ -711,6 +711,45 @@ describe("ContextPanel files", () => {
     expect(onSaveSettings).toHaveBeenCalledWith({ disableAutoCompaction: true });
   });
 
+  it("renders the Subagents toggle below Auto-compaction and updates the setting", () => {
+    const onSaveSettings = vi.fn();
+    render(
+      <ContextPanel
+        settings={settings}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onSaveSettings={onSaveSettings}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    const autoCompaction = screen.getByText("Auto-compaction");
+    const subagents = screen.getByText("Subagents");
+    expect(
+      autoCompaction.compareDocumentPosition(subagents) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const enableBtn = screen.getByRole("button", { name: "Enable subagents" });
+    const disableBtn = screen.getByRole("button", { name: "Disable subagents" });
+    expect(enableBtn.getAttribute("data-on")).toBe("true");
+    expect(enableBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(disableBtn.getAttribute("data-on")).toBe("false");
+
+    fireEvent.click(disableBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({ enableSubagents: false });
+  });
+
   it("displays auto-compaction disabled indicator in context meter legend when active", () => {
     render(
       <ContextPanel

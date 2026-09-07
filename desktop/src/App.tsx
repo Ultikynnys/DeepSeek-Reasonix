@@ -390,6 +390,8 @@ export type Settings = {
   maxIterPerTurnOverride?: number | null;
   /** When true, all automatic compaction sources are disabled. */
   disableAutoCompaction?: boolean;
+  /** Whether subagent skills may run. Defaults to true. */
+  enableSubagents?: boolean;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -1736,6 +1738,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           maxIterPerTurn: ev.maxIterPerTurn ?? null,
           maxIterPerTurnOverride: ev.maxIterPerTurnOverride ?? null,
           disableAutoCompaction: ev.disableAutoCompaction ?? false,
+          enableSubagents: ev.enableSubagents ?? true,
           baseUrl: ev.baseUrl,
           apiKeyPrefix: ev.apiKeyPrefix,
           workspaceDir: ev.workspaceDir,

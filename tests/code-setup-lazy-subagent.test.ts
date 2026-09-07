@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANTIGRAVITY_OAUTH_CLIENT_ID } from "../src/antigravity-oauth.js";
 import { buildCodeToolset } from "../src/code/setup.js";
-import { saveAntigravityOAuth } from "../src/config.js";
+import { saveAntigravityOAuth, saveEnableSubagents } from "../src/config.js";
 
 // #700-followup: buildCodeToolset used to eagerly construct a DeepSeekClient
 // for the subagent runner, which threw "DEEPSEEK_API_KEY is not set" before
@@ -60,6 +60,38 @@ describe("buildCodeToolset", () => {
     expect(toolset.tools.size).toBeGreaterThan(0);
     // Never consulted during toolset construction — only on an actual subagent spawn.
     expect(reads).toBe(0);
+    await toolset.jobs.shutdown();
+  });
+
+  it("blocks dedicated and custom subagent skills before constructing a client", async () => {
+    saveEnableSubagents(false, cfgPath);
+    const skillDir = join(tmpRoot, ".reasonix", "skills", "custom-audit");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        "name: custom-audit",
+        "description: Run a custom audit",
+        "runAs: subagent",
+        "---",
+        "",
+        "Audit the requested area.",
+      ].join("\n"),
+      "utf8",
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });
+
+    for (const [tool, args] of [
+      ["explore", { task: "inspect the project" }],
+      ["research", { task: "compare behavior" }],
+      ["run_skill", { name: "custom-audit", arguments: "inspect auth" }],
+    ] as const) {
+      const result = await toolset.tools.dispatch(tool, JSON.stringify(args));
+      expect(JSON.parse(result).error).toMatch(/subagents are disabled/i);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
     await toolset.jobs.shutdown();
   });
 

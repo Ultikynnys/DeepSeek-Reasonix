@@ -370,6 +370,8 @@ export interface ReasonixConfig {
   contextTokens?: number;
   /** When true, disable all automatic compaction (turn-start auto-fold, post-response fold, context guards). Manual compaction remains available. */
   disableAutoCompaction?: boolean;
+  /** Whether subagent skills may run. Defaults to true when absent. */
+  enableSubagents?: boolean;
   /** Default workspace root for the desktop client. CLI uses cwd. */
   workspaceDir?: string;
   /** Last N workspace paths the desktop client has opened, most recent first. */
@@ -1819,6 +1821,18 @@ export function saveDisableAutoCompaction(
 ): void {
   const cfg = readConfig(path);
   cfg.disableAutoCompaction = disabled;
+  writeConfig(cfg, path);
+}
+
+/** Whether subagent skills may run. Defaults to true for backward compatibility. */
+export function loadEnableSubagents(path: string = defaultConfigPath()): boolean {
+  return readConfig(path).enableSubagents !== false;
+}
+
+/** Persist whether subagent skills may run. */
+export function saveEnableSubagents(enabled: boolean, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.enableSubagents = enabled;
   writeConfig(cfg, path);
 }
 

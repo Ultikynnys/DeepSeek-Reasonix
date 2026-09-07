@@ -7,6 +7,7 @@ import {
   type ModelProvider,
   isOpenAIStandardEndpoint,
   loadEditMode,
+  loadEnableSubagents,
   loadEndpointForModel,
   loadFilesystemOutlineThresholdBytes,
   loadJavaSourceEnabled,
@@ -149,6 +150,11 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     subagentModels: loadSubagentModels(),
     onSkillInstalled: opts.onSkillInstalled,
     subagentRunner: async (skill, task, signal, parentCallId, parentTurn) => {
+      if (!loadEnableSubagents(opts.configPath)) {
+        return JSON.stringify({
+          error: "Subagents are disabled in Settings → Tools.",
+        });
+      }
       // Per-tab default wins over the skill's explicit model (frontmatter or the
       // per-skill config override baked into `skill.model`), so the desktop's
       // subagent selector is authoritative; DEFAULT_MODEL is the last resort.

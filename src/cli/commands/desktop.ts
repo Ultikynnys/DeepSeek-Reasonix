@@ -102,6 +102,7 @@ import {
   loadDisabledModels,
   loadEditMode,
   loadEffectiveMcpConfig,
+  loadEnableSubagents,
   loadEndpoint,
   loadEndpointForModel,
   loadExaApiKey,
@@ -142,6 +143,7 @@ import {
   saveDisableAutoCompaction,
   saveDisabledModels,
   saveEditMode,
+  saveEnableSubagents,
   saveMaxIterPerTurn,
   saveModel,
   saveOllamaGenerationPatch,
@@ -959,6 +961,7 @@ function emitSettings(tab: Tab): void {
       maxIterPerTurnOverride:
         typeof config.maxIterPerTurn === "number" ? config.maxIterPerTurn : null,
       disableAutoCompaction: tab.runtime?.loop.disableAutoCompaction ?? loadDisableAutoCompaction(),
+      enableSubagents: loadEnableSubagents(),
       disabledModels: loadDisabledModels(),
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
@@ -4926,6 +4929,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             openTab.runtime?.loop.configure({ disableAutoCompaction: next });
             emitSettings(openTab);
           }
+        }
+        if (msg.enableSubagents !== undefined) {
+          saveEnableSubagents(msg.enableSubagents);
+          for (const openTab of tabs.values()) emitSettings(openTab);
         }
         if (msg.disabledModels !== undefined) {
           saveDisabledModels(Array.isArray(msg.disabledModels) ? msg.disabledModels : []);

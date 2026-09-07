@@ -916,6 +916,39 @@ function CtxTools({
         </div>
       </div>
 
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.subagents")}</span>
+          <span className="right">
+            <div className="seg-ctrl" style={{ fontSize: "10.5px" }}>
+              <button
+                type="button"
+                aria-label={t("contextPanel.enableSubagents")}
+                aria-pressed={settings?.enableSubagents !== false}
+                data-on={settings?.enableSubagents !== false}
+                onClick={() => onSaveSettings?.({ enableSubagents: true })}
+              >
+                {t("contextPanel.subagentsEnabled")}
+              </button>
+              <button
+                type="button"
+                aria-label={t("contextPanel.disableSubagents")}
+                aria-pressed={settings?.enableSubagents === false}
+                data-on={settings?.enableSubagents === false}
+                onClick={() => onSaveSettings?.({ enableSubagents: false })}
+              >
+                {t("contextPanel.subagentsDisabled")}
+              </button>
+            </div>
+          </span>
+        </div>
+        <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>
+          {settings?.enableSubagents === false
+            ? t("contextPanel.subagentsDisabledDesc")
+            : t("contextPanel.subagentsEnabledDesc")}
+        </div>
+      </div>
+
       {settings &&
       (settings.modelEndpoint?.provider === "ollama" ||
         settings.subagentModelEndpoint?.provider === "ollama") ? (

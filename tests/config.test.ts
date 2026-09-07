@@ -24,6 +24,7 @@ import {
   loadContextTokens,
   loadDesktopOpenTabs,
   loadEditMode,
+  loadEnableSubagents,
   loadEndpoint,
   loadEndpointForModel,
   loadEngineeringLifecycleMode,
@@ -66,6 +67,7 @@ import {
   saveContextTokens,
   saveDesktopOpenTabs,
   saveEditMode,
+  saveEnableSubagents,
   saveIndexConfig,
   saveMaxIterPerTurn,
   saveModel,
@@ -1202,6 +1204,18 @@ describe("config", () => {
 
     saveMaxIterPerTurn(null, path);
     expect(readConfig(path).maxIterPerTurn).toBeUndefined();
+  });
+
+  it("enableSubagents defaults to true and persists either state", () => {
+    expect(loadEnableSubagents(path)).toBe(true);
+
+    saveEnableSubagents(false, path);
+    expect(loadEnableSubagents(path)).toBe(false);
+    expect(readConfig(path).enableSubagents).toBe(false);
+
+    saveEnableSubagents(true, path);
+    expect(loadEnableSubagents(path)).toBe(true);
+    expect(readConfig(path).enableSubagents).toBe(true);
   });
 
   it("loadReasoningEffort defaults to 'high' when unset (safe for vLLM / Azure)", () => {
