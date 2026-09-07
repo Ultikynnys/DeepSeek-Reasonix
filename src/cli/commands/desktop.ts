@@ -4926,16 +4926,20 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               tab.currentModel = prevModel;
               try {
                 saveModel(prevModel);
-              } catch {
-                /* config rewrite failed — runtime state still restored below */
+              } catch (saveErr) {
+                process.stderr.write(
+                  `reasonix: model prefs rollback save failed — ${messageOf(saveErr)}\n`,
+                );
               }
               persistSessionModelPrefs(tab);
               if (tab.toolset) {
                 tab.system = prevSystem;
                 try {
                   syncVisionTool(tab);
-                } catch {
-                  /* keep previous system prompt on vision-sync failure */
+                } catch (syncErr) {
+                  process.stderr.write(
+                    `reasonix: vision-sync rollback failed — ${messageOf(syncErr)}\n`,
+                  );
                 }
                 try {
                   if (tabCurrentModelUsable(tab)) tab.runtime = buildRuntimeFor(tab);
@@ -4959,8 +4963,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         // so without this it permanently displays settings the daemon rejected.
         try {
           emitSettings(tab);
-        } catch {
-          /* emit must not mask the original error */
+        } catch (emitErr) {
+          process.stderr.write(`reasonix: settings re-emit failed — ${messageOf(emitErr)}\n`);
         }
         emitTabGate(tab);
       }
