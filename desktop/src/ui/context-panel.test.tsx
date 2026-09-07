@@ -457,16 +457,11 @@ describe("ContextPanel files", () => {
     );
     fireEvent.click(screen.getByText("Tools"));
 
-    vi.useFakeTimers();
-    try {
-      const temp = screen.getByRole("spinbutton", { name: "Temperature" });
-      // Change without blurring — the value should persist on its own.
-      fireEvent.change(temp, { target: { value: "0.7" } });
-      vi.advanceTimersByTime(200);
-      expect(onSaveSettings).toHaveBeenCalledWith({ ollamaGeneration: { temperature: 0.7 } });
-    } finally {
-      vi.useRealTimers();
-    }
+    const temp = screen.getByRole("spinbutton", { name: "Temperature" });
+    // Change without blurring or advancing timers: the modification must reach
+    // the backend before the user can start the next model request.
+    fireEvent.change(temp, { target: { value: "0.7" } });
+    expect(onSaveSettings).toHaveBeenCalledWith({ ollamaGeneration: { temperature: 0.7 } });
   });
 
   it("renders 5 Ollama sampling preset buttons and applies presets on click", () => {

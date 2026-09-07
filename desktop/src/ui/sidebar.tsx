@@ -85,16 +85,12 @@ export function Sidebar({
     ? workspaceDir.split(/[\\/]/).pop() || workspaceDir
     : t("sidebarPanel.noWorkspace");
   const sortedSessions = [...sessions].sort(sortSessionsDescending);
-  const allSessions =
-    activeName && !sortedSessions.some((s) => s.name === activeName)
-      ? [{ name: activeName, messageCount: 0, mtime: new Date().toISOString() }, ...sortedSessions]
-      : sortedSessions;
   const filtered = query
-    ? allSessions.filter((s) => {
+    ? sortedSessions.filter((s) => {
         const q = query.toLowerCase();
         return prettyName(s).toLowerCase().includes(q) || s.name.toLowerCase().includes(q);
       })
-    : allSessions;
+    : sortedSessions;
 
   useEffect(() => {
     if (!pendingDelete && !pendingClear) return;

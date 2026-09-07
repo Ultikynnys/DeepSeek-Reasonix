@@ -71,6 +71,9 @@ function initialState(): Parameters<typeof reduce>[0] {
       liveLogTokens: 0,
     },
     sessions: [],
+    sessionsEpoch: "",
+    sessionsRevision: 0,
+    pendingSessionDeletes: [],
     settings: null,
     balance: null,
     codexQuota: null,
@@ -1203,18 +1206,22 @@ describe("Desktop App session sorting", () => {
     ]);
   });
 
-  it("reducer applies sortSessionsDescending on incoming $sessions event", () => {
+  it("orders, deduplicates, and omits empty incoming sessions", () => {
     const state = initialState();
+    const older = {
+      name: "desktop-20260901100000-1",
+      messageCount: 2,
+      mtime: new Date(1000).toISOString(),
+    };
     const next = reduce(state, {
       t: "incoming",
       event: {
         type: "$sessions",
+        epoch: "daemon-1",
+        revision: 1,
         items: [
-          {
-            name: "desktop-20260901100000-1",
-            messageCount: 2,
-            mtime: new Date(1000).toISOString(),
-          },
+          older,
+          older,
           {
             name: "desktop-20260905120000-1",
             messageCount: 0,
@@ -1223,7 +1230,85 @@ describe("Desktop App session sorting", () => {
         ],
       },
     });
-    expect(next.sessions[0]?.name).toBe("desktop-20260905120000-1");
+    expect(next.sessions).toEqual([older]);
+  });
+
+  it("keeps optimistic deletion hidden until its authoritative snapshot settles", () => {
+    const session = {
+      name: "desktop-20260901100000-1",
+      messageCount: 2,
+      mtime: new Date(1000).toISOString(),
+    };
+    const deleting = reduce(
+      { ...initialState(), sessions: [session], sessionsEpoch: "daemon-1" },
+      {
+        t: "session_delete_requested",
+        name: session.name,
+      },
+    );
+    const unrelatedSnapshot = reduce(deleting, {
+      t: "incoming",
+      event: { type: "$sessions", epoch: "daemon-1", revision: 1, items: [session] },
+    });
+    expect(unrelatedSnapshot.sessions).toEqual([]);
+    expect(unrelatedSnapshot.pendingSessionDeletes).toEqual([session.name]);
+
+    const failedSnapshot = reduce(unrelatedSnapshot, {
+      t: "incoming",
+      event: {
+        type: "$sessions",
+        epoch: "daemon-1",
+        revision: 2,
+        settledDeletes: [{ name: session.name, removed: false }],
+        items: [session],
+      },
+    });
+    expect(failedSnapshot.sessions).toEqual([session]);
+    expect(failedSnapshot.pendingSessionDeletes).toEqual([]);
+  });
+
+  it("ignores an out-of-order session snapshot", () => {
+    const newest = {
+      name: "newest",
+      messageCount: 1,
+      mtime: new Date(2000).toISOString(),
+    };
+    const state = {
+      ...initialState(),
+      sessions: [newest],
+      sessionsEpoch: "daemon-1",
+      sessionsRevision: 3,
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$sessions",
+        epoch: "daemon-1",
+        revision: 2,
+        items: [{ name: "stale", messageCount: 1, mtime: new Date(1000).toISOString() }],
+      },
+    });
+    expect(next).toBe(state);
+  });
+
+  it("accepts a lower revision after the daemon snapshot epoch changes", () => {
+    const state = {
+      ...initialState(),
+      sessionsEpoch: "daemon-1",
+      sessionsRevision: 20,
+    };
+    const restarted = {
+      name: "after-restart",
+      messageCount: 1,
+      mtime: new Date(3000).toISOString(),
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: { type: "$sessions", epoch: "daemon-2", revision: 1, items: [restarted] },
+    });
+    expect(next.sessions).toEqual([restarted]);
+    expect(next.sessionsEpoch).toBe("daemon-2");
+    expect(next.sessionsRevision).toBe(1);
   });
 });
 

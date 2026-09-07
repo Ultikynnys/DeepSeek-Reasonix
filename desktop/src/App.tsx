@@ -511,6 +511,9 @@ type State = {
   activePlan: ActivePlan | null;
   usage: UsageStats;
   sessions: SessionInfo[];
+  sessionsEpoch: string;
+  sessionsRevision: number;
+  pendingSessionDeletes: string[];
   settings: Settings | null;
   balance: Balance | null;
   codexQuota: CodexQuota | null;
@@ -605,6 +608,8 @@ type Action =
   | { t: "dequeue_send"; index: number }
   | { t: "shift_queued_send" }
   | { t: "settings_patch"; patch: SettingsPatch }
+  | { t: "session_delete_requested"; name: string }
+  | { t: "session_clear_requested" }
   | { t: "workspace_recent_removed"; path: string }
   | { t: "oauth_waiting"; waiting: boolean }
   | { t: "antigravity_oauth_waiting"; waiting: boolean }
@@ -735,6 +740,20 @@ export function reduce(state: State, action: Action): State {
       return state.settings
         ? { ...state, settings: { ...state.settings, ...sanitizeSettingsPatch(action.patch) } }
         : state;
+    case "session_delete_requested":
+      return {
+        ...state,
+        sessions: state.sessions.filter((session) => session.name !== action.name),
+        pendingSessionDeletes: [...new Set([...state.pendingSessionDeletes, action.name])],
+      };
+    case "session_clear_requested":
+      return {
+        ...state,
+        sessions: [],
+        pendingSessionDeletes: [
+          ...new Set([...state.pendingSessionDeletes, ...state.sessions.map((s) => s.name)]),
+        ],
+      };
     case "workspace_recent_removed":
       return state.settings
         ? {
@@ -1576,8 +1595,28 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingCheckpoints: [],
         pendingRevisions: [],
       };
-    case "$sessions":
-      return { ...state, sessions: [...ev.items].sort(sortSessionsDescending) };
+    case "$sessions": {
+      const sameEpoch = ev.epoch === state.sessionsEpoch;
+      if (sameEpoch && ev.revision < state.sessionsRevision) return state;
+      const settledNames = new Set(ev.settledDeletes?.map((result) => result.name) ?? []);
+      const pendingSessionDeletes = sameEpoch
+        ? state.pendingSessionDeletes.filter((name) => !settledNames.has(name))
+        : [];
+      const hidden = new Set(pendingSessionDeletes);
+      const unique = new Map<string, SessionInfo>();
+      for (const session of ev.items) {
+        if (session.messageCount > 0 && !hidden.has(session.name)) {
+          unique.set(session.name, session);
+        }
+      }
+      return {
+        ...state,
+        sessions: [...unique.values()].sort(sortSessionsDescending),
+        sessionsEpoch: ev.epoch,
+        sessionsRevision: ev.revision,
+        pendingSessionDeletes,
+      };
+    }
     case "$mcp_specs":
       return {
         ...state,
@@ -2289,6 +2328,9 @@ function TabRuntime({
     activePlan: null,
     usage: zeroUsage(),
     sessions: [],
+    sessionsEpoch: "",
+    sessionsRevision: 0,
+    pendingSessionDeletes: [],
     settings: null,
     balance: null,
     codexQuota: null,
@@ -2390,9 +2432,11 @@ function TabRuntime({
     }
   }, [settingsOpen]);
 
+  const rpcQueue = useRef(Promise.resolve());
   const sendRpc = useCallback(
     (cmd: OutgoingCommand) => {
-      rpcSend({ tabId, ...cmd }).catch((err) => console.error(`${cmd.cmd} failed`, err));
+      const queued = rpcQueue.current.then(() => rpcSend({ tabId, ...cmd }));
+      rpcQueue.current = queued.catch((err) => console.error(`${cmd.cmd} failed`, err));
     },
     [tabId],
   );
@@ -3128,8 +3172,14 @@ function TabRuntime({
             clearAbortDraft();
             sendRpc({ cmd: "session_load", name });
           }}
-          onDeleteSession={(name) => sendRpc({ cmd: "session_delete", name })}
-          onClearSessions={() => sendRpc({ cmd: "session_clear" })}
+          onDeleteSession={(name) => {
+            dispatch({ t: "session_delete_requested", name });
+            sendRpc({ cmd: "session_delete", name });
+          }}
+          onClearSessions={() => {
+            dispatch({ t: "session_clear_requested" });
+            sendRpc({ cmd: "session_clear" });
+          }}
           onRenameSession={(name, title) => sendRpc({ cmd: "session_rename", name, title })}
           onOpenWorkdir={(anchor) => {
             setWdAnchor(anchor);

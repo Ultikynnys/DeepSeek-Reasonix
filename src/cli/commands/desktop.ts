@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -547,7 +548,7 @@ function wireEventDetails(ev: EmittableEvent): Record<string, unknown> {
         resync: ev.resync ?? false,
       };
     case "$sessions":
-      return { sessions: ev.items.length };
+      return { sessions: ev.items.length, epoch: ev.epoch, revision: ev.revision };
     case "$ctx_breakdown":
       return {
         reservedTokens: ev.reservedTokens,
@@ -1778,25 +1779,35 @@ function subagentBillingFor(model: string): import("../../code/setup.js").Subage
   }
 }
 
-async function emitSessions(tab: Tab): Promise<void> {
+async function emitSessions(
+  tab: Tab,
+  settledDeletes?: SessionsEvent["settledDeletes"],
+): Promise<void> {
   const startedAt = performance.now();
+  const revision = ++tab.sessionsRevision;
   const source = listSessionsForWorkspaceAsync(tab.rootDir);
   const request = {
     cache: source.cache,
     value: source.value.then((sessions) =>
-      sessions.map((session): SessionsEvent["items"][number] => ({
-        name: session.name,
-        messageCount: session.messageCount,
-        mtime: session.mtime.toISOString(),
-        summary: session.meta.summary,
-        workspaceStatus: session.workspaceStatus,
-      })),
+      sessions.flatMap((session): SessionsEvent["items"] =>
+        session.messageCount === 0
+          ? []
+          : [
+              {
+                name: session.name,
+                messageCount: session.messageCount,
+                mtime: session.mtime.toISOString(),
+                summary: session.meta.summary,
+                workspaceStatus: session.workspaceStatus,
+              },
+            ],
+      ),
     ),
   };
   emitTabDiagnostic(tab, "sessions.list.started", { cache: request.cache });
   try {
     const items = await request.value;
-    emit({ type: "$sessions", items }, tab.id);
+    emit({ type: "$sessions", epoch: tab.sessionsEpoch, revision, items, settledDeletes }, tab.id);
     emitTabDiagnostic(tab, "sessions.list.completed", {
       count: items.length,
       cache: request.cache,
@@ -2097,6 +2108,10 @@ interface Tab {
   mcpBridgePromise: Promise<void> | null;
   /** True while a session switch is in progress — prevents stale events from the old turn. */
   switching: boolean;
+  /** Identifies session snapshots from this daemon lifetime. */
+  sessionsEpoch: string;
+  /** Monotonic ordering for asynchronous session-list snapshots. */
+  sessionsRevision: number;
   hooks: ResolvedHook[];
 }
 
@@ -2680,6 +2695,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       mcpStatuses: new Map(),
       mcpBridgePromise: null,
       switching: false,
+      sessionsEpoch: randomUUID(),
+      sessionsRevision: 0,
       hooks: loadHooks({ projectRoot: dir }),
     };
     tab.currentSession = mintSessionFor(dir, {
@@ -3416,7 +3433,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
   function startFreshSession(
     tab: Tab,
-    options: { cleanUpEmptyCurrent: boolean; reason: "new-chat" | "session-delete" },
+    options: {
+      cleanUpEmptyCurrent: boolean;
+      reason: "new-chat" | "session-delete";
+      settledDeletes?: SessionsEvent["settledDeletes"];
+    },
   ): void {
     const diagnosticPrefix = options.reason === "new-chat" ? "session.new-chat" : "session.delete";
     emitTabDiagnostic(tab, `${diagnosticPrefix}.started`, undefined, "info");
@@ -3471,7 +3492,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       },
       tab.id,
     );
-    void emitSessions(tab);
+    void emitSessions(tab, options.settledDeletes);
     emitTabDiagnostic(tab, `${diagnosticPrefix}.completed`, undefined, "info");
   }
 
@@ -4458,27 +4479,51 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "session_delete") {
+      const existed = existsSync(sessionPath(msg.name));
       const deleted = deleteSession(msg.name);
+      const removed = deleted || !existed;
+      if (!removed) {
+        emit({ type: "$error", message: `session_delete failed: ${msg.name}` }, tab.id);
+      }
       for (const openTab of tabs.values()) {
-        if (shouldReplaceDeletedSession(openTab.currentSession, msg.name, deleted)) {
-          startFreshSession(openTab, { cleanUpEmptyCurrent: false, reason: "session-delete" });
+        const settledDeletes = [{ name: msg.name, removed }];
+        if (shouldReplaceDeletedSession(openTab.currentSession, msg.name, removed)) {
+          startFreshSession(openTab, {
+            cleanUpEmptyCurrent: false,
+            reason: "session-delete",
+            settledDeletes,
+          });
         } else {
-          void emitSessions(openTab);
+          void emitSessions(openTab, settledDeletes);
         }
       }
       return;
     }
     if (msg.cmd === "session_clear") {
+      const candidates = listSessionsForWorkspace(tab.rootDir);
+      const settledDeletes = candidates.map((session) => ({
+        name: session.name,
+        removed: deleteSession(session.name),
+      }));
       const deletedSessions = new Set(
-        listSessionsForWorkspace(tab.rootDir)
-          .filter((session) => deleteSession(session.name))
-          .map((session) => session.name),
+        settledDeletes.filter((result) => result.removed).map((result) => result.name),
       );
+      const failed = settledDeletes.filter((result) => !result.removed);
+      if (failed.length > 0) {
+        emit(
+          { type: "$error", message: `session_clear failed for ${failed.length} session(s)` },
+          tab.id,
+        );
+      }
       for (const openTab of tabs.values()) {
         if (deletedSessions.has(openTab.currentSession)) {
-          startFreshSession(openTab, { cleanUpEmptyCurrent: false, reason: "session-delete" });
+          startFreshSession(openTab, {
+            cleanUpEmptyCurrent: false,
+            reason: "session-delete",
+            settledDeletes,
+          });
         } else {
-          void emitSessions(openTab);
+          void emitSessions(openTab, settledDeletes);
         }
       }
       return;

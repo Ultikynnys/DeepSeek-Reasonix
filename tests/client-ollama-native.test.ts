@@ -1,21 +1,27 @@
 /** Native `/api/chat` transport for the Ollama provider: payload shape,
  *  non-stream + NDJSON stream parsing, cache-hit inference, num_ctx probe. */
 
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient, type Usage } from "../src/client.js";
+import { saveOllamaGenerationPatch } from "../src/config.js";
 import { estimateRequestTokens } from "../src/tokenizer.js";
 
 const savedKeepAlive = process.env.OLLAMA_KEEP_ALIVE;
 const savedNumCtx = process.env.OLLAMA_NUM_CTX;
+const savedTemperature = process.env.OLLAMA_TEMPERATURE;
 const savedReasonixConfig = process.env.REASONIX_CONFIG;
 const testConfigPath = join(tmpdir(), "reasonix-test-empty-config.json");
 
 beforeEach(() => {
   process.env.OLLAMA_KEEP_ALIVE = "30m";
   process.env.OLLAMA_NUM_CTX = "8192";
+  // biome-ignore lint/performance/noDelete: persisted settings must win in live-reload tests
+  delete process.env.OLLAMA_TEMPERATURE;
   process.env.REASONIX_CONFIG = testConfigPath;
+  writeFileSync(testConfigPath, "{}", "utf8");
 });
 
 afterEach(() => {
@@ -36,6 +42,12 @@ afterEach(() => {
     delete process.env.OLLAMA_NUM_CTX;
   } else {
     process.env.OLLAMA_NUM_CTX = savedNumCtx;
+  }
+  if (savedTemperature === undefined) {
+    // biome-ignore lint/performance/noDelete: restore exact env state
+    delete process.env.OLLAMA_TEMPERATURE;
+  } else {
+    process.env.OLLAMA_TEMPERATURE = savedTemperature;
   }
 });
 
@@ -136,6 +148,34 @@ describe("ollama native payload", () => {
       top_k: 60,
       repeat_last_n: 256,
     });
+  });
+
+  it("reloads modified generation settings for the current client on its next request", async () => {
+    const capturedBodies: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      capturedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify(nativeChatResponse()), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      baseUrl: "http://localhost:11434/v1",
+      allowMissingKey: true,
+      fetch,
+    });
+    const request = {
+      model: "ollama/qwen3:32b",
+      messages: [{ role: "user" as const, content: "hi" }],
+    };
+
+    saveOllamaGenerationPatch({ temperature: 0.2, topP: 0.9 }, testConfigPath);
+    await client.chat(request);
+    saveOllamaGenerationPatch({ temperature: 1.7, topP: 0.2 }, testConfigPath);
+    await client.chat(request);
+
+    expect(capturedBodies[0]?.options).toMatchObject({ temperature: 0.2, top_p: 0.9 });
+    expect(capturedBodies[1]?.options).toMatchObject({ temperature: 1.7, top_p: 0.2 });
   });
 
   it("converts image parts to native images and tool-call args to objects", async () => {

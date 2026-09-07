@@ -196,6 +196,12 @@ export type PlanClearedEvent = { type: "$plan_cleared" };
 
 export interface SessionsEvent {
   type: "$sessions";
+  /** Identifies the daemon lifetime that produced this snapshot. */
+  epoch: string;
+  /** Monotonic per-tab snapshot revision. Older async results must be ignored. */
+  revision: number;
+  /** Delete operations settled by this authoritative snapshot. */
+  settledDeletes?: { name: string; removed: boolean }[];
   items: {
     name: string;
     messageCount: number;
