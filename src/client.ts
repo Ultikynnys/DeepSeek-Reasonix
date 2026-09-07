@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { type EventSourceMessage, createParser } from "eventsource-parser";
 import { ANTIGRAVITY_CLOUD_CODE_URL, antigravityHeaders } from "./antigravity-oauth.js";
 import {
@@ -17,6 +18,7 @@ import { type RetryOptions, fetchWithRetry } from "./retry.js";
 import { DEFAULT_CONTEXT_TOKENS } from "./telemetry/stats.js";
 import { estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
+import { VERSION } from "./version.js";
 
 const log = createLogger("client");
 
@@ -348,6 +350,10 @@ export interface DeepSeekClientOptions {
   /** Skip the "No API key" constructor throw — for keyless endpoints like the
    *  local Ollama daemon, where the Authorization header is simply omitted. */
   allowMissingKey?: boolean;
+  /** Conversation id sent as x-opencode-session (opencode.ai/docs/go) on
+   *  opencode requests. Unset → one uuid per client instance, so the header is
+   *  never missing and each subagent client maps to its own conversation. */
+  sessionId?: string;
 }
 
 // DeepSeek's strict JSON parser rejects lone UTF-16 surrogate escapes
@@ -398,6 +404,8 @@ export class DeepSeekClient {
   readonly baseUrl: string;
   readonly timeoutMs: number;
   readonly retry: RetryOptions;
+  /** Conversation identity for OpenCode's session-routing header; null → lazily generated uuid. */
+  readonly sessionId: string | null;
   private readonly _fetch: typeof fetch;
   private readonly minChatIntervalMs: number;
   private readonly apiKeyResolver?: () => Promise<string | undefined>;
@@ -410,6 +418,7 @@ export class DeepSeekClient {
    *  the endpoint config decides the wire format; account-specific and
    *  uncataloged ids carry no provider signal, so the name never routes. */
   private readonly geminiMode: boolean;
+  private _generatedSessionId: string | null = null;
   private nextChatRequestAt = 0;
 
   /** What was last sent per Ollama model, for cache-prefix inference. */
@@ -443,6 +452,7 @@ export class DeepSeekClient {
     this.apiKeyResolver = opts.apiKeyResolver;
     this.transportResolver = opts.transportResolver;
     this.geminiAuthResolver = opts.geminiAuthResolver;
+    this.sessionId = opts.sessionId ?? null;
     // A configured Antigravity auth resolver declares this client's endpoint
     // — wire-format routing follows the endpoint, not the model id's name.
     this.geminiMode = this.geminiAuthResolver !== undefined;
@@ -480,6 +490,14 @@ export class DeepSeekClient {
   private async resolveTransport(): Promise<ResolvedTransport | null> {
     if (!this.transportResolver) return null;
     return this.transportResolver();
+  }
+
+  /** Stable per-conversation id for OpenCode's x-opencode-session header —
+   *  the configured session identity when present, else one uuid per client. */
+  private resolveOpencodeSessionId(): string {
+    if (this.sessionId) return this.sessionId;
+    this._generatedSessionId ??= randomUUID();
+    return this._generatedSessionId;
   }
 
   /** Authorization header when a key exists — omitted entirely for keyless
@@ -529,6 +547,13 @@ export class DeepSeekClient {
       Object.assign(headers, transport.headers);
     } else {
       Object.assign(headers, await this.authHeaders());
+    }
+    // OpenCode Go routes and prompt-caches per conversation and asks clients to
+    // identify themselves (opencode.ai/docs/go). ??= lets an explicitly
+    // configured transport header win over both defaults.
+    if (providerForModel(opts.model) === "opencode") {
+      headers["x-opencode-session"] ??= this.resolveOpencodeSessionId();
+      headers["User-Agent"] ??= `reasonix/${VERSION}`;
     }
     const isOllama = providerForModel(opts.model) === "ollama";
     const endpoint =
@@ -619,7 +644,7 @@ export class DeepSeekClient {
       // Ollama model ids are namespaced `ollama/<id>` for provider routing, but
       // the server expects the raw id (`llama3.1:latest`) — strip the prefix.
       model: isOllama ? opts.model.replace(/^ollama\//, "") : opts.model,
-      messages: opts.messages,
+      messages: provider === "deepseek" ? stampWireMessageIds(opts.messages) : opts.messages,
       stream,
     };
     if (stream && provider !== "zai") payload.stream_options = { include_usage: true };
@@ -1615,6 +1640,31 @@ export class DeepSeekClient {
             }
             return;
           }
+          // Some gateways relay upstream failures as a mid-stream JSON error
+          // frame instead of a non-200 status (OpenCode Zen: "Upstream request
+          // failed: [server_error] The model failed to generate a response.").
+          // The frame carries no `choices`, so without this branch it is
+          // silently dropped and the stream just ends — the loop's guarded
+          // provider-error replay never sees a failure at all. Surface it with
+          // the same shape as the Responses-path `response.failed` handler.
+          const midStreamError = extractMidStreamError(json);
+          if (midStreamError) {
+            const status = /server_error/i.test(
+              `${midStreamError.code ?? ""} ${midStreamError.message ?? ""}`,
+            )
+              ? 500
+              : 400;
+            streamError = Object.assign(
+              new Error(
+                `${this._errorPrefix(opts.model)} ${status}: ${midStreamError.message ?? "upstream error"}`,
+              ),
+              {
+                phase: "stream_body_read" as const,
+                ...(midStreamError.code ? { code: midStreamError.code } : {}),
+              },
+            );
+            return;
+          }
           const delta = json.choices?.[0]?.delta ?? {};
           const finishReason = json.choices?.[0]?.finish_reason ?? undefined;
           const chunk: StreamChunk = { raw: json, finishReason };
@@ -1686,6 +1736,40 @@ export class DeepSeekClient {
       reader.releaseLock();
     }
   }
+}
+
+// DeepSeek-family gateways reject round-tripped assistant/tool messages that
+// lack a message-level id ("messages[N]: missing field `id`") — the log never
+// carries one, so stamp deterministic index-derived ids at the wire layer only:
+// a stable log yields identical ids per request, so prompt-cache prefixes hold.
+function stampWireMessageIds(messages: readonly ChatMessage[]): ChatMessage[] {
+  return messages.map((m, i) => {
+    if ((m.role !== "assistant" && m.role !== "tool") || m.id !== undefined) return m;
+    return { ...m, id: `msg-${i}` };
+  });
+}
+
+// Mid-stream chat-completions error frame → {message, code}. `type:
+// "server_error"` maps to `code` so the loop's server-error replay path (10 s
+// backoff) recognizes it. Returns null for non-error frames.
+function extractMidStreamError(json: unknown): { message?: string; code?: string } | null {
+  if (!json || typeof json !== "object") return null;
+  const error = (json as { error?: unknown }).error;
+  if (error === null || error === undefined) return null;
+  if (typeof error === "string") {
+    return { message: error };
+  }
+  if (typeof error !== "object") return null;
+  const obj = error as { message?: unknown; code?: unknown; type?: unknown };
+  const message = typeof obj.message === "string" ? obj.message : undefined;
+  const code =
+    typeof obj.code === "string"
+      ? obj.code
+      : typeof obj.type === "string" && /server_error/i.test(obj.type)
+        ? obj.type
+        : undefined;
+  if (message === undefined && code === undefined) return null;
+  return { message, ...(code ? { code } : {}) };
 }
 
 function responsesFailure(event: unknown): { detail: string; code?: string; status: number } {

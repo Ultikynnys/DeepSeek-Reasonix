@@ -669,10 +669,16 @@ export const EN: TranslationSchema = {
       "The model provider returned an error before producing a visible response — retrying automatically.",
     providerServerErrorRetry:
       "The model provider reported a temporary server error before producing a visible response: retrying automatically in 10 seconds.",
-    ollamaTruncatedRetry:
+    truncatedContinue:
       "The model hit its output-token limit mid-response — continuing generation from where it stopped.",
-    ollamaTruncatedGiveUp:
+    truncatedGiveUp:
       "The model kept hitting its output-token limit after {max} continuations — ending the turn with the partial response. Raise the per-turn output cap (/max-tokens) or switch model.",
+    prematureStopNudge:
+      "Your previous message stopped mid-task without completing the work. If the task is now complete, end your reply with the proper final completion message summarizing what was done. If it is not complete, continue working right now with your tools — do not stop halfway.",
+    prematureStopWarning:
+      "The model stopped mid-task mid-sentence — prompting it to finish the task or end with a proper completion message.",
+    prematureStopGiveUp:
+      "The model ended mid-task after {max} continuation prompts — ending the turn with the partial message. Ask it to continue if needed.",
     repetitionStall:
       "Stopped a degenerating model stream after detecting {repeatedChars} repeated characters (period {period}) in {channel} output. The repetitive tail was discarded; retry or switch models if the response is incomplete.",
     repetitionStallNoPrefix:

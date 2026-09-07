@@ -2396,6 +2396,10 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   const client = new DeepSeekClient({
     apiKey: ep.apiKey,
     baseUrl: ep.baseUrl,
+    // Stable conversation identity for OpenCode's x-opencode-session routing
+    // header (opencode.ai/docs/go) — the tab's session name changes exactly
+    // when the conversation does (runtime rebuilds on session load/switch).
+    sessionId: tab.currentSession ?? undefined,
     // Local Ollama is keyless — the client omits the Authorization header.
     allowMissingKey: provider === "ollama" || provider === "opencode",
     // OAuth tokens refresh per request — fallback for when the Codex backend

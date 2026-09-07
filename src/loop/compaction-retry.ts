@@ -1,5 +1,5 @@
 import { abortReason, messageOf, sleep } from "@reasonix/core-utils";
-import { isRetryableHttpStatus } from "../core/retry-shared.js";
+import { isRetryableProviderFailure } from "../core/retry-shared.js";
 
 /** Maximum attempts for a compaction model call, including the first call. */
 export const COMPACTION_MAX_ATTEMPTS = 2;
@@ -139,10 +139,10 @@ export function isRetryableCompactionError(message: string): boolean {
     return false;
   }
 
-  const status = /^(?:DeepSeek|Upstream) (\d{3}):/.exec(trimmed)?.[1];
-  if (status !== undefined) {
-    return isRetryableHttpStatus(Number(status));
-  }
+  // Any provider brand: a retryable status under "OpenCode 500: ..." counts the
+  // same as "DeepSeek 500: ...", and upstream-relayed failure phrases
+  // ("Upstream request failed: [server_error] ...") are transient by nature.
+  if (isRetryableProviderFailure(trimmed)) return true;
 
   // Only replay recognizable transport/body failures. A local programming or
   // accounting error must not trigger a second billable model request.

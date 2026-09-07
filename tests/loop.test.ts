@@ -3917,7 +3917,7 @@ describe("CacheFirstLoop — ollama length-truncation continuation", () => {
     for await (const ev of loop.step("hello")) events.push(ev);
 
     // Cap of 3 continuations: initial + 3 continuations, then give up.
-    expect(chatCalls()).toBe(CacheFirstLoop.MAX_OLLAMA_CONTINUATIONS + 1);
+    expect(chatCalls()).toBe(CacheFirstLoop.MAX_TRUNCATION_CONTINUATIONS + 1);
     expect(
       events
         .filter((ev) => ev.role === "warning")

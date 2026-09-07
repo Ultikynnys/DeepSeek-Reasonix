@@ -130,7 +130,16 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     // Strip system head + trailing instruction; what remains must equal a prefix of the pre-fold log.
     const middle = req.messages.slice(1, -1);
     for (let i = 0; i < middle.length; i++) {
-      expect(middle[i]).toEqual(logBeforeFold[i]);
+      // The only allowed difference is the wire-level message id stamp, which
+      // is additive and index-derived (wire index = log index + 1 for the
+      // system head) — everything else must match the pre-fold log verbatim.
+      const { id, ...rest } = middle[i]!;
+      if (middle[i]!.role === "assistant" || middle[i]!.role === "tool") {
+        expect(id).toBe(`msg-${i + 1}`);
+      } else {
+        expect(id).toBeUndefined();
+      }
+      expect(rest).toEqual(logBeforeFold[i]);
     }
   });
 

@@ -1,5 +1,6 @@
 import type { DeepSeekClient } from "../client.js";
 import type { ModelProvider } from "../config.js";
+import { PROVIDER_ERROR_BRANDS } from "../core/retry-shared.js";
 import { t } from "../i18n/index.js";
 import type { TranslationSchema } from "../i18n/types.js";
 
@@ -20,8 +21,7 @@ export function formatLoopError(
   opts?: FormatLoopErrorOptions,
 ): string {
   const msg = err.message ?? "";
-  const match =
-    /^(DeepSeek|OpenAI|Ollama|Antigravity|Z\.AI|OpenCode|Upstream) (\d{3}):\s*([\s\S]*)$/.exec(msg);
+  const match = new RegExp(`^(${PROVIDER_ERROR_BRANDS}) (\\d{3}):\\s*([\\s\\S]*)$`).exec(msg);
   const provider = resolveErrorProvider(opts?.provider, match?.[1], opts?.upstreamHost);
   if (
     match &&
@@ -68,7 +68,7 @@ export function formatLoopError(
   return msg;
 }
 
-const PROVIDER_ERROR_PREFIX = "(?:DeepSeek|OpenAI|Ollama|Antigravity|Z\\.AI|OpenCode|Upstream)";
+const PROVIDER_ERROR_PREFIX = `(?:${PROVIDER_ERROR_BRANDS})`;
 
 export function is5xxError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;

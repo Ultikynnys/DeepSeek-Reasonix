@@ -54,6 +54,10 @@ export interface TurnImage {
 
 export interface ChatMessage {
   role: Role;
+  /** Wire-level message id for strict DeepSeek-family deserializers
+   *  ("messages[N]: missing field `id`"). Stamped at send time in buildPayload;
+   *  index-derived so the prompt-cache prefix doesn't churn. */
+  id?: string;
   content?: string | UserContentPart[] | null;
   name?: string;
   tool_call_id?: string;

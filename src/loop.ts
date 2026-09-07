@@ -32,6 +32,7 @@ import {
 } from "./loop/healing.js";
 import { hookWarnings, safeParseToolArgs } from "./loop/hook-events.js";
 import { buildAssistantMessage, buildSyntheticAssistantMessage } from "./loop/messages.js";
+import { looksLikePrematureStop } from "./loop/premature-stop.js";
 import { stripDroppableReasoningContent } from "./loop/reasoning-retention.js";
 import {
   looksLikeCompleteJson,
@@ -84,6 +85,14 @@ export const MID_TURN_STEER_WRAPPER =
 
 function formatSteerUserMessage(content: string): string {
   return [MID_TURN_STEER_WRAPPER, content].join("\n");
+}
+
+/** finish_reason from a non-streaming chat-completions response body
+ *  ("length" = output-token cutoff, like the streaming path's chunk field). */
+function chatFinishReason(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const choice = (raw as { choices?: Array<{ finish_reason?: unknown }> }).choices?.[0];
+  return typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined;
 }
 
 function parseNeedsProEscalation(content: string): boolean {
@@ -222,12 +231,15 @@ export class CacheFirstLoop {
    *  burning unlimited API budget. The model gets one final force-summary
    *  call when the cap fires. Override via REASONIX_MAX_ITER env var. */
   static readonly DEFAULT_MAX_ITER_PER_TURN = 50;
-  /** Ollama length-truncation continuations allowed per turn — a model stuck
+  /** Output-token-truncation continuations allowed per turn — a model stuck
    *  regenerating a partial answer must not loop forever. */
-  static readonly MAX_OLLAMA_CONTINUATIONS = 3;
+  static readonly MAX_TRUNCATION_CONTINUATIONS = 3;
   /** Consecutive identical-reasoning iterations before the reasoning-loop guard
    *  collapses the turn to a forced summary. */
   static readonly REASONING_LOOP_LIMIT = 3;
+  /** Premature-stop nudges per turn — a model that always answers in
+   *  fragments can't loop forever. */
+  static readonly MAX_PREMATURE_STOP_NUDGES = 2;
   /** Files the model has read this session; gates edit_file / multi_edit so SEARCH text matches on-disk bytes. Cleared on fold / mechanical truncate (the model's byte-level view of the elided history is gone). In-memory only — naturally empty on resume. */
   readonly readTracker = new ReadTracker();
 
@@ -325,8 +337,10 @@ export class CacheFirstLoop {
   private _thinkingOnlyPartialAppended = false;
   /** Latched once per turn — replay one provider failure before any output reached the UI. */
   private _providerErrorRetried = false;
-  /** Count of ollama length-truncation continuations this turn — caps the resume loop. */
-  private _ollamaContinuations = 0;
+  /** Count of output-token-truncation continuations this turn — caps the resume loop. */
+  private _truncationContinuations = 0;
+  /** Count of premature-stop nudges this turn — caps the finish-or-continue re-prompt loop. */
+  private _prematureStopNudges = 0;
   /** Normalized reasoning text from the previous iteration — detects a model
    *  re-thinking the identical thought (a reasoning-only loop) when tool args
    *  drift so the storm breaker can't fire. */
@@ -1006,7 +1020,8 @@ export class CacheFirstLoop {
     this._thinkingOnlyRetried = false;
     this._thinkingOnlyPartialAppended = false;
     this._providerErrorRetried = false;
-    this._ollamaContinuations = 0;
+    this._truncationContinuations = 0;
+    this._prematureStopNudges = 0;
     this._lastReasoningSig = null;
     this._reasoningLoopCount = 0;
     // Fresh controller for this turn: the prior step's signal has
@@ -1079,6 +1094,10 @@ export class CacheFirstLoop {
         this._foldedThisTurn = true;
       }
     }
+
+    // Any tool dispatch this turn — gates the premature-stop nudge so plain
+    // Q&A answers are never re-prompted for ending without a "task complete".
+    let turnHadToolActivity = false;
 
     for (let iter = 0; ; iter++) {
       if (signal.aborted) {
@@ -1309,6 +1328,7 @@ export class CacheFirstLoop {
           toolCalls = resp.toolCalls;
           usage = resp.usage;
           image = resp.image;
+          finishReason = chatFinishReason(resp.raw);
         }
       } catch (err) {
         // An aborted signal here is almost always our own doing —
@@ -1435,30 +1455,32 @@ export class CacheFirstLoop {
         }
       }
 
-      // Ollama reports `done_reason: "length"` when generation is cut off at
-      // num_predict (the output-token cap). The partial answer is already
+      // Providers report an output-token cutoff in different shapes: Ollama
+      // native sends done_reason "length", OpenAI-compat chat sends
+      // finish_reason "length", OpenCode's Responses API marks the response
+      // "incomplete", Gemini uses "MAX_TOKENS". The partial answer is already
       // rendered; append it to the log and re-request so the model continues
       // from where it stopped, instead of ending the turn on a truncated
       // answer. Bounded per turn so a model stuck regenerating can't loop.
       // Only continue when there is real content to resume from AND no tool
       // call was cut mid-stream — a truncated tool_call has no result to feed
       // back, and appending it as a phantom would confuse the next request.
-      const ollamaTruncated =
-        this.stream && finishReason === "length" && providerForModel(callModel) === "ollama";
+      const outputTruncated =
+        finishReason === "length" || finishReason === "incomplete" || finishReason === "MAX_TOKENS";
       const partialHasContent = assistantContent.length > 0 || reasoningContent.length > 0;
-      if (ollamaTruncated && partialHasContent && toolCalls.length === 0) {
-        if (this._ollamaContinuations >= CacheFirstLoop.MAX_OLLAMA_CONTINUATIONS) {
+      if (outputTruncated && partialHasContent && toolCalls.length === 0) {
+        if (this._truncationContinuations >= CacheFirstLoop.MAX_TRUNCATION_CONTINUATIONS) {
           yield {
             turn: this._turn,
             role: "warning",
             severity: "high",
-            content: t("loop.ollamaTruncatedGiveUp", {
-              max: CacheFirstLoop.MAX_OLLAMA_CONTINUATIONS,
+            content: t("loop.truncatedGiveUp", {
+              max: CacheFirstLoop.MAX_TRUNCATION_CONTINUATIONS,
             }),
           };
           // fall through and end the turn with the partial content
         } else {
-          this._ollamaContinuations++;
+          this._truncationContinuations++;
           this.appendAndPersist(
             buildAssistantMessage(assistantContent, toolCalls, callModel, reasoningContent),
           );
@@ -1466,7 +1488,7 @@ export class CacheFirstLoop {
             turn: this._turn,
             role: "warning",
             severity: "low",
-            content: t("loop.ollamaTruncatedRetry"),
+            content: t("loop.truncatedContinue"),
           };
           continue;
         }
@@ -1849,12 +1871,44 @@ export class CacheFirstLoop {
           this._steerQueue.length = 0;
           return;
         }
+        // Premature-stop guard: the model ended its reply mid-thought (e.g.
+        // "Now the remaining verification:") with no completion message, after
+        // having done real work this turn. Ending the turn here strands the
+        // task, so re-prompt it — bounded per turn — telling it to end with
+        // the proper completion message if the task is done, otherwise
+        // continue working. The partial message stays in the log (it was
+        // already yielded as assistant_final); the nudge arrives as the next
+        // user message and the turn continues in the same iteration loop.
+        if (turnHadToolActivity && !repetitionStall && looksLikePrematureStop(assistantContent)) {
+          if (this._prematureStopNudges >= CacheFirstLoop.MAX_PREMATURE_STOP_NUDGES) {
+            yield {
+              turn: this._turn,
+              role: "warning",
+              severity: "low",
+              content: t("loop.prematureStopGiveUp", {
+                max: CacheFirstLoop.MAX_PREMATURE_STOP_NUDGES,
+              }),
+            };
+            // fall through and end the turn with the partial message — never silently.
+          } else {
+            this._prematureStopNudges++;
+            this.appendAndPersist({ role: "user", content: t("loop.prematureStopNudge") });
+            yield {
+              turn: this._turn,
+              role: "warning",
+              severity: "low",
+              content: t("loop.prematureStopWarning"),
+            };
+            continue;
+          }
+        }
         restoreModelIfNeeded();
         yield { turn: this._turn, role: "done", content: assistantContent };
         this._steerQueue.length = 0;
         return;
       }
 
+      turnHadToolActivity = true;
       yield* dispatchToolCallsChunked(repairedCalls, {
         turn: this._turn,
         signal,

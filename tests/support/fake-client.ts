@@ -13,6 +13,9 @@ export interface FakeResponseShape {
     function: { name: string; arguments: string };
   }>;
   usage?: Record<string, number>;
+  /** Override the terminal finish_reason (default: "tool_calls" when tool_calls
+   *  present, else "stop"). "length" simulates an output-token cutoff. */
+  finish_reason?: string;
 }
 
 /** Deep-captured copy of one request body, for tests that assert on what the client sent. */
@@ -74,7 +77,7 @@ export function makeFakeClient(
     const resp = responses[i++] ?? responses[responses.length - 1]!;
     const usage = resp.usage ?? DEFAULT_USAGE;
     if (body.stream === true) {
-      const finish = resp.tool_calls ? "tool_calls" : "stop";
+      const finish = resp.finish_reason ?? (resp.tool_calls ? "tool_calls" : "stop");
       const delta: Record<string, unknown> = {};
       if (resp.content) delta.content = resp.content;
       if (resp.reasoning_content) delta.reasoning_content = resp.reasoning_content;
@@ -100,7 +103,7 @@ export function makeFakeClient(
           reasoning_content: resp.reasoning_content ?? null,
           tool_calls: resp.tool_calls ?? undefined,
         },
-        finish_reason: resp.tool_calls ? "tool_calls" : "stop",
+        finish_reason: resp.finish_reason ?? (resp.tool_calls ? "tool_calls" : "stop"),
       },
     ];
     payload.usage = usage;

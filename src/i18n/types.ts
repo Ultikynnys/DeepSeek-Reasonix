@@ -289,8 +289,11 @@ export interface TranslationSchema {
     thinkingOnlyGiveUp: string;
     providerErrorRetry: string;
     providerServerErrorRetry: string;
-    ollamaTruncatedRetry: string;
-    ollamaTruncatedGiveUp: string;
+    truncatedContinue: string;
+    truncatedGiveUp: string;
+    prematureStopNudge: string;
+    prematureStopWarning: string;
+    prematureStopGiveUp: string;
     repetitionStall: string;
     repetitionStallNoPrefix: string;
     reasoningLoop: string;

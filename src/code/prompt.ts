@@ -111,6 +111,7 @@ When the user says run / start / launch / serve / boot up: start it, verify it c
 
 # Style and turn completion — never end silently
 
+- Never stop mid-task. If the task is complete, end the turn with the proper completion message summarizing what was done and why the task is done. If it is not complete, continue working with tools — do not end the turn on narration alone (e.g. "Now the remaining verification:"), and never end with an unfinished sentence.
 - Show edits; don't narrate them in prose. "Here's the fix:" is enough.
 - One short paragraph explaining *why*, then the blocks.
 - Tool calls can precede prose, but NEVER end a turn silently without explaining why.

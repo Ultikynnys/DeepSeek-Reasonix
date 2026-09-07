@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { isRetryableProviderFailure } from "../src/core/retry-shared.js";
+import { isRetryableCompactionError } from "../src/loop/compaction-retry.js";
 import { fetchWithRetry } from "../src/retry.js";
 
 function makeFetch(responses: Array<Response | Error | (() => Response | Error)>): {
@@ -122,5 +124,54 @@ describe("fetchWithRetry", () => {
     const r = await fetchWithRetry(f.fn, "https://x", {}, { ...BASE, maxAttempts: 1 });
     expect(r.status).toBe(503);
     expect(f.calls).toBe(1);
+  });
+});
+
+describe("isRetryableProviderFailure", () => {
+  it("recognizes the OpenCode upstream-failure error the loop surfaces", () => {
+    expect(
+      isRetryableProviderFailure(
+        "OpenCode 500: Upstream request failed: [server_error] The model failed to generate a response.",
+      ),
+    ).toBe(true);
+  });
+
+  it("recognizes retryable status lines under any provider brand", () => {
+    expect(isRetryableProviderFailure("DeepSeek 429: rate limited")).toBe(true);
+    expect(isRetryableProviderFailure("OpenCode 503: overloaded")).toBe(true);
+    expect(isRetryableProviderFailure("Z.AI 502: bad gateway")).toBe(true);
+  });
+
+  it("rejects 4xx request rejections and unknown errors", () => {
+    expect(isRetryableProviderFailure("OpenCode 400: bad request")).toBe(false);
+    expect(isRetryableProviderFailure("DeepSeek 401: bad key")).toBe(false);
+    expect(isRetryableProviderFailure("TypeError: cannot read properties of undefined")).toBe(
+      false,
+    );
+  });
+
+  it("recognizes upstream-relayed failure phrases even without a status line", () => {
+    expect(
+      isRetryableProviderFailure(
+        "Upstream request failed: [server_error] The model failed to generate a response.",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("isRetryableCompactionError", () => {
+  it("retries OpenCode upstream failures, same as DeepSeek-branded ones", () => {
+    expect(
+      isRetryableCompactionError(
+        "OpenCode 500: Upstream request failed: [server_error] The model failed to generate a response.",
+      ),
+    ).toBe(true);
+    expect(isRetryableCompactionError("DeepSeek 500: internal error")).toBe(true);
+  });
+
+  it("does not retry aborts, 4xx, or unknown local errors", () => {
+    expect(isRetryableCompactionError("aborted")).toBe(false);
+    expect(isRetryableCompactionError("OpenCode 400: bad request")).toBe(false);
+    expect(isRetryableCompactionError("Error: assertion failed")).toBe(false);
   });
 });
