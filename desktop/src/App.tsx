@@ -918,19 +918,23 @@ export function reduce(state: State, action: Action): State {
       };
     case "shift_queued_send":
       return { ...state, queuedSends: state.queuedSends.slice(1) };
-    case "push_notice":
+    case "push_notice": {
+      const turn = currentTurnForNotice(state.messages);
       return {
         ...state,
-        messages: [
-          ...state.messages,
+        messages: insertMessageAtTurn(
+          state.messages,
           {
             kind: "notice",
             id: nextNoticeId(),
             text: action.text,
             severity: action.severity ?? "info",
+            turn,
           },
-        ],
+          turn,
+        ),
       };
+    }
   }
 }
 
@@ -1250,6 +1254,19 @@ function insertMessageAtTurn(
   );
   if (insertAt < 0) return [...messages, message];
   return [...messages.slice(0, insertAt), message, ...messages.slice(insertAt)];
+}
+
+// Anchor a notice to the turn currently in flight (if any), else the last
+// completed turn, so error/notification cards stay chronologically placed in
+// the timeline instead of always being appended to the bottom.
+function currentTurnForNotice(messages: ChatMessage[]): number {
+  const pending = messages.find((m) => m.kind === "assistant" && m.pending);
+  if (pending?.kind === "assistant") return pending.turn;
+  let last = 0;
+  for (const m of messages) {
+    if (m.kind === "user" || m.kind === "assistant") last = Math.max(last, m.turn);
+  }
+  return last;
 }
 
 function appendAssistantSegment(
@@ -1780,7 +1797,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         turnStatusTool: null,
         oauthWaiting: ev.message.includes("OAuth") ? false : state.oauthWaiting,
         messages:
-          turn === undefined ? [...settled, notice] : insertMessageAtTurn(settled, notice, turn),
+          turn === undefined
+            ? insertMessageAtTurn(settled, notice, currentTurnForNotice(settled))
+            : insertMessageAtTurn(settled, notice, turn),
       };
     }
     case "oauth_begin_result":

@@ -104,6 +104,59 @@ describe("desktop timeline notices", () => {
     expect(next.busy).toBe(state.busy);
     expect(next.ready).toBe(state.ready);
   });
+
+  it("anchors a notice to the last completed turn instead of the bottom", () => {
+    const state: AppState = {
+      ...makeState(),
+      messages: [
+        { kind: "user", text: "hi", clientId: "c1", turn: 1 },
+        { kind: "assistant", turn: 1, segments: [], pending: false },
+        { kind: "user", text: "again", clientId: "c2", turn: 2 },
+        { kind: "assistant", turn: 2, segments: [], pending: false },
+      ],
+    };
+    const next = reduce(state, { t: "push_notice", text: "Export failed", severity: "error" });
+    // The notice must slot after turn 2 (chronologically), not at the very end
+    // of whatever array position it was dispatched from.
+    expect(next.messages.map((m) => m.kind)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "notice",
+    ]);
+    expect(next.messages.at(-1)).toMatchObject({ kind: "notice", turn: 2 });
+  });
+
+  it("anchors a notice to the in-flight turn while the assistant is streaming", () => {
+    const state: AppState = {
+      ...makeState(),
+      messages: [
+        { kind: "user", text: "hi", clientId: "c1", turn: 1 },
+        { kind: "assistant", turn: 1, segments: [], pending: false },
+        { kind: "user", text: "again", clientId: "c2", turn: 2 },
+        { kind: "assistant", turn: 2, segments: [], pending: true },
+        { kind: "user", text: "queued", clientId: "c3", turn: 3 },
+      ],
+    };
+    const next = reduce(state, {
+      t: "push_notice",
+      text: "Image attach failed",
+      severity: "error",
+    });
+    // The notice belongs to turn 2 (still streaming), so it must slot after
+    // turn 2's assistant and BEFORE the already-queued turn 3, not jump to the
+    // bottom of the timeline.
+    expect(next.messages.map((m) => m.kind)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "notice",
+      "user",
+    ]);
+    expect(next.messages[4]).toMatchObject({ kind: "notice", turn: 2 });
+  });
 });
 
 describe("desktop $btw_result reducer (#1470)", () => {
