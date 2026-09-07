@@ -724,15 +724,11 @@ export function reduce(state: State, action: Action): State {
         busy: false,
         activeSkill: null,
         queuedSends: [],
-        messages: [
-          ...state.messages,
-          {
-            kind: "notice",
-            text: `reasonix exited (code ${action.code ?? "?"})`,
-            severity: "error",
-            id: nextNoticeId(),
-          },
-        ],
+        messages: insertNotice(
+          state.messages,
+          `reasonix exited (code ${action.code ?? "?"})`,
+          "error",
+        ),
       };
     case "incoming":
       return applyIncoming(state, action.event);
@@ -938,20 +934,9 @@ export function reduce(state: State, action: Action): State {
     case "shift_queued_send":
       return { ...state, queuedSends: state.queuedSends.slice(1) };
     case "push_notice": {
-      const turn = currentTurnForNotice(state.messages);
       return {
         ...state,
-        messages: insertMessageAtTurn(
-          state.messages,
-          {
-            kind: "notice",
-            id: nextNoticeId(),
-            text: action.text,
-            severity: action.severity ?? "info",
-            turn,
-          },
-          turn,
-        ),
+        messages: insertNotice(state.messages, action.text, action.severity ?? "info"),
       };
     }
   }
@@ -1263,6 +1248,17 @@ function appendTextSegment(
   return [...segments, { kind, text }];
 }
 
+// Insert `message` into the transcript at its owning turn's boundary: right
+// before the first message whose turn is strictly greater than `turn`, or at
+// the end when no later message exists. This keeps error/notification cards
+// chronologically placed at their owning turn instead of always parked at the
+// bottom of the conversation.
+//
+// One guard keeps the timeline truthful while a card is live: when the message
+// would land at the very bottom (no later turn) and the last card is an
+// active/streaming assistant, slot it ABOVE the active card instead. Content
+// still being written is the newest thing on the timeline, so a status card
+// must never push the in-flight answer lower.
 function insertMessageAtTurn(
   messages: ChatMessage[],
   message: ChatMessage,
@@ -1271,8 +1267,12 @@ function insertMessageAtTurn(
   const insertAt = messages.findIndex(
     (candidate) => "turn" in candidate && candidate.turn !== undefined && candidate.turn > turn,
   );
-  if (insertAt < 0) return [...messages, message];
-  return [...messages.slice(0, insertAt), message, ...messages.slice(insertAt)];
+  let idx = insertAt < 0 ? messages.length : insertAt;
+  if (insertAt < 0) {
+    const last = messages[messages.length - 1];
+    if (last?.kind === "assistant" && last.pending) idx = messages.length - 1;
+  }
+  return [...messages.slice(0, idx), message, ...messages.slice(idx)];
 }
 
 // Anchor a notice to the turn currently in flight (if any), else the last
@@ -1286,6 +1286,24 @@ function currentTurnForNotice(messages: ChatMessage[]): number {
     if (m.kind === "user" || m.kind === "assistant") last = Math.max(last, m.turn);
   }
   return last;
+}
+
+// Build a notice and slot it into the timeline at its owning turn. Every
+// notice path routes through here so the active-column cap in
+// insertMessageAtTurn applies uniformly (btw / session-empty / exit notices
+// previously bypassed it and landed below the streaming card).
+function insertNotice(
+  messages: ChatMessage[],
+  text: string,
+  severity: NoticeSeverity = "info",
+  turn?: number,
+): ChatMessage[] {
+  const anchor = turn ?? currentTurnForNotice(messages);
+  return insertMessageAtTurn(
+    messages,
+    { kind: "notice", id: nextNoticeId(), text, severity, turn: anchor },
+    anchor,
+  );
 }
 
 function appendAssistantSegment(
@@ -1795,15 +1813,11 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       const sizeNote = ev.sizeBytes === 0 ? "0 bytes" : `${ev.sizeBytes} bytes, no valid entries`;
       return {
         ...state,
-        messages: [
-          ...state.messages,
-          {
-            kind: "notice",
-            text: `Session "${ev.name}" loaded with no messages (${sizeNote}). The file ~/.reasonix/sessions/${ev.name}.jsonl exists but couldn't be parsed — start a new chat or restore from .jsonl.bak if you have one.`,
-            severity: "error",
-            id: nextNoticeId(),
-          },
-        ],
+        messages: insertNotice(
+          state.messages,
+          `Session "${ev.name}" loaded with no messages (${sizeNote}). The file ~/.reasonix/sessions/${ev.name}.jsonl exists but couldn't be parsed — start a new chat or restore from .jsonl.bak if you have one.`,
+          "error",
+        ),
       };
     }
     case "$error":
@@ -2145,15 +2159,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return {
         ...state,
         busy: false,
-        messages: [
-          ...state.messages,
-          {
-            kind: "notice",
-            id: nextNoticeId(),
-            text: `≫ btw\n${ev.answer}`,
-            severity: "info",
-          },
-        ],
+        messages: insertNotice(state.messages, `≫ btw\n${ev.answer}`, "info"),
       };
     case "status":
       return state;

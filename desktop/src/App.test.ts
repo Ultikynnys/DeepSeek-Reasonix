@@ -275,6 +275,45 @@ describe("Desktop App reducer — usage", () => {
     ).toEqual(["notice-1", "user-2", "assistant-2"]);
   });
 
+  it("keeps an active streaming card newest and slots a mid-turn notice above it", () => {
+    let s = initialState();
+    const act = (action: Parameters<typeof reduce>[1]) => {
+      s = reduce(s, action);
+    };
+    const inc = (event: { type: string } & Record<string, unknown>) => {
+      s = reduce(s, { t: "incoming", event } as unknown as Parameters<typeof reduce>[1]);
+    };
+    const labels = (msgs: typeof s.messages) =>
+      msgs.map((m) => {
+        if (m.kind === "notice") return `${m.severity}-${m.turn}`;
+        if (m.kind === "user") return `user-${m.turn}`;
+        return `assistant-${m.turn}${m.pending ? "(pending)" : ""}`;
+      });
+
+    // Turn 1 completes cleanly.
+    act({ t: "send_user", text: "first", clientId: "c-1" });
+    inc({ type: "model.turn.started", id: 1, ts: "t", turn: 1, model: "m", reasoningEffort: "medium", prefixHash: "h" });
+    inc({ type: "model.delta", id: 2, ts: "t", turn: 1, channel: "content", text: "hello" });
+    inc({ type: "model.final", id: 3, ts: "t", turn: 1, content: "hello", usage: null });
+    inc({ type: "$turn_complete", ts: "t" });
+
+    // Turn 2 starts streaming (assistant-2 is the active/pending card).
+    act({ t: "send_user", text: "second", clientId: "c-2" });
+    inc({ type: "model.turn.started", id: 4, ts: "t", turn: 2, model: "m", reasoningEffort: "medium", prefixHash: "h" });
+    inc({ type: "model.delta", id: 5, ts: "t", turn: 2, channel: "content", text: "streaming" });
+    expect(labels(s.messages)).toEqual(["user-1", "assistant-1", "user-2", "assistant-2(pending)"]);
+
+    // A mid-turn notice must slot ABOVE the active card, never below it —
+    // the active (streaming) card stays newest on the timeline.
+    act({ t: "push_notice", text: "Model → deepseek-v4-flash", severity: "info" });
+    expect(labels(s.messages)).toEqual(["user-1", "assistant-1", "user-2", "info-2", "assistant-2(pending)"]);
+
+    // The 429 error for the current turn settles the streaming card and lands
+    // at the end of turn 2 (its owning turn), not as a fresh bottom entry.
+    inc({ type: "error", id: 6, ts: "t", turn: 2, message: "429 rate limit", recoverable: false });
+    expect(labels(s.messages)).toEqual(["user-1", "assistant-1", "user-2", "info-2", "assistant-2", "error-2"]);
+  });
+
   it("settles every unresolved tool card when the conversation stops", () => {
     const base = initialState();
     const state = {
