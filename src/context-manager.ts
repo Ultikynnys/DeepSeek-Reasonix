@@ -6,6 +6,7 @@ import {
 import type { DeepSeekClient } from "./client.js";
 import { Usage } from "./client.js";
 import { providerForModel } from "./config.js";
+import { withDeadline } from "./core/with-deadline.js";
 import { pruneUnusedFileReads } from "./file-prune.js";
 import {
   buildFileTriageInstruction,
@@ -19,7 +20,6 @@ import {
   COMPACTION_MAX_ATTEMPTS,
   COMPACTION_RETRY_DELAY_MS,
   withCompactionRetry,
-  withDeadline,
 } from "./loop/compaction-retry.js";
 import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";

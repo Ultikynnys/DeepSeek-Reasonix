@@ -1,5 +1,6 @@
 import { loadEffectiveMcpConfig } from "../../config.js";
 import { formatMcpLifecycleEvent } from "../../desktop/mcp-lifecycle.js";
+import type { McpLifecycleEvent } from "../../desktop/mcp-lifecycle.js";
 import { formatMcpSlowToast } from "../../desktop/mcp-toast.js";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
@@ -39,66 +40,22 @@ export interface RuntimeContext {
   progressSink: { current: ((info: ProgressInfo) => void) | null };
 }
 
-export type McpLifecycleNotice =
-  | { kind: "handshake"; name: string }
-  | {
-      kind: "connected";
-      name: string;
-      tools: number;
-      resources: number;
-      prompts: number;
-      ms: number;
-    }
-  | { kind: "disabled"; name: string }
-  | { kind: "failed"; name: string; reason: string }
-  | { kind: "slow"; serverName: string; p95Ms: number; sampleSize: number }
-  | { kind: "tools-ready"; name: string; tools: number; ms: number }
-  | { kind: "warn"; name: string; reason: string };
+export type McpLifecycleSink = (event: McpLifecycleEvent) => void;
 
-export type McpLifecycleSink = (notice: McpLifecycleNotice) => void;
-
-export const stderrLifecycleSink: McpLifecycleSink = (n) => {
-  if (n.kind === "slow") {
+export const stderrLifecycleSink: McpLifecycleSink = (ev) => {
+  if (ev.state === "slow") {
     process.stderr.write(
-      `${formatMcpSlowToast({ name: n.serverName, p95Ms: n.p95Ms, sampleSize: n.sampleSize })}\n`,
+      `${formatMcpSlowToast({ name: ev.serverName, p95Ms: ev.p95Ms, sampleSize: ev.sampleSize })}\n`,
     );
     return;
   }
-  if (n.kind === "failed") {
+  if (ev.state === "failed") {
     process.stderr.write(
-      `${formatMcpLifecycleEvent({ state: "failed", name: n.name, reason: n.reason })}\n  → ${t("mcpLifecycle.failedSetupHint")}\n`,
+      `${formatMcpLifecycleEvent(ev)}\n  → ${t("mcpLifecycle.failedSetupHint")}\n`,
     );
     return;
   }
-  if (n.kind === "connected") {
-    process.stderr.write(
-      `${formatMcpLifecycleEvent({
-        state: "connected",
-        name: n.name,
-        tools: n.tools,
-        resources: n.resources,
-        prompts: n.prompts,
-        ms: n.ms,
-      })}\n`,
-    );
-    return;
-  }
-  if (n.kind === "tools-ready") {
-    process.stderr.write(
-      `${formatMcpLifecycleEvent({ state: "tools-ready", name: n.name, tools: n.tools, ms: n.ms })}\n`,
-    );
-    return;
-  }
-  if (n.kind === "warn") {
-    process.stderr.write(
-      `${formatMcpLifecycleEvent({ state: "warn", name: n.name, reason: n.reason })}\n`,
-    );
-    return;
-  }
-  // handshake / disabled — no extra fields needed
-  process.stderr.write(
-    `${formatMcpLifecycleEvent({ state: n.kind as "handshake" | "disabled", name: n.name })}\n`,
-  );
+  process.stderr.write(`${formatMcpLifecycleEvent(ev)}\n`);
 };
 
 export interface McpFailure {
@@ -170,12 +127,12 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
       const spec = overlayMatchedSpec(parsed, matched);
       if (spec.disabled) {
-        sink({ kind: "disabled", name: label });
+        sink({ state: "disabled", name: label });
         rejectReady(new Error(`MCP server "${label}" is disabled`));
         failureMap.set(raw, { spec: raw, name: label, reason: "disabled by user", at: Date.now() });
         return { ok: false, reason: "disabled by user" };
       }
-      sink({ kind: "handshake", name: label });
+      sink({ state: "handshake", name: label });
       const t0 = Date.now();
       const namePrefix = spec.name
         ? `${spec.name}_`
@@ -197,7 +154,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         onProgress: (info) => ctx.progressSink.current?.(info),
         onSlow: (info) =>
           sink({
-            kind: "slow",
+            state: "slow",
             serverName: info.serverName,
             p95Ms: info.p95Ms,
             sampleSize: info.sampleSize,
@@ -236,7 +193,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       insertionOrder.push(raw);
       resolveReady();
       sink({
-        kind: "tools-ready",
+        state: "tools-ready",
         name: label,
         tools: bridge.registeredNames.length,
         ms,
@@ -261,7 +218,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       const promptCount = report.prompts.supported ? report.prompts.items.length : 0;
       // Re-emit with full inspection data (the provisional event reported 0).
       sink({
-        kind: "connected",
+        state: "connected",
         name: label,
         tools: bridge.registeredNames.length,
         resources: resourceCount,
@@ -292,7 +249,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
             loop.prefix.addTool(s);
           } catch (err) {
             sink({
-              kind: "warn",
+              state: "warn",
               name: label,
               reason: `addTool failed for ${s.function.name}: ${(err as Error).message}`,
             });
@@ -305,11 +262,11 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       if (!records.has(raw)) {
         await mcp?.close().catch(() => undefined);
         rejectReady(new Error(`MCP server "${label}" failed to start: ${reason}`));
-        sink({ kind: "failed", name: label, reason });
+        sink({ state: "failed", name: label, reason });
         failureMap.set(raw, { spec: raw, name: label, reason, at: Date.now() });
         return { ok: false, reason };
       }
-      sink({ kind: "warn", name: label, reason });
+      sink({ state: "warn", name: label, reason });
       return { ok: true, summary: records.get(raw)!.summary };
     }
   }

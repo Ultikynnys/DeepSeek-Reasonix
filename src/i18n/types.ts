@@ -967,6 +967,7 @@ export interface TranslationSchema {
     abortedHint: string;
     toolsReady: string;
     warnLabel: string;
+    slowLabel: string;
   };
   planReviseConfirm: {
     title: string;

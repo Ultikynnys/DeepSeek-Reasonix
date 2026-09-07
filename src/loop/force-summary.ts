@@ -5,17 +5,14 @@ import {
   HISTORY_FOLD_SUMMARY_MIN_HEAD_TOKENS,
   trimMessageWindow,
 } from "../context-manager.js";
+import { withDeadline } from "../core/with-deadline.js";
 import { pruneUnusedFileReads } from "../file-prune.js";
 import { t } from "../i18n/index.js";
 import { type TurnStats, resolveContextTokens } from "../telemetry/stats.js";
 import { countTokensBounded } from "../tokenizer.js";
 import type { ChatMessage } from "../types.js";
 import { buildFoldSummaryInstruction, extractPinnedConstraints } from "./compaction-prompt.js";
-import {
-  COMPACTION_RETRY_DELAY_MS,
-  withCompactionRetry,
-  withDeadline,
-} from "./compaction-retry.js";
+import { COMPACTION_RETRY_DELAY_MS, withCompactionRetry } from "./compaction-retry.js";
 import { errorLabelFor, reasonPrefixFor } from "./errors.js";
 import { buildAssistantMessage } from "./messages.js";
 import { stripHallucinatedToolMarkup } from "./thinking.js";

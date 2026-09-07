@@ -1857,6 +1857,7 @@ export const EN: TranslationSchema = {
       "MCP startup aborted — {count} server(s) skipped. Run /mcp to retry once you've fixed the underlying issue.",
     toolsReady: "tools ready",
     warnLabel: "warn",
+    slowLabel: "slow",
   },
   planReviseConfirm: {
     title: "plan revision proposed",

@@ -1,4 +1,5 @@
 import { messageOf } from "@reasonix/core-utils";
+import { isAbortError } from "../../core/retry-shared.js";
 
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_EMBED_MODEL = "nomic-embed-text";
@@ -300,12 +301,4 @@ function composeAbort(
       if (signal) signal.removeEventListener("abort", onCallerAbort);
     },
   };
-}
-
-function isAbortError(err: unknown): boolean {
-  if (err instanceof Error) {
-    if (err.name === "AbortError") return true;
-    if (/aborted/i.test(err.message)) return true;
-  }
-  return false;
 }

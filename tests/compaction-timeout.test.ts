@@ -3,7 +3,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 import { ContextManager, FILE_TRIAGE_TIMEOUT_MS } from "../src/context-manager.js";
-import { COMPACTION_RETRY_DELAY_MS, withDeadline } from "../src/loop/compaction-retry.js";
+import { withDeadline } from "../src/core/with-deadline.js";
+import { COMPACTION_RETRY_DELAY_MS } from "../src/loop/compaction-retry.js";
 import {
   FORCE_SUMMARY_TIMEOUT_MS,
   type ForceSummaryContext,

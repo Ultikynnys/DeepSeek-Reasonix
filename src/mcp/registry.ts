@@ -1,3 +1,4 @@
+import { withDeadline } from "../core/with-deadline.js";
 import { recordDiagnostic } from "../diagnostics.js";
 import { countTokens, countTokensBounded } from "../tokenizer.js";
 import { ToolRegistry } from "../tools.js";
@@ -130,53 +131,36 @@ async function waitForReady(
   serverName: string,
   signal: AbortSignal | undefined,
 ): Promise<void> {
-  let settled = false;
-  let timer: NodeJS.Timeout | undefined;
-  let onAbort: (() => void) | undefined;
-  try {
+  if (timeoutMs <= 0) {
+    // No deadline — still honor the caller's abort (the original listener).
     await new Promise<void>((resolve, reject) => {
+      const onAbort = () => reject(new Error("aborted"));
       ready.then(
         () => {
-          if (settled) return;
-          settled = true;
+          signal?.removeEventListener("abort", onAbort);
           resolve();
         },
         (err) => {
-          if (settled) return;
-          settled = true;
+          signal?.removeEventListener("abort", onAbort);
           reject(err instanceof Error ? err : new Error(String(err)));
         },
       );
-      if (timeoutMs > 0) {
-        timer = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          reject(
-            new Error(
-              `MCP server "${serverName}" still handshaking after ${timeoutMs}ms — try /mcp reconnect or check the server logs.`,
-            ),
-          );
-        }, timeoutMs);
-      }
       if (signal) {
         if (signal.aborted) {
-          if (settled) return;
-          settled = true;
           reject(new Error("aborted"));
           return;
         }
-        onAbort = () => {
-          if (settled) return;
-          settled = true;
-          reject(new Error("aborted"));
-        };
         signal.addEventListener("abort", onAbort, { once: true });
       }
     });
-  } finally {
-    if (timer) clearTimeout(timer);
-    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+    return;
   }
+  await withDeadline(
+    () => ready,
+    timeoutMs,
+    `MCP server "${serverName}" still handshaking after ${timeoutMs}ms — try /mcp reconnect or check the server logs.`,
+    signal,
+  );
 }
 
 export async function bridgeMcpTools(

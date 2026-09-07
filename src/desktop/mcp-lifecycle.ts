@@ -16,6 +16,7 @@ export type McpLifecycleEvent =
   | { state: "disabled"; name: string }
   | { state: "reconnect"; name: string }
   | { state: "tools-ready"; name: string; tools: number; ms: number }
+  | { state: "slow"; serverName: string; p95Ms: number; sampleSize: number }
   | { state: "warn"; name: string; reason: string };
 
 const STATE: Record<McpLifecycleEvent["state"], { glyph: string; label: () => string }> = {
@@ -25,6 +26,7 @@ const STATE: Record<McpLifecycleEvent["state"], { glyph: string; label: () => st
   disabled: { glyph: "○", label: () => t("mcpLifecycle.disabled") },
   reconnect: { glyph: "↻", label: () => t("mcpLifecycle.reconnect") },
   "tools-ready": { glyph: "⚡", label: () => t("mcpLifecycle.toolsReady") },
+  slow: { glyph: "🐢", label: () => t("mcpLifecycle.slowLabel") },
   warn: { glyph: "⚠", label: () => t("mcpLifecycle.warnLabel") },
 };
 
@@ -33,7 +35,8 @@ const STATE_COL = 15;
 
 export function formatMcpLifecycleEvent(ev: McpLifecycleEvent): string {
   const { glyph, label } = STATE[ev.state];
-  const namePart = `MCP · ${ev.name}`;
+  const serverName = "serverName" in ev ? ev.serverName : ev.name;
+  const namePart = `MCP · ${serverName}`;
   const namePad = " ".repeat(Math.max(1, NAME_COL - namePart.length));
   const stateField = `${glyph} ${label()}`.padEnd(STATE_COL);
   return `⌘ ${namePart}${namePad}${stateField}${describeDetail(ev)}`;
@@ -45,6 +48,7 @@ function describeDetail(ev: McpLifecycleEvent): string {
   if (ev.state === "disabled") return t("mcpLifecycle.disabledDetail", { name: ev.name });
   if (ev.state === "reconnect") return t("mcpLifecycle.reconnectDetail");
   if (ev.state === "tools-ready") return `${ev.tools} tools · ${ev.ms}ms`;
+  if (ev.state === "slow") return `${(ev.p95Ms / 1000).toFixed(1)}s p95 · n=${ev.sampleSize}`;
   if (ev.state === "warn") return ev.reason;
   const parts: string[] = [`${ev.tools} tools`];
   if (ev.resources && ev.resources > 0) parts.push(`${ev.resources} resources`);

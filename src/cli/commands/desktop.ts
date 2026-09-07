@@ -2863,31 +2863,31 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       progressSink: { current: null },
     });
     tab.mcpRuntime = runtime;
-    runtime.setLifecycleSink((notice) => {
-      if (notice.kind === "slow") {
+    runtime.setLifecycleSink((event) => {
+      if (event.state === "slow") {
         emitTabDiagnostic(
           tab,
           "mcp.lifecycle",
           {
             notice: "slow",
-            name: notice.serverName,
-            p95Ms: notice.p95Ms,
-            sampleSize: notice.sampleSize,
+            name: event.serverName,
+            p95Ms: event.p95Ms,
+            sampleSize: event.sampleSize,
           },
           "warn",
         );
         return;
       }
       const activeSpecs = loadEffectiveMcpConfig(tab.rootDir);
-      const targetSpec = activeSpecs.find((s) => s.name === notice.name);
-      const target = targetSpec ? specToRaw(targetSpec) : notice.name;
+      const targetSpec = activeSpecs.find((s) => s.name === event.name);
+      const target = targetSpec ? specToRaw(targetSpec) : event.name;
       if (!targetSpec) {
         emitTabDiagnostic(
           tab,
           "mcp.lifecycle.unmatched",
           {
-            notice: notice.kind,
-            name: notice.name,
+            notice: event.state,
+            name: event.name,
           },
           "warn",
         );
@@ -2897,32 +2897,32 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         tab,
         "mcp.lifecycle",
         {
-          notice: notice.kind,
-          name: notice.name,
-          ...(notice.kind === "connected"
+          notice: event.state,
+          name: event.name,
+          ...(event.state === "connected"
             ? {
-                tools: notice.tools,
-                resources: notice.resources,
-                prompts: notice.prompts,
-                ms: notice.ms,
+                tools: event.tools,
+                resources: event.resources,
+                prompts: event.prompts,
+                ms: event.ms,
               }
             : {}),
-          ...(notice.kind === "failed" || notice.kind === "warn" ? { reason: notice.reason } : {}),
+          ...(event.state === "failed" || event.state === "warn" ? { reason: event.reason } : {}),
         },
-        notice.kind === "failed" ? "error" : "debug",
+        event.state === "failed" ? "error" : "debug",
       );
-      if (notice.kind === "handshake") {
+      if (event.state === "handshake") {
         tab.mcpStatuses.set(target, { kind: "handshake" });
         if (targetSpec.name) tab.mcpStatuses.set(targetSpec.name, { kind: "handshake" });
-      } else if (notice.kind === "connected") {
-        tab.mcpStatuses.set(target, { kind: "connected", toolCount: notice.tools });
+      } else if (event.state === "connected") {
+        tab.mcpStatuses.set(target, { kind: "connected", toolCount: event.tools });
         if (targetSpec.name)
-          tab.mcpStatuses.set(targetSpec.name, { kind: "connected", toolCount: notice.tools });
-      } else if (notice.kind === "failed") {
-        tab.mcpStatuses.set(target, { kind: "failed", reason: notice.reason });
+          tab.mcpStatuses.set(targetSpec.name, { kind: "connected", toolCount: event.tools });
+      } else if (event.state === "failed") {
+        tab.mcpStatuses.set(target, { kind: "failed", reason: event.reason });
         if (targetSpec.name)
-          tab.mcpStatuses.set(targetSpec.name, { kind: "failed", reason: notice.reason });
-      } else if (notice.kind === "disabled") {
+          tab.mcpStatuses.set(targetSpec.name, { kind: "failed", reason: event.reason });
+      } else if (event.state === "disabled") {
         tab.mcpStatuses.set(target, { kind: "disabled" });
         if (targetSpec.name) tab.mcpStatuses.set(targetSpec.name, { kind: "disabled" });
       }

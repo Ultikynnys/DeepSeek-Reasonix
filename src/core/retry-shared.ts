@@ -32,3 +32,12 @@ export function isRetryableProviderFailure(message: string): boolean {
   if (status !== undefined) return isRetryableHttpStatus(Number(status));
   return RETRYABLE_FAILURE_PHRASES.test(message);
 }
+
+/** True when `err` is an aborted operation — by `name` or an "aborted" message. */
+export function isAbortError(err: unknown): boolean {
+  if (err instanceof Error) {
+    if (err.name === "AbortError") return true;
+    if (/aborted/i.test(err.message)) return true;
+  }
+  return false;
+}

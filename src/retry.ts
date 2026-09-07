@@ -1,7 +1,7 @@
 /** Client retries initial requests only; loop-level guards handle safe stream/compaction replays. */
 
 import { messageOf, sleep } from "@reasonix/core-utils";
-import { RETRYABLE_HTTP_STATUSES } from "./core/retry-shared.js";
+import { RETRYABLE_HTTP_STATUSES, isAbortError } from "./core/retry-shared.js";
 
 export interface RetryOptions {
   /** Maximum total attempts (including the first). Default 4. */
@@ -93,10 +93,4 @@ function computeWait(
   // Jitter range [75%, 125%] to spread retries out when many clients hit 429 together.
   const jitter = exp * (0.75 + Math.random() * 0.5);
   return Math.min(Math.max(jitter, 0), cap);
-}
-
-function isAbortError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const name = (err as { name?: unknown }).name;
-  return name === "AbortError";
 }
