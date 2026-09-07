@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: desktop chat timeline keeps error and notification cards with their turn, and never pushes a streaming answer down.**
+
+- Kernel error and notice cards are inserted at the turn they belong to instead of always being appended to the bottom of the transcript. A notice that lands mid-turn (model switch, btw answer, session-empty, exit) is slotted above the still-streaming assistant card, so active content stays the newest thing on the timeline and a status card can no longer shove the in-flight answer lower. All notice paths route through one chronological insertion helper.
+
 **Fixed — queued messages no longer run concurrently with a still-running compaction fold.**
 
 - A turn aborted mid-compaction (Stop, Esc, Send now, or a synthetic abort) left its fold running detached: the summary is non-interruptible and the host closes the generator fire-and-forget, so the fold kept owning the loop's `_compacting` lock until it committed or failed open at its scaled deadline. `runTurn` emitted `$turn_complete` immediately, the queued-sends drain fired, and the next `user_input` started a fresh turn while the fold was still rewriting the log — compaction and the new message ran at the same time and corrupted the transcript.

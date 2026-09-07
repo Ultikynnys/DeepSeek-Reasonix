@@ -1289,7 +1289,7 @@ function currentTurnForNotice(messages: ChatMessage[]): number {
 }
 
 // Build a notice and slot it into the timeline at its owning turn. Every
-// notice path routes through here so the active-column cap in
+// notice path routes through here so the active-card guard in
 // insertMessageAtTurn applies uniformly (btw / session-empty / exit notices
 // previously bypassed it and landed below the streaming card).
 function insertNotice(
