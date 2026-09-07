@@ -1809,7 +1809,7 @@ async function emitSessions(
     cache: source.cache,
     value: source.value.then((sessions) =>
       sessions.flatMap((session): SessionsEvent["items"] =>
-        session.messageCount === 0
+        session.messageCount === 0 && session.name !== tab.currentSession
           ? []
           : [
               {

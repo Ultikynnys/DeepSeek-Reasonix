@@ -1272,6 +1272,20 @@ describe("Desktop App session sorting", () => {
     expect(next.sessions).toEqual([older]);
   });
 
+  it("keeps the current (active) session in Recent even while it has zero messages", () => {
+    const emptyActive = {
+      name: "desktop-20260905120000-1",
+      messageCount: 0,
+      mtime: new Date(1000).toISOString(),
+    };
+    const base = { ...initialState(), currentSession: emptyActive.name };
+    const next = reduce(base, {
+      t: "incoming",
+      event: { type: "$sessions", epoch: "daemon-1", revision: 1, items: [emptyActive] },
+    });
+    expect(next.sessions).toEqual([emptyActive]);
+  });
+
   it("keeps optimistic deletion hidden until its authoritative snapshot settles", () => {
     const session = {
       name: "desktop-20260901100000-1",

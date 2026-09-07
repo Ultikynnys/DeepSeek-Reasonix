@@ -1623,7 +1623,11 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       const hidden = new Set(pendingSessionDeletes);
       const unique = new Map<string, SessionInfo>();
       for (const session of ev.items) {
-        if (session.messageCount > 0 && !hidden.has(session.name)) {
+        // The current conversation always shows in Recent even before its
+        // first message, so a freshly created chat is visible the moment it's
+        // made; old empty draft sessions stay hidden (issue: new-chat latency).
+        const isCurrent = session.name === state.currentSession;
+        if ((session.messageCount > 0 || isCurrent) && !hidden.has(session.name)) {
           unique.set(session.name, session);
         }
       }
