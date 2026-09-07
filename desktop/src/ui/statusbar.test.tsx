@@ -25,7 +25,11 @@ function endpointFor(model: string): ModelEndpointInfo {
   // OpenAI provider via the `models` config (the daemon resolved it).
   if (model === "gpt-4o-custom")
     return { provider: "openai", baseUrl: "https://api.openai.com/v1" };
-  if (model === "gpt-oss-120b-medium" || model === "gemini-3.6-flash" || model === "gemini-3.7-flash")
+  if (
+    model === "gpt-oss-120b-medium" ||
+    model === "gemini-3.6-flash" ||
+    model === "gemini-3.7-flash"
+  )
     return { provider: "gemini", baseUrl: "https://daily-cloudcode-pa.googleapis.com" };
   return { provider: "deepseek", baseUrl: "https://api.deepseek.com" };
 }
@@ -317,23 +321,31 @@ describe("StatusBar quota display", () => {
     expect(screen.getByTitle(/no OAuth token/)).toBeTruthy();
   });
 
-  it("shows USD turn and session costs for token-priced Ollama Cloud models", () => {
+  it("shows only quota percentages for a keyed Ollama DeepSeek model", () => {
     renderBar({
       settings: {
-        model: "ollama/deepseek-v4-flash",
+        model: "ollama/deepseek-v4-flash:0731",
         modelEndpoint: {
           provider: "ollama",
           baseUrl: "https://ollama.com/v1",
-          billingKind: "usd",
+          billingKind: "quota",
           deployment: "cloud",
         },
       } as Settings,
-      usage: { totalCostUsd: 1.5, lastCallCostUsd: 0.25 } as unknown as UsageStats,
+      usage: {
+        totalCostUsd: 1.5,
+        lastCallCostUsd: 0.25,
+        costByProvider: { ollama: { kind: "quota", quotaUsedPct: 0.35 } },
+      } as unknown as UsageStats,
       ollamaQuota: OLLAMA_QUOTA,
+      ollamaPlan: "medium",
     });
-    expect(screen.getByText(/\$ 0\.2500/)).toBeTruthy();
-    expect(screen.getByText(/\$ 1\.5000/)).toBeTruthy();
-    expect(screen.queryByText(/88%\s*left/)).toBeNull();
+    expect(screen.getByText(/88%\s*left/)).toBeTruthy();
+    expect(screen.getByText("medium")).toBeTruthy();
+    expect(screen.getByText("0.1%")).toBeTruthy();
+    expect(screen.getByText("0.35%")).toBeTruthy();
+    expect(screen.queryByText(/\$/)).toBeNull();
+    expect(screen.queryByText(/¥/)).toBeNull();
   });
 
   it("shows weekly % left + plan + this-turn % for quota-billed Ollama tabs", () => {

@@ -8,7 +8,6 @@ import {
 import type { Usage } from "../client.js";
 import {
   type ModelProvider,
-  isOllamaCloudEndpoint,
   loadEndpointForModel,
   loadPricingOverride,
   providerForModel,
@@ -310,16 +309,11 @@ export function billingContextForModel(model: string, path?: string): BillingCon
       return { kind: "quota", provider };
     case "ollama": {
       const endpoint = loadEndpointForModel(model, path);
-      // A keyless Ollama endpoint is the local daemon — never USD-priced, even
-      // when the model is named like a DeepSeek API id (a name never implies
-      // billing; provider/kind come from endpoint evidence). Only a genuine
-      // cloud deployment (apiKey present) can be token-priced.
-      const tokenPriced =
-        isOllamaCloudEndpoint(endpoint.baseUrl) &&
-        !!endpoint.apiKey &&
-        isOllamaPeakPricedModel(model);
+      // Ollama accounts expose plan-window usage as percentages. Keep keyless
+      // local deployments unbilled; an API key is endpoint evidence that the
+      // quota-backed account usage endpoint is available.
       return {
-        kind: tokenPriced ? "usd" : endpoint.apiKey ? "quota" : "none",
+        kind: endpoint.apiKey ? "quota" : "none",
         provider,
       };
     }

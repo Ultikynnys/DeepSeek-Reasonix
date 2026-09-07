@@ -463,6 +463,20 @@ describe("billingContextForModel", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("classifies authenticated Ollama usage as quota regardless of model pricing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "reasonix-ollama-billing-"));
+    const path = join(dir, "config.json");
+    try {
+      writeConfig({ ollamaApiKey: "ollama-test" }, path);
+      expect(billingContextForModel("ollama/deepseek-v4-flash:0731", path)).toEqual({
+        kind: "quota",
+        provider: "ollama",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("SessionStats explicit billing context", () => {
