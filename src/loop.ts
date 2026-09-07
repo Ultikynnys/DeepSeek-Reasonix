@@ -1439,6 +1439,14 @@ export class CacheFirstLoop {
         return;
       }
 
+      if (repetitionStall?.channel === "reasoning") {
+        this.appendAndPersist(buildAssistantMessage("", [], callModel, reasoningContent));
+        yield* this.reasoningLoopEvents(assistantContent);
+        restoreModelIfNeeded();
+        this._steerQueue.length = 0;
+        return;
+      }
+
       if (repetitionStall) {
         yield {
           turn: this._turn,
@@ -1588,21 +1596,7 @@ export class CacheFirstLoop {
       }
       this._lastReasoningSig = reasoningSig || null;
       if (this._reasoningLoopCount >= CacheFirstLoop.REASONING_LOOP_LIMIT) {
-        yield {
-          turn: this._turn,
-          role: "warning",
-          severity: "high",
-          content: t("loop.reasoningLoop"),
-        };
-        if (!this._disableAutoCompaction) {
-          yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
-        } else {
-          yield {
-            turn: this._turn,
-            role: "done",
-            content: assistantContent || t("loop.reasoningLoop"),
-          };
-        }
+        yield* this.reasoningLoopEvents(assistantContent);
         restoreModelIfNeeded();
         this._steerQueue.length = 0;
         return;
@@ -2042,6 +2036,29 @@ export class CacheFirstLoop {
     } finally {
       this._compacting = false;
     }
+  }
+
+  /** One recovery path for both within-stream periodic reasoning and identical
+   *  reasoning across tool iterations. The warning explains the trigger and the
+   *  compaction lifecycle provides the single persistent UI card. */
+  private async *reasoningLoopEvents(
+    assistantContent: string,
+  ): AsyncGenerator<LoopEvent, void, void> {
+    yield {
+      turn: this._turn,
+      role: "warning",
+      severity: "high",
+      content: t("loop.reasoningLoop"),
+    };
+    if (!this._disableAutoCompaction) {
+      yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
+      return;
+    }
+    yield {
+      turn: this._turn,
+      role: "done",
+      content: assistantContent || t("loop.reasoningLoop"),
+    };
   }
 
   /** Force-summary card lifecycle — trims the trailing in-flight tool call and

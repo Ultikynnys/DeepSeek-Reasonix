@@ -67,6 +67,29 @@ describe("streamModelResponse — repetition stall false positives", () => {
     expect(result.repetitionStall).toMatchObject({ channel: "tool_call", period: 1 });
   });
 
+  it("does not stall long-form reasoning after three exact deliberation cycles", async () => {
+    const healthy = Array.from(
+      { length: 36 },
+      (_, i) =>
+        `Finding ${i}: checked session deletion path ${i * 11}, compared backend event ${i * 13}, and preserved distinct evidence ${i * 17}.`,
+    ).join("\n\n");
+    const cycle = Array.from(
+      { length: 8 },
+      (_, i) =>
+        `Actually, let me reconsider option ${i}. The backend and frontend state need to remain synchronized, so I should verify ordering case ${i * 19} before choosing the cleanest fix.`,
+    ).join("\n\n");
+    const reasoning = `${healthy}\n\n${cycle}\n\n${cycle}\n\n${cycle}`;
+    const chunks: StreamChunk[] = [];
+    for (let i = 0; i < reasoning.length; i += 17) {
+      chunks.push({ reasoningDelta: reasoning.slice(i, i + 17) });
+    }
+
+    const result = await run(chunks);
+
+    expect(result.repetitionStall).toBeUndefined();
+    expect(result.reasoningContent).toBe(reasoning);
+  });
+
   it("does not stall healthy reasoning that restates a hypothesis 3x", async () => {
     const healthy = Array.from(
       { length: 30 },

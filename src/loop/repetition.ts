@@ -15,7 +15,8 @@ export interface StreamRepetitionDetectorOptions {
 }
 
 const LONG_ANCHOR_CHARS = 48;
-const LONG_MIN_REPEATS = 3;
+/** Minimum exact cycles required before phrase/paragraph repetition is conclusive. */
+const LONG_MIN_REPEATS = 4;
 const MAX_LONG_CANDIDATES = 128;
 
 /** Word-scale period cap: 5+ consecutive identical words is never legitimate output. */
@@ -156,16 +157,17 @@ export class StreamRepetitionDetector {
 
       // Degeneracy gate for phrase/paragraph-scale periods: healthy long-form
       // output legitimately contains short exact runs (restated hypotheses,
-      // echoed refrains), so a run that small only proves a stall when it is
-      // either unambiguously long or already dominates the stream so far.
-      // Word-scale periods (≤ WORD_PERIOD_CAP) keep their early word-bias
-      // thresholds. Keep watching otherwise: a genuinely stuck model's run
-      // keeps growing and re-qualifies on a later delta, while a momentary
-      // echo is forgiven as soon as diverging content breaks periodicity.
+      // echoed refrains), so repetition only proves a stall after four exact
+      // cycles, or earlier when a substantial run already dominates the whole
+      // stream. Word-scale periods keep their early word-bias thresholds.
+      // Keep watching otherwise: a genuinely stuck model's run keeps growing
+      // and re-qualifies on a later delta, while a momentary echo is forgiven
+      // as soon as diverging content breaks periodicity.
       if (this.minRepeatedChars === undefined && actualPeriod > WORD_PERIOD_CAP) {
         const runChars = this.buffer.length - runStart;
         const dominant = runStart * 2 <= this.buffer.length;
-        if (runChars < LONG_RUN_CHARS && !(runChars >= MIN_DOMINANT_RUN_CHARS && dominant)) {
+        const sustained = runChars >= LONG_RUN_CHARS && runChars >= actualPeriod * LONG_MIN_REPEATS;
+        if (!sustained && !(runChars >= MIN_DOMINANT_RUN_CHARS && dominant)) {
           continue;
         }
       }
@@ -202,14 +204,17 @@ export class StreamRepetitionDetector {
       const period = anchorStart - match;
       const repeatedLength = period * LONG_MIN_REPEATS;
       const runStart = this.buffer.length - repeatedLength;
-      if (
-        period > this.maxPeriod &&
-        repeatedLength >= minChars &&
-        runStart >= 0 &&
-        this.buffer.slice(runStart, runStart + period) ===
-          this.buffer.slice(runStart + period, runStart + period * 2) &&
-        this.buffer.slice(runStart, runStart + period) === this.buffer.slice(runStart + period * 2)
-      ) {
+      let exactCycles = runStart >= 0;
+      for (let repeat = 1; exactCycles && repeat < LONG_MIN_REPEATS; repeat++) {
+        const offset = runStart + repeat * period;
+        for (let i = 0; i < period; i++) {
+          if (this.buffer[runStart + i] !== this.buffer[offset + i]) {
+            exactCycles = false;
+            break;
+          }
+        }
+      }
+      if (period > this.maxPeriod && repeatedLength >= minChars && runStart >= 0 && exactCycles) {
         let extendedStart = runStart;
         while (
           extendedStart > 0 &&

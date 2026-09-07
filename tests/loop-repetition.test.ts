@@ -132,6 +132,26 @@ describe("StreamRepetitionDetector", () => {
     expect(detect(chunks)).toBeNull();
   });
 
+  it("does not abort after only three long-form deliberation cycles", () => {
+    const healthy = Array.from(
+      { length: 36 },
+      (_, i) =>
+        `Finding ${i}: checked session deletion path ${i * 11}, compared backend event ${i * 13}, and preserved distinct evidence ${i * 17}.`,
+    ).join("\n\n");
+    const cycle = Array.from(
+      { length: 8 },
+      (_, i) =>
+        `Actually, let me reconsider option ${i}. The backend and frontend state need to remain synchronized, so I should verify ordering case ${i * 19} before choosing the cleanest fix.`,
+    ).join("\n\n");
+    expect(cycle.replace(/\s/gu, "").length).toBeGreaterThan(512);
+    const text = `${healthy}\n\n${cycle}\n\n${cycle}\n\n${cycle}`;
+    const chunks = Array.from({ length: Math.ceil(text.length / 17) }, (_, i) =>
+      text.slice(i * 17, i * 17 + 17),
+    );
+
+    expect(detect(chunks)).toBeNull();
+  });
+
   it("aborts once the repeated paragraph run grows unambiguous", () => {
     const healthy = Array.from(
       { length: 30 },

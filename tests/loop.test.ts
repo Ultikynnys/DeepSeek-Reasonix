@@ -2406,8 +2406,12 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     for await (const event of loop.step("think")) events.push(event);
 
     expect(events.find((event) => event.role === "warning")?.content).toContain(
-      "in reasoning output",
+      "re-thinking the same point",
     );
+    expect(events.find((event) => event.role === "compaction_start")).toMatchObject({
+      compactionKind: "force-summary",
+    });
+    expect(events.find((event) => event.role === "compaction_end")).toBeDefined();
     expect(JSON.stringify(loop.log.entries)).toContain("Useful thought ");
     expect(JSON.stringify(loop.log.entries)).not.toContain("cyclecycle");
   });
@@ -4169,6 +4173,18 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
         });
       }
       chatCalls++;
+      if (chatCalls === 2) {
+        return new Response(
+          new TextEncoder().encode(
+            `${JSON.stringify({
+              model: "qwen3:32b",
+              message: { role: "assistant", content: "Recovered reasoning summary." },
+              done: true,
+            })}\n`,
+          ),
+          { status: 200, headers: { "Content-Type": "application/x-ndjson" } },
+        );
+      }
       // Stream chunks that contain a repeating reasoning loop
       const lines = [
         JSON.stringify({
@@ -4216,29 +4232,32 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
     const events: LoopEvent[] = [];
     for await (const ev of loop.step("hello")) events.push(ev);
 
-    // Stalled stream should halt immediately and NOT re-request or loop
-    expect(chatCalls).toBe(1);
+    // The stalled stream halts immediately, then uses one summary request through
+    // the same reasoning-loop recovery/card path as cross-iteration detection.
+    expect(chatCalls).toBe(2);
     expect(
       events.some(
-        (ev) =>
-          ev.role === "warning" && ev.content?.includes("Stopped a degenerating model stream"),
+        (ev) => ev.role === "warning" && ev.content?.includes("re-thinking the same point"),
       ),
     ).toBe(true);
-    // Should NOT trigger empty response retry or thinking-only retry
+    expect(events.find((ev) => ev.role === "compaction_start")).toMatchObject({
+      compactionKind: "force-summary",
+    });
+    expect(events.find((ev) => ev.role === "compaction_end")).toMatchObject({ folded: true });
+    // Should NOT trigger empty response retry or thinking-only retry.
     expect(
       events.some((ev) => ev.role === "warning" && ev.content?.includes("empty response")),
     ).toBe(false);
     expect(
       events.some((ev) => ev.role === "warning" && ev.content?.includes("without an answer")),
     ).toBe(false);
-    // Assistant content has the non-empty stall notice
     const final = events.find((ev) => ev.role === "assistant_final");
-    expect(final?.content).toContain("repetitive output");
+    expect(final?.forcedSummary).toBe(true);
+    expect(final?.content).toContain("Recovered reasoning summary.");
     expect(events.some((ev) => ev.role === "done")).toBe(true);
-    // Exactly 1 valid assistant message in the log
     const assistantEntries = loop.log.entries.filter((m) => m.role === "assistant");
     expect(assistantEntries).toHaveLength(1);
-    expect(assistantEntries[0]!.content).toContain("repetitive output");
+    expect(assistantEntries[0]!.content).toContain("Recovered reasoning summary.");
   });
 });
 
