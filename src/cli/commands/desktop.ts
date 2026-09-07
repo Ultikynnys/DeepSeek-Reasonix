@@ -338,6 +338,15 @@ export function normalizeSessionTitle(raw: string): string {
   return flattenText(raw).slice(0, SESSION_TITLE_MAX_CHARS);
 }
 
+/** Active deletion must replace the backend-bound session before the refreshed list is emitted. */
+export function shouldReplaceDeletedSession(
+  currentSession: string,
+  deletedSession: string,
+  deleted: boolean,
+): boolean {
+  return deleted && currentSession === deletedSession;
+}
+
 /** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
 export function writeAllSync(
   fd: number,
@@ -3413,6 +3422,67 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       .finally(() => emitJobs());
   }
 
+  function startFreshSession(
+    tab: Tab,
+    options: { cleanUpEmptyCurrent: boolean; reason: "new-chat" | "session-delete" },
+  ): void {
+    const diagnosticPrefix = options.reason === "new-chat" ? "session.new-chat" : "session.delete";
+    emitTabDiagnostic(tab, `${diagnosticPrefix}.started`, undefined, "info");
+    // Only set switching when a live turn is being aborted. Otherwise it would
+    // suppress the first events emitted by the replacement session (#1217).
+    if (tab.aborter) tab.switching = true;
+    cancelConversation(tab);
+    if (options.cleanUpEmptyCurrent && tab.currentSession) {
+      try {
+        const prevPath = sessionPath(tab.currentSession);
+        if (existsSync(prevPath) && statSync(prevPath).size === 0) {
+          deleteSession(tab.currentSession);
+        }
+      } catch (err) {
+        emitDiagnosticError("session.empty.cleanup.failed", err, {
+          tabId: tab.id,
+          details: { session: tab.currentSession },
+        });
+      }
+    }
+    try {
+      tab.currentSession = mintSessionFor(tab.rootDir, {
+        model: tab.currentModel,
+        reasoningEffort: tab.currentReasoningEffort,
+        subagentModel: tab.currentSubagentModel,
+      });
+      persistOpenTabs();
+      tab.runtime = tab.toolset && tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+    } catch (err) {
+      emitDiagnosticError(`${diagnosticPrefix}.failed`, err, {
+        tabId: tab.id,
+        details: tabDiagnosticState(tab),
+      });
+      emit(
+        { type: "$error", message: `${options.reason} failed: ${(err as Error).message}` },
+        tab.id,
+      );
+      return;
+    }
+    emit(
+      {
+        type: "$session_loaded",
+        name: tab.currentSession,
+        messages: [],
+        carryover: {
+          totalCostUsd: 0,
+          costByProvider: {},
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          totalCompletionTokens: 0,
+        },
+      },
+      tab.id,
+    );
+    void emitSessions(tab);
+    emitTabDiagnostic(tab, `${diagnosticPrefix}.completed`, undefined, "info");
+  }
+
   function tabSessionLabel(tab: Tab): string {
     if (tab.currentSession) {
       try {
@@ -4396,13 +4466,29 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "session_delete") {
-      deleteSession(msg.name);
-      void emitSessions(tab);
+      const deleted = deleteSession(msg.name);
+      for (const openTab of tabs.values()) {
+        if (shouldReplaceDeletedSession(openTab.currentSession, msg.name, deleted)) {
+          startFreshSession(openTab, { cleanUpEmptyCurrent: false, reason: "session-delete" });
+        } else {
+          void emitSessions(openTab);
+        }
+      }
       return;
     }
     if (msg.cmd === "session_clear") {
-      for (const s of listSessionsForWorkspace(tab.rootDir)) deleteSession(s.name);
-      void emitSessions(tab);
+      const deletedSessions = new Set(
+        listSessionsForWorkspace(tab.rootDir)
+          .filter((session) => deleteSession(session.name))
+          .map((session) => session.name),
+      );
+      for (const openTab of tabs.values()) {
+        if (deletedSessions.has(openTab.currentSession)) {
+          startFreshSession(openTab, { cleanUpEmptyCurrent: false, reason: "session-delete" });
+        } else {
+          void emitSessions(openTab);
+        }
+      }
       return;
     }
     if (msg.cmd === "session_rename") {
@@ -4515,59 +4601,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "new_chat") {
-      emitTabDiagnostic(tab, "session.new-chat.started", undefined, "info");
-      // Only set switching flag when there's a live turn to abort:
-      // otherwise the flag stays true and suppresses the first turn's events (#1217).
-      if (tab.aborter) tab.switching = true;
-      // Full conversation teardown: abortTurn alone leaves spawned shell
-      // jobs running after the transcript is cleared.
-      cancelConversation(tab);
-      if (tab.currentSession) {
-        try {
-          const prevPath = sessionPath(tab.currentSession);
-          if (existsSync(prevPath) && statSync(prevPath).size === 0) {
-            deleteSession(tab.currentSession);
-          }
-        } catch (err) {
-          emitDiagnosticError("session.empty.cleanup.failed", err, {
-            tabId: tab.id,
-            details: { session: tab.currentSession },
-          });
-        }
-      }
-      try {
-        tab.currentSession = mintSessionFor(tab.rootDir, {
-          model: tab.currentModel,
-          reasoningEffort: tab.currentReasoningEffort,
-          subagentModel: tab.currentSubagentModel,
-        });
-        persistOpenTabs();
-        tab.runtime = tab.toolset && tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
-      } catch (err) {
-        emitDiagnosticError("session.new-chat.failed", err, {
-          tabId: tab.id,
-          details: tabDiagnosticState(tab),
-        });
-        emit({ type: "$error", message: `new_chat failed: ${(err as Error).message}` }, tab.id);
-        return;
-      }
-      emit(
-        {
-          type: "$session_loaded",
-          name: tab.currentSession,
-          messages: [],
-          carryover: {
-            totalCostUsd: 0,
-            costByProvider: {},
-            cacheHitTokens: 0,
-            cacheMissTokens: 0,
-            totalCompletionTokens: 0,
-          },
-        },
-        tab.id,
-      );
-      void emitSessions(tab);
-      emitTabDiagnostic(tab, "session.new-chat.completed", undefined, "info");
+      startFreshSession(tab, { cleanUpEmptyCurrent: true, reason: "new-chat" });
       return;
     }
     if (msg.cmd === "oauth_begin") {
