@@ -310,7 +310,14 @@ export function billingContextForModel(model: string, path?: string): BillingCon
       return { kind: "quota", provider };
     case "ollama": {
       const endpoint = loadEndpointForModel(model, path);
-      const tokenPriced = isOllamaCloudEndpoint(endpoint.baseUrl) && isOllamaPeakPricedModel(model);
+      // A keyless Ollama endpoint is the local daemon — never USD-priced, even
+      // when the model is named like a DeepSeek API id (a name never implies
+      // billing; provider/kind come from endpoint evidence). Only a genuine
+      // cloud deployment (apiKey present) can be token-priced.
+      const tokenPriced =
+        isOllamaCloudEndpoint(endpoint.baseUrl) &&
+        !!endpoint.apiKey &&
+        isOllamaPeakPricedModel(model);
       return {
         kind: tokenPriced ? "usd" : endpoint.apiKey ? "quota" : "none",
         provider,

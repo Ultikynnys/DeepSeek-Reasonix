@@ -149,11 +149,28 @@ describe("desktop modelEndpointFor (#1529)", () => {
     });
   });
 
-  it("reports USD billing for an Ollama Cloud peak-priced model", () => {
+  it("reports USD billing for a keyed Ollama Cloud peak-priced model", () => {
+    // Ollama Cloud bills deepseek-v4-flash/pro per token (USD, peak/off-peak).
+    // A keyed cloud deployment resolves to a token-priced USD kind.
+    process.env.OLLAMA_API_KEY = "ollama-cloud-key";
     expect(modelEndpointFor("ollama/deepseek-v4-flash", path)).toEqual({
       provider: "ollama",
       baseUrl: "https://ollama.com/v1",
       billingKind: "usd",
+      deployment: "cloud",
+    });
+  });
+
+  it("keeps a keyless Ollama deployment unpriced even for a DeepSeek-named model", () => {
+    // Regression: a local daemon (no OLLAMA_API_KEY) must never be USD/yuan
+    // priced just because the model is named `deepseek-v4-flash` (with a
+    // version tag) — provider/billing come from endpoint evidence, never the
+    // model name. A keyless default endpoint resolves to the cloud URL but is
+    // still not billable per token without a key.
+    expect(modelEndpointFor("ollama/deepseek-v4-flash:0731", path)).toEqual({
+      provider: "ollama",
+      baseUrl: "https://ollama.com/v1",
+      billingKind: "none",
       deployment: "cloud",
     });
   });
