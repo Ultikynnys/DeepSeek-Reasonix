@@ -1360,30 +1360,71 @@ function PageModels({
 
   const allAvailable = groups.flatMap((g) => g.models);
   const isKnown = allAvailable.includes(settings.model);
+  const hiddenSet = new Set(settings.disabledModels ?? []);
+  const hiddenCount = allAvailable.filter((id) => hiddenSet.has(id)).length;
+  const toggleHidden = (id: string): void => {
+    const next = new Set(settings.disabledModels ?? []);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onSave({ disabledModels: [...next] });
+  };
   return (
     <>
       <section className="section">
         <div className="stitle">{t("settings.defaultModelCurrent", { model: settings.model })}</div>
+        <div className="h" style={{ marginBottom: 8 }}>
+          {t("settings.modelVisibilityHint")}
+          {hiddenCount > 0 ? (
+            <>
+              {" "}
+              {t("settings.modelHiddenCount", { count: hiddenCount })}{" "}
+              <button
+                type="button"
+                className="mini-btn"
+                title={t("settings.modelShowAll")}
+                onClick={() => onSave({ disabledModels: [] })}
+              >
+                {t("settings.modelShowAll")}
+              </button>
+            </>
+          ) : null}
+        </div>
         {groups.map((g) => (
           <div key={g.title} style={{ marginBottom: 12 }}>
             <div className="h" style={{ fontWeight: 600, marginBottom: 6 }}>
               {g.title}
             </div>
             <div className="model-grid">
-              {g.models.map((id) => (
-                <div
-                  key={id}
-                  className="mcard"
-                  data-on={settings.model === id}
-                  onClick={() => onSave({ model: id })}
-                  onKeyDown={activationHandler(() => onSave({ model: id }))}
-                >
-                  <div className="nm">{modelDisplayName(id)}</div>
-                  {modelAcceptsImages(id, ollamaVisionModels) ? (
-                    <span className="badge">vision</span>
-                  ) : null}
-                </div>
-              ))}
+              {g.models.map((id) => {
+                const hidden = hiddenSet.has(id);
+                return (
+                  <div
+                    key={id}
+                    className="mcard"
+                    data-on={settings.model === id}
+                    data-hidden={hidden}
+                    onClick={() => onSave({ model: id })}
+                    onKeyDown={activationHandler(() => onSave({ model: id }))}
+                  >
+                    <div className="nm">{modelDisplayName(id)}</div>
+                    {modelAcceptsImages(id, ollamaVisionModels) ? (
+                      <span className="badge">vision</span>
+                    ) : null}
+                    {hidden ? <span className="badge">{t("settings.modelHidden")}</span> : null}
+                    <button
+                      type="button"
+                      className="mini-btn model-visibility-btn"
+                      title={hidden ? t("settings.modelShow") : t("settings.modelHide")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleHidden(id);
+                      }}
+                    >
+                      {hidden ? t("settings.modelShow") : t("settings.modelHide")}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         ))}
@@ -1505,11 +1546,13 @@ function PageModels({
           <div className="model-grid ollama-model-grid">
             {ollamaModels.map((id) => {
               const full = `ollama/${id}`;
+              const hidden = hiddenSet.has(full);
               return (
                 <div
                   key={full}
                   className="mcard"
                   data-on={settings.model === full}
+                  data-hidden={hidden}
                   onClick={() => onSave({ model: full })}
                   onKeyDown={activationHandler(() => onSave({ model: full }))}
                 >
@@ -1517,6 +1560,18 @@ function PageModels({
                   {modelAcceptsImages(full, ollamaVisionModels) ? (
                     <span className="badge">vision</span>
                   ) : null}
+                  {hidden ? <span className="badge">{t("settings.modelHidden")}</span> : null}
+                  <button
+                    type="button"
+                    className="mini-btn model-visibility-btn"
+                    title={hidden ? t("settings.modelShow") : t("settings.modelHide")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleHidden(full);
+                    }}
+                  >
+                    {hidden ? t("settings.modelShow") : t("settings.modelHide")}
+                  </button>
                 </div>
               );
             })}

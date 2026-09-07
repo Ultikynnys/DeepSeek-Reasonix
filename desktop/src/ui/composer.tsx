@@ -111,6 +111,7 @@ export function Composer({
   opencodeModelsError,
   onRefreshOpencodeModels,
   customModels,
+  disabledModels,
   textareaRef,
   workspaceDir,
   queuedSends,
@@ -168,6 +169,9 @@ export function Composer({
   /** Ids with an explicit `models` provider mapping in config.json — offered
    *  in the general list because the user declared them. */
   customModels?: string[];
+  /** Model ids hidden from every model picker. Global persistent setting
+   *  (`disabledModels` in config.json), edited from Settings → Models. */
+  disabledModels?: string[];
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   workspaceDir?: string;
   /** Messages typed while busy=true; rendered as removable chips above the textarea and auto-drained FIFO on turn-complete. */
@@ -460,6 +464,7 @@ export function Composer({
     opencodeModels,
     opencodeModelsError,
     customModels,
+    disabledModels,
     onRefreshOllamaModels,
     onRefreshAntigravityModels,
     onRefreshOpencodeModels,
@@ -811,6 +816,7 @@ function ModelList({
   opencodeModels,
   opencodeModelsError,
   customModels,
+  disabledModels,
   onRefreshOllamaModels,
   onRefreshAntigravityModels,
   onRefreshOpencodeModels,
@@ -827,6 +833,8 @@ function ModelList({
   opencodeModelsError?: string;
   /** Ids with an explicit `models` provider mapping — user-declared, so offered. */
   customModels?: string[];
+  /** Model ids hidden from every picker. The active model always stays visible. */
+  disabledModels?: string[];
   onRefreshOllamaModels?: (force?: boolean) => void;
   onRefreshAntigravityModels?: () => void;
   onRefreshOpencodeModels?: (force?: boolean) => void;
@@ -857,6 +865,12 @@ function ModelList({
   const filteredCustomModels = (customModels ?? []).filter(
     (id) => !knownSet.has(id) && !antigravitySet.has(id) && !isAntigravityModel(id),
   );
+
+  // Global hide list from Settings → Models. The active model always stays
+  // visible so a hidden-but-selected tab can never strand itself.
+  const hiddenSet = new Set(disabledModels ?? []);
+  const visibleUnlessActive = (id: string): boolean =>
+    id === activeModel || !hiddenSet.has(id);
 
   type GroupDef = {
     key: string;
@@ -940,9 +954,23 @@ function ModelList({
       : []),
   ];
 
+  const visibleGroups = groups
+    .map((group) => ({
+      ...group,
+      models: group.models.filter(visibleUnlessActive),
+    }))
+    .filter((group) => {
+      // Keep group headers that carry an error/refresh affordance even when
+      // every model in them is hidden; drop purely empty catalog groups.
+      if (group.error) return true;
+      if (group.key === "ollama" && ollamaModelsError) return true;
+      if (group.key === "antigravity" && antigravityModelsError) return true;
+      return group.models.length > 0;
+    });
+
   return (
     <div className="popup-list model-menu-list">
-      {groups.map((group) => {
+      {visibleGroups.map((group) => {
         if (group.models.length === 0 && !group.error) return null;
         const Icon = group.icon ?? I.brain;
         return (

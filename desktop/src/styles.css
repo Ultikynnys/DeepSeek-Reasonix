@@ -6441,6 +6441,16 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+/* Hidden models stay editable in Settings → Models (dimmed) but never
+ * appear in the composer pickers. */
+.mcard[data-hidden="true"] {
+  opacity: 0.55;
+}
+.model-visibility-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
 .mcard .nm {
   font-weight: 600;
   font-size: 14px;

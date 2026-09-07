@@ -398,6 +398,9 @@ export type Settings = {
   /** Ids with an explicit `models` provider mapping in config.json — offered
    *  by the model picker alongside the catalogs, since the user declared them. */
   customModels?: string[];
+  /** Model ids hidden from every model picker. Global persistent setting
+   *  (`disabledModels` in config.json), edited from Settings → Models. */
+  disabledModels?: string[];
   /** Ollama chat endpoint (OpenAI-compatible) — shown in the Models settings page. */
   ollamaBaseUrl?: string;
   webSearchEngine?:
@@ -1661,6 +1664,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           recentWorkspaces: ev.recentWorkspaces,
           model: ev.model,
           customModels: ev.customModels,
+          disabledModels: ev.disabledModels,
           webSearchEngine: ev.webSearchEngine,
           webSearchEndpoint: ev.webSearchEndpoint,
           webSearchApiKeys: ev.webSearchApiKeys,
@@ -3333,6 +3337,7 @@ function TabRuntime({
                 opencodeModels={opencodeModels}
                 opencodeModelsError={opencodeModelsError ?? undefined}
                 customModels={state.settings?.customModels}
+                disabledModels={state.settings?.disabledModels}
                 onRefreshOllamaModels={onRefreshOllamaModels}
                 onRefreshAntigravityModels={onRefreshAntigravityModels}
                 onRefreshOpencodeModels={onRefreshOpencodeModels}

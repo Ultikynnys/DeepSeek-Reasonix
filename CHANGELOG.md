@@ -5,6 +5,11 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Added — hide models you never use; a global persistent `disabledModels` setting.**
+
+- Settings → Models now has a Hide/Show toggle on every model card (including the Ollama grid) plus a Show-all reset. Hidden ids are stored in a `disabledModels: string[]` field in `~/.reasonix/config.json` (same string-array sanitization as `mcpDisabled`), emitted on every `$settings` event, and persisted through `settings_save`.
+- Both composer pickers (main agent and subagent menus) filter hidden ids from every group, including dynamic Ollama (`ollama/<id>` stored fully qualified) and discovered Antigravity ids. The active model always stays visible so a hidden-but-selected tab can never strand itself.
+
 **Added — `gemini-3.8-flash` and `gemini-3.8-flash-tiered` in the Antigravity catalog.**
 
 - Gemini 3.8 Flash is now GA (released 2026-09-02). Both `gemini-3.8-flash` and `gemini-3.8-flash-tiered` are re-added to the static `ANTIGRAVITY_MODELS` catalog so the desktop pickers offer them and `providerForModel` routes them to the Cloud Code wire format.

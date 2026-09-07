@@ -210,6 +210,12 @@ export const en = {
     modelCustom: "Custom model id",
     modelCustomHint: "Any OpenAI-compatible id your endpoint serves (vLLM, Ollama, Together, …).",
     modelCustomActive: "Currently running on a custom id: {model}",
+    modelVisibilityHint: "Hide models you never use — hidden models disappear from every picker.",
+    modelHide: "Hide",
+    modelShow: "Show",
+    modelShowAll: "Show all",
+    modelHidden: "hidden",
+    modelHiddenCount: "{count} hidden",
     ollamaBaseUrl: "Ollama base URL",
     ollamaBaseUrlHint:
       "OpenAI-compatible endpoint. Empty = Ollama cloud https://ollama.com/v1 (requires the API key below); set http://localhost:11434/v1 for a local daemon.",

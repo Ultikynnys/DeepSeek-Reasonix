@@ -118,6 +118,25 @@ describe("desktop Composer model catalog", () => {
     ]);
   });
 
+  it("hides disabledModels from both menus but keeps the active model visible", () => {
+    const { container } = renderComposer({
+      modelLabel: "glm-4.5",
+      disabledModels: ["deepseek-v4-pro", "glm-4.5", "ollama/llama3.1:latest"],
+      ollamaModels: ["llama3.1:latest", "qwen3:32b"],
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+    const mainText = container.querySelector(".model-menu-list")?.textContent ?? "";
+    expect(mainText).not.toContain("deepseek-v4-pro");
+    expect(mainText).not.toContain("ollama/llama3.1:latest");
+    // Active model escapes the filter so a hidden-but-selected tab never strands.
+    expect(mainText).toContain("glm-4.5");
+    expect(mainText).toContain("qwen3:32b");
+
+    fireEvent.click(container.querySelector(".subagent-pill")!);
+    const subText = container.querySelector(".model-menu-list")?.textContent ?? "";
+    expect(subText).not.toContain("deepseek-v4-pro");
+  });
+
   it("subagent menu shares the backend-generated Ollama and Gemini models with the main agent", () => {
     const ollamaModels = ["llama3.1:latest", "qwen3:32b", "llava"];
     const antigravityModels = ["gemini-3.6-flash", "gemini-3.7-flash", "claude-3-5-sonnet"];
