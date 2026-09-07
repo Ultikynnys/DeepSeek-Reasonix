@@ -206,6 +206,7 @@ describe("compaction model-call deadlines", () => {
       sessionName: null,
       getCurrentTurn: () => 0,
       getSystemPrompt: () => "system",
+      billingContextFor: () => ({ kind: "usd", provider: "deepseek", at: 0 }),
     });
 
     const pending = cm.fold("test-model", { keepRecentTokens: 500 });

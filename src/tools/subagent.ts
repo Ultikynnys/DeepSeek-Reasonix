@@ -1,7 +1,7 @@
 /** Isolated child loop. Inherits parent registry minus spawn_subagent + submit_plan; no hooks; non-streaming. */
 
 import { type DeepSeekClient, Usage } from "../client.js";
-import { isKnownModelId } from "../config.js";
+import { type ModelProvider, isKnownModelId, providerForModel } from "../config.js";
 import { CacheFirstLoop } from "../loop.js";
 import { applyProjectMemory } from "../memory/project.js";
 import { ImmutablePrefix } from "../memory/runtime.js";
@@ -89,8 +89,9 @@ export interface SpawnSubagentOptions {
   maxElapsedMs?: number;
   /** Continue an earlier session instead of starting fresh — loads the prior messages from disk; `task` is treated as a continuation nudge. */
   resumeSession?: string;
-  /** How this run bills — drives the card's cost unit. "usd" = token-priced
-   *  (costUsd is meaningful), "quota" = provider plan window %, "none" = unmeasurable. */
+  /** Provider and native billing unit resolved by the caller. */
+  billingContext?: { kind: "usd" | "quota" | "none"; provider: ModelProvider };
+  /** @deprecated Compatibility option. Prefer billingContext. */
   billingKind?: "usd" | "quota" | "none";
   /** Returns the provider plan-window used % (0..100) for this run's model.
    *  Snapshotted before and after the run to compute the consumed quota delta.
@@ -194,6 +195,10 @@ export function subagentBudgetHint(spawnCount: number, totalTokens: number): str
 /** Errors captured in the result shape, never thrown — caller decides how to surface. */
 export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<SubagentResult> {
   const model = opts.model ?? DEFAULT_SUBAGENT_MODEL;
+  const billingContext = opts.billingContext ?? {
+    kind: opts.billingKind ?? "usd",
+    provider: providerForModel(model),
+  };
   const maxResultChars = opts.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
   const sink = opts.sink;
   const skillName = opts.skillName;
@@ -240,7 +245,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         error: errorMessage,
         turns: 0,
         costUsd: 0,
-        billingKind: opts.billingKind ?? "usd",
+        billingKind: billingContext.kind,
         usage: new Usage(),
       });
       return {
@@ -251,7 +256,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         toolIters: 0,
         elapsedMs: Date.now() - startedAt,
         costUsd: 0,
-        billingKind: opts.billingKind ?? "usd",
+        billingKind: billingContext.kind,
         model,
         skillName,
         usage: new Usage(),
@@ -285,7 +290,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   // Quota-billed runs snapshot the provider plan window before the child does
   // any work; the after-snapshot (post-loop) yields this run's consumed delta.
   let quotaBaseline: number | null = null;
-  if (opts.billingKind === "quota" && opts.measureQuota) {
+  if (billingContext.kind === "quota" && opts.measureQuota) {
     quotaBaseline = await opts.measureQuota().catch(() => null);
   }
   const childPrefix = new ImmutablePrefix({
@@ -304,6 +309,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     hooks: [],
     stream: true,
     session: sessionName,
+    billingContextFor: () => billingContext,
   });
 
   // Wire parent-abort → child-abort. Two pitfalls we have to handle:
@@ -494,7 +500,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   const turns = childLoop.stats.turns.length;
   const costUsd = childLoop.stats.totalCost;
   const usage = aggregateChildUsage(childLoop);
-  const billingKind = opts.billingKind ?? "usd";
+  const billingKind = billingContext.kind;
   // After-snapshot the provider window for quota-billed runs. Only a non-negative
   // delta under 100pp (no window reset / no overlap double-count) is trustworthy.
   let quotaUsedPct: number | undefined;

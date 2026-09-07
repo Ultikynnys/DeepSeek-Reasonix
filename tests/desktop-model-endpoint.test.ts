@@ -64,6 +64,7 @@ describe("desktop modelEndpointFor (#1529)", () => {
     expect(modelEndpointFor("gpt-5.6-sol", path)).toEqual({
       provider: "openai",
       baseUrl: "https://api.openai.com/v1",
+      billingKind: "usd",
       openaiAuth: "none",
     });
   });
@@ -73,6 +74,7 @@ describe("desktop modelEndpointFor (#1529)", () => {
     expect(modelEndpointFor("gpt-5.6-sol", path)).toEqual({
       provider: "openai",
       baseUrl: "https://api.openai.com/v1",
+      billingKind: "usd",
       openaiAuth: "apiKey",
     });
   });
@@ -92,6 +94,7 @@ describe("desktop modelEndpointFor (#1529)", () => {
     expect(modelEndpointFor("gpt-5.6-sol", path)).toEqual({
       provider: "openai",
       baseUrl: "https://api.openai.com/v1",
+      billingKind: "quota",
       openaiAuth: "oauth",
       oauthAccount: "u@example.com",
     });
@@ -119,6 +122,7 @@ describe("desktop modelEndpointFor (#1529)", () => {
     expect(modelEndpointFor("gpt-5.6-terra", path)).toEqual({
       provider: "openai",
       baseUrl: "https://openai-proxy.example.com/v1",
+      billingKind: "usd",
       openaiAuth: "apiKey",
     });
   });
@@ -131,6 +135,7 @@ describe("desktop modelEndpointFor (#1529)", () => {
     expect(modelEndpointFor("gpt-5.6-luna", path)).toEqual({
       provider: "openai",
       baseUrl: "https://gateway.example.com/v1",
+      billingKind: "usd",
       openaiAuth: "apiKey",
     });
   });
@@ -139,6 +144,17 @@ describe("desktop modelEndpointFor (#1529)", () => {
     expect(modelEndpointFor("ollama/llama3.1:latest", path)).toEqual({
       provider: "ollama",
       baseUrl: "https://ollama.com/v1",
+      billingKind: "none",
+      deployment: "cloud",
+    });
+  });
+
+  it("reports USD billing for an Ollama Cloud peak-priced model", () => {
+    expect(modelEndpointFor("ollama/deepseek-v4-flash", path)).toEqual({
+      provider: "ollama",
+      baseUrl: "https://ollama.com/v1",
+      billingKind: "usd",
+      deployment: "cloud",
     });
   });
 
@@ -153,6 +169,8 @@ describe("desktop modelEndpointFor (#1529)", () => {
     expect(modelEndpointFor("private-coding-model", path)).toEqual({
       provider: "ollama",
       baseUrl: "http://localhost:11434",
+      billingKind: "none",
+      deployment: "local",
     });
   });
 
@@ -161,6 +179,8 @@ describe("desktop modelEndpointFor (#1529)", () => {
     expect(modelEndpointFor("ollama/qwen3:32b", path)).toEqual({
       provider: "ollama",
       baseUrl: "https://ollama.example.com/v1",
+      billingKind: "none",
+      deployment: "local",
     });
   });
 
@@ -169,6 +189,8 @@ describe("desktop modelEndpointFor (#1529)", () => {
     expect(modelEndpointFor("ollama/llama4-maverick", path)).toEqual({
       provider: "ollama",
       baseUrl: "https://env.ollama.example.com",
+      billingKind: "none",
+      deployment: "local",
     });
   });
 });

@@ -13,7 +13,12 @@ import { StatusBar } from "./statusbar";
  *  "name doesn't imply provider" contract under test. */
 function endpointFor(model: string): ModelEndpointInfo {
   if (model.startsWith("ollama/"))
-    return { provider: "ollama", baseUrl: "http://localhost:11434/v1" };
+    return {
+      provider: "ollama",
+      baseUrl: "https://ollama.com/v1",
+      billingKind: "quota",
+      deployment: "cloud",
+    };
   if (model === "gpt-5.6-sol" || model === "gpt-5.6-terra")
     return { provider: "openai", baseUrl: "https://api.openai.com/v1" };
   // gpt-4o-custom here stands in for a custom id the user mapped to the
@@ -127,10 +132,40 @@ describe("StatusBar quota display", () => {
     expect(screen.queryByText(/1x|2x/)).toBeNull();
   });
 
-  it("hides the peak/off-peak chip on Ollama tabs", () => {
+  it("shows Ollama Cloud's rate chip only for token-priced Flash/Pro models", () => {
+    renderBar({
+      settings: {
+        model: "ollama/deepseek-v4-flash",
+        modelEndpoint: {
+          provider: "ollama",
+          baseUrl: "https://ollama.com/v1",
+          billingKind: "usd",
+          deployment: "cloud",
+        },
+      } as Settings,
+    });
+    expect(screen.getByText(/off-peak|peak/)).toBeTruthy();
+    expect(screen.getByText(/1x|2x/)).toBeTruthy();
+  });
+
+  it("hides the rate chip for local Ollama and other Ollama models", () => {
     renderBar({ settings: { model: "ollama/llama3.1:latest" } as Settings });
     expect(screen.queryByText(/off-peak|peak/)).toBeNull();
     expect(screen.queryByText(/1x|2x/)).toBeNull();
+
+    cleanup();
+    renderBar({
+      settings: {
+        model: "ollama/deepseek-v4-pro",
+        modelEndpoint: {
+          provider: "ollama",
+          baseUrl: "http://localhost:11434",
+          billingKind: "none",
+          deployment: "local",
+        },
+      } as Settings,
+    });
+    expect(screen.queryByText(/off-peak|peak/)).toBeNull();
   });
 
   it("hides the peak/off-peak chip on Antigravity (Gemini) tabs", () => {
@@ -282,7 +317,26 @@ describe("StatusBar quota display", () => {
     expect(screen.getByTitle(/no OAuth token/)).toBeTruthy();
   });
 
-  it("shows weekly % left + plan + this-turn % for ollama tabs", () => {
+  it("shows USD turn and session costs for token-priced Ollama Cloud models", () => {
+    renderBar({
+      settings: {
+        model: "ollama/deepseek-v4-flash",
+        modelEndpoint: {
+          provider: "ollama",
+          baseUrl: "https://ollama.com/v1",
+          billingKind: "usd",
+          deployment: "cloud",
+        },
+      } as Settings,
+      usage: { totalCostUsd: 1.5, lastCallCostUsd: 0.25 } as unknown as UsageStats,
+      ollamaQuota: OLLAMA_QUOTA,
+    });
+    expect(screen.getByText(/\$ 0\.2500/)).toBeTruthy();
+    expect(screen.getByText(/\$ 1\.5000/)).toBeTruthy();
+    expect(screen.queryByText(/88%\s*left/)).toBeNull();
+  });
+
+  it("shows weekly % left + plan + this-turn % for quota-billed Ollama tabs", () => {
     renderBar({
       settings: { model: "ollama/gpt-oss:20b" } as Settings,
       ollamaQuota: OLLAMA_QUOTA,

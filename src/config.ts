@@ -135,6 +135,17 @@ export const DEFAULT_ZAI_CHAT_URL = "https://api.z.ai/api/paas/v4";
 /** OpenCode Zen OpenAI-compatible endpoint used for free/paid OpenCode models. */
 export const DEFAULT_OPENCODE_CHAT_URL = "https://opencode.ai/zen/v1";
 
+/** Positive endpoint evidence that an Ollama provider request targets Ollama Cloud. */
+export function isOllamaCloudEndpoint(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false;
+  try {
+    const hostname = new URL(baseUrl).hostname.toLowerCase();
+    return hostname === "ollama.com" || hostname.endsWith(".ollama.com");
+  } catch {
+    return false;
+  }
+}
+
 /** Native Ollama API origin: strip a trailing `/v1` — the `/api/*` endpoints
  *  live at that root (localhost:11434/v1 → localhost:11434). */
 export function deriveNativeOllamaOrigin(baseUrl: string): string {
@@ -1128,6 +1139,12 @@ export interface ResolvedEndpoint {
   apiKey: string | undefined;
 }
 
+export interface ResolvedModelEndpoint extends ResolvedEndpoint {
+  provider: ModelProvider;
+  /** Deployment classification derived from the resolved endpoint, never the model id. */
+  deployment: "cloud" | "local" | "custom";
+}
+
 // DEEPSEEK_BASE_URL is the original name; DEEPSEEK_API_BASE_URL is accepted as an
 // alias so users who copy the OPENAI_BASE_URL pattern land on a working name (#1876).
 export function resolveBaseUrlEnv(): string | undefined {
@@ -1148,9 +1165,25 @@ export function loadEndpoint(path: string = defaultConfigPath()): ResolvedEndpoi
   return { baseUrl: undefined, apiKey: process.env.DEEPSEEK_API_KEY ?? cfg.apiKey };
 }
 
-/** Endpoint tuple per model — GPT ids route to OpenAI (OPENAI_BASE_URL /
- *  OPENAI_API_KEY, default https://api.openai.com/v1); the rest to DeepSeek.
- *  Same tuple rule as loadEndpoint: the baseUrl owner defines apiKey too. */
+/** Resolve provider and deployment metadata alongside its endpoint tuple. */
+export function loadResolvedModelEndpoint(
+  model: string,
+  path: string = defaultConfigPath(),
+): ResolvedModelEndpoint {
+  const provider = providerForModel(model, path);
+  const endpoint = loadEndpointForModel(model, path);
+  const deployment =
+    provider === "ollama"
+      ? isOllamaCloudEndpoint(endpoint.baseUrl)
+        ? "cloud"
+        : endpoint.apiKey
+          ? "custom"
+          : "local"
+      : "custom";
+  return { ...endpoint, provider, deployment };
+}
+
+/** Endpoint tuple per model. Provider routing is resolved from positive config/catalog evidence. */
 export function loadEndpointForModel(
   model: string,
   path: string = defaultConfigPath(),

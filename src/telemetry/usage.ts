@@ -14,12 +14,13 @@ import {
 import { join } from "node:path";
 import { DAY_MS, formatBytes } from "@reasonix/core-utils";
 import type { Usage } from "../client.js";
+import type { ModelProvider } from "../config.js";
 import { appendJsonlLine, countJsonlLines, parseJsonl, readJsonlLines } from "../core/jsonl.js";
 import { reasonixHome } from "../reasonix-home.js";
 import {
   CLAUDE_SONNET_PRICING,
   DEEPSEEK_PRICING,
-  billingKindForModel,
+  billingContextForModel,
   cacheSavingsUsd,
   claudeEquivalentCost,
   costUsd,
@@ -42,6 +43,8 @@ export interface UsageRecord {
   costUsd: number;
   /** Native billing unit for this record. */
   billingKind?: "usd" | "quota" | "none";
+  /** Provider resolved when the request was recorded. */
+  provider?: ModelProvider;
   /** Plan-window percentage points consumed — only present when billingKind === "quota". */
   quotaUsedPct?: number;
   /** What the same turn would have cost at Claude Sonnet 4.6 rates. */
@@ -79,6 +82,8 @@ export interface AppendUsageInput {
   subagent?: UsageRecord["subagent"];
   /** Native billing unit for this turn. Quota-billed turns record 0 USD. */
   billingKind?: "usd" | "quota" | "none";
+  /** Resolved provider identity. Pass with billingKind to avoid re-resolution. */
+  provider?: ModelProvider;
   /** Plan-window percentage points consumed — only when billingKind === "quota". */
   quotaUsedPct?: number;
 }
@@ -137,20 +142,27 @@ function compactUsageLogIfLarge(path: string, now: number): void {
 
 /** Returns the record so tests can assert cost fields without re-reading the log. */
 export function appendUsage(input: AppendUsageInput): UsageRecord {
-  const billingKind = input.billingKind ?? billingKindForModel(input.model);
+  const resolved =
+    input.billingKind === undefined || input.provider === undefined
+      ? billingContextForModel(input.model)
+      : undefined;
+  const billingKind = input.billingKind ?? resolved?.kind ?? "none";
+  const provider = input.provider ?? resolved?.provider ?? "deepseek";
+  const ts = input.now ?? Date.now();
   // Quota-billed providers expose no dollar amounts — never invent a USD figure
   // from token counts. The telemetry log stores their native unit (quota %).
   const isUsd = billingKind === "usd";
   const record: UsageRecord = {
-    ts: input.now ?? Date.now(),
+    ts,
     session: input.session,
     model: input.model,
     promptTokens: input.usage.promptTokens,
     completionTokens: input.usage.completionTokens,
     cacheHitTokens: input.usage.promptCacheHitTokens,
     cacheMissTokens: input.usage.promptCacheMissTokens,
-    costUsd: isUsd ? costUsd(input.model, input.usage) : 0,
+    costUsd: isUsd ? costUsd(input.model, input.usage, undefined, { provider, at: ts }) : 0,
     billingKind,
+    provider,
     ...(billingKind === "quota" && typeof input.quotaUsedPct === "number"
       ? { quotaUsedPct: input.quotaUsedPct }
       : {}),

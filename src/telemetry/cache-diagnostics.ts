@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Usage } from "../client.js";
 import type { ChatMessage, ToolSpec } from "../types.js";
-import { cacheSavingsUsd } from "./stats.js";
+import { type PricingContext, cacheSavingsUsd } from "./stats.js";
 
 export const CACHE_DIAGNOSTICS_MAX_ENTRIES = 50;
 
@@ -48,6 +48,7 @@ export interface CacheDiagnosticInput {
   prefix: PrefixDiagnosticHashes;
   previous?: CacheDiagnosticEntry | null;
   now?: number;
+  pricingContext?: PricingContext;
 }
 
 export function stableHash(value: unknown): string {
@@ -87,7 +88,12 @@ export function buildCacheDiagnostic(input: CacheDiagnosticInput): CacheDiagnost
     cacheMissTokens: usage.promptCacheMissTokens,
     cacheHitRate: usage.cacheHitRatio,
     estimatedCostUsd: input.estimatedCostUsd,
-    savedCostUsd: cacheSavingsUsd(input.model, usage.promptCacheHitTokens),
+    savedCostUsd: cacheSavingsUsd(
+      input.model,
+      usage.promptCacheHitTokens,
+      undefined,
+      input.pricingContext,
+    ),
     missReason: reason,
     missReasonDetail: detail,
     inferred: true,

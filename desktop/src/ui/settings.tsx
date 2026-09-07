@@ -2009,14 +2009,19 @@ function PageBilling({
               "—"
             ) : (
               <span className="provider-costs">
-                {providerCosts.map(([provider, cost]) => (
-                  <span key={provider} className="provider-cost">
-                    {provider}:{" "}
-                    {cost.kind === "quota"
-                      ? `${(cost.quotaUsedPct ?? 0).toFixed(2)}%`
-                      : `${symbol} ${(currency === "CNY" ? (cost.totalCostUsd ?? 0) * 7.2 : (cost.totalCostUsd ?? 0)).toFixed(4)}`}
-                  </span>
-                ))}
+                {providerCosts.map(([provider, cost]) => {
+                  const units = [
+                    cost.totalCostUsd !== undefined
+                      ? `${symbol} ${(currency === "CNY" ? cost.totalCostUsd * 7.2 : cost.totalCostUsd).toFixed(4)}`
+                      : null,
+                    cost.quotaUsedPct !== undefined ? `${cost.quotaUsedPct.toFixed(2)}%` : null,
+                  ].filter((unit): unit is string => unit !== null);
+                  return (
+                    <span key={provider} className="provider-cost">
+                      {provider}: {units.join(" + ")}
+                    </span>
+                  );
+                })}
               </span>
             )}
           </div>

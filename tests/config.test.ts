@@ -43,6 +43,7 @@ import {
   loadRateLimit,
   loadReasoningEffort,
   loadRecentWorkspaces,
+  loadResolvedModelEndpoint,
   loadSemanticEmbeddingUserConfig,
   loadSubagentModels,
   loadTheme,
@@ -1704,6 +1705,25 @@ describe("config", () => {
       const ep = loadEndpointForModel("ollama/llama3.1:latest", path);
       expect(ep.baseUrl).toBe("https://ollama.com/v1");
       expect(ep.apiKey).toBeUndefined();
+      expect(loadResolvedModelEndpoint("ollama/llama3.1:latest", path)).toMatchObject({
+        provider: "ollama",
+        deployment: "cloud",
+      });
+    });
+
+    it("loadResolvedModelEndpoint preserves explicit provider evidence for arbitrary ids", () => {
+      writeConfig(
+        {
+          models: { "deepseek-v4-flash": { provider: "ollama" } },
+          ollamaBaseUrl: "http://localhost:11434",
+        },
+        path,
+      );
+      expect(loadResolvedModelEndpoint("deepseek-v4-flash", path)).toMatchObject({
+        provider: "ollama",
+        deployment: "local",
+        baseUrl: "http://localhost:11434",
+      });
     });
 
     it("loadEndpointForModel: ollama cloud baseUrl + key come from config", () => {

@@ -1210,12 +1210,17 @@ function zeroUsage(): UsageStats {
 function applyQuotaDelta(usage: UsageStats, provider: string, usedPct: number | null): UsageStats {
   if (usedPct === null || usedPct <= 0) return usage;
   const prev = usage.costByProvider?.[provider];
-  const prevPct = prev && prev.kind === "quota" ? (prev.quotaUsedPct ?? 0) : 0;
+  const prevPct = prev?.quotaUsedPct ?? 0;
+  const kind = prev?.totalCostUsd !== undefined ? "mixed" : "quota";
   return {
     ...usage,
     costByProvider: {
       ...(usage.costByProvider ?? {}),
-      [provider]: { kind: "quota", quotaUsedPct: prevPct + usedPct },
+      [provider]: {
+        ...prev,
+        kind,
+        quotaUsedPct: prevPct + usedPct,
+      },
     },
   };
 }

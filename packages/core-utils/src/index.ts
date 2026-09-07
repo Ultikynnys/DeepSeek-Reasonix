@@ -29,6 +29,16 @@ export { formatBytes } from "./format.js";
 export { messageOf } from "./error.js";
 export { DAY_MS, abortReason, sleep } from "./time.js";
 export {
+  DEEPSEEK_RATE_SCHEDULE,
+  OLLAMA_RATE_SCHEDULE,
+  isOffPeakRate,
+  isOllamaPeakPricedModel,
+  isPeakRate,
+  isRateScheduleWeekend,
+  minutesUntilRateChangeForSchedule,
+} from "./rate-periods.js";
+export type { RateSchedule } from "./rate-periods.js";
+export {
   ANTIGRAVITY_MODELS,
   GEMINI_MODELS,
   GPT56_MODELS,

@@ -12,6 +12,7 @@ function makeManager(log: AppendOnlyLog): ContextManager {
     stats: new SessionStats(),
     sessionName: null,
     getCurrentTurn: () => 1,
+    billingContextFor: () => ({ kind: "usd", provider: "deepseek", at: 0 }),
   });
 }
 

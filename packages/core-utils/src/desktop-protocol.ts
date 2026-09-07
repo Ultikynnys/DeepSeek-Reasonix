@@ -387,10 +387,11 @@ export interface SessionLoadedEvent {
  *  src/telemetry/stats.ts SessionProviderCost — defined here so the frontend
  *  has a standalone wire shape (core-utils cannot import from src). */
 export interface SessionProviderCost {
-  kind: "usd" | "quota" | "none";
-  /** Cumulative USD — only present when kind === "usd". */
+  /** Providers can carry both units after a model or plan switch. */
+  kind: "usd" | "quota" | "none" | "mixed";
+  /** Cumulative token-priced USD, when measured. */
   totalCostUsd?: number;
-  /** Cumulative plan-window percentage points consumed — only when kind === "quota". */
+  /** Cumulative plan-window percentage points, when measured. */
   quotaUsedPct?: number;
 }
 
@@ -506,6 +507,10 @@ export interface SettingsEvent {
 export interface ModelEndpointInfo {
   provider: "deepseek" | "openai" | "ollama" | "gemini" | "zai" | "opencode";
   baseUrl: string;
+  /** Native billing unit resolved by the daemon for this endpoint. */
+  billingKind?: "usd" | "quota" | "none";
+  /** Ollama endpoint deployment classification; absent for other providers. */
+  deployment?: "cloud" | "local" | "custom";
   /** Auth source for OpenAI endpoints — absent for the DeepSeek provider. */
   openaiAuth?: "oauth" | "apiKey" | "none";
   /** Masked account email when signed in via OAuth. */

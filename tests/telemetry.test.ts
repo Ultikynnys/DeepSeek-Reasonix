@@ -6,7 +6,9 @@ import { Usage } from "../src/client.js";
 import { writeConfig } from "../src/config.js";
 import {
   DEEPSEEK_PRICING,
+  OLLAMA_PRICING,
   SessionStats,
+  billingContextForModel,
   cacheSavingsUsd,
   costUsd,
   inputCostUsd,
@@ -81,6 +83,69 @@ describe("costUsd", () => {
 
   it("returns 0 for unknown model", () => {
     expect(costUsd("unknown-model", new Usage(1000, 100))).toBe(0);
+  });
+
+  it("applies Ollama Cloud's published off-peak Flash and Pro prices", () => {
+    expect(OLLAMA_PRICING).toEqual({
+      "deepseek-v4-flash": {
+        inputCacheHit: 0.007,
+        inputCacheMiss: 0.22,
+        output: 0.66,
+      },
+      "deepseek-v4-pro": {
+        inputCacheHit: 0.022,
+        inputCacheMiss: 0.66,
+        output: 1.98,
+      },
+    });
+    const usage = new Usage(2_000_000, 1_000_000, 3_000_000, 1_000_000, 1_000_000);
+    const saturday = Date.UTC(2026, 8, 5, 13);
+    expect(
+      costUsd("ollama/deepseek-v4-flash", usage, undefined, {
+        provider: "ollama",
+        at: saturday,
+      }),
+    ).toBeCloseTo(0.007 + 0.22 + 0.66, 10);
+    expect(
+      costUsd("ollama/deepseek-v4-pro:cloud", usage, undefined, {
+        provider: "ollama",
+        at: saturday,
+      }),
+    ).toBeCloseTo(0.022 + 0.66 + 1.98, 10);
+  });
+
+  it("uses 2x Ollama pricing from 12:00 through 18:00 UTC on weekdays", () => {
+    const usage = new Usage(2_000_000, 1_000_000, 3_000_000, 1_000_000, 1_000_000);
+    const base = 0.007 + 0.22 + 0.66;
+    const ollamaAt = (hour: number, minute = 0) =>
+      costUsd("ollama/deepseek-v4-flash", usage, undefined, {
+        provider: "ollama",
+        at: Date.UTC(2026, 0, 1, hour, minute),
+      });
+    expect(ollamaAt(11, 59)).toBeCloseTo(base, 10);
+    expect(ollamaAt(12)).toBeCloseTo(base * 2, 10);
+    expect(ollamaAt(17, 59)).toBeCloseTo(base * 2, 10);
+    expect(ollamaAt(18)).toBeCloseTo(base, 10);
+  });
+
+  it("selects Ollama pricing only from explicit resolved provider context", () => {
+    const usage = new Usage(1_000_000, 1_000_000, 2_000_000, 0, 1_000_000);
+    const at = Date.UTC(2026, 0, 1, 13);
+    const explicitlyOllama = costUsd("deepseek-v4-flash", usage, undefined, {
+      provider: "ollama",
+      at,
+    });
+    const resolvedDeepSeek = costUsd("deepseek-v4-flash", usage, undefined, {
+      provider: "deepseek",
+      at,
+    });
+    const resolvedOpenAI = costUsd("deepseek-v4-flash", usage, undefined, {
+      provider: "openai",
+      at,
+    });
+    expect(explicitlyOllama).toBeCloseTo((0.22 + 0.66) * 2, 10);
+    expect(resolvedDeepSeek).toBeCloseTo(0.22 + 0.66, 10);
+    expect(resolvedOpenAI).toBe(0);
   });
 
   it("uses pricingOverride for renamed third-party models", () => {
@@ -360,6 +425,99 @@ describe("SessionStats — issue #364 resume cache + context carryover", () => {
     expect(s.cumulativeCompletionTokens).toBe(0);
     s.seedCarryover({ totalCompletionTokens: -1 });
     expect(s.cumulativeCompletionTokens).toBe(0);
+  });
+});
+
+describe("billingContextForModel", () => {
+  it("distinguishes OpenAI OAuth quota from API-key USD billing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "reasonix-openai-billing-"));
+    const path = join(dir, "config.json");
+    try {
+      writeConfig({ openaiApiKey: "sk-test" }, path);
+      expect(billingContextForModel("gpt-5.6-sol", path)).toEqual({
+        kind: "usd",
+        provider: "openai",
+      });
+      writeConfig(
+        {
+          openaiOAuth: {
+            accessToken: "access",
+            refreshToken: "refresh",
+            expiresAt: Date.now() + 60_000,
+          },
+        },
+        path,
+      );
+      expect(billingContextForModel("gpt-5.6-sol", path)).toEqual({
+        kind: "quota",
+        provider: "openai",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("SessionStats explicit billing context", () => {
+  it("records Ollama Cloud turn cost and provider bucket at the request timestamp", () => {
+    const stats = new SessionStats();
+    const usage = new Usage(2_000_000, 1_000_000, 3_000_000, 1_000_000, 1_000_000);
+    const turn = stats.record(1, "ollama/deepseek-v4-flash", usage, undefined, {
+      kind: "usd",
+      provider: "ollama",
+      at: Date.UTC(2026, 0, 1, 12),
+    });
+    expect(turn.cost).toBeCloseTo((0.007 + 0.22 + 0.66) * 2, 10);
+    expect(stats.providerCosts.ollama).toMatchObject({
+      kind: "usd",
+      totalCostUsd: turn.cost,
+    });
+    expect(stats.summary().totalInputCostUsd).toBeCloseTo((0.007 + 0.22) * 2, 6);
+    expect(stats.summary().totalOutputCostUsd).toBeCloseTo(0.66 * 2, 6);
+  });
+
+  it("preserves both Ollama USD and quota units after model switches", () => {
+    const stats = new SessionStats();
+    stats.record(
+      1,
+      "ollama/deepseek-v4-flash",
+      new Usage(1_000_000, 1_000_000, 2_000_000, 0, 1_000_000),
+      undefined,
+      { kind: "usd", provider: "ollama", at: Date.UTC(2026, 8, 5, 13) },
+    );
+    stats.recordExternal("ollama/gpt-oss:20b", new Usage(), {
+      kind: "quota",
+      provider: "ollama",
+      quotaUsedPct: 2.5,
+    });
+    expect(stats.providerCosts.ollama).toMatchObject({
+      kind: "mixed",
+      totalCostUsd: 0.88,
+      quotaUsedPct: 2.5,
+    });
+  });
+
+  it("preserves unattributed legacy USD when provider buckets are partial", () => {
+    const stats = new SessionStats();
+    stats.seedCarryover({
+      totalCostUsd: 10,
+      costByProvider: { deepseek: { kind: "usd", totalCostUsd: 1 } },
+    });
+    stats.record(1, "deepseek-v4-flash", new Usage(1_000_000, 0, 1_000_000, 0, 1_000_000));
+    expect(stats.totalCost).toBeCloseTo(10.22, 10);
+  });
+
+  it("keeps local Ollama unpriced", () => {
+    const stats = new SessionStats();
+    const turn = stats.record(
+      1,
+      "ollama/deepseek-v4-flash",
+      new Usage(1_000_000, 1_000_000),
+      undefined,
+      { kind: "none", provider: "ollama", at: Date.UTC(2026, 0, 1, 12) },
+    );
+    expect(turn.cost).toBe(0);
+    expect(stats.providerCosts.ollama).toBeUndefined();
   });
 });
 

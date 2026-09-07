@@ -25,7 +25,7 @@ import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
 import type { AppendOnlyLog } from "./memory/runtime.js";
 import { rewriteSession } from "./memory/session.js";
-import { type SessionStats, resolveContextTokens } from "./telemetry/stats.js";
+import { type BillingContext, type SessionStats, resolveContextTokens } from "./telemetry/stats.js";
 import { IMAGE_DETAIL_LOW_TOKENS, countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ToolSpec, UserContentPart } from "./types.js";
 
@@ -163,6 +163,8 @@ export interface ContextManagerDeps {
   /** Reuses the live prefix → fold summary call shares the cached bytes the main agent already paid for. */
   getToolSpecs?: () => readonly ToolSpec[];
   getFewShots?: () => readonly ChatMessage[];
+  /** Provider and native billing context for internal model calls. */
+  billingContextFor: (model: string) => BillingContext;
   /** Fired when the message log was rewritten by fold; lets the loop drop session-scoped caches whose validity rested on the elided history (e.g. read-before-edit tracker). */
   onLogRewrite?: () => void;
   /** User-configured context-window cap override (tokens). Undefined = per-model default (see resolveContextTokens). */
@@ -722,7 +724,11 @@ export class ContextManager {
             "fold-timeout",
             attemptSignal,
           );
-          this.deps.stats.recordCompaction(summaryModel, resp.usage ?? new Usage());
+          this.deps.stats.recordCompaction(
+            summaryModel,
+            resp.usage ?? new Usage(),
+            this.deps.billingContextFor(summaryModel),
+          );
           return {
             content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
             reasoningContent: resp.reasoningContent ?? "",
@@ -773,7 +779,11 @@ export class ContextManager {
         FILE_TRIAGE_TIMEOUT_MS,
         "file-triage-timeout",
       );
-      this.deps.stats.recordCompaction(triageModel, resp.usage ?? new Usage());
+      this.deps.stats.recordCompaction(
+        triageModel,
+        resp.usage ?? new Usage(),
+        this.deps.billingContextFor(triageModel),
+      );
       return parseFileTriage(resp.content, allPaths);
     } catch (err) {
       // Fail-open: relevance is advisory — the fold proceeds with no drops.

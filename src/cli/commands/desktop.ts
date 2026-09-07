@@ -87,6 +87,7 @@ import {
   anyProviderConfigured,
   bridgeEndpointEnv,
   deriveNativeOllamaOrigin,
+  isOllamaCloudEndpoint,
   isOpenAIStandardEndpoint,
   isPlausibleKey,
   isReasoningEffort,
@@ -230,7 +231,7 @@ import { registerSeeImageTool } from "../../tools/see-image.js";
 import type { SubagentEvent } from "../../tools/subagent.js";
 
 import { SkillStore } from "../../skills.js";
-import { resolveContextTokens } from "../../telemetry/stats.js";
+import { billingContextForModel, resolveContextTokens } from "../../telemetry/stats.js";
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage, TurnImage } from "../../types.js";
@@ -853,11 +854,15 @@ async function refreshAntigravityModels(tab: Tab): Promise<void> {
  *  from the id's name shape. Exported for tests. */
 export function modelEndpointFor(model: string, path?: string): ModelEndpointInfo {
   const provider = providerForModel(model, path);
+  const billing = billingContextForModel(model, path);
   if (provider === "ollama") {
     const oep = loadOllamaEndpoint(path);
+    const baseUrl = oep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL;
     return {
       provider: "ollama",
-      baseUrl: oep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL,
+      baseUrl,
+      billingKind: billing.kind,
+      deployment: isOllamaCloudEndpoint(baseUrl) ? "cloud" : oep.apiKey ? "custom" : "local",
     };
   }
   if (provider === "gemini") {
@@ -896,6 +901,7 @@ export function modelEndpointFor(model: string, path?: string): ModelEndpointInf
   return {
     provider: "openai",
     baseUrl: oep.baseUrl ?? "https://api.openai.com/v1",
+    billingKind: billing.kind,
     openaiAuth: oauth?.accessToken ? "oauth" : oep.apiKey ? "apiKey" : "none",
     oauthAccount: oauth?.account,
   };
@@ -1711,14 +1717,15 @@ async function emitAntigravityQuota(tab: Tab): Promise<void> {
   emit({ type: "$antigravity_quota", quota: { ...quota, turnUsedPct } }, tab.id);
 }
 
-/** How a subagent model bills, for the desktop. Plan-based providers (Codex
- *  OAuth, cloud Ollama, Antigravity) show the consumed plan-window % rather
- *  than an invented dollar figure; DeepSeek/OpenAI show the real USD cost. */
+/** Provider-aware billing for subagent and main-loop model calls. */
 function subagentBillingFor(model: string): import("../../code/setup.js").SubagentBilling {
-  switch (providerForModel(model)) {
+  const context = billingContextForModel(model);
+  switch (context.provider) {
     case "openai":
+      if (context.kind !== "quota") return { kind: context.kind, provider: "openai" };
       return {
         kind: "quota",
+        provider: "openai",
         measureQuota: async () => {
           const r = await fetchCodexQuotaViaOAuth(8000).catch(() => ({
             quota: null,
@@ -1729,13 +1736,15 @@ function subagentBillingFor(model: string): import("../../code/setup.js").Subage
         },
       };
     case "ollama": {
+      if (context.kind !== "quota") return { kind: context.kind, provider: "ollama" };
       const ep = loadOllamaEndpoint();
       const baseUrl = ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL;
       const apiKey = ep.apiKey;
-      if (!apiKey) return { kind: "none" };
       return {
         kind: "quota",
+        provider: "ollama",
         measureQuota: async () => {
+          if (!apiKey) return null;
           const usage = await fetchOllamaUsage(baseUrl, apiKey, 8000);
           return usage?.session !== undefined ? usage.session * 100 : null;
         },
@@ -1744,6 +1753,7 @@ function subagentBillingFor(model: string): import("../../code/setup.js").Subage
     case "gemini":
       return {
         kind: "quota",
+        provider: "gemini",
         measureQuota: async () => {
           const auth = await resolveGeminiAuth().catch(() => null);
           if (!auth) return null;
@@ -1759,7 +1769,7 @@ function subagentBillingFor(model: string): import("../../code/setup.js").Subage
         },
       };
     default:
-      return { kind: "usd" };
+      return { kind: context.kind, provider: context.provider };
   }
 }
 
@@ -2420,10 +2430,11 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     maxIterPerTurn: loadMaxIterPerTurn(),
     maxOutputTokens: loadMaxOutputTokens(),
     disableAutoCompaction: loadDisableAutoCompaction(),
-    // Plan-based providers (Codex OAuth, cloud Ollama, Antigravity) record
-    // quota % not invented dollars — same billing resolution the subagent path
-    // uses, so main-loop and subagent turns agree on the native unit.
-    billingKindFor: (m) => subagentBillingFor(m).kind,
+    // Provider and billing unit come from resolved endpoint/config evidence.
+    billingContextFor: (model) => {
+      const billing = subagentBillingFor(model);
+      return { kind: billing.kind, provider: billing.provider };
+    },
     // Live thunk (not a snapshot) so a mid-session Shift+Tab / /mode flip
     // stops the iteration cap from pausing the turn in yolo.
     getEditMode: () => loadEditMode(),

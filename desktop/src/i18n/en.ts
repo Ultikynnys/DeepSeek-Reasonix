@@ -582,6 +582,10 @@ export const en = {
       "Off-peak — half of peak rates · Peak hours 01:00–04:00 & 06:00–10:00 UTC (weekdays), off-peak all day on weekends · changes in {when}",
     peakTitle:
       "Peak — double the off-peak rate · Peak hours 01:00–04:00 & 06:00–10:00 UTC (weekdays), off-peak all day on weekends · changes in {when}",
+    ollamaOffPeakTitle:
+      "Ollama Cloud off-peak — half of peak rates · Peak hours 12:00–18:00 UTC (weekdays), off-peak all day on weekends · changes in {when}",
+    ollamaPeakTitle:
+      "Ollama Cloud peak — double the off-peak rate · Peak hours 12:00–18:00 UTC (weekdays), off-peak all day on weekends · changes in {when}",
     authOauth: "oauth",
     authKey: "key",
     authNone: "no key",

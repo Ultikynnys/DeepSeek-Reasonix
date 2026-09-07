@@ -64,11 +64,12 @@ import {
   latestCacheDiagnostic,
 } from "./telemetry/cache-diagnostics.js";
 import {
+  type BillingContext,
   type BillingKind,
   type CacheDiagnostics,
   SessionStats,
   type TurnStats,
-  billingKindForModel,
+  billingContextForModel,
   resolveContextTokens,
 } from "./telemetry/stats.js";
 import { countTokensBounded } from "./tokenizer.js";
@@ -150,9 +151,9 @@ export interface CacheFirstLoopOptions {
    *  (not a snapshot) so a mid-session Shift+Tab flip takes effect, same
    *  pattern as shell.ts's `allowAll`. */
   getEditMode?: () => EditMode;
-  /** Resolves the native billing unit for a model id ("usd" | "quota" | "none").
-   *  Defaults to a provider-based guess; the desktop passes a resolver that knows
-   *  keyless local Ollama is "none". Quota turns record 0 USD — never converted. */
+  /** Resolves provider and native billing unit from endpoint/config evidence. */
+  billingContextFor?: (model: string) => Omit<BillingContext, "at">;
+  /** @deprecated Compatibility hook. Prefer billingContextFor. */
   billingKindFor?: (model: string) => BillingKind;
   /** User-configured context-window cap (tokens), forwarded to the ContextManager.
    *  Undefined = per-model default. Hot-applied via configure(). */
@@ -254,8 +255,8 @@ export class CacheFirstLoop {
 
   private readonly _rebuildSystem: (() => string) | null;
 
-  /** Native billing unit resolver — see CacheFirstLoopOptions.billingKindFor. */
-  private readonly _billingKindFor: (model: string) => BillingKind;
+  /** Provider and native billing resolver. Timestamp is attached at request completion. */
+  private readonly _billingContextFor: (model: string) => Omit<BillingContext, "at">;
 
   private _turn = 0;
   private _streamPreference: boolean;
@@ -381,7 +382,14 @@ export class CacheFirstLoop {
     this.hookCwd = opts.hookCwd ?? process.cwd();
     this.confirmationGate = opts.confirmationGate ?? defaultPauseGate;
     this._rebuildSystem = opts.rebuildSystem ?? null;
-    this._billingKindFor = opts.billingKindFor ?? billingKindForModel;
+    this._billingContextFor =
+      opts.billingContextFor ??
+      ((model) => {
+        const resolved = billingContextForModel(model);
+        return opts.billingKindFor
+          ? { kind: opts.billingKindFor(model), provider: resolved.provider }
+          : resolved;
+      });
     this._onPreCompaction = opts.onPreCompaction ?? null;
 
     this._streamPreference = opts.stream ?? true;
@@ -456,6 +464,7 @@ export class CacheFirstLoop {
       getSystemPrompt: () => this.prefix.system,
       getToolSpecs: () => this.prefix.toolSpecs,
       getFewShots: () => this.prefix.fewShots,
+      billingContextFor: (model) => ({ ...this._billingContextFor(model), at: Date.now() }),
       onLogRewrite: () => this.readTracker.reset(),
     });
   }
@@ -1479,7 +1488,7 @@ export class CacheFirstLoop {
         callModel,
         usage ?? new Usage(),
         cacheDiagnostics,
-        this._billingKindFor(callModel),
+        { ...this._billingContextFor(callModel), at: Date.now() },
       );
 
       // Carry cumulative stats across app restarts.
@@ -1490,6 +1499,10 @@ export class CacheFirstLoop {
         estimatedCostUsd: turnStats.cost,
         prefix: prefixEvidence,
         previous: latestCacheDiagnostic(this.stats.cacheDiagnostics),
+        pricingContext:
+          turnStats.pricedAt === undefined
+            ? undefined
+            : { provider: turnStats.provider, at: turnStats.pricedAt },
       });
       if (this.sessionName) {
         try {
@@ -1503,6 +1516,10 @@ export class CacheFirstLoop {
             estimatedCostUsd: turnStats.cost,
             prefix: prefixEvidence,
             previous: latestCacheDiagnostic(meta.cacheDiagnostics),
+            pricingContext:
+              turnStats.pricedAt === undefined
+                ? undefined
+                : { provider: turnStats.provider, at: turnStats.pricedAt },
           });
           const last =
             this.stats.turns.length > 0 ? this.stats.turns[this.stats.turns.length - 1] : null;
@@ -2047,7 +2064,11 @@ export class CacheFirstLoop {
         this.log.compactInPlace([m]);
         this.persistLog([m]);
       },
-      recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
+      recordStats: (model, usage) =>
+        this.stats.record(this._turn, model, usage, undefined, {
+          ...this._billingContextFor(model),
+          at: Date.now(),
+        }),
       turn: this._turn,
       model: this.model,
       maxOutputTokens: this.maxOutputTokens,

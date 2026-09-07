@@ -13,7 +13,8 @@
     "./expand-tilde": "./src/expand-tilde.ts",
     "./path-utils": "./src/path-utils.ts",
     "./permission-types": "./src/permission-types.ts",
-    "./approval-prompt": "./src/approval-prompt.ts"
+    "./approval-prompt": "./src/approval-prompt.ts",
+    "./rate-periods": "./src/rate-periods.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

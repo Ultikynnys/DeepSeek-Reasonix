@@ -1,3 +1,4 @@
+import { OLLAMA_RATE_SCHEDULE } from "@reasonix/core-utils";
 import { describe, expect, it } from "vitest";
 import {
   isBeijingWeekendDay,
@@ -62,6 +63,32 @@ describe("peak-hours rate periods", () => {
     expect(isBeijingWeekendDay(new Date(Date.UTC(2026, 8, 4, 15, 59)))).toBe(false); // Fri 23:59 Beijing
     expect(isBeijingWeekendDay(new Date(Date.UTC(2026, 8, 6, 15, 59)))).toBe(true); // Sun 23:59 Beijing
     expect(isBeijingWeekendDay(new Date(Date.UTC(2026, 8, 7, 15, 59)))).toBe(false); // Mon 23:59 Beijing
+  });
+});
+
+describe("Ollama Cloud rate periods", () => {
+  it.each([
+    [11, 59, true],
+    [12, 0, false],
+    [17, 59, false],
+    [18, 0, true],
+  ])("UTC %i:%02i off-peak = %s", (hour, minute, offPeak) => {
+    expect(isOffPeak(weekday(hour, minute), OLLAMA_RATE_SCHEDULE)).toBe(offPeak);
+    expect(isPeak(weekday(hour, minute), OLLAMA_RATE_SCHEDULE)).toBe(!offPeak);
+  });
+
+  it("is off-peak throughout UTC weekends", () => {
+    expect(isOffPeak(saturday(12), OLLAMA_RATE_SCHEDULE)).toBe(true);
+    expect(isOffPeak(sunday(17, 59), OLLAMA_RATE_SCHEDULE)).toBe(true);
+  });
+
+  it("counts down through weekends to the next real transition", () => {
+    expect(minutesUntilRateChange(weekday(11, 30), OLLAMA_RATE_SCHEDULE)).toBe(30);
+    expect(minutesUntilRateChange(weekday(17, 30), OLLAMA_RATE_SCHEDULE)).toBe(30);
+    expect(
+      minutesUntilRateChange(new Date(Date.UTC(2026, 8, 4, 18)), OLLAMA_RATE_SCHEDULE),
+    ).toBe(3960);
+    expect(minutesUntilRateChange(sunday(12), OLLAMA_RATE_SCHEDULE)).toBe(1440);
   });
 });
 

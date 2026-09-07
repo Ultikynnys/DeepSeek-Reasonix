@@ -153,10 +153,14 @@ export {
   inputCostUsd,
   outputCostUsd,
   claudeEquivalentCost,
+  billingContextForModel,
   billingKindForModel,
 } from "./telemetry/stats.js";
 export type {
+  BillingContext,
   BillingKind,
+  ModelPricing,
+  PricingContext,
   SessionProviderCost,
   TurnStats,
   SessionSummary,

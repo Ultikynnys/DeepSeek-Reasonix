@@ -1,13 +1,28 @@
+import {
+  DEEPSEEK_RATE_SCHEDULE,
+  OLLAMA_RATE_SCHEDULE,
+  isOllamaPeakPricedModel,
+  isPeakRate,
+} from "@reasonix/core-utils";
 import type { Usage } from "../client.js";
-import { loadPricingOverride, providerForModel } from "../config.js";
+import {
+  type ModelProvider,
+  isOllamaCloudEndpoint,
+  loadEndpointForModel,
+  loadPricingOverride,
+  providerForModel,
+  readConfig,
+} from "../config.js";
 import type { CacheDiagnosticEntry } from "./cache-diagnostics.js";
 
-/** USD per 1M tokens, off-peak base rate (peak hours bill at 2x — see
- *  desktop/src/peak-hours.ts). Display currency conversion happens at the UI boundary. */
-export const DEEPSEEK_PRICING: Record<
-  string,
-  { inputCacheHit: number; inputCacheMiss: number; output: number }
-> = {
+export interface ModelPricing {
+  inputCacheHit: number;
+  inputCacheMiss: number;
+  output: number;
+}
+
+/** USD per 1M tokens at each provider's off-peak base rate. */
+export const DEEPSEEK_PRICING: Record<string, ModelPricing> = {
   // Official DeepSeek API pricing (api-docs.deepseek.com/quick_start/pricing).
   "deepseek-v4-flash": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
   "deepseek-v4-pro": { inputCacheHit: 0.022, inputCacheMiss: 0.66, output: 1.98 },
@@ -24,10 +39,52 @@ export const DEEPSEEK_PRICING: Record<
   "gpt-5.6-luna": { inputCacheHit: 0.02, inputCacheMiss: 0.2, output: 1.2 },
 };
 
-export type ModelPricing = (typeof DEEPSEEK_PRICING)[string];
+/** Ollama Cloud's published off-peak rates. Peak billing is exactly 2x. */
+export const OLLAMA_PRICING: Record<string, ModelPricing> = {
+  "deepseek-v4-flash": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
+  "deepseek-v4-pro": { inputCacheHit: 0.022, inputCacheMiss: 0.66, output: 1.98 },
+};
 
-function pricingFor(model: string, path?: string): ModelPricing | undefined {
-  const defaults = DEEPSEEK_PRICING[model];
+export interface PricingContext {
+  /** Resolved provider identity. Never inferred from the model's name shape. */
+  provider: ModelProvider;
+  /** Time the priced request completed. */
+  at: Date | number;
+}
+
+const DEEPSEEK_PRICED_MODELS = new Set([
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-v4-flash-vision-exp",
+  "deepseek-chat",
+  "deepseek-reasoner",
+]);
+const OPENAI_PRICED_MODELS = new Set(["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+
+function ollamaPricingModel(model: string): string {
+  return model.replace(/^ollama\//, "").replace(/:cloud$/, "");
+}
+
+function defaultPricingFor(model: string, context?: PricingContext): ModelPricing | undefined {
+  if (!context) return DEEPSEEK_PRICING[model];
+  switch (context.provider) {
+    case "deepseek":
+      return DEEPSEEK_PRICED_MODELS.has(model) ? DEEPSEEK_PRICING[model] : undefined;
+    case "openai":
+      return OPENAI_PRICED_MODELS.has(model) ? DEEPSEEK_PRICING[model] : undefined;
+    case "ollama":
+      return isOllamaPeakPricedModel(model) ? OLLAMA_PRICING[ollamaPricingModel(model)] : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function pricingFor(
+  model: string,
+  path?: string,
+  context?: PricingContext,
+): ModelPricing | undefined {
+  const defaults = defaultPricingFor(model, context);
   const override = loadPricingOverride(path)[model];
   if (!override) return defaults;
   const pricing = { ...defaults, ...override };
@@ -39,6 +96,18 @@ function pricingFor(model: string, path?: string): ModelPricing | undefined {
     return undefined;
   }
   return pricing as ModelPricing;
+}
+
+function priceMultiplier(context?: PricingContext): number {
+  if (!context) return 1;
+  const at = context.at instanceof Date ? context.at : new Date(context.at);
+  if (context.provider === "deepseek") {
+    return isPeakRate(at, DEEPSEEK_RATE_SCHEDULE) ? 2 : 1;
+  }
+  if (context.provider === "ollama") {
+    return isPeakRate(at, OLLAMA_RATE_SCHEDULE) ? 2 : 1;
+  }
+  return 1;
 }
 
 /** Reference Claude Sonnet 4.6 pricing (USD per 1M tokens). */
@@ -105,40 +174,62 @@ export function resolveContextTokens(model: string, configured?: number): number
  *  Each TurnStats holds usage + cost + model — at N=200 this caps memory at ~50KB. */
 const MAX_TURNS = 200;
 
-export function costUsd(model: string, usage: Usage, path?: string): number {
-  const p = pricingFor(model, path);
+export function costUsd(
+  model: string,
+  usage: Usage,
+  path?: string,
+  context?: PricingContext,
+): number {
+  const p = pricingFor(model, path, context);
   if (!p) return 0;
   return (
-    (usage.promptCacheHitTokens * p.inputCacheHit +
+    ((usage.promptCacheHitTokens * p.inputCacheHit +
       usage.promptCacheMissTokens * p.inputCacheMiss +
       usage.completionTokens * p.output) /
-    1_000_000
+      1_000_000) *
+    priceMultiplier(context)
   );
 }
 
 /** Input-side cost only (prompt, cache hit + miss). Used for the panel breakdown. */
-export function inputCostUsd(model: string, usage: Usage, path?: string): number {
-  const p = pricingFor(model, path);
+export function inputCostUsd(
+  model: string,
+  usage: Usage,
+  path?: string,
+  context?: PricingContext,
+): number {
+  const p = pricingFor(model, path, context);
   if (!p) return 0;
   return (
-    (usage.promptCacheHitTokens * p.inputCacheHit +
+    ((usage.promptCacheHitTokens * p.inputCacheHit +
       usage.promptCacheMissTokens * p.inputCacheMiss) /
-    1_000_000
+      1_000_000) *
+    priceMultiplier(context)
   );
 }
 
 /** Output-side cost only (completion tokens). Used for the panel breakdown. */
-export function outputCostUsd(model: string, usage: Usage, path?: string): number {
-  const p = pricingFor(model, path);
+export function outputCostUsd(
+  model: string,
+  usage: Usage,
+  path?: string,
+  context?: PricingContext,
+): number {
+  const p = pricingFor(model, path, context);
   if (!p) return 0;
-  return (usage.completionTokens * p.output) / 1_000_000;
+  return (usage.completionTokens * p.output * priceMultiplier(context)) / 1_000_000;
 }
 
-export function cacheSavingsUsd(model: string, hitTokens: number, path?: string): number {
+export function cacheSavingsUsd(
+  model: string,
+  hitTokens: number,
+  path?: string,
+  context?: PricingContext,
+): number {
   if (hitTokens <= 0) return 0;
-  const p = pricingFor(model, path);
+  const p = pricingFor(model, path, context);
   if (!p) return 0;
-  return (hitTokens * (p.inputCacheMiss - p.inputCacheHit)) / 1_000_000;
+  return (hitTokens * (p.inputCacheMiss - p.inputCacheHit) * priceMultiplier(context)) / 1_000_000;
 }
 
 export function claudeEquivalentCost(usage: Usage): number {
@@ -152,6 +243,10 @@ export function claudeEquivalentCost(usage: Usage): number {
 export interface TurnStats {
   turn: number;
   model: string;
+  /** Resolved provider identity used for billing. */
+  provider: ModelProvider;
+  /** Request completion time used to select the provider's rate period. */
+  pricedAt?: number;
   usage: Usage;
   cost: number;
   /** Native billing unit this turn ran under. Quota-billed turns carry
@@ -178,36 +273,68 @@ export interface CacheDiagnostics {
   promptCacheHitTokens: number;
 }
 
-/** How a provider bills its usage — "usd" = token-priced currency (real dollars),
- *  "quota" = plan-window % (ChatGPT plan, cloud Ollama, Antigravity),
- *  "none" = no cost metric (local Ollama). */
+/** How a provider bills its usage: currency, plan-window quota, or no metric. */
 export type BillingKind = "usd" | "quota" | "none";
+
+export interface BillingContext {
+  kind: BillingKind;
+  /** Resolved provider identity. Never derive this from the model name. */
+  provider: ModelProvider;
+  /** Optional request completion time. Omitted by legacy callers that expect base rates. */
+  at?: number;
+}
 
 /** Per-provider cumulative session usage in the provider's NATIVE unit. Never
  *  converted between providers: a quota-billed provider never contributes a
  *  dollar figure, and a token-priced provider never contributes a percentage. */
 export interface SessionProviderCost {
-  kind: BillingKind;
-  /** Cumulative USD — only present when kind === "usd". */
+  /** A provider can contribute both native units when models/plans change mid-session. */
+  kind: BillingKind | "mixed";
+  /** Cumulative token-priced USD, when measured. */
   totalCostUsd?: number;
-  /** Cumulative plan-window percentage points consumed — only when kind === "quota". */
+  /** Cumulative plan-window percentage points, when measured. */
   quotaUsedPct?: number;
 }
 
-/** Which unit a model's provider bills in. The default for callers that don't
- *  resolve billing themselves (the desktop passes a richer resolver that treats
- *  keyless local Ollama as "none"). */
-export function billingKindForModel(model: string): BillingKind {
-  switch (providerForModel(model)) {
+/** Resolve a model's native billing unit and provider from endpoint/config evidence. */
+export function billingContextForModel(model: string, path?: string): BillingContext {
+  const provider = providerForModel(model, path);
+  switch (provider) {
     case "openai":
-    case "ollama":
+      return {
+        kind: readConfig(path).openaiOAuth?.accessToken ? "quota" : "usd",
+        provider,
+      };
     case "gemini":
-      return "quota";
+      return { kind: "quota", provider };
+    case "ollama": {
+      const endpoint = loadEndpointForModel(model, path);
+      const tokenPriced = isOllamaCloudEndpoint(endpoint.baseUrl) && isOllamaPeakPricedModel(model);
+      return {
+        kind: tokenPriced ? "usd" : endpoint.apiKey ? "quota" : "none",
+        provider,
+      };
+    }
     case "opencode":
-      return "none";
+      return { kind: "none", provider };
     default:
-      return "usd";
+      return { kind: "usd", provider };
   }
+}
+
+/** Compatibility helper for consumers that only need the native unit. */
+export function billingKindForModel(model: string): BillingKind {
+  return billingContextForModel(model).kind;
+}
+
+function normalizeBilling(model: string, billing: BillingKind | BillingContext): BillingContext {
+  return typeof billing === "string"
+    ? { kind: billing, provider: providerForModel(model) }
+    : billing;
+}
+
+function pricingContextForBilling(billing: BillingContext): PricingContext | undefined {
+  return billing.at === undefined ? undefined : { provider: billing.provider, at: billing.at };
 }
 
 export interface SessionSummary {
@@ -293,18 +420,15 @@ export class SessionStats {
           ...(typeof cost.totalCostUsd === "number" ? { totalCostUsd: cost.totalCostUsd } : {}),
           ...(typeof cost.quotaUsedPct === "number" ? { quotaUsedPct: cost.quotaUsedPct } : {}),
         });
-        if (cost.kind === "usd" && typeof cost.totalCostUsd === "number") {
-          usdCarryover += cost.totalCostUsd;
-        }
+        if (typeof cost.totalCostUsd === "number") usdCarryover += cost.totalCostUsd;
       }
     }
-    if (typeof opts.totalCostUsd === "number" && opts.totalCostUsd > 0) {
-      // Per-provider records win when present (they disambiguate the provider);
-      // the legacy flat figure covers pre-decoupling sessions.
-      this._carryoverCost = usdCarryover > 0 ? usdCarryover : opts.totalCostUsd;
-    } else {
-      this._carryoverCost = usdCarryover;
-    }
+    // Preserve unattributed legacy USD. Provider buckets can be partial when an
+    // older session is resumed, so the larger aggregate is the safe carryover.
+    this._carryoverCost = Math.max(
+      usdCarryover,
+      typeof opts.totalCostUsd === "number" ? opts.totalCostUsd : 0,
+    );
     if (typeof opts.turnCount === "number" && opts.turnCount > 0) {
       this._carryoverTurns = opts.turnCount;
     }
@@ -364,22 +488,25 @@ export class SessionStats {
     model: string,
     usage: Usage,
     cacheDiagnostics?: CacheDiagnostics,
-    /** Native billing unit for this call. Quota-billed turns record 0 USD — the
-     *  real unit is plan-window %, which the desktop accumulates separately. */
-    billingKind: BillingKind = billingKindForModel(model),
+    /** Explicit provider and native billing unit. A bare kind is retained for API compatibility. */
+    billing: BillingKind | BillingContext = billingContextForModel(model),
   ): TurnStats {
-    const cost = billingKind === "usd" ? costUsd(model, usage) : 0;
+    const resolved = normalizeBilling(model, billing);
+    const pricing = pricingContextForBilling(resolved);
+    const cost = resolved.kind === "usd" ? costUsd(model, usage, undefined, pricing) : 0;
     const stats: TurnStats = {
       turn,
       model,
+      provider: resolved.provider,
+      ...(resolved.at !== undefined ? { pricedAt: resolved.at } : {}),
       usage,
       cost,
-      billingKind,
+      billingKind: resolved.kind,
       cacheHitRatio: usage.cacheHitRatio,
       cacheDiagnostics,
     };
     this.turns.push(stats);
-    this.accrueProviderCost(model, billingKind, { costUsd: cost });
+    this.accrueProviderCost(resolved.provider, resolved.kind, { costUsd: cost });
     this.trimOldTurns();
     return stats;
   }
@@ -401,15 +528,16 @@ export class SessionStats {
   recordExternal(
     model: string,
     usage: Usage,
-    billing: { kind: BillingKind; quotaUsedPct?: number } = { kind: billingKindForModel(model) },
+    billing: BillingContext & { quotaUsedPct?: number } = billingContextForModel(model),
   ): void {
+    const pricing = pricingContextForBilling(billing);
     if (billing.kind === "usd") {
-      const cost = costUsd(model, usage);
+      const cost = costUsd(model, usage, undefined, pricing);
       this._carryoverCost += cost;
-      this.accrueProviderCost(model, "usd", { costUsd: cost });
+      this.accrueProviderCost(billing.provider, "usd", { costUsd: cost });
     } else if (billing.kind === "quota" && typeof billing.quotaUsedPct === "number") {
       // Native unit: plan-window % consumed, never converted to dollars.
-      this.accrueProviderCost(model, "quota", { quotaUsedPct: billing.quotaUsedPct });
+      this.accrueProviderCost(billing.provider, "quota", { quotaUsedPct: billing.quotaUsedPct });
     }
     this._carryoverCacheHit += usage.promptCacheHitTokens;
     this._carryoverCacheMiss += usage.promptCacheMissTokens;
@@ -422,11 +550,13 @@ export class SessionStats {
   recordCompaction(
     model: string,
     usage: Usage,
-    billingKind: BillingKind = billingKindForModel(model),
+    billing: BillingKind | BillingContext = billingContextForModel(model),
   ): void {
-    const cost = billingKind === "usd" ? costUsd(model, usage) : 0;
+    const resolved = normalizeBilling(model, billing);
+    const pricing = pricingContextForBilling(resolved);
+    const cost = resolved.kind === "usd" ? costUsd(model, usage, undefined, pricing) : 0;
     this._compactionCost += cost;
-    this.accrueProviderCost(model, billingKind, { costUsd: cost });
+    this.accrueProviderCost(resolved.provider, resolved.kind, { costUsd: cost });
     this._compactionPromptTokens += usage.promptTokens;
     this._compactionCompletionTokens += usage.completionTokens;
     this._compactionCount += 1;
@@ -436,7 +566,7 @@ export class SessionStats {
    *  a dollar figure; USD providers never get a percentage. Zero-value records
    *  are skipped so an empty quota turn can't clobber a desktop-accumulated delta. */
   private accrueProviderCost(
-    model: string,
+    provider: ModelProvider,
     kind: BillingKind,
     opts: { costUsd?: number; quotaUsedPct?: number },
   ): void {
@@ -444,7 +574,6 @@ export class SessionStats {
     const hasQuota =
       kind === "quota" && typeof opts.quotaUsedPct === "number" && opts.quotaUsedPct > 0;
     if (!hasUsd && !hasQuota) return;
-    const provider = providerForModel(model);
     const cur = this._providerCosts.get(provider);
     if (!cur) {
       this._providerCosts.set(provider, {
@@ -454,14 +583,17 @@ export class SessionStats {
       });
       return;
     }
+    const nextKind = cur.kind === kind || cur.kind === "mixed" ? cur.kind : "mixed";
     if (hasUsd) {
       this._providerCosts.set(provider, {
         ...cur,
+        kind: nextKind,
         totalCostUsd: (cur.totalCostUsd ?? 0) + (opts.costUsd ?? 0),
       });
     } else if (hasQuota) {
       this._providerCosts.set(provider, {
         ...cur,
+        kind: nextKind,
         quotaUsedPct: (cur.quotaUsedPct ?? 0) + (opts.quotaUsedPct ?? 0),
       });
     }
@@ -513,17 +645,21 @@ export class SessionStats {
   }
 
   get totalInputCost(): number {
-    return this.turns.reduce(
-      (sum, t) => sum + (t.billingKind === "usd" ? inputCostUsd(t.model, t.usage) : 0),
-      0,
-    );
+    return this.turns.reduce((sum, turn) => {
+      if (turn.billingKind !== "usd") return sum;
+      const pricing =
+        turn.pricedAt === undefined ? undefined : { provider: turn.provider, at: turn.pricedAt };
+      return sum + inputCostUsd(turn.model, turn.usage, undefined, pricing);
+    }, 0);
   }
 
   get totalOutputCost(): number {
-    return this.turns.reduce(
-      (sum, t) => sum + (t.billingKind === "usd" ? outputCostUsd(t.model, t.usage) : 0),
-      0,
-    );
+    return this.turns.reduce((sum, turn) => {
+      if (turn.billingKind !== "usd") return sum;
+      const pricing =
+        turn.pricedAt === undefined ? undefined : { provider: turn.provider, at: turn.pricedAt };
+      return sum + outputCostUsd(turn.model, turn.usage, undefined, pricing);
+    }, 0);
   }
 
   get aggregateCacheHitRatio(): number {

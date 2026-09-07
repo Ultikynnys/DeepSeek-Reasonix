@@ -1,4 +1,9 @@
-import { modelDisplayName } from "@reasonix/core-utils";
+import {
+  DEEPSEEK_RATE_SCHEDULE,
+  OLLAMA_RATE_SCHEDULE,
+  isOllamaPeakPricedModel,
+  modelDisplayName,
+} from "@reasonix/core-utils";
 import { useEffect, useRef, useState } from "react";
 import type { Balance, Settings, UsageStats } from "../App";
 import { t } from "../i18n";
@@ -129,12 +134,22 @@ export function StatusBar({
   // falls back to the resolver's DeepSeek default family.
   const ep = settings?.modelEndpoint;
   const provider = ep?.provider ?? "deepseek";
+  const openaiTab = provider === "openai";
+  const openaiTokenBilling = openaiTab && ep?.billingKind === "usd";
+  const openaiQuotaBilling = openaiTab && !openaiTokenBilling;
+  const ollamaTokenBilling = provider === "ollama" && ep?.billingKind === "usd";
+  const ollamaQuotaBilling = provider === "ollama" && !ollamaTokenBilling;
   const sessionQuotaProvider =
-    provider === "openai" || provider === "ollama" || provider === "gemini" ? provider : null;
+    openaiQuotaBilling
+      ? "openai"
+      : provider === "gemini"
+        ? provider
+      : ollamaQuotaBilling
+        ? "ollama"
+        : null;
   const sessionQuotaCost =
     sessionQuotaProvider !== null ? usage.costByProvider?.[sessionQuotaProvider] : undefined;
-  const sessionQuotaPct =
-    sessionQuotaCost && sessionQuotaCost.kind === "quota" ? sessionQuotaCost.quotaUsedPct ?? 0 : null;
+  const sessionQuotaPct = sessionQuotaCost?.quotaUsedPct ?? null;
   const balanceLabel = balance
     ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
     : "—";
@@ -180,8 +195,7 @@ export function StatusBar({
   // swap follows the resolved provider, and even without quota data the
   // chips render an em dash + retry hint — the DeepSeek balance and $
   // amounts are meaningless on an OpenAI tab.
-  const openaiTab = provider === "openai";
-  const quota = codexQuota && openaiTab ? codexQuota : null;
+  const quota = codexQuota && openaiQuotaBilling ? codexQuota : null;
   const showQuota = !!quota;
   const quotaWeekly = quota?.weekly ?? null;
   const quotaFiveHour = quota?.fiveHour ?? null;
@@ -189,8 +203,7 @@ export function StatusBar({
   // and an ISO resetsAt — the chip shows "% left" + plan, no credit amounts.
   const quotaLeftPct = quotaWeekly ? Math.round(quotaWeekly.remainingPercent) : 0;
   const quotaTurnPct = quota?.turnUsedPct ?? null;
-  const ollamaTab = provider === "ollama";
-  const ollamaQuotaData = ollamaQuota && ollamaTab ? ollamaQuota : null;
+  const ollamaQuotaData = ollamaQuota && ollamaQuotaBilling ? ollamaQuota : null;
   const ollamaWeekly = ollamaQuotaData?.weekly ?? null;
   const ollamaSession = ollamaQuotaData?.session ?? null;
   const ollamaTurnPct = ollamaQuotaData?.turnUsedPct ?? null;
@@ -203,10 +216,19 @@ export function StatusBar({
       : t("statusbar.ollamaNoData");
   // Antigravity (Gemini Code Assist): plan + the active model's used fraction.
   const geminiTab = provider === "gemini";
-  // Peak / off-peak pricing only applies to the DeepSeek API — the chip is
-  // hidden on every other provider's tab. The provider is the daemon's
-  // resolved value; absent endpoint info keeps the resolver's default.
   const deepseekTab = ep ? ep.provider === "deepseek" : provider === "deepseek";
+  // Rate-period visibility follows daemon-resolved provider/deployment metadata.
+  // Model matching only selects a price row after Ollama has already been resolved.
+  const ollamaPeakPricing =
+    ep?.provider === "ollama" &&
+    ep.deployment === "cloud" &&
+    ep.billingKind === "usd" &&
+    isOllamaPeakPricedModel(settings?.model ?? "");
+  const rateSchedule = ollamaPeakPricing
+    ? OLLAMA_RATE_SCHEDULE
+    : deepseekTab
+      ? DEEPSEEK_RATE_SCHEDULE
+      : null;
   const antigravityQuotaData = antigravityQuota && geminiTab ? antigravityQuota : null;
   const agActive =
     antigravityQuotaData?.windows.find((w) => w.modelId === settings?.model) ??
@@ -253,7 +275,7 @@ export function StatusBar({
   useEffect(() => {
     const renderState = {
       openaiTab,
-      ollamaTab,
+      ollamaQuotaBilling,
       showQuota,
       hasWeeklyWindow: quotaWeekly !== null,
       hasFiveHourWindow: quotaFiveHour !== null,
@@ -264,14 +286,14 @@ export function StatusBar({
       reason: codexQuotaReason,
     };
     const level =
-      (quotaTurnPct === null && openaiTab) || (ollamaTurnPct === null && ollamaTab)
+      (quotaTurnPct === null && openaiTab) || (ollamaTurnPct === null && ollamaQuotaBilling)
         ? "warn"
         : "debug";
     if (level === "warn") console.warn("[reasonix frontend] statusbar quota render", renderState);
     else console.debug("[reasonix frontend] statusbar quota render", renderState);
   }, [
     openaiTab,
-    ollamaTab,
+    ollamaQuotaBilling,
     showQuota,
     quotaWeekly,
     quotaFiveHour,
@@ -280,17 +302,14 @@ export function StatusBar({
     codexQuotaRefreshing,
     codexQuotaReason,
   ]);
-  // Rate period (peak / off-peak) — this turn's pricing depends on the UTC
-  // hour and whether the Beijing day is a weekend (off-peak all day), so the
-  // chip re-evaluates on a short tick instead of only on parent re-renders
-  // (the parent has no per-minute state of its own).
+  // Rate-period timing uses the same shared schedule engine as telemetry billing.
   const [rateNow, setRateNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setRateNow(new Date()), 30_000);
     return () => clearInterval(id);
   }, []);
-  const offPeak = isOffPeak(rateNow);
-  const rateMins = minutesUntilRateChange(rateNow);
+  const offPeak = rateSchedule ? isOffPeak(rateNow, rateSchedule) : true;
+  const rateMins = rateSchedule ? minutesUntilRateChange(rateNow, rateSchedule) : 0;
   // Weekends push the next change past a full day — render "2d 9h" instead of
   // a raw "3420 min".
   const when =
@@ -299,9 +318,13 @@ export function StatusBar({
       : rateMins >= 60
         ? `${Math.floor(rateMins / 60)}h ${rateMins % 60}m`
         : `${rateMins}m`;
-  const rateTitle = offPeak
-    ? t("statusbar.offPeakTitle", { when })
-    : t("statusbar.peakTitle", { when });
+  const rateTitle = ollamaPeakPricing
+    ? offPeak
+      ? t("statusbar.ollamaOffPeakTitle", { when })
+      : t("statusbar.ollamaPeakTitle", { when })
+    : offPeak
+      ? t("statusbar.offPeakTitle", { when })
+      : t("statusbar.peakTitle", { when });
   const [themeOpen, setThemeOpen] = useState(false);
   const themePopRef = useRef<HTMLDivElement | null>(null);
   const themeButtonRef = useRef<HTMLSpanElement | null>(null);
@@ -365,13 +388,13 @@ export function StatusBar({
         >
           <I.coin size={11} />
           <span>{t("statusbar.thisTurn")}</span>
-          {openaiTab ? (
+          {openaiQuotaBilling ? (
             quotaTurnPct != null ? (
               <span className="v ok">{quotaTurnPct.toFixed(1)}%</span>
             ) : (
               <span className="v ok">—</span>
             )
-          ) : ollamaTab ? (
+          ) : ollamaQuotaBilling ? (
             ollamaTurnPct != null ? (
               <span className="v ok">{ollamaTurnPct.toFixed(1)}%</span>
             ) : (
@@ -392,7 +415,7 @@ export function StatusBar({
         </span>
       ) : null}
 
-      {showSessionCost && !openaiTab && !ollamaTab && !geminiTab ? (
+      {showSessionCost && !openaiQuotaBilling && !ollamaQuotaBilling && !geminiTab ? (
         <span className="seg" title={t("settings.sessionCost")}>
           <I.coin size={11} />
           <span>{t("settings.sessionCost")}</span>
@@ -410,7 +433,7 @@ export function StatusBar({
           <span className="v ok">{sessionQuotaPct.toFixed(2)}%</span>
         </span>
       ) : null}
-      {deepseekTab ? (
+      {rateSchedule ? (
         <span className="seg" title={rateTitle}>
           <I.clock size={11} style={{ color: offPeak ? "var(--success)" : "var(--warning)" }} />
           <span className={`v ${offPeak ? "ok" : "warn"}`}>
@@ -464,7 +487,7 @@ export function StatusBar({
         <span className="v">{settings?.reasoningEffort ?? "high"}</span>
       </span>
       {showBalance ? (
-        openaiTab ? (
+        openaiQuotaBilling ? (
           <span
             className="seg"
             title={quotaTitleWithReason}
@@ -516,7 +539,7 @@ export function StatusBar({
               <span className="v acc">—</span>
             )}
           </span>
-        ) : ollamaTab ? (
+        ) : ollamaQuotaBilling ? (
           <span
             className="seg"
             title={ollamaQuotaTitleWithReason}

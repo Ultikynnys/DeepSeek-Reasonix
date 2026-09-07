@@ -4,6 +4,7 @@ import { resolveCodexTransport } from "../codex-backend.js";
 import {
   DEFAULT_MODEL,
   type EditMode,
+  type ModelProvider,
   isOpenAIStandardEndpoint,
   loadEditMode,
   loadEndpointForModel,
@@ -45,6 +46,8 @@ import { registerWebTools } from "../tools/web.js";
  *  (no monetary cost is exposed); "none" = no cost metric should be shown. */
 export interface SubagentBilling {
   kind: "usd" | "quota" | "none";
+  /** Provider resolved from config/catalog/endpoint evidence. */
+  provider: ModelProvider;
   /** Returns the provider plan-window used % (0..100) for the model. Snapshotted
    *  before and after the run to compute the consumed quota delta. Only consulted
    *  when kind === "quota". */
@@ -179,7 +182,10 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
         system: skill.body,
         task,
         model,
-        billingKind: billing?.kind ?? "usd",
+        billingContext: billing ?? {
+          kind: "usd",
+          provider: providerForModel(model, opts.configPath),
+        },
         measureQuota: billing?.kind === "quota" ? billing.measureQuota : undefined,
         allowedTools: skill.allowedTools,
         skillName: skill.name,
