@@ -5,6 +5,11 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed — queued messages no longer run concurrently with a still-running compaction fold.**
+
+- A turn aborted mid-compaction (Stop, Esc, Send now, or a synthetic abort) left its fold running detached: the summary is non-interruptible and the host closes the generator fire-and-forget, so the fold kept owning the loop's `_compacting` lock until it committed or failed open at its scaled deadline. `runTurn` emitted `$turn_complete` immediately, the queued-sends drain fired, and the next `user_input` started a fresh turn while the fold was still rewriting the log — compaction and the new message ran at the same time and corrupted the transcript.
+- `runTurn` now waits for the in-flight fold to settle before starting the new turn — abort-aware and bounded by the fold's own deadline — using the same `_compacting` lock the `/compact` handler already refuses to overlap. Stop / session switch during the wait cancels the pending turn cleanly instead of hanging on the lock. Regression tests drive the wait against a real hung fold and assert the turn does not start until the lock clears.
+
 **Added — automatic retry for OpenCode failures; premature-stop and truncation recovery in the turn loop.**
 
 - **OpenCode autoretry, DRY with the existing machinery.** Mid-stream chat-completions error frames (`{"error": ...}` — e.g. OpenCode Zen relaying "Upstream request failed: [server_error] The model failed to generate a response.") are no longer silently dropped: the client now surfaces them as a provider-branded `streamError` with the same replay metadata as the Responses-path `response.failed` handler, so the loop's guarded provider-error replay (10 s backoff for `server_error`) actually fires. `isRetryableProviderFailure` (new, in `core/retry-shared.ts`) is the one matcher for retryable provider errors: any-brand status lines plus upstream-relayed failure phrases — and the compaction retry loop now uses it too, so "OpenCode 500: ..." replays exactly like "DeepSeek 500: ...".

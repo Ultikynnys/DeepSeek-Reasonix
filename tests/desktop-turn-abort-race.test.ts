@@ -12,7 +12,7 @@
 // generator close).
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { raceLoopStep } from "../src/cli/commands/desktop.js";
+import { raceLoopStep, waitForCompactionIdle } from "../src/cli/commands/desktop.js";
 import { DeepSeekClient } from "../src/client.js";
 import { HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS } from "../src/context-manager.js";
 import { CacheFirstLoop } from "../src/loop.js";
@@ -134,5 +134,94 @@ describe("desktop runTurn abort race (Send now during a non-interruptible fold)"
     // A clean run, not the abort path — turn two's fresh controller won.
     expect(finals[0]!.forcedSummary).toBeUndefined();
     expect(turn2.some((e) => e.role === "compaction_end")).toBe(true);
+  });
+
+  it("does not start the next turn while the detached fold holds the compaction lock", async () => {
+    vi.useFakeTimers();
+    // Tiny ctxMax so the seeded log crosses the 75% turn-start fold threshold
+    // on the very first step().
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 1_000;
+
+    const hangFold = neverResolvingFetch();
+    const fetchMock = vi.fn((url: unknown, init: { body?: string } | undefined) => {
+      const body = JSON.parse(init?.body ?? "{}") as { model?: string };
+      if (body.model === FOLD_SUMMARY_MODEL) {
+        return hangFold(url, init);
+      }
+      return Promise.resolve(jsonOkResponse({ choices: [{ message: { content: "ok" } }] }));
+    });
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: FOLD_TEST_MODEL,
+    });
+    seedTurns(loop, 6);
+
+    const aborter = new AbortController();
+    const gen = loop.step("turn one");
+    let sawCompactionStart = false;
+    let aborted = false;
+    const consume = async (): Promise<void> => {
+      while (true) {
+        const next = await raceLoopStep(gen, aborter.signal);
+        if (next === null) {
+          aborted = true;
+          return;
+        }
+        if (next.done) return;
+        if (next.value.role === "compaction_start") sawCompactionStart = true;
+      }
+    };
+    const turn1 = consume();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sawCompactionStart).toBe(true);
+
+    // Stop / Send now: abort the consumer, then close the suspended generator
+    // fire-and-forget exactly like runTurn's finally does.
+    aborter.abort();
+    loop.abort();
+    await turn1;
+    expect(aborted).toBe(true);
+    // The fold is still hung — the loop's compaction lock is held.
+    expect(loop.isCompacting).toBe(true);
+    const closeP = gen.return(undefined).catch(() => undefined);
+
+    // The queued message's turn arrives at runTurn while the detached fold
+    // still owns the lock. The gate must NOT resolve: the fold and the new
+    // message must never run concurrently on the same log.
+    let gateResolved = false;
+    const gateP = waitForCompactionIdle(loop, undefined).then(() => {
+      gateResolved = true;
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(gateResolved).toBe(false);
+    expect(loop.isCompacting).toBe(true);
+
+    // The fold's scaled deadline fires → summary fails open → the generator
+    // unwinds and releases the lock → the gate opens.
+    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS);
+    await gateP;
+    await closeP;
+    expect(loop.isCompacting).toBe(false);
+  });
+
+  it("aborts the fold wait when Stop lands while the lock is held", async () => {
+    // runTurn creates the aborter before the gate, so Stop during the wait
+    // (loop still compacting) must cancel the pending turn instead of hanging
+    // on the lock until the fold's deadline.
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const result = await Promise.race([
+      waitForCompactionIdle({ isCompacting: true }, ctrl.signal).then(() => "resolved" as const),
+      new Promise<"hung">((resolve) => {
+        setTimeout(() => resolve("hung"), 200);
+      }),
+    ]);
+    expect(result).toBe("resolved");
   });
 });

@@ -15,6 +15,7 @@ import {
   redactDiagnosticText,
   redactDiagnosticValue,
   scanImageMentions,
+  sleep,
   stripMentionTokens,
   toApprovalPrompt,
 } from "@reasonix/core-utils";
@@ -276,6 +277,24 @@ export function raceLoopStep(
       },
     );
   });
+}
+
+// Wait until any in-flight compaction fold has settled. A turn cancelled
+// mid-fold leaves the fold running detached: it is non-interruptible and the
+// host closes the generator fire-and-forget, so it keeps owning the loop's
+// _compacting lock until it commits or fails open at its scaled deadline.
+// Starting a new turn while the lock is held would run the fold and the new
+// message concurrently on the same log. The /compact handler refuses that
+// overlap outright, user turns must wait instead. Bounded by the fold's own
+// deadline; abort-aware so Stop / switch during the wait cancels the pending
+// turn before any request goes out. Exported for tests.
+export async function waitForCompactionIdle(
+  loop: { isCompacting: boolean },
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  while (loop.isCompacting && !signal?.aborted) {
+    await sleep(50);
+  }
 }
 
 type InMessage = import("@reasonix/core-utils").OutgoingCommand;
@@ -3117,6 +3136,25 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // config. Never overwrites an existing stored pair (see stampSessionModelPrefs).
     stampSessionModelPrefs(tab);
     tab.aborter = new AbortController();
+    // A turn cancelled while its compaction fold was mid-summary leaves the
+    // fold running detached: the fold is non-interruptible (summarizeForFold)
+    // and the host closes the generator fire-and-forget, so it keeps owning
+    // the loop's _compacting lock until it settles (commit or fail-open at
+    // its scaled deadline). Starting this turn now would run the fold and the
+    // new message concurrently on the same log — wait for the lock to clear
+    // first, the same guard /compact uses. Stop / switch during the wait
+    // cancels before any request goes out.
+    await waitForCompactionIdle(rt.loop, tab.aborter.signal);
+    if (tab.aborter.signal.aborted) {
+      // The turn never started: nothing to settle beyond the busy flag, same
+      // completion signal as the hook-blocked path above. A session switch
+      // may have set switching while aborting us — this turn has no stale
+      // events to suppress, so clear it like a finished turn would.
+      tab.switching = false;
+      tab.aborter = null;
+      emit({ type: "$turn_complete" }, tab.id);
+      return;
+    }
     emitTabDiagnostic(
       tab,
       "turn.started",
