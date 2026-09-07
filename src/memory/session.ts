@@ -118,12 +118,7 @@ export function freshSessionName(currentName: string | undefined): string {
   return `${base || "default"}-${timestampSuffix(14)}`;
 }
 
-/**
- * First free session name for `base`: a seconds-precision timestamp can repeat
- * when `new_chat` fires twice within one second, so a base whose session file
- * already holds messages takes a `-1`, `-2`, … suffix instead of truncating it.
- * `occupied` reports whether a candidate name already holds a live session.
- */
+/** First free session name for `base`: a repeated seconds-precision timestamp takes a `-1`, `-2`, … suffix instead of truncating an occupied session file. */
 export function firstFreeSessionName(base: string, occupied: (name: string) => boolean): string {
   for (let attempt = 1; attempt <= 10; attempt++) {
     const candidate = attempt === 1 ? base : `${base}-${attempt - 1}`;
