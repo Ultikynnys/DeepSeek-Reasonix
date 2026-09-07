@@ -1,5 +1,6 @@
-/** R1 sometimes emits tool-call JSON inside reasoning_content and forgets `tool_calls`; recover those calls. */
+/** Recover intended tool calls that models emitted as text instead of structured `tool_calls`. */
 
+import { type EditBlock, parseEditBlocks } from "../code/edit-blocks.js";
 import type { ToolCall } from "../types.js";
 
 export interface ScavengeOptions {
@@ -12,6 +13,13 @@ export interface ScavengeOptions {
 export interface ScavengeResult {
   calls: ToolCall[];
   notes: string[];
+  /** Text ranges occupied by calls recovered from Markdown. */
+  recoveredRanges: ScavengeRange[];
+}
+
+export interface ScavengeRange {
+  start: number;
+  end: number;
 }
 
 /** Bounds the regex input — DSML matchers are O(n²) on adversarial input per CodeQL js/polynomial-redos. */
@@ -54,16 +62,18 @@ export function scavengeToolCalls(
   reasoningContent: string | null | undefined,
   opts: ScavengeOptions,
 ): ScavengeResult {
-  if (!reasoningContent) return { calls: [], notes: [] };
+  if (!reasoningContent) return { calls: [], notes: [], recoveredRanges: [] };
   if (reasoningContent.length > MAX_SCAVENGE_INPUT) {
     return {
       calls: [],
       notes: [`scavenge skipped: reasoning_content too large (${reasoningContent.length} chars)`],
+      recoveredRanges: [],
     };
   }
   const max = opts.maxCalls ?? 4;
   const notes: string[] = [];
   const out: ToolCall[] = [];
+  const recoveredRanges: ScavengeRange[] = [];
 
   // Pattern A: DSML invoke blocks. R1 sometimes emits tool calls as
   // its chat-template markup in the content channel instead of the
@@ -85,11 +95,26 @@ export function scavengeToolCalls(
     notes.push(`scavenged DSML call: ${resolvedName}`);
   }
 
-  // Pattern B: raw JSON objects (the original three shapes). Strip
-  // any DSML blocks we already processed so parameter JSON buried
-  // inside them doesn't get re-scavenged as a standalone call.
-  const nonDsml = stripDsmlBlocks(reasoningContent);
-  for (const candidate of iterateJsonObjects(nonDsml)) {
+  // Pattern B: native Reasonix SEARCH/REPLACE blocks. Some models emit the
+  // edit protocol as Markdown content instead of calling the corresponding
+  // filesystem tool. Only complete, unfenced blocks accepted by the canonical
+  // parser and backed by an offered tool are executable.
+  const editBlocks = parseEditBlocks(reasoningContent);
+  for (const block of editBlocks) {
+    if (out.length >= max) break;
+    if (isInsideMarkdownFence(reasoningContent, block.offset)) continue;
+    const call = editBlockToToolCall(block, opts.allowedNames);
+    if (!call) continue;
+    out.push(call);
+    recoveredRanges.push(editBlockRange(reasoningContent, block));
+    notes.push(`scavenged Markdown call: ${call.function.name}`);
+  }
+
+  // Pattern C: raw JSON objects (the original three shapes). Strip DSML and
+  // edit blocks first so JSON in their parameter/replacement bodies cannot be
+  // mistaken for an additional standalone call.
+  const standaloneText = stripDsmlBlocks(stripEditBlocks(reasoningContent, editBlocks));
+  for (const candidate of iterateJsonObjects(standaloneText)) {
     if (out.length >= max) break;
     const call = coerceToToolCall(candidate, opts.allowedNames);
     if (call) {
@@ -97,12 +122,59 @@ export function scavengeToolCalls(
       notes.push(`scavenged call: ${call.function.name}`);
     }
   }
-  return { calls: out, notes };
+  return { calls: out, notes, recoveredRanges };
 }
 
 interface DsmlInvoke {
   name: string;
   args: Record<string, unknown>;
+}
+
+function editBlockToToolCall(block: EditBlock, allowedNames: ReadonlySet<string>): ToolCall | null {
+  if (block.search.length === 0) {
+    if (!allowedNames.has("write_file")) return null;
+    return {
+      function: {
+        name: "write_file",
+        arguments: JSON.stringify({ path: block.path, content: block.replace }),
+      },
+    };
+  }
+  if (!allowedNames.has("edit_file")) return null;
+  return {
+    function: {
+      name: "edit_file",
+      arguments: JSON.stringify({
+        path: block.path,
+        search: block.search,
+        replace: block.replace,
+      }),
+    },
+  };
+}
+
+function editBlockRange(text: string, block: EditBlock): ScavengeRange {
+  const closingLine = "\n>>>>>>> REPLACE";
+  const closingStart = text.indexOf(closingLine, block.offset);
+  return {
+    start: block.offset,
+    end: closingStart < 0 ? block.offset : closingStart + closingLine.length,
+  };
+}
+
+function isInsideMarkdownFence(text: string, offset: number): boolean {
+  const prefix = text.slice(0, offset);
+  const fences = prefix.match(/^\s*```/gm);
+  return (fences?.length ?? 0) % 2 === 1;
+}
+
+function stripEditBlocks(text: string, blocks: readonly EditBlock[]): string {
+  let out = text;
+  const ranges = blocks.map((block) => editBlockRange(text, block));
+  for (const range of ranges.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, range.start) + out.slice(range.end);
+  }
+  return out;
 }
 
 /** Strips DSML invoke blocks so the raw-JSON scanner doesn't re-scavenge their parameter payloads. */

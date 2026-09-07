@@ -10,7 +10,7 @@ export type { FlattenDecision } from "./flatten.js";
 export { repairTruncatedJson } from "./truncation.js";
 export type { TruncationRepairResult } from "./truncation.js";
 export { repairRepeatingToolName, scavengeToolCalls } from "./scavenge.js";
-export type { ScavengeOptions, ScavengeResult } from "./scavenge.js";
+export type { ScavengeOptions, ScavengeRange, ScavengeResult } from "./scavenge.js";
 export { StormBreaker } from "./storm.js";
 
 export interface RepairReport {
@@ -54,7 +54,7 @@ export class ToolCallRepair {
     declaredCalls: ToolCall[],
     reasoningContent: string | null,
     content: string | null = null,
-  ): { calls: ToolCall[]; report: RepairReport } {
+  ): { calls: ToolCall[]; report: RepairReport; content: string | null } {
     const report: RepairReport = {
       scavenged: 0,
       truncationsFixed: 0,
@@ -97,6 +97,26 @@ export class ToolCallRepair {
     }
     report.notes.push(...scavenged.notes);
 
+    // Remove only Markdown blocks that were actually recovered from the content
+    // channel. Failed, fenced, or disallowed candidates remain visible prose.
+    let cleanedContent = content;
+    if (content && scavenged.recoveredRanges.length > 0) {
+      const contentStart = reasoningContent ? reasoningContent.length + 1 : 0;
+      const contentEnd = contentStart + content.length;
+      const contentRanges = scavenged.recoveredRanges
+        .filter((range) => range.start >= contentStart && range.end <= contentEnd)
+        .map((range) => ({
+          start: range.start - contentStart,
+          end: range.end - contentStart,
+        }))
+        .sort((a, b) => b.start - a.start);
+      let nextContent = content;
+      for (const range of contentRanges) {
+        nextContent = nextContent.slice(0, range.start) + nextContent.slice(range.end);
+      }
+      cleanedContent = nextContent.trim();
+    }
+
     // 2. Truncation repair on argument JSON.
     for (const call of merged) {
       const args = call.function?.arguments ?? "";
@@ -133,7 +153,7 @@ export class ToolCallRepair {
       filtered.push(call);
     }
 
-    return { calls: filtered, report };
+    return { calls: filtered, report, content: cleanedContent };
   }
 }
 

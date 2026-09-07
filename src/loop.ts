@@ -1652,11 +1652,14 @@ export class CacheFirstLoop {
         return;
       }
 
-      const { calls: repairedCalls, report } = this.repair.process(
-        toolCalls,
-        reasoningContent || null,
-        assistantContent || null,
-      );
+      const contentBeforeRepair = assistantContent;
+      const {
+        calls: repairedCalls,
+        report,
+        content: repairedContent,
+      } = this.repair.process(toolCalls, reasoningContent || null, assistantContent || null);
+      assistantContent = repairedContent ?? "";
+      const repairedVisibleContent = assistantContent !== contentBeforeRepair;
 
       // Strip any hallucinated/scavenged tool markup (DSML envelopes, <function_calls>,
       // loose invoke blocks) from assistantContent before persisting into history,
@@ -1738,7 +1741,9 @@ export class CacheFirstLoop {
         turn: this._turn,
         role: "assistant_final",
         content: assistantContent,
-        ...(repetitionStall ? { reasoningContent, replaceStreamedOutput: true } : {}),
+        ...(repetitionStall || repairedVisibleContent
+          ? { reasoningContent, replaceStreamedOutput: true }
+          : {}),
         image,
         stats: turnStats,
         cacheDiagnostic,

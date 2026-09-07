@@ -236,6 +236,95 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.stats.turns.length).toBe(2); // two model round-trips
   });
 
+  it("dispatches an edit tool accidentally emitted as Markdown and hides the raw block", async () => {
+    const markdownCall = [
+      "Applying the change.",
+      "src/a.ts",
+      "<<<<<<< SEARCH",
+      "old",
+      "=======",
+      "new",
+      ">>>>>>> REPLACE",
+    ].join("\n");
+    const client = makeClient([{ content: markdownCall }, { content: "Change complete." }]);
+    const invoked: Array<Record<string, unknown>> = [];
+    const tools = new ToolRegistry();
+    tools.register<Record<string, unknown>, string>({
+      name: "edit_file",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          search: { type: "string" },
+          replace: { type: "string" },
+        },
+        required: ["path", "search", "replace"],
+      },
+      fn: async (args) => {
+        invoked.push(args);
+        return "edit blocks: 1/1 applied";
+      },
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    const finals: string[] = [];
+    for await (const ev of loop.step("make the edit")) {
+      if (ev.role === "assistant_final") finals.push(ev.content);
+    }
+
+    expect(invoked).toEqual([{ path: "src/a.ts", search: "old", replace: "new" }]);
+    expect(finals).toEqual(["Applying the change.", "Change complete."]);
+    expect(JSON.stringify(loop.log.entries)).not.toContain("<<<<<<< SEARCH");
+  });
+
+  it("replaces streamed Markdown tool-call text with repaired content", async () => {
+    const markdownCall = [
+      "Applying the streamed change.",
+      "src/a.ts",
+      "<<<<<<< SEARCH",
+      "old",
+      "=======",
+      "new",
+      ">>>>>>> REPLACE",
+    ].join("\n");
+    const client = makeClient([
+      { content: markdownCall },
+      { content: "Streamed change complete." },
+    ]);
+    const tools = new ToolRegistry();
+    tools.register<Record<string, unknown>, string>({
+      name: "edit_file",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          search: { type: "string" },
+          replace: { type: "string" },
+        },
+        required: ["path", "search", "replace"],
+      },
+      fn: async () => "edit blocks: 1/1 applied",
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: true,
+    });
+
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("make the edit")) events.push(ev);
+
+    const firstFinal = events.find((ev) => ev.role === "assistant_final");
+    expect(firstFinal?.content).toBe("Applying the streamed change.");
+    expect(firstFinal?.replaceStreamedOutput).toBe(true);
+  });
+
   it("yields tool_start before each tool dispatch so the TUI can show 'running…'", async () => {
     const client = makeClient([
       {

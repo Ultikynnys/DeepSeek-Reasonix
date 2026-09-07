@@ -119,4 +119,79 @@ describe("scavengeToolCalls", () => {
     expect(r.calls[0]!.function.name).toBe("read_file");
     expect(JSON.parse(r.calls[0]!.function.arguments)).toEqual({ path: "bar.txt" });
   });
+
+  it("recovers an unfenced SEARCH/REPLACE block as edit_file", () => {
+    const input = [
+      "Applying the exact ordering.",
+      "src/cli/commands/desktop.ts",
+      "<<<<<<< SEARCH",
+      "loadDisableAutoCompaction,",
+      "loadDisabledModels,",
+      "=======",
+      "loadDisabledModels,",
+      "loadDisableAutoCompaction,",
+      ">>>>>>> REPLACE",
+    ].join("\n");
+    const r = scavengeToolCalls(input, { allowedNames: new Set(["edit_file"]) });
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0]!.function.name).toBe("edit_file");
+    expect(JSON.parse(r.calls[0]!.function.arguments)).toEqual({
+      path: "src/cli/commands/desktop.ts",
+      search: "loadDisableAutoCompaction,\nloadDisabledModels,",
+      replace: "loadDisabledModels,\nloadDisableAutoCompaction,",
+    });
+    expect(r.recoveredRanges).toHaveLength(1);
+  });
+
+  it("maps an empty SEARCH block to write_file", () => {
+    const input = [
+      "src/new.ts",
+      "<<<<<<< SEARCH",
+      "=======",
+      "export const value = 1;",
+      ">>>>>>> REPLACE",
+    ].join("\n");
+    const r = scavengeToolCalls(input, { allowedNames: new Set(["write_file"]) });
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0]!.function.name).toBe("write_file");
+    expect(JSON.parse(r.calls[0]!.function.arguments)).toEqual({
+      path: "src/new.ts",
+      content: "export const value = 1;",
+    });
+  });
+
+  it("leaves fenced examples, incomplete blocks, and unavailable edit tools inert", () => {
+    const complete = [
+      "src/a.ts",
+      "<<<<<<< SEARCH",
+      "old",
+      "=======",
+      "new",
+      ">>>>>>> REPLACE",
+    ].join("\n");
+    const fenced = `Example:\n\`\`\`text\n${complete}\n\`\`\``;
+    expect(scavengeToolCalls(fenced, { allowedNames: new Set(["edit_file"]) }).calls).toEqual([]);
+    expect(
+      scavengeToolCalls(`${complete}\n`.replace(">>>>>>> REPLACE", ""), {
+        allowedNames: new Set(["edit_file"]),
+      }).calls,
+    ).toEqual([]);
+    expect(scavengeToolCalls(complete, { allowedNames: new Set(["read_file"]) }).calls).toEqual([]);
+  });
+
+  it("does not scavenge JSON embedded in an edit replacement as another call", () => {
+    const input = [
+      "src/config.ts",
+      "<<<<<<< SEARCH",
+      "const x = {};",
+      "=======",
+      'const x = {"name":"search","arguments":{"q":"not a call"}};',
+      ">>>>>>> REPLACE",
+    ].join("\n");
+    const r = scavengeToolCalls(input, {
+      allowedNames: new Set(["edit_file", "search"]),
+    });
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0]!.function.name).toBe("edit_file");
+  });
 });

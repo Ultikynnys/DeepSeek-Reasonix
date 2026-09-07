@@ -77,6 +77,42 @@ describe("ToolCallRepair pipeline", () => {
     expect(report.scavenged).toBe(1);
   });
 
+  it("recovers multiple Markdown edits and removes only those blocks from content", () => {
+    const repair = new ToolCallRepair({ allowedToolNames: new Set(["edit_file"]) });
+    const content = [
+      "Applying both changes.",
+      "src/a.ts",
+      "<<<<<<< SEARCH",
+      "oldA",
+      "=======",
+      "newA",
+      ">>>>>>> REPLACE",
+      "src/b.ts",
+      "<<<<<<< SEARCH",
+      "oldB",
+      "=======",
+      "newB",
+      ">>>>>>> REPLACE",
+      "Continuing after the edits.",
+    ].join("\n");
+    const result = repair.process([], null, content);
+    expect(result.calls).toHaveLength(2);
+    expect(result.report.scavenged).toBe(2);
+    expect(result.content).toBe("Applying both changes.\n\n\nContinuing after the edits.");
+  });
+
+  it("deduplicates a Markdown call against a declared call and still removes the raw block", () => {
+    const repair = new ToolCallRepair({ allowedToolNames: new Set(["edit_file"]) });
+    const args = { path: "src/a.ts", search: "old", replace: "new" };
+    const content = ["src/a.ts", "<<<<<<< SEARCH", "old", "=======", "new", ">>>>>>> REPLACE"].join(
+      "\n",
+    );
+    const result = repair.process([call("c1", "edit_file", JSON.stringify(args))], null, content);
+    expect(result.calls).toHaveLength(1);
+    expect(result.report.scavenged).toBe(0);
+    expect(result.content).toBe("");
+  });
+
   it("repairs repeating tool names in declared calls", () => {
     const repair = new ToolCallRepair({
       allowedToolNames: new Set(["read_file", "write_file"]),
