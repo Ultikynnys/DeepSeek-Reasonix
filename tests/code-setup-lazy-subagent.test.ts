@@ -83,15 +83,45 @@ describe("buildCodeToolset", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });
 
-    for (const [tool, args] of [
-      ["explore", { task: "inspect the project" }],
-      ["research", { task: "compare behavior" }],
-      ["run_skill", { name: "custom-audit", arguments: "inspect auth" }],
-    ] as const) {
-      const result = await toolset.tools.dispatch(tool, JSON.stringify(args));
-      expect(JSON.parse(result).error).toMatch(/subagents are disabled/i);
-    }
+    // Knowledge-level gate: the dedicated subagent tools are no longer even
+    // registered — the tool spec never offers what can't run.
+    expect(toolset.tools.has("explore")).toBe(false);
+    expect(toolset.tools.has("research")).toBe(false);
+    expect(toolset.tools.has("review")).toBe(false);
+    expect(toolset.tools.has("security_review")).toBe(false);
+    // run_skill still resolves the custom skill by name; the runner gate
+    // stays as the backstop with the actionable error message.
+    const result = await toolset.tools.dispatch(
+      "run_skill",
+      JSON.stringify({ name: "custom-audit", arguments: "inspect auth" }),
+    );
+    expect(JSON.parse(result).error).toMatch(/subagents are disabled/i);
     expect(fetchSpy).not.toHaveBeenCalled();
+    await toolset.jobs.shutdown();
+  });
+
+  it("registers the dedicated subagent tools when subagents are enabled", async () => {
+    // Pin an explicit enabled config — a dev machine's real ~/.reasonix/config.json
+    // may have subagents disabled, and then the gate keeping the tools out is correct.
+    writeFileSync(cfgPath, JSON.stringify({ enableSubagents: true }), "utf8");
+    const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });
+    expect(toolset.tools.has("explore")).toBe(true);
+    expect(toolset.tools.has("research")).toBe(true);
+    expect(toolset.tools.has("review")).toBe(true);
+    expect(toolset.tools.has("security_review")).toBe(true);
+
+    // Live toggle round trip — the same call the desktop's settings handler makes.
+    toolset.syncSubagentTools(false);
+    expect(toolset.tools.has("explore")).toBe(false);
+    expect(toolset.tools.has("research")).toBe(false);
+    expect(toolset.tools.has("review")).toBe(false);
+    expect(toolset.tools.has("security_review")).toBe(false);
+
+    toolset.syncSubagentTools(true);
+    expect(toolset.tools.has("explore")).toBe(true);
+    expect(toolset.tools.has("research")).toBe(true);
+    expect(toolset.tools.has("review")).toBe(true);
+    expect(toolset.tools.has("security_review")).toBe(true);
     await toolset.jobs.shutdown();
   });
 

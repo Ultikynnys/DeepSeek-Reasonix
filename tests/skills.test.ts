@@ -472,6 +472,132 @@ describe("applySkillsIndex", () => {
   });
 });
 
+describe("subagentsEnabled — knowledge-level disable (Settings → Tools)", () => {
+  let home: string;
+  let projectRoot: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "reasonix-skills-subgate-"));
+    projectRoot = mkdtempSync(join(tmpdir(), "reasonix-skills-subgate-proj-"));
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it("list() hides user subagent skills when disabled but keeps inline ones", () => {
+    writeSkillDir(
+      projectRoot,
+      "global",
+      "my-audit",
+      { description: "Run a custom audit", runAs: "subagent" },
+      "body",
+      home,
+    );
+    writeSkillDir(
+      projectRoot,
+      "global",
+      "fmt",
+      { description: "Format the codebase", runAs: "inline" },
+      "body",
+      home,
+    );
+    const store = new SkillStore({
+      homeDir: home,
+      projectRoot,
+      disableBuiltins: true,
+      subagentsEnabled: false,
+    });
+    const names = store.list().map((s) => s.name);
+    expect(names).toContain("fmt");
+    expect(names).not.toContain("my-audit");
+  });
+
+  it("list() hides builtin subagent skills when disabled, keeping the inline ones", () => {
+    const store = new SkillStore({ homeDir: home, projectRoot, subagentsEnabled: false });
+    const names = store.list().map((s) => s.name);
+    expect(names).not.toContain("explore");
+    expect(names).not.toContain("research");
+    expect(names).not.toContain("review");
+    expect(names).not.toContain("security-review");
+    // `test` is the inline builtin — unaffected by the gate.
+    expect(names).toContain("test");
+  });
+
+  it("defaults to enabled — option omitted keeps subagent skills listed (back-compat)", () => {
+    const store = new SkillStore({ homeDir: home, projectRoot });
+    const names = store.list().map((s) => s.name);
+    expect(names).toContain("explore");
+    expect(names).toContain("research");
+    expect(names).toContain("review");
+    expect(names).toContain("security-review");
+  });
+
+  it("read() still resolves subagent skills when disabled — the runner gate stays the backstop", () => {
+    writeSkillDir(
+      projectRoot,
+      "global",
+      "my-audit",
+      { description: "Run a custom audit", runAs: "subagent" },
+      "body",
+      home,
+    );
+    const store = new SkillStore({
+      homeDir: home,
+      projectRoot,
+      disableBuiltins: true,
+      subagentsEnabled: false,
+    });
+    expect(store.read("my-audit")).not.toBeNull();
+  });
+
+  it("applySkillsIndex omits subagent entries when subagentsEnabled is false", () => {
+    writeSkillDir(
+      projectRoot,
+      "global",
+      "lookup",
+      { description: "Look something up", runAs: "subagent" },
+      "body",
+      home,
+    );
+    writeSkillDir(
+      projectRoot,
+      "global",
+      "fmt",
+      { description: "Format the codebase", runAs: "inline" },
+      "body",
+      home,
+    );
+    const out = applySkillsIndex(BASE, {
+      homeDir: home,
+      projectRoot,
+      disableBuiltins: true,
+      subagentsEnabled: false,
+    });
+    expect(out).toContain("- fmt — Format the codebase");
+    expect(out).not.toContain("lookup");
+    expect(out).not.toContain("[🧬 subagent] — Look something up");
+  });
+
+  it("applySkillsIndex keeps subagent entries by default (option omitted)", () => {
+    writeSkillDir(
+      projectRoot,
+      "global",
+      "lookup",
+      { description: "Look something up", runAs: "subagent" },
+      "body",
+      home,
+    );
+    const out = applySkillsIndex(BASE, {
+      homeDir: home,
+      projectRoot,
+      disableBuiltins: true,
+    });
+    expect(out).toContain("- lookup [🧬 subagent] — Look something up");
+  });
+});
+
 describe("validateSkillFrontmatter (#583 install gate)", () => {
   it("accepts content with a non-empty description line", () => {
     const result = validateSkillFrontmatter("---\ndescription: does a thing\n---\nbody\n");

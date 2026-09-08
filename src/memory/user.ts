@@ -399,7 +399,7 @@ export function applyUserMemory(
 export function applyMemoryStack(
   basePrompt: string,
   rootDir: string,
-  opts: { homeDir?: string; cfg?: ReasonixConfig } = {},
+  opts: { homeDir?: string; cfg?: ReasonixConfig; subagentsEnabled?: boolean } = {},
 ): string {
   const homeDir = opts.homeDir;
   const cfg = opts.cfg;
@@ -413,5 +413,10 @@ export function applyMemoryStack(
   const customSkillPaths = cfg?.skills?.paths
     ? resolveSkillPaths(cfg.skills.paths, rootDir)
     : loadResolvedSkillPaths(rootDir);
-  return applySkillsIndex(withMemory, { projectRoot: rootDir, homeDir, customSkillPaths });
+  return applySkillsIndex(withMemory, {
+    projectRoot: rootDir,
+    homeDir,
+    customSkillPaths,
+    subagentsEnabled: opts.subagentsEnabled,
+  });
 }

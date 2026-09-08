@@ -32,6 +32,10 @@ export interface SkillToolsOptions {
   onSkillInstalled?: SkillInstalledHook;
   /** Per-skill model override for `runAs: subagent` skills — sourced from config.json's `subagentModels`. */
   subagentModels?: Record<string, "flash" | "pro">;
+  /** Knowledge-level subagent gate (`enableSubagents` in Settings → Tools): when false the
+   *  dedicated subagent tools (explore / research / review / security_review) aren't registered
+   *  and the store hides runAs-subagent skills from list surfaces. Defaults to true. */
+  subagentsEnabled?: boolean;
 }
 
 interface BuiltinSubagentToolSpec {
@@ -93,6 +97,76 @@ function registerBuiltinSubagentTool(
   });
 }
 
+/** The four dedicated top-level subagent spawn tools — single source of truth for
+ *  registration (registerSkillTools) and mid-session re-sync (syncDedicatedSubagentTools). */
+export const DEDICATED_SUBAGENT_TOOLS = [
+  "explore",
+  "research",
+  "review",
+  "security_review",
+] as const;
+
+/** Registers the four dedicated spawn tools — same subagentRunner path as run_skill,
+ *  but the tool name matches the verb in the question. Shared by build-time registration
+ *  and the mid-session toggle re-sync so the two never drift. */
+function registerDedicatedSubagentTools(
+  registry: ToolRegistry,
+  store: SkillStore,
+  subagentRunner: SubagentRunner | undefined,
+): void {
+  registerBuiltinSubagentTool(registry, store, subagentRunner, {
+    toolName: "explore",
+    skillName: "explore",
+    description:
+      "Run a focused read-only codebase investigation in an isolated subagent. **Use for broad survey questions across multiple files** — 'find all places that X', 'how does Y work across the project', 'audit Z'. Returns one distilled answer with file:line citations. Chained `read_file` is the wrong tool for these — it bloats your context with raw file contents; `explore`'s reads + reasoning never enter your log.",
+    taskDescription:
+      "Concrete investigation question. The subagent has none of your context — write a self-contained prompt naming the symbol / pattern / behavior you want surveyed.",
+  });
+  registerBuiltinSubagentTool(registry, store, subagentRunner, {
+    toolName: "research",
+    skillName: "research",
+    description:
+      "Combine web search + code reading in an isolated subagent. **Use when the answer needs both external reference and local verification** — 'is X supported by lib Y in version Z', 'compare our impl against the spec', 'what's the canonical way to do Q'. Returns one synthesis citing code (file:line) and web (URL). Reads + searches stay in the subagent.",
+    taskDescription:
+      "Concrete research question. The subagent has none of your context — name the external thing to look up and the local code to compare against.",
+  });
+  registerBuiltinSubagentTool(registry, store, subagentRunner, {
+    toolName: "review",
+    skillName: "review",
+    description:
+      "Review the pending changes (current branch diff) in an isolated subagent — flags correctness / security / missing-tests / hidden behavior per file:line. Read-only; you decide what to act on. Use before suggesting a PR-shaped change, or when you've finished a multi-step edit and want a second pass.",
+    taskDescription:
+      "What to focus the review on (e.g. 'focus on the auth changes' or 'general'). The subagent reads the diff itself.",
+  });
+  registerBuiltinSubagentTool(registry, store, subagentRunner, {
+    toolName: "security_review",
+    skillName: "security-review",
+    description:
+      "Security-focused review of current branch diff in an isolated subagent — injection / authz / secrets / deserialization / path-traversal / crypto issues, severity-tagged. Use when shipping changes that touch auth, input parsing, file IO, or external requests. Read-only.",
+    taskDescription:
+      "Optional scope hint (e.g. 'focus on token handling in src/auth/') or 'full' for everything in the diff.",
+  });
+}
+
+/** Live `enableSubagents` toggle — knowledge-level sync for an already-built toolset.
+ *  Disabled: the four dedicated spawn tools leave the registry. Enabled: re-registered
+ *  with the supplied runner — pass the same opts the toolset was built with. */
+export function syncDedicatedSubagentTools(registry: ToolRegistry, opts: SkillToolsOptions): void {
+  const store = new SkillStore({
+    homeDir: opts.homeDir,
+    projectRoot: opts.projectRoot,
+    customSkillPaths: opts.customSkillPaths,
+    disableBuiltins: opts.disableBuiltins,
+    subagentModels: opts.subagentModels,
+    subagentsEnabled: opts.subagentsEnabled,
+  });
+  if (store.allowsSubagents()) {
+    registerDedicatedSubagentTools(registry, store, opts.subagentRunner);
+  } else {
+    for (const name of DEDICATED_SUBAGENT_TOOLS) registry.unregister(name);
+  }
+}
+
 export function registerSkillTools(
   registry: ToolRegistry,
   opts: SkillToolsOptions = {},
@@ -103,6 +177,7 @@ export function registerSkillTools(
     customSkillPaths: opts.customSkillPaths,
     disableBuiltins: opts.disableBuiltins,
     subagentModels: opts.subagentModels,
+    subagentsEnabled: opts.subagentsEnabled,
   });
   const subagentRunner = opts.subagentRunner;
   const onSkillInstalled = opts.onSkillInstalled;
@@ -198,38 +273,11 @@ export function registerSkillTools(
   // subagentRunner path as `run_skill(name="explore", ...)`, but the
   // tool name matches the verb in the question — models pick it
   // because affordance design > prompt rules.
-  registerBuiltinSubagentTool(registry, store, subagentRunner, {
-    toolName: "explore",
-    skillName: "explore",
-    description:
-      "Run a focused read-only codebase investigation in an isolated subagent. **Use for broad survey questions across multiple files** — 'find all places that X', 'how does Y work across the project', 'audit Z'. Returns one distilled answer with file:line citations. Chained `read_file` is the wrong tool for these — it bloats your context with raw file contents; `explore`'s reads + reasoning never enter your log.",
-    taskDescription:
-      "Concrete investigation question. The subagent has none of your context — write a self-contained prompt naming the symbol / pattern / behavior you want surveyed.",
-  });
-  registerBuiltinSubagentTool(registry, store, subagentRunner, {
-    toolName: "research",
-    skillName: "research",
-    description:
-      "Combine web search + code reading in an isolated subagent. **Use when the answer needs both external reference and local verification** — 'is X supported by lib Y in version Z', 'compare our impl against the spec', 'what's the canonical way to do Q'. Returns one synthesis citing code (file:line) and web (URL). Reads + searches stay in the subagent.",
-    taskDescription:
-      "Concrete research question. The subagent has none of your context — name the external thing to look up and the local code to compare against.",
-  });
-  registerBuiltinSubagentTool(registry, store, subagentRunner, {
-    toolName: "review",
-    skillName: "review",
-    description:
-      "Review the pending changes (current branch diff) in an isolated subagent — flags correctness / security / missing-tests / hidden behavior per file:line. Read-only; you decide what to act on. Use before suggesting a PR-shaped change, or when you've finished a multi-step edit and want a second pass.",
-    taskDescription:
-      "What to focus the review on (e.g. 'focus on the auth changes' or 'general'). The subagent reads the diff itself.",
-  });
-  registerBuiltinSubagentTool(registry, store, subagentRunner, {
-    toolName: "security_review",
-    skillName: "security-review",
-    description:
-      "Security-focused review of current branch diff in an isolated subagent — injection / authz / secrets / deserialization / path-traversal / crypto issues, severity-tagged. Use when shipping changes that touch auth, input parsing, file IO, or external requests. Read-only.",
-    taskDescription:
-      "Optional scope hint (e.g. 'focus on token handling in src/auth/') or 'full' for everything in the diff.",
-  });
+  // Skipped entirely when subagents are disabled — the tools must not
+  // appear in the model's tool spec at all (knowledge-level gate).
+  if (store.allowsSubagents()) {
+    registerDedicatedSubagentTools(registry, store, subagentRunner);
+  }
 
   const installScopeDesc = hasProjectScope
     ? "'project' (default) writes to <repo>/.reasonix/skills/, scoped to this workspace only; 'global' writes to ~/.reasonix/skills/, available in every project."

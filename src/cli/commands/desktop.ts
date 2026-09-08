@@ -2323,6 +2323,20 @@ function syncVisionTool(tab: Tab): void {
   }
 }
 
+/** Knowledge-level refresh after an enableSubagents toggle — the toolset-level twin of
+ *  syncVisionTool: sync the dedicated spawn tools on the live registry, recompute the
+ *  system prompt (skills index + section), rebuild the runtime like a model switch. */
+function refreshSubagentKnowledge(tab: Tab, enabled: boolean): void {
+  const toolset = tab.toolset;
+  if (!toolset) return;
+  toolset.syncSubagentTools(enabled);
+  tab.system = codeSystemPrompt(tab.rootDir, {
+    hasSemanticSearch: toolset.semantic.enabled,
+    modelId: tab.currentModel,
+  });
+  tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+}
+
 /** Provider-specific "not configured yet" message for a model id — keeps a
  *  gemini tab from being told to paste a DeepSeek key. Shared by the
  *  user_input and skill_run setup gates (deepseek is the fallback provider). */
@@ -4932,7 +4946,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
         if (msg.enableSubagents !== undefined) {
           saveEnableSubagents(msg.enableSubagents);
-          for (const openTab of tabs.values()) emitSettings(openTab);
+          for (const openTab of tabs.values()) {
+            refreshSubagentKnowledge(openTab, msg.enableSubagents);
+            emitSettings(openTab);
+          }
         }
         if (msg.disabledModels !== undefined) {
           saveDisabledModels(Array.isArray(msg.disabledModels) ? msg.disabledModels : []);

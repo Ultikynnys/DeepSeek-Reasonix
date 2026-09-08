@@ -22,11 +22,17 @@ const BASE = "You are a test assistant.";
 describe("project-memory", () => {
   let root: string;
   const originalEnv = process.env.REASONIX_MEMORY;
+  const originalConfigPath = process.env.REASONIX_CONFIG;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "reasonix-mem-"));
     // biome-ignore lint/performance/noDelete: avoid leaking "undefined" into env
     delete process.env.REASONIX_MEMORY;
+    // The codeSystemPrompt integration asserts offsets against the frozen
+    // CODE_SYSTEM_PROMPT (subagent section in its enabled form) — pin the
+    // config to a nonexistent tmp path so enableSubagents resolves to the
+    // default (true) instead of the dev machine's real setting.
+    process.env.REASONIX_CONFIG = join(root, "nonexistent-config.json");
   });
 
   afterEach(() => {
@@ -36,6 +42,11 @@ describe("project-memory", () => {
       delete process.env.REASONIX_MEMORY;
     } else {
       process.env.REASONIX_MEMORY = originalEnv;
+    }
+    if (originalConfigPath === undefined) {
+      process.env.REASONIX_CONFIG = undefined;
+    } else {
+      process.env.REASONIX_CONFIG = originalConfigPath;
     }
   });
 

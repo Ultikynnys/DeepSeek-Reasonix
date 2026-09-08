@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SkillStore } from "../src/skills.js";
 import { ToolRegistry } from "../src/tools.js";
-import { registerSkillTools } from "../src/tools/skills.js";
+import { registerSkillTools, syncDedicatedSubagentTools } from "../src/tools/skills.js";
 
 function writeSkill(baseDir: string, name: string, description: string, body: string): void {
   const dir = join(baseDir, ".reasonix", "skills", name);
@@ -475,6 +475,53 @@ describe("built-in subagent tools (explore / research / review / security_review
     expect(reg.get("research")).toBeUndefined();
     expect(reg.get("review")).toBeUndefined();
     expect(reg.get("security_review")).toBeUndefined();
+  });
+
+  it("does not register the wrappers when subagentsEnabled is false (knowledge-level gate)", () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, {
+      homeDir: home,
+      subagentsEnabled: false,
+      subagentRunner: async () => "ok",
+    });
+    expect(reg.get("explore")).toBeUndefined();
+    expect(reg.get("research")).toBeUndefined();
+    expect(reg.get("review")).toBeUndefined();
+    expect(reg.get("security_review")).toBeUndefined();
+    // The inline-capable tools stay registered.
+    expect(reg.get("run_skill")).toBeDefined();
+    expect(reg.get("install_skill")).toBeDefined();
+  });
+
+  it("syncDedicatedSubagentTools unregisters the four tools when disabled and re-registers when enabled", async () => {
+    // Start from a fully-enabled registration.
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, subagentRunner: async () => "ok" });
+    expect(reg.get("explore")).toBeDefined();
+
+    // Toggle off — registry-level, so future runtime rebuilds stay consistent.
+    syncDedicatedSubagentTools(reg, { homeDir: home, subagentsEnabled: false });
+    for (const name of ["explore", "research", "review", "security_review"]) {
+      expect(reg.get(name)).toBeUndefined();
+    }
+    // run_skill / install_skill are unaffected by the sync.
+    expect(reg.get("run_skill")).toBeDefined();
+    expect(reg.get("install_skill")).toBeDefined();
+
+    // Toggle back on — re-registered and dispatchable through the supplied runner.
+    let runnerCalls = 0;
+    syncDedicatedSubagentTools(reg, {
+      homeDir: home,
+      subagentsEnabled: true,
+      subagentRunner: async () => {
+        runnerCalls++;
+        return JSON.stringify({ success: true, output: "back" });
+      },
+    });
+    expect(reg.get("explore")).toBeDefined();
+    const out = await reg.dispatch("research", { task: "compare behavior" });
+    expect(runnerCalls).toBe(1);
+    expect(JSON.parse(out).output).toBe("back");
   });
 
   it("dispatches `explore` straight to subagentRunner with the explore skill body + task", async () => {

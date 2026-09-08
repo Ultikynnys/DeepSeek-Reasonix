@@ -1,6 +1,6 @@
 /** codeSystemPrompt — gitignore injection + system-append composition. */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,10 +9,21 @@ import { ImmutablePrefix } from "../src/memory/runtime.js";
 
 describe("codeSystemPrompt", () => {
   let root: string;
+  let cfgPath: string;
+
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "reasonix-prompt-"));
+    // The base prompt now depends on `enableSubagents` (knowledge-level gate) —
+    // pin it to a tmp config so containment assertions against the frozen
+    // CODE_SYSTEM_PROMPT don't go machine-dependent on a dev's real
+    // ~/.reasonix/config.json.
+    cfgPath = join(root, "config.json");
+    process.env.REASONIX_CONFIG = cfgPath;
   });
   afterEach(() => {
+    // `defaultConfigPath()` treats unset/undefined the same (env?.trim()), so an
+    // undefined assignment is enough to restore real-config resolution.
+    process.env.REASONIX_CONFIG = undefined;
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -163,6 +174,46 @@ describe("codeSystemPrompt", () => {
       expect(out).toContain("escalation tier");
       expect(out).toContain("If asked which model you are, answer `deepseek-v4-pro`");
       expect(out).not.toMatch(/running on `?deepseek-v4-flash`?/);
+    });
+  });
+
+  describe("subagents disabled — knowledge-level gate", () => {
+    it("swaps the delegation section for a disabled note when enableSubagents=false", () => {
+      writeFileSync(cfgPath, JSON.stringify({ enableSubagents: false }), "utf8");
+      const out = codeSystemPrompt(root, { configPath: cfgPath });
+      expect(out).not.toContain("Delegating to subagents via Skills");
+      expect(out).toContain("# Subagents are disabled");
+      expect(out).toContain("Settings → Tools");
+    });
+
+    it("keeps the delegation section when the setting is absent (default on)", () => {
+      const out = codeSystemPrompt(root, { configPath: cfgPath });
+      expect(out).toContain("Delegating to subagents via Skills");
+      expect(out).not.toContain("# Subagents are disabled");
+    });
+
+    it("omits subagent skills from the skills index when disabled", () => {
+      writeFileSync(cfgPath, JSON.stringify({ enableSubagents: false }), "utf8");
+      const skillDir = join(root, ".reasonix", "skills", "my-audit");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(
+        join(skillDir, "SKILL.md"),
+        "---\nname: my-audit\ndescription: Run a custom audit\nrunAs: subagent\n---\n\nAudit body.\n",
+        "utf8",
+      );
+      const out = codeSystemPrompt(root, { configPath: cfgPath });
+      expect(out).not.toContain("my-audit");
+      // Inline skills still surface.
+      const skillDir2 = join(root, ".reasonix", "skills", "fmt");
+      mkdirSync(skillDir2, { recursive: true });
+      writeFileSync(
+        join(skillDir2, "SKILL.md"),
+        "---\nname: fmt\ndescription: Format the codebase\n---\n\nFormat body.\n",
+        "utf8",
+      );
+      const out2 = codeSystemPrompt(root, { configPath: cfgPath });
+      expect(out2).toContain("- fmt — Format the codebase");
+      expect(out2).not.toContain("my-audit");
     });
   });
 

@@ -32,7 +32,12 @@ import { registerPlanTool } from "../tools/plan.js";
 import { registerScaffoldTools } from "../tools/scaffold.js";
 import { registerSeeImageTool } from "../tools/see-image.js";
 import { registerShellTools } from "../tools/shell.js";
-import { type SkillInstalledHook, registerSkillTools } from "../tools/skills.js";
+import {
+  type SkillInstalledHook,
+  type SubagentRunner,
+  registerSkillTools,
+  syncDedicatedSubagentTools,
+} from "../tools/skills.js";
 import {
   SHARED_SUBAGENT_SINK,
   type SubagentSink,
@@ -87,6 +92,10 @@ export interface CodeToolset {
   registerRooted: (root: string) => void;
   reBootstrapSemantic: (root: string) => Promise<{ enabled: boolean }>;
   semantic: { enabled: boolean };
+  /** Live `enableSubagents` toggle — re-registers/unregisters the dedicated spawn tools
+   *  on this toolset's registry so later runtimes carry the new state. The prompt +
+   *  skills-index half is the host's job (rebuild via codeSystemPrompt). */
+  syncSubagentTools: (enabled: boolean) => void;
 }
 
 /** Mirror `editMode === "plan"` into the registry's dispatch gate — keeps a single source of truth (the persisted EditMode) for the read-only mode. */
@@ -144,70 +153,78 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   // model id so `model: gpt-5.6-sol` skills route to the OpenAI endpoint and
   // DeepSeek skills to theirs.
   const subagentClients = new Map<string, DeepSeekClient>();
-  registerSkillTools(tools, {
+  // Hoisted so syncSubagentTools re-registers against the SAME runner closure —
+  // re-enabled tools must dispatch through the client cache below unchanged.
+  const skillOpts = {
     projectRoot: opts.rootDir,
     customSkillPaths: loadResolvedSkillPaths(opts.rootDir),
     subagentModels: loadSubagentModels(),
     onSkillInstalled: opts.onSkillInstalled,
-    subagentRunner: async (skill, task, signal, parentCallId, parentTurn) => {
-      if (!loadEnableSubagents(opts.configPath)) {
-        return JSON.stringify({
-          error: "Subagents are disabled in Settings → Tools.",
-        });
-      }
-      // Per-tab default wins over the skill's explicit model (frontmatter or the
-      // per-skill config override baked into `skill.model`), so the desktop's
-      // subagent selector is authoritative; DEFAULT_MODEL is the last resort.
-      const model = opts.subagentModel?.() ?? skill.model ?? DEFAULT_MODEL;
-      let subagentClient = subagentClients.get(model);
-      if (!subagentClient) {
-        const ep = loadEndpointForModel(model, opts.configPath);
-        const isOpenAI = isOpenAIStandardEndpoint(model, opts.configPath);
-        const provider = providerForModel(model, opts.configPath);
-        subagentClient = new DeepSeekClient({
-          apiKey: ep.apiKey,
-          baseUrl: ep.baseUrl,
-          // Local Ollama is keyless — the client omits the Authorization header.
-          allowMissingKey: provider === "ollama",
-          // OAuth fallback — when Codex backend is unavailable the static key is used
-          // (bills platform credits). OAuth tokens are audience-locked to api.openai.com.
-          apiKeyResolver: isOpenAI ? () => resolveOpenAIToken(opts.configPath) : undefined,
-          // Primary: route through ChatGPT Codex backend for plan-quota billing.
-          transportResolver: isOpenAI ? () => resolveCodexTransport() : undefined,
-          // Gemini models authenticate via Google Antigravity OAuth (Starter quota).
-          geminiAuthResolver:
-            provider === "gemini" ? () => resolveGeminiAuth(opts.configPath) : undefined,
-        });
-        subagentClients.set(model, subagentClient);
-      }
-      const billing = opts.subagentBilling?.(model);
-      const result = await spawnSubagent({
-        client: subagentClient,
-        parentRegistry: tools,
-        parentSignal: signal,
-        system: skill.body,
-        task,
-        model,
-        billingContext: billing ?? {
-          kind: "usd",
-          provider: providerForModel(model, opts.configPath),
-        },
-        measureQuota: billing?.kind === "quota" ? billing.measureQuota : undefined,
-        allowedTools: skill.allowedTools,
-        skillName: skill.name,
-        parentCallId,
-        parentTurn,
-        maxToolIters: skill.maxToolIters,
-        maxElapsedMs: skill.maxElapsedMs,
-        // Late-bound: the TUI's `useSubagent` writes the live callback into
-        // SHARED_SUBAGENT_SINK after mount. Until then `.current` is null
-        // and the events are silently dropped — that's fine for non-TUI
-        // callers (`reasonix chat --transcript`, library use).
-        sink: opts.subagentSink ?? SHARED_SUBAGENT_SINK,
+    // Knowledge-level gate: read once at registration so a disabled setting
+    // keeps the dedicated subagent tools out of the tool spec and subagent
+    // skills out of the pinned Skills index. The runner still re-checks
+    // per call, so re-enabling mid-session works without a toolset rebuild.
+    subagentsEnabled: loadEnableSubagents(opts.configPath),
+  };
+  const subagentRunner: SubagentRunner = async (skill, task, signal, parentCallId, parentTurn) => {
+    if (!loadEnableSubagents(opts.configPath)) {
+      return JSON.stringify({
+        error: "Subagents are disabled in Settings → Tools.",
       });
-      return formatSubagentResult(result);
-    },
-  });
+    }
+    // Per-tab default wins over the skill's explicit model (frontmatter or the
+    // per-skill config override baked into `skill.model`), so the desktop's
+    // subagent selector is authoritative; DEFAULT_MODEL is the last resort.
+    const model = opts.subagentModel?.() ?? skill.model ?? DEFAULT_MODEL;
+    let subagentClient = subagentClients.get(model);
+    if (!subagentClient) {
+      const ep = loadEndpointForModel(model, opts.configPath);
+      const isOpenAI = isOpenAIStandardEndpoint(model, opts.configPath);
+      const provider = providerForModel(model, opts.configPath);
+      subagentClient = new DeepSeekClient({
+        apiKey: ep.apiKey,
+        baseUrl: ep.baseUrl,
+        // Local Ollama is keyless — the client omits the Authorization header.
+        allowMissingKey: provider === "ollama",
+        // OAuth fallback — when Codex backend is unavailable the static key is used
+        // (bills platform credits). OAuth tokens are audience-locked to api.openai.com.
+        apiKeyResolver: isOpenAI ? () => resolveOpenAIToken(opts.configPath) : undefined,
+        // Primary: route through ChatGPT Codex backend for plan-quota billing.
+        transportResolver: isOpenAI ? () => resolveCodexTransport() : undefined,
+        // Gemini models authenticate via Google Antigravity OAuth (Starter quota).
+        geminiAuthResolver:
+          provider === "gemini" ? () => resolveGeminiAuth(opts.configPath) : undefined,
+      });
+      subagentClients.set(model, subagentClient);
+    }
+    const billing = opts.subagentBilling?.(model);
+    const result = await spawnSubagent({
+      client: subagentClient,
+      parentRegistry: tools,
+      parentSignal: signal,
+      system: skill.body,
+      task,
+      model,
+      billingContext: billing ?? {
+        kind: "usd",
+        provider: providerForModel(model, opts.configPath),
+      },
+      measureQuota: billing?.kind === "quota" ? billing.measureQuota : undefined,
+      allowedTools: skill.allowedTools,
+      skillName: skill.name,
+      parentCallId,
+      parentTurn,
+      maxToolIters: skill.maxToolIters,
+      maxElapsedMs: skill.maxElapsedMs,
+      // Late-bound: the TUI's `useSubagent` writes the live callback into
+      // SHARED_SUBAGENT_SINK after mount. Until then `.current` is null
+      // and the events are silently dropped — that's fine for non-TUI
+      // callers (`reasonix chat --transcript`, library use).
+      sink: opts.subagentSink ?? SHARED_SUBAGENT_SINK,
+    });
+    return formatSubagentResult(result);
+  };
+  registerSkillTools(tools, { ...skillOpts, subagentRunner });
 
   opts.onPhase?.("tool_registration_completed");
   return {
@@ -216,5 +233,11 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     registerRooted,
     reBootstrapSemantic,
     semantic: { enabled: false },
+    syncSubagentTools: (enabled) =>
+      syncDedicatedSubagentTools(tools, {
+        ...skillOpts,
+        subagentRunner,
+        subagentsEnabled: enabled,
+      }),
   };
 }

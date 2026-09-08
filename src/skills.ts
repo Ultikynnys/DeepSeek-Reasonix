@@ -71,6 +71,10 @@ export interface SkillStoreOptions {
   disableBuiltins?: boolean;
   /** Per-skill model override applied to `runAs: subagent` skills (overrides frontmatter `model:`). */
   subagentModels?: Record<string, "flash" | "pro">;
+  /** Knowledge-level subagent gate (`enableSubagents` in Settings → Tools): when false,
+   *  `runAs: subagent` skills drop out of `list()` (index + availability surfaces) so the
+   *  model never attempts to spawn; `read()` stays unfiltered for the runner-gate backstop. */
+  subagentsEnabled?: boolean;
 }
 
 /** Reject skill files that would silently disappear from the prefix index — `description:` is what `applySkillsIndex` keys on. */
@@ -116,6 +120,7 @@ export class SkillStore {
   private readonly customSkillPaths: readonly string[];
   private readonly disableBuiltins: boolean;
   private readonly subagentModels: Record<string, "flash" | "pro">;
+  private readonly subagentsEnabled: boolean;
 
   constructor(opts: SkillStoreOptions = {}) {
     this.homeDir = opts.homeDir ?? homedir();
@@ -126,11 +131,18 @@ export class SkillStore {
     );
     this.disableBuiltins = opts.disableBuiltins === true;
     this.subagentModels = opts.subagentModels ?? {};
+    this.subagentsEnabled = opts.subagentsEnabled !== false;
   }
 
   /** True iff this store was configured with a project root. */
   hasProjectScope(): boolean {
     return this.projectRoot !== undefined;
+  }
+
+  /** Resolved knowledge-level subagent gate — the single `!== false` coercion site;
+   *  tool-registration sync reads this instead of re-deriving the default. */
+  allowsSubagents(): boolean {
+    return this.subagentsEnabled;
   }
 
   /** Project scope first so per-repo skill overrides custom/global entries with the same name. */
@@ -187,9 +199,14 @@ export class SkillStore {
         if (!byName.has(skill.name)) byName.set(skill.name, skill);
       }
     }
-    return [...byName.values()]
-      .map((s) => this.applyModelOverride(s))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return (
+      [...byName.values()]
+        // Knowledge-level subagent gate: when disabled, `runAs: subagent` skills
+        // don't enter the index/availability surfaces at all (#knowledge-gate).
+        .filter((s) => this.subagentsEnabled || s.runAs !== "subagent")
+        .map((s) => this.applyModelOverride(s))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    );
   }
 
   /** Apply `subagentModels` config override on top of frontmatter `model:`. Inline skills are unaffected. */

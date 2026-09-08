@@ -1,14 +1,35 @@
 import { join } from "node:path";
-import { loadEffectiveMcpConfig } from "../config.js";
+import { loadEffectiveMcpConfig, loadEnableSubagents } from "../config.js";
 import { readCappedTextFile } from "../memory/read-capped.js";
 import { applyMemoryStack } from "../memory/user.js";
 import { TUI_FORMATTING_RULES, escalationContract } from "../prompt-fragments.js";
 
 const DEFAULT_CODE_MODEL = "deepseek-v4-flash";
 
+/** Rendered when subagents are enabled — the default. Kept verbatim so the frozen
+ *  CODE_SYSTEM_PROMPT back-compat const and existing cache prefixes stay stable. */
+const SUBAGENT_SECTION_ENABLED = `# Delegating to subagents via Skills
+
+The pinned Skills index below lists every available playbook (built-ins + user-installed). Entries tagged \`[🧬 subagent]\` spawn an isolated child loop and return only the final answer — their tool calls never enter your context. Pass \`name\` as the BARE identifier (e.g. \`"explore"\`), not the \`[🧬 subagent]\` tag.
+
+**Default: don't delegate.** Direct tools are cheaper and keep evidence in your context. Spawn ONLY for (a) true parallelism — 2+ independent investigations in one batch — or (b) context blow-up — >10 file reads where you only need the conclusion. Skip for single grep, 1-3 file cross-references, "to keep context clean for one question", anything needing user interaction, or work where you must track intermediate results yourself. Always pass clear, self-contained \`arguments\` — the subagent gets no other context.`;
+
+/** Knowledge-level subagent gate (Settings → Tools, `enableSubagents`): when disabled the
+ *  Skills index omits subagent skills and the dedicated spawn tools aren't registered —
+ *  this section must not tell the model to spawn either, so it swaps to a short note. */
+const SUBAGENT_SECTION_DISABLED = `# Subagents are disabled
+
+Subagent skills and the dedicated subagent tools (explore / research / review / security_review) are turned off for this session (Settings → Tools). They are absent from the tool spec and the Skills index — don't attempt to spawn subagents; handle the work inline with your direct tools instead.`;
+
 /** Built per-session against the resolved model id so the contract names the actual tier (#582). */
-function codeSystemBase(modelId: string): string {
-  return CODE_SYSTEM_TEMPLATE.replace("__ESCALATION_CONTRACT__", escalationContract(modelId));
+function codeSystemBase(modelId: string, subagentsEnabled = true): string {
+  return CODE_SYSTEM_TEMPLATE.replace(
+    "__ESCALATION_CONTRACT__",
+    escalationContract(modelId),
+  ).replace(
+    "__SUBAGENT_SECTION__",
+    subagentsEnabled ? SUBAGENT_SECTION_ENABLED : SUBAGENT_SECTION_DISABLED,
+  );
 }
 
 const CODE_SYSTEM_TEMPLATE = `You are Reasonix Code, a coding assistant. Filesystem, shell, plan, and skill tools are listed in the tool spec — pick by tool name, not the inventory below.
@@ -42,11 +63,7 @@ When asked to audit/review/critique Reasonix itself, the failure mode is buildin
 
 Stronger constraint than submit_plan: writes + non-allowlisted run_command are bounced at dispatch ("unavailable in plan mode" — don't retry). Read tools and allowlisted shell commands still work. You MUST call submit_plan before anything will execute.
 
-# Delegating to subagents via Skills
-
-The pinned Skills index below lists every available playbook (built-ins + user-installed). Entries tagged \`[🧬 subagent]\` spawn an isolated child loop and return only the final answer — their tool calls never enter your context. Pass \`name\` as the BARE identifier (e.g. \`"explore"\`), not the \`[🧬 subagent]\` tag.
-
-**Default: don't delegate.** Direct tools are cheaper and keep evidence in your context. Spawn ONLY for (a) true parallelism — 2+ independent investigations in one batch — or (b) context blow-up — >10 file reads where you only need the conclusion. Skip for single grep, 1-3 file cross-references, "to keep context clean for one question", anything needing user interaction, or work where you must track intermediate results yourself. Always pass clear, self-contained \`arguments\` — the subagent gets no other context.
+__SUBAGENT_SECTION__
 
 # When to edit vs. when to explore
 
@@ -170,9 +187,12 @@ export interface CodeSystemPromptOptions {
 }
 
 export function codeSystemPrompt(rootDir: string, opts: CodeSystemPromptOptions = {}): string {
-  const codeBase = codeSystemBase(opts.modelId ?? DEFAULT_CODE_MODEL);
+  // Knowledge-level subagent gate: shapes the prompt section AND the skills index in
+  // one pass, captured at session build so the cache prefix stays stable per session.
+  const subagentsEnabled = loadEnableSubagents(opts.configPath);
+  const codeBase = codeSystemBase(opts.modelId ?? DEFAULT_CODE_MODEL, subagentsEnabled);
   const base = opts.hasSemanticSearch ? `${codeBase}${SEMANTIC_SEARCH_ROUTING}` : codeBase;
-  const withMemory = applyMemoryStack(base, rootDir);
+  const withMemory = applyMemoryStack(base, rootDir, { subagentsEnabled });
   const gitignorePath = join(rootDir, ".gitignore");
   let result = withMemory;
   const gitignore = readCappedTextFile(gitignorePath, GITIGNORE_MAX_CHARS);
