@@ -1,31 +1,17 @@
-import {
-  ANTIGRAVITY_MODELS,
-  GPT56_MODELS,
-  OPENCODE_MODELS,
-  SUPPORTED_OFFICIAL_MODELS,
-  ZAI_MODELS,
-  isAntigravityModel,
-  isUsableAntigravityModel,
-  modelAcceptsImages,
-  modelDisplayName,
-} from "@reasonix/core-utils";
+import { modelDisplayName } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
+import { MODEL_CATALOG_GROUP_LABELS, deriveModelCatalog } from "../model-catalog";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
 import {
+  QUICK_SEND_SHORTHAND_MAX_LENGTH,
   allQuickSends,
   enforceQuickSendShorthand,
-  QUICK_SEND_SHORTHAND_MAX_LENGTH,
 } from "../protocol";
-import {
-  FONT_FAMILY,
-  FONT_SCALE,
-  type FontFamily,
-  type FontScale,
-} from "../theme";
+import { FONT_FAMILY, FONT_SCALE, type FontFamily, type FontScale } from "../theme";
 import {
   type AudioInputDevice,
   getSelectedAudioInputDeviceId,
@@ -110,6 +96,7 @@ export function SettingsModal({
   onRefreshOllamaModels,
   opencodeModels,
   opencodeModelsError,
+  opencodeVisionModels,
   onRefreshOpencodeModels,
   onAddMcpSpec,
   onRemoveMcpSpec,
@@ -159,6 +146,7 @@ export function SettingsModal({
   ollamaVisionModels?: ReadonlySet<string>;
   opencodeModels?: string[];
   opencodeModelsError?: string;
+  opencodeVisionModels?: ReadonlySet<string>;
   onRefreshOpencodeModels?: (force?: boolean) => void;
   oauthWaiting: boolean;
   onOAuthBegin: () => void;
@@ -270,6 +258,7 @@ export function SettingsModal({
                 onRefreshOllamaModels={onRefreshOllamaModels}
                 opencodeModels={opencodeModels}
                 opencodeModelsError={opencodeModelsError}
+                opencodeVisionModels={opencodeVisionModels}
                 onRefreshOpencodeModels={onRefreshOpencodeModels}
                 oauthSignedIn={settings.openaiOAuth?.signedIn ?? false}
                 oauthAccount={settings.openaiOAuth?.account}
@@ -310,11 +299,7 @@ export function SettingsModal({
               />
             )}
             {page === "rules" && (
-              <PageRules
-                settings={settings}
-                onAddRule={onAddRule}
-                onRemoveRule={onRemoveRule}
-              />
+              <PageRules settings={settings} onAddRule={onAddRule} onRemoveRule={onRemoveRule} />
             )}
             {page === "billing" && (
               <PageBilling balance={balance} usage={usage} currency={currency} />
@@ -940,7 +925,16 @@ function WebSearchApiKeyRow({
   prefix,
   onSave,
 }: {
-  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama" | "zai" | "opencode";
+  engine:
+    | "metaso"
+    | "baidu"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama"
+    | "zai"
+    | "opencode";
   patchKey:
     | "metasoApiKey"
     | "baiduApiKey"
@@ -1255,6 +1249,7 @@ function PageModels({
   onRefreshOllamaModels,
   opencodeModels,
   opencodeModelsError,
+  opencodeVisionModels,
   onRefreshOpencodeModels,
   oauthSignedIn,
   oauthAccount,
@@ -1293,6 +1288,7 @@ function PageModels({
   onRefreshOllamaModels?: (force?: boolean) => void;
   opencodeModels?: string[];
   opencodeModelsError?: string;
+  opencodeVisionModels?: ReadonlySet<string>;
   onRefreshOpencodeModels?: (force?: boolean) => void;
   oauthSignedIn: boolean;
   oauthAccount?: string;
@@ -1313,53 +1309,21 @@ function PageModels({
   const [draft, setDraft] = useState(settings.model);
   useEffect(() => setDraft(settings.model), [settings.model]);
 
-  type ModelGroup = {
-    title: string;
-    models: readonly string[];
-  };
-
-  const antigravityModelsList = Array.from(
-    new Set([
-      ...(settings.antigravityOAuth?.models?.filter(isUsableAntigravityModel) ?? []),
-      ...ANTIGRAVITY_MODELS,
-      ...(settings.customModels?.filter(isAntigravityModel) ?? []),
-    ]),
-  );
-  const antigravitySet = new Set(antigravityModelsList);
-  const knownSet = new Set([
-    ...SUPPORTED_OFFICIAL_MODELS,
-    ...GPT56_MODELS,
-    ...ZAI_MODELS,
-    ...OPENCODE_MODELS,
-    ...antigravityModelsList,
-  ]);
-  const customModelsList = (settings.customModels ?? []).filter(
-    (id) => !knownSet.has(id) && !antigravitySet.has(id) && !isAntigravityModel(id),
-  );
-
-  const groups: ModelGroup[] = [
-    { title: t("composer.modelDeepSeekGroup"), models: SUPPORTED_OFFICIAL_MODELS },
-    { title: t("composer.modelOpenAIGroup"), models: GPT56_MODELS },
-    { title: t("composer.modelZaiGroup"), models: ZAI_MODELS },
-    {
-      title: t("composer.modelOpencodeGroup"),
-      models: opencodeModels && opencodeModels.length > 0 ? opencodeModels : OPENCODE_MODELS,
-    },
-    ...(customModelsList.length > 0
-      ? [{ title: t("composer.modelCustomGroup"), models: customModelsList }]
-      : []),
-    ...(settings.antigravityOAuth?.signedIn || antigravityModelsList.length > 0
-      ? [
-          {
-            title: t("composer.modelAntigravityGroup"),
-            models: antigravityModelsList,
-          },
-        ]
-      : []),
-  ];
+  const catalog = deriveModelCatalog({
+    discoveredAntigravityModels: settings.antigravityOAuth?.models,
+    customModels: settings.customModels,
+    opencodeModels,
+    includeAntigravity: Boolean(settings.antigravityOAuth?.signedIn),
+    ollamaVisionModels,
+    opencodeVisionModels,
+  });
+  const groups = catalog.groups.map((group) => ({
+    title: t(MODEL_CATALOG_GROUP_LABELS[group.key]),
+    models: group.models,
+  }));
 
   const allAvailable = groups.flatMap((g) => g.models);
-  const isKnown = allAvailable.includes(settings.model);
+  const isKnown = catalog.knownModelIds.has(settings.model);
   const hiddenSet = new Set(settings.disabledModels ?? []);
   const hiddenCount = allAvailable.filter((id) => hiddenSet.has(id)).length;
   const toggleHidden = (id: string): void => {
@@ -1407,9 +1371,7 @@ function PageModels({
                     onKeyDown={activationHandler(() => onSave({ model: id }))}
                   >
                     <div className="nm">{modelDisplayName(id)}</div>
-                    {modelAcceptsImages(id, ollamaVisionModels) ? (
-                      <span className="badge">vision</span>
-                    ) : null}
+                    {catalog.acceptsImages(id) ? <span className="badge">vision</span> : null}
                     {hidden ? <span className="badge">{t("settings.modelHidden")}</span> : null}
                     <button
                       type="button"
@@ -1557,9 +1519,7 @@ function PageModels({
                   onKeyDown={activationHandler(() => onSave({ model: full }))}
                 >
                   <div className="nm">{full}</div>
-                  {modelAcceptsImages(full, ollamaVisionModels) ? (
-                    <span className="badge">vision</span>
-                  ) : null}
+                  {catalog.acceptsImages(full) ? <span className="badge">vision</span> : null}
                   {hidden ? <span className="badge">{t("settings.modelHidden")}</span> : null}
                   <button
                     type="button"

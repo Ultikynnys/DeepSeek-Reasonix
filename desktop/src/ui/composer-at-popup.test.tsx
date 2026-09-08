@@ -39,7 +39,12 @@ function renderComposer(props?: Partial<React.ComponentProps<typeof Composer>>) 
 describe("desktop Composer model catalog", () => {
   it("shows only the signed-in account's discovered Antigravity models and filters unusable ones", () => {
     const { container } = renderComposer({
-      antigravityModels: ["gemini-account-model", "claude-account-model", "chat_20706", "gemini-2.5-pro"],
+      antigravityModels: [
+        "gemini-account-model",
+        "claude-account-model",
+        "chat_20706",
+        "gemini-2.5-pro",
+      ],
     });
     fireEvent.click(container.querySelector(".model-pill")!);
     const text = container.querySelector(".model-menu-list")?.textContent ?? "";
@@ -59,9 +64,7 @@ describe("desktop Composer model catalog", () => {
     });
     fireEvent.click(container.querySelector(".model-pill")!);
     expect(container.querySelector(".model-menu-list")?.textContent).toContain("quota unavailable");
-    const refresh = container.querySelector(
-      'button[title="Refresh"]',
-    ) as HTMLButtonElement | null;
+    const refresh = container.querySelector('button[title="Refresh"]') as HTMLButtonElement | null;
     expect(refresh).not.toBeNull();
     fireEvent.click(refresh!);
     expect(onRefreshAntigravityModels).toHaveBeenCalledOnce();
@@ -116,6 +119,18 @@ describe("desktop Composer model catalog", () => {
       "Google Antigravity",
       "Ollama",
     ]);
+  });
+
+  it("shows dynamically discovered OpenCode vision capability", () => {
+    const { container } = renderComposer({
+      opencodeModels: ["dynamic-vision-free"],
+      opencodeVisionModels: new Set(["dynamic-vision-free"]),
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+    const item = Array.from(container.querySelectorAll(".popup-item")).find((el) =>
+      el.textContent?.includes("dynamic-vision-free"),
+    );
+    expect(item?.textContent).toContain("vision");
   });
 
   it("hides disabledModels from both menus but keeps the active model visible", () => {

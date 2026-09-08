@@ -2160,6 +2160,14 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         sessionFiles: deriveSessionFiles(loaded),
       };
     }
+    case "session.retracted": {
+      const loaded = mapLoadedMessages(ev.replacementMessages);
+      return {
+        ...state,
+        messages: loaded,
+        sessionFiles: deriveSessionFiles(loaded),
+      };
+    }
     case "$retry_result":
       return { ...state, retryText: ev.text, retryNonce: state.retryNonce + 1 };
     case "$btw_result":
@@ -3431,6 +3439,7 @@ function TabRuntime({
                 antigravityModelsError={state.settings?.antigravityOAuth?.flowError}
                 opencodeModels={opencodeModels}
                 opencodeModelsError={opencodeModelsError ?? undefined}
+                opencodeVisionModels={opencodeVisionModels}
                 customModels={state.settings?.customModels}
                 disabledModels={state.settings?.disabledModels}
                 onRefreshOllamaModels={onRefreshOllamaModels}
@@ -3592,6 +3601,7 @@ function TabRuntime({
             onRefreshOllamaModels={onRefreshOllamaModels}
             opencodeModels={opencodeModels}
             opencodeModelsError={opencodeModelsError ?? undefined}
+            opencodeVisionModels={opencodeVisionModels}
             onRefreshOpencodeModels={onRefreshOpencodeModels}
             oauthWaiting={state.oauthWaiting}
             onOAuthBegin={() => sendRpc({ cmd: "oauth_begin" })}

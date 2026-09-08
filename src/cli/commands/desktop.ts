@@ -29,6 +29,7 @@ import type {
   ConfirmRequiredEvent,
   CtxBreakdownEvent,
   DesktopDiagnosticEvent,
+  DirectKernelWireEvent,
   JobInfo,
   JobsEvent,
   LoadedMessage,
@@ -56,6 +57,7 @@ import type {
   SessionCompactedEvent,
   SessionEmptyEvent,
   SessionLoadedEvent,
+  SessionRetractedEvent,
   SessionsEvent,
   SettingsEvent,
   SkillsEvent,
@@ -304,9 +306,10 @@ type InMessage = import("@reasonix/core-utils").OutgoingCommand;
 /** Direct fd write — bypasses Node's stream layer (and its piped-output
  *  block buffering) so every JSON line reaches Rust the moment it's
  *  produced, not whenever the next 8 KB flushes. */
+type KernelWireBridgeEvent = DirectKernelWireEvent | SessionCompactedEvent | SessionRetractedEvent;
+
 type EmittableEvent =
-  | KernelEvent
-  | SessionCompactedEvent
+  | KernelWireBridgeEvent
   | { type: "$connected" }
   | { type: "$ready" }
   | { type: "$error"; message: string }
@@ -629,22 +632,92 @@ function emit(ev: EmittableEvent, tabId?: string): void {
 /** Emit a kernel event to a tab; session.compacted's replacement payload is
  *  converted from the kernel ChatMessage shape into the LoadedMessage wire
  *  shape so the App reducer can swap in the post-fold conversation. */
-function emitKernelEvent(kev: KernelEvent, tabId?: string): void {
-  if (kev.type === "session.compacted") {
-    const wire: SessionCompactedEvent = {
-      type: EventType.sessionCompacted,
-      id: kev.id,
-      ts: kev.ts,
-      turn: kev.turn,
-      beforeMessages: kev.beforeMessages,
-      afterMessages: kev.afterMessages,
-      reason: kev.reason,
-      replacementMessages: buildLoadedMessages([...kev.replacementMessages]),
-    };
-    emit(wire, tabId);
-    return;
+export function sessionCarryover(meta: SessionMeta): SessionLoadedEvent["carryover"] {
+  return {
+    totalCostUsd: meta.totalCostUsd ?? 0,
+    costByProvider: meta.costByProvider,
+    cacheHitTokens: meta.cacheHitTokens ?? 0,
+    cacheMissTokens: meta.cacheMissTokens ?? 0,
+    totalCompletionTokens: meta.totalCompletionTokens ?? 0,
+  };
+}
+
+export function emptySessionCarryover(): SessionLoadedEvent["carryover"] {
+  return {
+    totalCostUsd: 0,
+    costByProvider: {},
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+    totalCompletionTokens: 0,
+  };
+}
+
+export function projectKernelEvent(kev: KernelEvent): KernelWireBridgeEvent | null {
+  switch (kev.type) {
+    case "session.compacted":
+      return {
+        type: EventType.sessionCompacted,
+        id: kev.id,
+        ts: kev.ts,
+        turn: kev.turn,
+        beforeMessages: kev.beforeMessages,
+        afterMessages: kev.afterMessages,
+        reason: kev.reason,
+        replacementMessages: buildLoadedMessages([...kev.replacementMessages]),
+      };
+    case "session.retracted":
+      return {
+        type: EventType.sessionRetracted,
+        id: kev.id,
+        ts: kev.ts,
+        turn: kev.turn,
+        kind: kev.kind,
+        beforeMessages: kev.beforeMessages,
+        afterMessages: kev.afterMessages,
+        replacementMessages: buildLoadedMessages([...kev.replacementMessages]),
+      };
+    case "user.message":
+    case "model.turn.started":
+    case "model.delta":
+    case "model.final":
+    case "tool.preparing":
+    case "tool.intent":
+    case "tool.result":
+    case "tool.output":
+    case "subagent.progress":
+    case "status":
+    case "compaction.started":
+    case "compaction.finished":
+    case "warning":
+    case "error":
+      return kev;
+    case "slash.invoked":
+    case "tool.dispatched":
+    case "tool.denied":
+    case "tool.call":
+    case "tool.confirm.allow":
+    case "tool.confirm.deny":
+    case "tool.confirm.always_allow":
+    case "effect.file.touched":
+    case "effect.memory.written":
+    case "plan.submitted":
+    case "plan.step.completed":
+    case "hook.fired":
+    case "policy.escalated":
+    case "session.opened":
+    case "capability.registered":
+    case "capability.removed":
+      return null;
+    default: {
+      const unhandled: never = kev;
+      return unhandled;
+    }
   }
-  emit(kev, tabId);
+}
+
+function emitKernelEvent(kev: KernelEvent, tabId?: string): void {
+  const wire = projectKernelEvent(kev);
+  if (wire) emit(wire, tabId);
 }
 
 function tailLines(s: string, n: number): string {
@@ -1894,13 +1967,7 @@ function loadSessionIntoTab(
       type: "$session_loaded",
       name,
       messages: loadedMessages,
-      carryover: {
-        totalCostUsd: meta.totalCostUsd ?? 0,
-        costByProvider: meta.costByProvider,
-        cacheHitTokens: meta.cacheHitTokens ?? 0,
-        cacheMissTokens: meta.cacheMissTokens ?? 0,
-        totalCompletionTokens: meta.totalCompletionTokens ?? 0,
-      },
+      carryover: sessionCarryover(meta),
     },
     tab.id,
   );
@@ -1914,13 +1981,7 @@ function loadSessionIntoTab(
     records: records.length,
     loadedMessages: loadedMessages.length,
     backfilledWorkspace,
-    carryover: {
-      totalCostUsd: meta.totalCostUsd ?? 0,
-      costByProvider: meta.costByProvider,
-      cacheHitTokens: meta.cacheHitTokens ?? 0,
-      cacheMissTokens: meta.cacheMissTokens ?? 0,
-      totalCompletionTokens: meta.totalCompletionTokens ?? 0,
-    },
+    carryover: sessionCarryover(meta),
   });
 }
 
@@ -3300,14 +3361,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             // The loop's own abort path never ran (the generator was
             // closed mid-await), so settle the still-pending assistant
             // card here — $turn_complete alone leaves it spinning.
-            emit(rt.eventizer.emitAbortedFinal(lastTurn), tab.id);
+            emitKernelEvent(rt.eventizer.emitAbortedFinal(lastTurn), tab.id);
           }
           if (aborted && openCompactionId && lastTurn >= 0) {
             // Same for a running compaction card: compaction_end was
             // never yielded. Report the interruption — the detached fold
             // keeps running and its merge-at-commit preserves anything
             // the next turn appends.
-            emit(
+            emitKernelEvent(
               rt.eventizer.emitCompactionFinished(openCompactionId, {
                 turn: lastTurn,
                 folded: false,
@@ -3442,13 +3503,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         type: "$session_loaded",
         name: tab.currentSession,
         messages: [],
-        carryover: {
-          totalCostUsd: 0,
-          costByProvider: {},
-          cacheHitTokens: 0,
-          cacheMissTokens: 0,
-          totalCompletionTokens: 0,
-        },
+        carryover: emptySessionCarryover(),
       },
       tab.id,
     );
@@ -3537,13 +3592,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         type: "$session_loaded",
         name: tab.currentSession,
         messages: [],
-        carryover: {
-          totalCostUsd: 0,
-          costByProvider: {},
-          cacheHitTokens: 0,
-          cacheMissTokens: 0,
-          totalCompletionTokens: 0,
-        },
+        carryover: emptySessionCarryover(),
       },
       tab.id,
     );
@@ -4006,13 +4055,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             type: "$session_loaded",
             name: tab.currentSession,
             messages: restoredMessages,
-            carryover: {
-              totalCostUsd: meta.totalCostUsd ?? 0,
-              costByProvider: meta.costByProvider,
-              cacheHitTokens: meta.cacheHitTokens ?? 0,
-              cacheMissTokens: meta.cacheMissTokens ?? 0,
-              totalCompletionTokens: meta.totalCompletionTokens ?? 0,
-            },
+            carryover: sessionCarryover(meta),
           },
           tab.id,
         );
@@ -4022,13 +4065,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             type: "$session_loaded",
             name: tab.currentSession,
             messages: [],
-            carryover: {
-              totalCostUsd: 0,
-              costByProvider: {},
-              cacheHitTokens: 0,
-              cacheMissTokens: 0,
-              totalCompletionTokens: 0,
-            },
+            carryover: emptySessionCarryover(),
           },
           tab.id,
         );
@@ -4274,13 +4311,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
                   type: "$session_loaded",
                   name: t.currentSession,
                   messages: msgs,
-                  carryover: {
-                    totalCostUsd: meta.totalCostUsd ?? 0,
-                    costByProvider: meta.costByProvider,
-                    cacheHitTokens: meta.cacheHitTokens ?? 0,
-                    cacheMissTokens: meta.cacheMissTokens ?? 0,
-                    totalCompletionTokens: meta.totalCompletionTokens ?? 0,
-                  },
+                  carryover: sessionCarryover(meta),
                   resync: true,
                 },
                 t.id,
@@ -5244,7 +5275,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       const prev = tab.runtime.loop.retryLastUser();
       if (prev) {
         emit({ type: "$retry_result", text: prev }, tab.id);
-        emit(
+        emitKernelEvent(
           tab.runtime.eventizer.emitSessionRetracted(
             tab.runtime.loop.currentTurn,
             "retry",

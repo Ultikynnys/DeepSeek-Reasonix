@@ -48,6 +48,16 @@ export const VOICE_MODELS: ReadonlyArray<VoiceModelOption> = [
 
 const STORAGE_KEY_ACTIVE = "reasonix.voiceModel";
 const STORAGE_PREFIX_DOWNLOADED = "reasonix.voiceModel.downloaded.";
+const VOICE_MODEL_CACHE = "transformers-cache";
+
+export function cacheRequestBelongsToModel(request: Request, model: VoiceModelOption): boolean {
+  return request.url.includes(model.repoId) || request.url.includes(model.id);
+}
+
+async function voiceModelCacheKeys(): Promise<readonly Request[]> {
+  const cache = await caches.open(VOICE_MODEL_CACHE);
+  return cache.keys();
+}
 
 export function getVoiceModelOption(id: string): VoiceModelOption {
   const found = VOICE_MODELS.find((m) => m.id === id);
@@ -86,17 +96,12 @@ export async function isVoiceModelDownloaded(id: VoiceModelId): Promise<boolean>
   // Check Web Cache API if available:
   if (typeof caches !== "undefined") {
     try {
-      const cache = await caches.open("transformers-cache");
-      const keys = await cache.keys();
+      const keys = await voiceModelCacheKeys();
       const hasEncoder = keys.some(
-        (req) =>
-          (req.url.includes(opt.repoId) || req.url.includes(opt.id)) &&
-          req.url.includes("encoder_model"),
+        (req) => cacheRequestBelongsToModel(req, opt) && req.url.includes("encoder_model"),
       );
       const hasDecoder = keys.some(
-        (req) =>
-          (req.url.includes(opt.repoId) || req.url.includes(opt.id)) &&
-          req.url.includes("decoder_model"),
+        (req) => cacheRequestBelongsToModel(req, opt) && req.url.includes("decoder_model"),
       );
       if (hasEncoder && hasDecoder) {
         markVoiceModelDownloaded(id, true);
@@ -129,12 +134,10 @@ export async function deleteVoiceModelCache(id: VoiceModelId): Promise<void> {
 
   if (typeof caches !== "undefined") {
     try {
-      const cache = await caches.open("transformers-cache");
-      const keys = await cache.keys();
+      const cache = await caches.open(VOICE_MODEL_CACHE);
+      const keys = await voiceModelCacheKeys();
       for (const req of keys) {
-        if (req.url.includes(opt.repoId) || req.url.includes(opt.id)) {
-          await cache.delete(req);
-        }
+        if (cacheRequestBelongsToModel(req, opt)) await cache.delete(req);
       }
     } catch (e) {
       console.warn("Failed to delete voice model cache:", e);

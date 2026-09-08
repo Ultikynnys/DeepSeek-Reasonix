@@ -108,6 +108,174 @@ export type ReadyEvent = { type: "$ready" };
 export type ProtocolErrorEvent = { type: "$error"; message: string };
 export type TurnCompleteEvent = { type: "$turn_complete" };
 
+/** Common envelope for kernel events forwarded directly to desktop clients. */
+export interface KernelWireEventBase {
+  id: number;
+  ts: string;
+  turn: number;
+}
+
+export interface KernelUserMessageEvent extends KernelWireEventBase {
+  type: "user.message";
+  text: string;
+}
+
+export interface KernelModelTurnStartedEvent extends KernelWireEventBase {
+  type: "model.turn.started";
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  prefixHash: string;
+}
+
+export interface KernelModelDeltaEvent extends KernelWireEventBase {
+  type: "model.delta";
+  channel: "content" | "reasoning" | "tool_args";
+  text: string;
+}
+
+export interface KernelUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_cache_hit_tokens?: number;
+  prompt_cache_miss_tokens?: number;
+}
+
+export interface KernelWireToolCall {
+  id?: string;
+  type?: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface KernelModelFinalEvent extends KernelWireEventBase {
+  type: "model.final";
+  content: string;
+  reasoningContent?: string;
+  replaceStreamedOutput?: boolean;
+  toolCalls: ReadonlyArray<KernelWireToolCall>;
+  usage: KernelUsage;
+  costUsd: number;
+  forcedSummary?: boolean;
+  image?: { dataUrl: string; mimeType: string };
+}
+
+export interface KernelToolPreparingEvent extends KernelWireEventBase {
+  type: "tool.preparing";
+  callId: string;
+  name: string;
+}
+
+export interface KernelToolIntentEvent extends KernelWireEventBase {
+  type: "tool.intent";
+  callId: string;
+  name: string;
+  args: string;
+}
+
+export interface KernelToolResultEvent extends KernelWireEventBase {
+  type: "tool.result";
+  callId: string;
+  ok: boolean;
+  output: string;
+}
+
+export interface KernelToolOutputEvent extends KernelWireEventBase {
+  type: "tool.output";
+  callId: string;
+  name: string;
+  text: string;
+}
+
+export interface KernelSubagentProgressEvent extends KernelWireEventBase {
+  type: "subagent.progress";
+  runId: string;
+  parentCallId?: string;
+  action: "start" | "phase" | "stream" | "tool-start" | "tool-end" | "end";
+  task: string;
+  skillName?: string;
+  model?: string;
+  phase?: "exploring" | "summarising";
+  iter?: number;
+  elapsedMs?: number;
+  contextTokens?: number;
+  outputChars?: number;
+  reasoningChars?: number;
+  toolReadChars?: number;
+  thought?: string;
+  childCallId?: string;
+  toolName?: string;
+  toolArgs?: string;
+  toolOk?: boolean;
+  error?: string;
+  turns?: number;
+  costUsd?: number;
+  billingKind?: "usd" | "quota" | "none";
+  quotaUsedPct?: number;
+  maxToolIters?: number;
+  maxElapsedMs?: number;
+  budgetExhausted?: "tool-iters" | "elapsed";
+}
+
+export interface KernelStatusEvent extends KernelWireEventBase {
+  type: "status";
+  text: string;
+}
+
+export interface KernelCompactionStartedEvent extends KernelWireEventBase {
+  type: "compaction.started";
+  compactionId: string;
+  reason: "user" | "auto-context-pressure";
+  kind?: "fold" | "force-summary";
+  aggressive?: boolean;
+}
+
+export interface KernelCompactionFinishedEvent extends KernelWireEventBase {
+  type: "compaction.finished";
+  compactionId: string;
+  kind?: "fold" | "force-summary";
+  folded: boolean;
+  beforeMessages: number;
+  afterMessages: number;
+  summaryChars: number;
+  summary?: string;
+  error?: string;
+  warn?: string;
+  prunedFiles?: number;
+  prunedTokens?: number;
+  droppedFiles?: string[];
+}
+
+export interface KernelWarningEvent extends KernelWireEventBase {
+  type: "warning";
+  text: string;
+  severity: "low" | "high";
+}
+
+export interface KernelErrorEvent extends KernelWireEventBase {
+  type: "error";
+  message: string;
+  recoverable: boolean;
+}
+
+export type DirectKernelWireEvent =
+  | KernelUserMessageEvent
+  | KernelModelTurnStartedEvent
+  | KernelModelDeltaEvent
+  | KernelModelFinalEvent
+  | KernelToolPreparingEvent
+  | KernelToolIntentEvent
+  | KernelToolResultEvent
+  | KernelToolOutputEvent
+  | KernelSubagentProgressEvent
+  | KernelStatusEvent
+  | KernelCompactionStartedEvent
+  | KernelCompactionFinishedEvent
+  | KernelWarningEvent
+  | KernelErrorEvent;
+
 export type DesktopDiagnosticLevel = "debug" | "info" | "warn" | "error";
 
 /** Structured daemon diagnostics delivered to the Tauri WebView console.
@@ -413,6 +581,20 @@ export interface SessionCompactedEvent {
   beforeMessages: number;
   afterMessages: number;
   reason: "user" | "auto-context-pressure";
+  replacementMessages: LoadedMessage[];
+}
+
+/** A retry, rewind, or abort-discard replaced the live conversation. The
+ *  replacement uses the same LoadedMessage wire shape as session loading and
+ *  compaction, while retaining the edit reason for consumers that need it. */
+export interface SessionRetractedEvent {
+  type: "session.retracted";
+  id: number;
+  ts: string;
+  turn: number;
+  kind: "retry" | "rewind" | "abort-discard";
+  beforeMessages: number;
+  afterMessages: number;
   replacementMessages: LoadedMessage[];
 }
 

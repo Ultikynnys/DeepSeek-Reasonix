@@ -1,14 +1,4 @@
-import {
-  ANTIGRAVITY_MODELS,
-  GPT56_MODELS,
-  OPENCODE_MODELS,
-  SUPPORTED_OFFICIAL_MODELS,
-  ZAI_MODELS,
-  isAntigravityModel,
-  isUsableAntigravityModel,
-  modelAcceptsImages,
-  modelDisplayName,
-} from "@reasonix/core-utils";
+import { modelDisplayName } from "@reasonix/core-utils";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   type ChangeEvent,
@@ -25,6 +15,7 @@ import type { QueuedSend } from "../App";
 import { type TKey, t } from "../i18n";
 import { I } from "../icons";
 import { isImagePath, resolveImagePath } from "../image-attach";
+import { MODEL_CATALOG_GROUP_LABELS, deriveModelCatalog } from "../model-catalog";
 import type { EditMode, ReasoningEffort, UserImageAttachment } from "../protocol";
 import { AudioRecorder } from "../voice/audio-recorder";
 import { getSelectedAudioInputDeviceId } from "../voice/device";
@@ -109,6 +100,7 @@ export function Composer({
   onRefreshAntigravityModels,
   opencodeModels,
   opencodeModelsError,
+  opencodeVisionModels,
   onRefreshOpencodeModels,
   customModels,
   disabledModels,
@@ -165,6 +157,7 @@ export function Composer({
   onRefreshAntigravityModels?: () => void;
   opencodeModels?: string[];
   opencodeModelsError?: string;
+  opencodeVisionModels?: ReadonlySet<string>;
   onRefreshOpencodeModels?: (force?: boolean) => void;
   /** Ids with an explicit `models` provider mapping in config.json — offered
    *  in the general list because the user declared them. */
@@ -463,6 +456,7 @@ export function Composer({
     antigravityModelsError,
     opencodeModels,
     opencodeModelsError,
+    opencodeVisionModels,
     customModels,
     disabledModels,
     onRefreshOllamaModels,
@@ -815,6 +809,7 @@ function ModelList({
   antigravityModelsError,
   opencodeModels,
   opencodeModelsError,
+  opencodeVisionModels,
   customModels,
   disabledModels,
   onRefreshOllamaModels,
@@ -831,6 +826,7 @@ function ModelList({
   antigravityModelsError?: string;
   opencodeModels?: string[];
   opencodeModelsError?: string;
+  opencodeVisionModels?: ReadonlySet<string>;
   /** Ids with an explicit `models` provider mapping — user-declared, so offered. */
   customModels?: string[];
   /** Model ids hidden from every picker. The active model always stays visible. */
@@ -840,37 +836,20 @@ function ModelList({
   onRefreshOpencodeModels?: (force?: boolean) => void;
 }) {
   const [draft, setDraft] = useState(activeModel);
-  const hasAntigravityEvidence =
-    Boolean(antigravityModels) || Boolean(customModels?.some(isAntigravityModel));
-  const usableAntigravityModels = hasAntigravityEvidence
-    ? Array.from(
-        new Set([
-          ...(antigravityModels?.filter(isUsableAntigravityModel) ?? []),
-          ...ANTIGRAVITY_MODELS,
-          ...(customModels?.filter(isAntigravityModel) ?? []),
-        ]),
-      )
-    : undefined;
-  const antigravityGroup = Boolean(usableAntigravityModels && usableAntigravityModels.length > 0);
+  const catalog = deriveModelCatalog({
+    discoveredAntigravityModels: antigravityModels,
+    customModels,
+    opencodeModels,
+    includeAntigravity: Boolean(antigravityModels),
+    ollamaVisionModels,
+    opencodeVisionModels,
+  });
   const ollamaGroup = Boolean(ollamaModels && ollamaModels.length > 0);
-
-  const antigravitySet = new Set(usableAntigravityModels ?? []);
-  const knownSet = new Set([
-    ...SUPPORTED_OFFICIAL_MODELS,
-    ...GPT56_MODELS,
-    ...ZAI_MODELS,
-    ...OPENCODE_MODELS,
-    ...(usableAntigravityModels ?? []),
-  ]);
-  const filteredCustomModels = (customModels ?? []).filter(
-    (id) => !knownSet.has(id) && !antigravitySet.has(id) && !isAntigravityModel(id),
-  );
 
   // Global hide list from Settings → Models. The active model always stays
   // visible so a hidden-but-selected tab can never strand itself.
   const hiddenSet = new Set(disabledModels ?? []);
-  const visibleUnlessActive = (id: string): boolean =>
-    id === activeModel || !hiddenSet.has(id);
+  const visibleUnlessActive = (id: string): boolean => id === activeModel || !hiddenSet.has(id);
 
   type GroupDef = {
     key: string;
@@ -884,51 +863,39 @@ function ModelList({
   };
 
   const groups: GroupDef[] = [
-    {
-      key: "deepseek",
-      title: t("composer.modelDeepSeekGroup"),
-      models: SUPPORTED_OFFICIAL_MODELS,
-    },
-    {
-      key: "openai",
-      title: t("composer.modelOpenAIGroup"),
-      models: GPT56_MODELS,
-    },
-    {
-      key: "zai",
-      title: t("composer.modelZaiGroup"),
-      models: ZAI_MODELS,
-    },
-    {
-      key: "opencode",
-      title: t("composer.modelOpencodeGroup"),
-      models: opencodeModels && opencodeModels.length > 0 ? opencodeModels : OPENCODE_MODELS,
-      refresh: onRefreshOpencodeModels ? () => onRefreshOpencodeModels(true) : undefined,
-      refreshTitle: t("composer.modelOpencodeRefresh"),
-      error: opencodeModelsError
-        ? t("composer.modelOpencodeError", { error: opencodeModelsError })
-        : undefined,
-    },
-    ...(filteredCustomModels.length > 0
-      ? [
-          {
-            key: "custom",
-            title: t("composer.modelCustomGroup"),
-            models: filteredCustomModels,
-          },
-        ]
-      : []),
-    ...(antigravityGroup || antigravityModelsError
+    ...catalog.groups.map(
+      (group): GroupDef => ({
+        ...group,
+        title: t(MODEL_CATALOG_GROUP_LABELS[group.key]),
+        ...(group.key === "opencode"
+          ? {
+              refresh: onRefreshOpencodeModels ? () => onRefreshOpencodeModels(true) : undefined,
+              refreshTitle: t("composer.modelOpencodeRefresh"),
+              error: opencodeModelsError
+                ? t("composer.modelOpencodeError", { error: opencodeModelsError })
+                : undefined,
+            }
+          : {}),
+        ...(group.key === "antigravity"
+          ? {
+              refresh: onRefreshAntigravityModels,
+              refreshTitle: t("composer.modelAntigravityRefresh"),
+              error: antigravityModelsError
+                ? t("composer.modelAntigravityError", { error: antigravityModelsError })
+                : undefined,
+            }
+          : {}),
+      }),
+    ),
+    ...(!catalog.groups.some((group) => group.key === "antigravity") && antigravityModelsError
       ? [
           {
             key: "antigravity",
             title: t("composer.modelAntigravityGroup"),
-            models: usableAntigravityModels ?? [],
+            models: [],
             refresh: onRefreshAntigravityModels,
             refreshTitle: t("composer.modelAntigravityRefresh"),
-            error: antigravityModelsError
-              ? t("composer.modelAntigravityError", { error: antigravityModelsError })
-              : undefined,
+            error: t("composer.modelAntigravityError", { error: antigravityModelsError }),
           },
         ]
       : []),
@@ -1004,9 +971,7 @@ function ModelList({
                 <div className="nm">
                   <span className="cmd">{modelDisplayName(model)}</span>
                 </div>
-                {modelAcceptsImages(model, ollamaVisionModels) ? (
-                  <span className="badge">vision</span>
-                ) : null}
+                {catalog.acceptsImages(model) ? <span className="badge">vision</span> : null}
               </div>
             ))}
           </Fragment>

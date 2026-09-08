@@ -1,15 +1,28 @@
 /** Event-log kernel types. Every transition is an appended Event; every view is a pure reducer projection (no I/O). */
 
+import type {
+  KernelCompactionFinishedEvent,
+  KernelCompactionStartedEvent,
+  KernelErrorEvent,
+  KernelModelDeltaEvent,
+  KernelModelFinalEvent,
+  KernelModelTurnStartedEvent,
+  KernelStatusEvent,
+  KernelSubagentProgressEvent,
+  KernelToolIntentEvent,
+  KernelToolOutputEvent,
+  KernelToolPreparingEvent,
+  KernelToolResultEvent,
+  KernelUserMessageEvent,
+  KernelWarningEvent,
+  KernelWireEventBase,
+} from "@reasonix/core-utils";
 import type { PlanStep, PlanStepRisk, StepCompletion } from "../tools/plan-types.js";
-import type { ChatMessage, RawUsage, ToolCall } from "../types.js";
+import type { ChatMessage } from "../types.js";
 
 export type EventId = number;
 
-export interface EventBase {
-  id: EventId;
-  ts: string;
-  turn: number;
-}
+export interface EventBase extends KernelWireEventBase {}
 
 /** Event type-name constants — emit sites (eventize.ts), reducer cases, and the desktop bridge reference these instead of restating literals. */
 export const EventType = {
@@ -49,9 +62,7 @@ export const EventType = {
   warning: "warning",
 } as const;
 
-export interface UserMessageEvent extends EventBase {
-  type: typeof EventType.userMessage;
-  text: string;
+export interface UserMessageEvent extends KernelUserMessageEvent {
   attachments?: ReadonlyArray<{ kind: "file" | "url"; ref: string }>;
 }
 
@@ -61,48 +72,17 @@ export interface SlashInvokedEvent extends EventBase {
   args: string;
 }
 
-export interface ModelTurnStartedEvent extends EventBase {
-  type: typeof EventType.modelTurnStarted;
-  model: string;
-  reasoningEffort: import("../config.js").ReasoningEffort;
-  prefixHash: string;
-}
+export interface ModelTurnStartedEvent extends KernelModelTurnStartedEvent {}
 
-export interface ModelDeltaEvent extends EventBase {
-  type: typeof EventType.modelDelta;
-  channel: "content" | "reasoning" | "tool_args";
-  text: string;
+export interface ModelDeltaEvent extends KernelModelDeltaEvent {
   toolCallIndex?: number;
 }
 
-export interface ModelFinalEvent extends EventBase {
-  type: typeof EventType.modelFinal;
-  content: string;
-  reasoningContent?: string;
-  /** Replace streamed content/reasoning with this authoritative final snapshot. */
-  replaceStreamedOutput?: boolean;
-  toolCalls: ReadonlyArray<ToolCall>;
-  usage: RawUsage;
-  costUsd: number;
-  /** True iff this was the no-tools wrap-up after budget / abort / context guard. */
-  forcedSummary?: boolean;
-  /** Model-generated image (assistant image output) — data URL + mime. */
-  image?: { dataUrl: string; mimeType: string };
-}
+export interface ModelFinalEvent extends KernelModelFinalEvent {}
 
-export interface ToolPreparingEvent extends EventBase {
-  type: typeof EventType.toolPreparing;
-  callId: string;
-  name: string;
-}
+export interface ToolPreparingEvent extends KernelToolPreparingEvent {}
 
-export interface ToolIntentEvent extends EventBase {
-  type: typeof EventType.toolIntent;
-  callId: string;
-  name: string;
-  /** JSON string exactly as the model emitted it. */
-  args: string;
-}
+export interface ToolIntentEvent extends KernelToolIntentEvent {}
 
 export interface ToolDispatchedEvent extends EventBase {
   type: typeof EventType.toolDispatched;
@@ -115,11 +95,7 @@ export interface ToolDeniedEvent extends EventBase {
   reason: "permission" | "budget" | "policy" | "hook";
 }
 
-export interface ToolResultEvent extends EventBase {
-  type: typeof EventType.toolResult;
-  callId: string;
-  ok: boolean;
-  output: string;
+export interface ToolResultEvent extends KernelToolResultEvent {
   truncated?: boolean;
   durationMs: number;
 }
@@ -133,49 +109,10 @@ export interface ToolCallEvent extends EventBase {
 /** Transient incremental stdout/stderr of a blocking shell tool call. Never
  *  persisted; fills the gap between dispatch and settle. The authoritative
  *  full output arrives on the matching `tool.result`. */
-export interface ToolOutputEvent extends EventBase {
-  type: typeof EventType.toolOutput;
-  /** Wire call id of the running tool call (loop id already mapped). */
-  callId: string;
-  name: string;
-  /** Incremental decoded stdout+stderr text since the previous event for this call. */
-  text: string;
-}
+export interface ToolOutputEvent extends KernelToolOutputEvent {}
 
 /** Sanitized, transient child-agent activity. Raw child output and reasoning never enter this event. */
-export interface SubagentProgressEvent extends EventBase {
-  type: typeof EventType.subagentProgress;
-  runId: string;
-  parentCallId?: string;
-  action: "start" | "phase" | "stream" | "tool-start" | "tool-end" | "end";
-  task: string;
-  skillName?: string;
-  model?: string;
-  phase?: "exploring" | "summarising";
-  iter?: number;
-  elapsedMs?: number;
-  /** Latest prompt size reported by the child model call. */
-  contextTokens?: number;
-  outputChars?: number;
-  reasoningChars?: number;
-  toolReadChars?: number;
-  thought?: string;
-  childCallId?: string;
-  toolName?: string;
-  /** Redacted and bounded JSON arguments; never includes a tool result body. */
-  toolArgs?: string;
-  toolOk?: boolean;
-  error?: string;
-  turns?: number;
-  costUsd?: number;
-  /** "usd" = token-priced cost, "quota" = provider plan window %, "none" = unmeasurable. */
-  billingKind?: "usd" | "quota" | "none";
-  /** Percent points of the provider plan window consumed by this run, when measurable. */
-  quotaUsedPct?: number;
-  maxToolIters?: number;
-  maxElapsedMs?: number;
-  budgetExhausted?: "tool-iters" | "elapsed";
-}
+export interface SubagentProgressEvent extends KernelSubagentProgressEvent {}
 
 export interface ToolConfirmAllowEvent extends EventBase {
   type: typeof EventType.toolConfirmAllow;
@@ -269,39 +206,9 @@ export interface SessionRetractedEvent extends EventBase {
   replacementMessages: ReadonlyArray<ChatMessage>;
 }
 
-export interface CompactionStartedEvent extends EventBase {
-  type: typeof EventType.compactionStarted;
-  /** Stable id pairing start with its finished event — the UI keys the card by it. */
-  compactionId: string;
-  reason: "user" | "auto-context-pressure";
-  /** What kind of compaction runs — "fold" (head folded into a summary message) vs
-   *  "force-summary" (log trimmed + summarized in place under the context guard). */
-  kind?: "fold" | "force-summary";
-  /** True when the fold is in the 70-85% aggressive band — user-facing messaging. */
-  aggressive?: boolean;
-}
+export interface CompactionStartedEvent extends KernelCompactionStartedEvent {}
 
-export interface CompactionFinishedEvent extends EventBase {
-  type: typeof EventType.compactionFinished;
-  /** Same compactionId as the matching started event. */
-  compactionId: string;
-  /** What kind of compaction ran — see CompactionStartedEvent.kind. */
-  kind?: "fold" | "force-summary";
-  folded: boolean;
-  beforeMessages: number;
-  afterMessages: number;
-  summaryChars: number;
-  /** The synthesized summary text — lets the card render the recap inline. */
-  summary?: string;
-  /** Why the fold didn't happen, when the summarizer failed (timeout / API error). */
-  error?: string;
-  /** Advisory warning on a successful fold — e.g. file triage failed, nothing dropped. */
-  warn?: string;
-  /** Unique file paths whose read results were pruned by the fold's prune step. */
-  prunedFiles?: number;
-  /** Tokens saved by the prune step. */
-  prunedTokens?: number;
-}
+export interface CompactionFinishedEvent extends KernelCompactionFinishedEvent {}
 
 export interface CapabilityRegisteredEvent extends EventBase {
   type: typeof EventType.capabilityRegistered;
@@ -315,15 +222,9 @@ export interface CapabilityRemovedEvent extends EventBase {
 }
 
 /** Transient — never persisted, drops on next primary event. */
-export interface StatusEvent extends EventBase {
-  type: typeof EventType.status;
-  text: string;
-}
+export interface StatusEvent extends KernelStatusEvent {}
 
-export interface ErrorEvent extends EventBase {
-  type: typeof EventType.error;
-  message: string;
-  recoverable: boolean;
+export interface ErrorEvent extends KernelErrorEvent {
   name?: string;
   code?: string;
   phase?: string;
@@ -333,11 +234,7 @@ export interface ErrorEvent extends EventBase {
 /** Non-fatal system event surfaced to UIs as a quiet inline divider — compaction,
  *  rate-limit pause, user-aborted iter, storm-stuck interrupt, etc. Carries a
  *  severity so noisy/self-correcting warnings can be filtered out by the surface. */
-export interface WarningEvent extends EventBase {
-  type: typeof EventType.warning;
-  text: string;
-  severity: "low" | "high";
-}
+export interface WarningEvent extends KernelWarningEvent {}
 
 export type Event =
   | UserMessageEvent

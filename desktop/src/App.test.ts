@@ -292,26 +292,55 @@ describe("Desktop App reducer — usage", () => {
 
     // Turn 1 completes cleanly.
     act({ t: "send_user", text: "first", clientId: "c-1" });
-    inc({ type: "model.turn.started", id: 1, ts: "t", turn: 1, model: "m", reasoningEffort: "medium", prefixHash: "h" });
+    inc({
+      type: "model.turn.started",
+      id: 1,
+      ts: "t",
+      turn: 1,
+      model: "m",
+      reasoningEffort: "medium",
+      prefixHash: "h",
+    });
     inc({ type: "model.delta", id: 2, ts: "t", turn: 1, channel: "content", text: "hello" });
     inc({ type: "model.final", id: 3, ts: "t", turn: 1, content: "hello", usage: null });
     inc({ type: "$turn_complete", ts: "t" });
 
     // Turn 2 starts streaming (assistant-2 is the active/pending card).
     act({ t: "send_user", text: "second", clientId: "c-2" });
-    inc({ type: "model.turn.started", id: 4, ts: "t", turn: 2, model: "m", reasoningEffort: "medium", prefixHash: "h" });
+    inc({
+      type: "model.turn.started",
+      id: 4,
+      ts: "t",
+      turn: 2,
+      model: "m",
+      reasoningEffort: "medium",
+      prefixHash: "h",
+    });
     inc({ type: "model.delta", id: 5, ts: "t", turn: 2, channel: "content", text: "streaming" });
     expect(labels(s.messages)).toEqual(["user-1", "assistant-1", "user-2", "assistant-2(pending)"]);
 
     // A mid-turn notice must slot ABOVE the active card, never below it —
     // the active (streaming) card stays newest on the timeline.
     act({ t: "push_notice", text: "Model → deepseek-v4-flash", severity: "info" });
-    expect(labels(s.messages)).toEqual(["user-1", "assistant-1", "user-2", "info-2", "assistant-2(pending)"]);
+    expect(labels(s.messages)).toEqual([
+      "user-1",
+      "assistant-1",
+      "user-2",
+      "info-2",
+      "assistant-2(pending)",
+    ]);
 
     // The 429 error for the current turn settles the streaming card and lands
     // at the end of turn 2 (its owning turn), not as a fresh bottom entry.
     inc({ type: "error", id: 6, ts: "t", turn: 2, message: "429 rate limit", recoverable: false });
-    expect(labels(s.messages)).toEqual(["user-1", "assistant-1", "user-2", "info-2", "assistant-2", "error-2"]);
+    expect(labels(s.messages)).toEqual([
+      "user-1",
+      "assistant-1",
+      "user-2",
+      "info-2",
+      "assistant-2",
+      "error-2",
+    ]);
   });
 
   it("settles every unresolved tool card when the conversation stops", () => {
@@ -1158,6 +1187,46 @@ describe("Desktop App reducer — compaction file triage", () => {
     // The live chat transcript is preserved with its compaction card in place.
     expect(next.messages).toEqual(base.messages);
     // Files re-derived from the post-fold log, marker drops applied.
+    expect(next.sessionFiles).toEqual([{ path: "src/keep.ts", status: "c" }]);
+  });
+
+  it("session.retracted replaces the transcript and re-derives files", () => {
+    const base = {
+      ...initialState(),
+      messages: [{ kind: "user" as const, text: "stale", clientId: "1", turn: 1 }],
+      sessionFiles: [{ path: "src/stale.ts", status: "c" as const }],
+    };
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "session.retracted",
+        id: 3,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 2,
+        kind: "retry",
+        beforeMessages: 4,
+        afterMessages: 2,
+        replacementMessages: [
+          { kind: "user", text: "kept" },
+          {
+            kind: "assistant",
+            turn: 1,
+            segments: [
+              {
+                kind: "tool",
+                callId: "c1",
+                name: "read_file",
+                args: JSON.stringify({ path: "src/keep.ts" }),
+              },
+            ],
+            pending: false,
+          },
+        ],
+      },
+    });
+
+    expect(next.messages).toHaveLength(2);
+    expect(next.messages[0]).toMatchObject({ kind: "user", text: "kept", turn: 1 });
     expect(next.sessionFiles).toEqual([{ path: "src/keep.ts", status: "c" }]);
   });
 });

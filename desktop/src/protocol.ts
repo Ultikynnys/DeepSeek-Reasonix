@@ -17,15 +17,31 @@ import type {
   ChoiceVerdict,
   CodexQuota,
   CodexQuotaEvent,
-  ConnectedEvent,
   ConfirmRequiredEvent,
   ConfirmationChoice,
+  ConnectedEvent,
   CtxBreakdownEvent,
   DesktopDiagnosticEvent,
   DesktopDiagnosticLevel,
+  DirectKernelWireEvent,
   EditMode,
   JobInfo,
   JobsEvent,
+  KernelCompactionFinishedEvent,
+  KernelCompactionStartedEvent,
+  KernelModelDeltaEvent,
+  KernelModelFinalEvent,
+  KernelModelTurnStartedEvent,
+  KernelStatusEvent,
+  KernelSubagentProgressEvent,
+  KernelToolIntentEvent,
+  KernelToolOutputEvent,
+  KernelToolPreparingEvent,
+  KernelToolResultEvent,
+  KernelUsage,
+  KernelUserMessageEvent,
+  KernelWarningEvent,
+  KernelWireToolCall,
   LoadedMessage,
   LoadedSegment,
   McpSpecInfo,
@@ -41,9 +57,9 @@ import type {
   MentionPreviewEvent,
   MentionResultsEvent,
   ModelEndpointInfo,
+  NeedsSetupEvent,
   OllamaGenerationPatch,
   OllamaGenerationSettings,
-  NeedsSetupEvent,
   OllamaModelsEvent,
   OllamaQuota,
   OllamaQuotaEvent,
@@ -56,6 +72,7 @@ import type {
   PlanStep,
   PlanVerdict,
   ProtocolErrorEvent,
+  QuickSend,
   ReadyEvent,
   ReasoningEffort,
   RetryResultEvent,
@@ -64,10 +81,12 @@ import type {
   SessionCompactedEvent,
   SessionEmptyEvent,
   SessionLoadedEvent,
+  SessionProviderCost,
+  SessionRetractedEvent,
   SessionsEvent,
   SettingsEvent,
   SettingsPatch,
-  SessionProviderCost,
+  KernelErrorEvent as SharedKernelErrorEvent,
   SkillInfo,
   SkillScope,
   SkillsEvent,
@@ -77,7 +96,6 @@ import type {
   TabsSnapshotEvent,
   TurnCompleteEvent,
   UserImageAttachment,
-  QuickSend,
   WebSearchEngineName,
 } from "@reasonix/core-utils";
 import { invoke } from "@tauri-apps/api/core";
@@ -152,6 +170,7 @@ export type {
   SessionCompactedEvent,
   SessionEmptyEvent,
   SessionLoadedEvent,
+  SessionRetractedEvent,
   SessionsEvent,
   SettingsEvent,
   SettingsPatch,
@@ -171,211 +190,24 @@ export type {
 /** Legacy alias for the memory-browser name (context-panel imports it). */
 export type MemoryDetail = MemoryEntryDetail;
 
-// ---- kernel-event projections (daemon source of truth: src/core/events.ts) ----
+// ---- kernel events shared with the daemon ----
 
-export type UserMessageEvent = {
-  type: "user.message";
-  id: number;
-  ts: string;
-  turn: number;
-  text: string;
-};
-
-export type ModelTurnStartedEvent = {
-  type: "model.turn.started";
-  id: number;
-  ts: string;
-  turn: number;
-  model: string;
-  reasoningEffort: ReasoningEffort;
-  prefixHash: string;
-};
-
-export type ModelDeltaEvent = {
-  type: "model.delta";
-  id: number;
-  ts: string;
-  turn: number;
-  channel: "content" | "reasoning" | "tool_args";
-  text: string;
-};
-
-export type Usage = {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-  prompt_cache_hit_tokens?: number;
-  prompt_cache_miss_tokens?: number;
-};
-
-/** Mirror of the daemon's ToolCall (src/types.ts) — rides model.final. */
-export type WireToolCall = {
-  id?: string;
-  type?: "function";
-  function: {
-    name: string;
-    arguments: string;
-  };
-};
-
-export type ModelFinalEvent = {
-  type: "model.final";
-  id: number;
-  ts: string;
-  turn: number;
-  content: string;
-  reasoningContent?: string;
-  /** Replace streamed content/reasoning with this authoritative final snapshot. */
-  replaceStreamedOutput?: boolean;
-  toolCalls: ReadonlyArray<WireToolCall>;
-  usage: Usage;
-  costUsd: number;
-  /** True iff this was the no-tools wrap-up after budget / abort / context guard. */
-  forcedSummary?: boolean;
-  /** Model-generated image (assistant image output) — data URL + mime. */
-  image?: { dataUrl: string; mimeType: string };
-};
-
-export type ToolPreparingEvent = {
-  type: "tool.preparing";
-  id: number;
-  ts: string;
-  turn: number;
-  callId: string;
-  name: string;
-};
-
-export type ToolIntentEvent = {
-  type: "tool.intent";
-  id: number;
-  ts: string;
-  turn: number;
-  callId: string;
-  name: string;
-  args: string;
-};
-
-export type ToolResultEvent = {
-  type: "tool.result";
-  id: number;
-  ts: string;
-  turn: number;
-  callId: string;
-  ok: boolean;
-  output: string;
-};
-
-export type ToolOutputEvent = {
-  type: "tool.output";
-  id: number;
-  ts: string;
-  turn: number;
-  /** Wire call id of the running tool call — attaches rows to the exact segment. */
-  callId: string;
-  name: string;
-  /** Incremental decoded stdout+stderr since the previous event for this call. */
-  text: string;
-};
-
-export type SubagentProgressEvent = {
-  type: "subagent.progress";
-  id: number;
-  ts: string;
-  turn: number;
-  runId: string;
-  parentCallId?: string;
-  action: "start" | "phase" | "stream" | "tool-start" | "tool-end" | "end";
-  task: string;
-  skillName?: string;
-  model?: string;
-  phase?: "exploring" | "summarising";
-  iter?: number;
-  elapsedMs?: number;
-  contextTokens?: number;
-  outputChars?: number;
-  reasoningChars?: number;
-  toolReadChars?: number;
-  thought?: string;
-  childCallId?: string;
-  toolName?: string;
-  toolArgs?: string;
-  toolOk?: boolean;
-  error?: string;
-  turns?: number;
-  costUsd?: number;
-  billingKind?: "usd" | "quota" | "none";
-  quotaUsedPct?: number;
-  maxToolIters?: number;
-  maxElapsedMs?: number;
-  budgetExhausted?: "tool-iters" | "elapsed";
-};
-
-export type StatusEvent = {
-  type: "status";
-  id: number;
-  ts: string;
-  turn: number;
-  text: string;
-};
-
-export type CompactionStartedEvent = {
-  type: "compaction.started";
-  id: number;
-  ts: string;
-  turn: number;
-  /** Stable id pairing start with its finished event — the UI keys the card by it. */
-  compactionId: string;
-  reason: "user" | "auto-context-pressure";
-  /** "fold" = head folded into a summary message; "force-summary" = context-guard / stuck trim + summarize in place. */
-  kind?: "fold" | "force-summary";
-  aggressive?: boolean;
-};
-
-export type CompactionFinishedEvent = {
-  type: "compaction.finished";
-  id: number;
-  ts: string;
-  turn: number;
-  /** Same compactionId as the matching started event. */
-  compactionId: string;
-  /** "fold" = head folded into a summary message; "force-summary" = context-guard / stuck trim + summarize in place. */
-  kind?: "fold" | "force-summary";
-  folded: boolean;
-  beforeMessages: number;
-  afterMessages: number;
-  summaryChars: number;
-  /** The synthesized summary text — lets the card render the recap inline. */
-  summary?: string;
-  /** Why the fold didn't happen, when the summarizer failed (timeout / API error). */
-  error?: string;
-  /** Advisory warning on a successful fold — e.g. file triage failed, nothing dropped. */
-  warn?: string;
-  /** Unique file paths whose read results were pruned by the fold's prune step. */
-  prunedFiles?: number;
-  /** Tokens saved by the prune step. */
-  prunedTokens?: number;
-  /** File paths the fold's triage step classified as no longer relevant — the
-   *  "Files in context" panel drops them. */
-  droppedFiles?: string[];
-};
-
-export type WarningEvent = {
-  type: "warning";
-  id: number;
-  ts: string;
-  turn: number;
-  text: string;
-  severity: "low" | "high";
-};
-
-export type KernelErrorEvent = {
-  type: "error";
-  id: number;
-  ts: string;
-  turn: number;
-  message: string;
-  recoverable: boolean;
-};
+export type UserMessageEvent = KernelUserMessageEvent;
+export type ModelTurnStartedEvent = KernelModelTurnStartedEvent;
+export type ModelDeltaEvent = KernelModelDeltaEvent;
+export type Usage = KernelUsage;
+export type WireToolCall = KernelWireToolCall;
+export type ModelFinalEvent = KernelModelFinalEvent;
+export type ToolPreparingEvent = KernelToolPreparingEvent;
+export type ToolIntentEvent = KernelToolIntentEvent;
+export type ToolResultEvent = KernelToolResultEvent;
+export type ToolOutputEvent = KernelToolOutputEvent;
+export type SubagentProgressEvent = KernelSubagentProgressEvent;
+export type StatusEvent = KernelStatusEvent;
+export type CompactionStartedEvent = KernelCompactionStartedEvent;
+export type CompactionFinishedEvent = KernelCompactionFinishedEvent;
+export type WarningEvent = KernelWarningEvent;
+export type KernelErrorEvent = SharedKernelErrorEvent;
 
 export type IncomingEvent = { tabId?: string } & (
   | ConnectedEvent
@@ -416,20 +248,9 @@ export type IncomingEvent = { tabId?: string } & (
   | MemoryResultEvent
   | MemoryExportEvent
   | JobsEvent
-  | UserMessageEvent
-  | ModelTurnStartedEvent
-  | ModelDeltaEvent
-  | ModelFinalEvent
-  | ToolPreparingEvent
-  | ToolIntentEvent
-  | ToolResultEvent
-  | ToolOutputEvent
-  | SubagentProgressEvent
-  | StatusEvent
-  | CompactionStartedEvent
-  | CompactionFinishedEvent
-  | WarningEvent
-  | KernelErrorEvent
+  | DirectKernelWireEvent
+  | SessionCompactedEvent
+  | SessionRetractedEvent
   | RetryResultEvent
   | BtwResultEvent
   | { type: "oauth_begin_result"; url: string }

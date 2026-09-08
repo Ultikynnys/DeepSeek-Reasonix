@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_VOICE_MODEL_ID,
   VOICE_MODELS,
+  cacheRequestBelongsToModel,
   deleteVoiceModelCache,
   getActiveVoiceModelId,
   getVoiceModelOption,
@@ -52,6 +53,28 @@ describe("Voice Models Registry", () => {
     // Fallback for unknown id
     const unknown = getVoiceModelOption("unknown-model");
     expect(unknown.id).toBe("whisper-tiny.en");
+  });
+
+  it("uses one cache-request identity rule for repo and model ids", () => {
+    const model = getVoiceModelOption("Xenova/whisper-base.en");
+    expect(
+      cacheRequestBelongsToModel(
+        new Request(`https://huggingface.co/${model.repoId}/resolve/main/encoder_model.onnx`),
+        model,
+      ),
+    ).toBe(true);
+    expect(
+      cacheRequestBelongsToModel(
+        new Request(`https://cache.invalid/${model.id}/decoder_model.onnx`),
+        model,
+      ),
+    ).toBe(true);
+    expect(
+      cacheRequestBelongsToModel(
+        new Request("https://cache.invalid/another-model/encoder_model.onnx"),
+        model,
+      ),
+    ).toBe(false);
   });
 
   it("tracks and clears download state for remote models", async () => {

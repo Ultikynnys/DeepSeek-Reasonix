@@ -1,5 +1,6 @@
 /** Pillar invariants — promoted from spike-fork-prefix-rebuild Exp 1 to permanent regression. */
 
+import type { DirectKernelWireEvent } from "@reasonix/core-utils";
 import { describe, expect, it } from "vitest";
 import { type EventizeContext, Eventizer } from "../src/core/eventize.js";
 import type { Event } from "../src/core/events.js";
@@ -46,6 +47,35 @@ function buildSession(turns: number, toolsPerTurn: (t: number) => number): LoopE
   }
   return out;
 }
+
+type ForwardedKernelEvent = Extract<Event, { type: DirectKernelWireEvent["type"] }>;
+const _kernelWireContract: ForwardedKernelEvent extends DirectKernelWireEvent ? true : never = true;
+void _kernelWireContract;
+
+describe("Pillar 1 — shared kernel wire contract", () => {
+  it("keeps compaction file-triage results in the authoritative event shape", () => {
+    const event = new Eventizer()
+      .consume(
+        {
+          turn: 1,
+          role: "compaction_end",
+          compactionId: "fold-1",
+          folded: true,
+          beforeMessages: 10,
+          afterMessages: 2,
+          summaryChars: 100,
+          droppedFiles: ["src/old.ts"],
+        } as LoopEvent,
+        ctx,
+      )
+      .find((candidate) => candidate.type === "compaction.finished");
+
+    expect(event).toMatchObject({
+      type: "compaction.finished",
+      droppedFiles: ["src/old.ts"],
+    });
+  });
+});
 
 describe("Pillar 1 — ImmutablePrefix.fingerprint determinism", () => {
   it("same {system, tools, fewShots} inputs yield byte-identical fingerprint", () => {
