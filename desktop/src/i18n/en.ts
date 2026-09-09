@@ -556,6 +556,9 @@ export const en = {
     jobsTip: "Background processes · ⌘J",
     cacheHit: "cache hit",
     cache: "cache",
+    outputSaved: "saved",
+    outputSavedTip:
+      "Shell output filtering: {pct}% of command-output tokens removed before reaching the model ({saved} of {raw} tokens, all sessions)",
     tokens: "tokens",
     thisTurn: "this turn",
     switchWorkspace: "Switch workspace · {workspace}",

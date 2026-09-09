@@ -345,6 +345,10 @@ export type UsageStats = {
   liveLogTokens: number;
   /** Model context cap — meter denominator + compaction-limit ticks. */
   ctxMax?: number;
+  /** Cumulative cross-session shell-output filtering totals — the statusbar "saved"
+   *  chip's numerator source. Undefined = no telemetry yet, chip hidden. */
+  shellOutputRawTokens?: number;
+  shellOutputShownTokens?: number;
 };
 
 export type SessionInfo = {
@@ -1660,6 +1664,11 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       if (typeof ev.ctxMax === "number") {
         next.ctxMax = ev.ctxMax;
       }
+      // The shell-output totals arrive as a pair (or not at all — no telemetry).
+      if (typeof ev.shellOutputRawTokens === "number") {
+        next.shellOutputRawTokens = ev.shellOutputRawTokens;
+        next.shellOutputShownTokens = ev.shellOutputShownTokens ?? 0;
+      }
       return { ...state, usage: next };
     }
     case "$memory":
@@ -1809,6 +1818,10 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           totalCompletionTokens: ev.carryover.totalCompletionTokens ?? 0,
           cacheHitTokens: ev.carryover.cacheHitTokens,
           cacheMissTokens: ev.carryover.cacheMissTokens,
+          // The filtering totals are cross-session and tab-lifetime — a session
+          // switch must not blank the statusbar chip.
+          shellOutputRawTokens: state.usage.shellOutputRawTokens,
+          shellOutputShownTokens: state.usage.shellOutputShownTokens,
         },
         sessionFiles,
         activeSkill: null,
@@ -1918,6 +1931,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         lastCallCacheMiss: hasCall ? callMiss : state.usage.lastCallCacheMiss,
         reservedTokens: state.usage.reservedTokens,
         liveLogTokens: state.usage.liveLogTokens,
+        // Cumulative totals are tab-lifetime, not per-turn — carry them through the rebuild.
+        shellOutputRawTokens: state.usage.shellOutputRawTokens,
+        shellOutputShownTokens: state.usage.shellOutputShownTokens,
       };
       return {
         ...state,

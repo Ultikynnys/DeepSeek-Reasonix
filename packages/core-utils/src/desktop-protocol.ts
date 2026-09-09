@@ -456,6 +456,11 @@ export interface CtxBreakdownEvent {
   logTokens?: number;
   /** Model context cap — denominator + compaction-limit ticks for the meter. */
   ctxMax?: number;
+  /** Cumulative cross-session shell-output filtering totals (summarizeCommandOutputMetrics):
+   *  tokens the filters removed from command output before it reached the model. Omitted
+   *  when telemetry is absent or the summary is unavailable — the UI shows no chip. */
+  shellOutputRawTokens?: number;
+  shellOutputShownTokens?: number;
 }
 
 export type MemoryEntryKind = "project_file" | "global_file" | "structured";

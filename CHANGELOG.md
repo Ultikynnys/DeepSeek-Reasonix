@@ -5,6 +5,14 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed — the statusbar tokens chip scales its unit with magnitude instead of pinning to kilo.**
+
+- The chip divided every value by 1000 with a fixed `k` suffix, so a 66.9M-token cumulative total rendered as the unreadable `66851.1k`. The adaptive formatter already existed for the subagent card's `ctx` labels (`66.9m` / `12.3k` / `999`); it is now extracted into a shared `ui/format.ts` module and used by the statusbar tokens chip too, so both surfaces agree and no token display can pin to kilo again.
+
+**Added — the statusbar shows the shell-output filtering savings as a percentage next to the cache-hit percentage.**
+
+- The semantic output filters have been reducing command output before it reaches the model since 0.53.267, with per-command telemetry (raw vs shown tokens) accumulating in `~/.reasonix/telemetry/command-output.jsonl` — but nothing displayed it. The `$ctx_breakdown` event now carries the cumulative cross-session totals (mtime-cached: one `stat` per refresh, re-summarized only when the file changed), and a new statusbar chip next to `cache 74%` reads `saved 38%` — the share of command-output tokens the filters removed across all sessions. The tooltip gives the absolute numbers ("19,000 of 50,000 tokens, all sessions"). No telemetry yet (filtering disabled, or a fresh install) renders no chip at all rather than a fake 0%.
+
 **Changed — the subagent card's run row shows `ctx x / y` (child prompt tokens / the cap the child loop enforces) instead of the raw "N read chars" counter.**
 
 - The old row counter ("45,678 read chars") had no reference point, so it said nothing about whether a subagent was about to run out of room. The row now reads like the main model's context meter: `ctx 12.3k / 300.0k`. Both sides are tokens — nothing is converted from chars: the numerator is the child's provider-reported `usage.promptTokens` (the `contextTokens` field that already existed on the wire and fed the card header's `ctx` label), and the denominator is `resolveContextTokens` of the child's model — exactly the cap the child loop enforces, because subagent child loops deliberately run without a `ctxMaxOverride` (the per-model default, never the user's session override). The cap travels the existing subagent progress chain as an additive `contextMax` field (core-utils protocol → `SubagentEvent` → wire projection → `SubagentRunProgress`), and is omitted by the projection when an older tool build does not supply it, in which case the row shows no meter rather than a wrong one. `toolReadChars` stays on the wire for its byte-flow proof purpose; only the display changed.

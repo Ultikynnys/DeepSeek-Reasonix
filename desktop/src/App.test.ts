@@ -507,6 +507,68 @@ describe("Desktop App reducer — usage", () => {
     expect(next.usage.cacheMissTokens).toBe(20);
     expect(next.usage.liveLogTokens).toBe(42);
   });
+
+  it("stores shell-output filtering totals from the context breakdown event", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$ctx_breakdown",
+        reservedTokens: 10,
+        shellOutputRawTokens: 50_000,
+        shellOutputShownTokens: 31_000,
+      },
+    });
+
+    expect(next.usage.shellOutputRawTokens).toBe(50_000);
+    expect(next.usage.shellOutputShownTokens).toBe(31_000);
+  });
+
+  it("keeps prior shell-output totals when a breakdown event omits them", () => {
+    const seeded = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$ctx_breakdown",
+        reservedTokens: 10,
+        shellOutputRawTokens: 50_000,
+        shellOutputShownTokens: 31_000,
+      },
+    });
+    const next = reduce(seeded, {
+      t: "incoming",
+      event: { type: "$ctx_breakdown", reservedTokens: 12 },
+    });
+
+    expect(next.usage.shellOutputRawTokens).toBe(50_000);
+    expect(next.usage.shellOutputShownTokens).toBe(31_000);
+  });
+
+  it("carries shell-output totals through a model.final usage rebuild", () => {
+    const seeded = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$ctx_breakdown",
+        reservedTokens: 10,
+        shellOutputRawTokens: 50_000,
+        shellOutputShownTokens: 31_000,
+      },
+    });
+    const next = reduce(seeded, {
+      t: "incoming",
+      event: {
+        type: "model.final",
+        id: 1,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        content: "ok",
+        toolCalls: [],
+        usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 },
+        costUsd: 0,
+      },
+    });
+
+    expect(next.usage.shellOutputRawTokens).toBe(50_000);
+    expect(next.usage.shellOutputShownTokens).toBe(31_000);
+  });
 });
 
 describe("Desktop App reducer — ApprovalPrompt integration", () => {

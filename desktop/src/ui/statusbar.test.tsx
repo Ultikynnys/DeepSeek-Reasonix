@@ -123,6 +123,55 @@ describe("StatusBar quota display", () => {
     expect(screen.queryByText(/This session cost/)).toBeNull();
   });
 
+  it("shows the shell-output savings chip with the reduction percentage", () => {
+    renderBar({
+      usage: {
+        totalCostUsd: 0,
+        lastCallCostUsd: 0,
+        // 19,000 of 50,000 tokens filtered out = 38%.
+        shellOutputRawTokens: 50_000,
+        shellOutputShownTokens: 31_000,
+      } as unknown as UsageStats,
+    });
+    expect(screen.getByText("saved")).toBeTruthy();
+    expect(screen.getByText("38%")).toBeTruthy();
+  });
+
+  it("hides the shell-output savings chip when there is no telemetry yet", () => {
+    renderBar({
+      usage: { totalCostUsd: 0, lastCallCostUsd: 0 } as unknown as UsageStats,
+    });
+    expect(screen.queryByText("saved")).toBeNull();
+  });
+
+  it("scales the tokens chip unit with magnitude (k below a million, m above)", () => {
+    // Regression: the label used to pin to kilo, so 66,851,100 tokens rendered
+    // as the unreadable "66851.1k".
+    renderBar({
+      usage: {
+        totalCostUsd: 0,
+        lastCallCostUsd: 0,
+        totalPromptTokens: 66_851_100,
+        reservedTokens: 0,
+        liveLogTokens: 0,
+      } as unknown as UsageStats,
+    });
+    expect(screen.getByText("66.9m")).toBeTruthy();
+  });
+
+  it("keeps the kilo unit for sub-million token counts", () => {
+    renderBar({
+      usage: {
+        totalCostUsd: 0,
+        lastCallCostUsd: 0,
+        totalPromptTokens: 12_345,
+        reservedTokens: 0,
+        liveLogTokens: 0,
+      } as unknown as UsageStats,
+    });
+    expect(screen.getByText("12.3k")).toBeTruthy();
+  });
+
   it("shows the current rate period (off-peak or peak) with its price multiplier", () => {
     renderBar();
     // Wall-clock dependent — either label and multiplier may be current.

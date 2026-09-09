@@ -11,6 +11,7 @@ import { I } from "../icons";
 import { isOffPeak, minutesUntilRateChange } from "../peak-hours";
 import type { AntigravityQuota, CodexQuota, JobInfo, OllamaQuota } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
+import { tokenLabel } from "./format";
 import { activationHandler } from "./keyboard";
 import { localizeShortcutText } from "./shortcut";
 
@@ -20,11 +21,6 @@ function formatMoney(amountUsd: number, currency: "CNY" | "USD"): string {
   const symbol = currency === "CNY" ? "¥" : "$";
   const amount = currency === "CNY" ? amountUsd * USD_TO_CNY : amountUsd;
   return `${symbol} ${amount.toFixed(4)}`;
-}
-
-function tokenLabel(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return `${n}`;
 }
 
 /** "in 2h 15m" relative time until a quota window resets. */
@@ -108,6 +104,17 @@ export function StatusBar({
   const totalTokens = Math.max(sessionPromptTokens, liveContextTokens);
   const cacheDenom = usage.cacheHitTokens + usage.cacheMissTokens;
   const cacheHitPct = cacheDenom > 0 ? Math.round((usage.cacheHitTokens / cacheDenom) * 100) : 0;
+  // Shell-output filtering savings — cumulative cross-session totals from the
+  // $ctx_breakdown event. Undefined = no telemetry yet, so no chip at all
+  // (never a fake 0%).
+  const outputSavedPct =
+    usage.shellOutputRawTokens !== undefined && usage.shellOutputRawTokens > 0
+      ? Math.round(
+          ((usage.shellOutputRawTokens - (usage.shellOutputShownTokens ?? 0)) /
+            usage.shellOutputRawTokens) *
+            100,
+        )
+      : null;
   const runningJobs = jobs.filter((j) => j.running).length;
   // "This turn" for pay-per-token providers is the latest model call's cost,
   // NOT the cumulative session total (which feeds the settings session-cost card).
@@ -364,6 +371,22 @@ export function StatusBar({
           <I.zap size={11} style={{ color: "var(--accent)" }} />
           <span>{t("statusbar.cache")}</span>
           <span className="v acc">{cacheHitPct}%</span>
+        </span>
+      ) : null}
+      {outputSavedPct !== null ? (
+        <span
+          className="seg"
+          title={t("statusbar.outputSavedTip", {
+            pct: outputSavedPct,
+            saved: (
+              (usage.shellOutputRawTokens ?? 0) - (usage.shellOutputShownTokens ?? 0)
+            ).toLocaleString(),
+            raw: (usage.shellOutputRawTokens ?? 0).toLocaleString(),
+          })}
+        >
+          <I.terminal size={11} style={{ color: "var(--accent)" }} />
+          <span>{t("statusbar.outputSaved")}</span>
+          <span className="v acc">{outputSavedPct}%</span>
         </span>
       ) : null}
       {showCtxUsage ? (

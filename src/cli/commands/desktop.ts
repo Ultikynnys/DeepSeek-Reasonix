@@ -240,6 +240,10 @@ import { registerSeeImageTool } from "../../tools/see-image.js";
 import type { SubagentEvent } from "../../tools/subagent.js";
 
 import { SkillStore } from "../../skills.js";
+import {
+  commandOutputTelemetryPath,
+  summarizeCommandOutputMetrics,
+} from "../../telemetry/command-output.js";
 import { billingContextForModel, resolveContextTokens } from "../../telemetry/stats.js";
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
@@ -2078,6 +2082,56 @@ const reservedTokenCache = new WeakMap<
   { sys: number; sysLen: number; tools: number; toolsLen: number }
 >();
 
+// Shell-output filtering totals for the $ctx_breakdown payload. emitCtxBreakdown
+// fires after every tool event, so re-reading the telemetry JSONL each time would
+// scale with session history — instead stat the file and re-summarize only when
+// its mtime+size changed (one stat call in steady state). A missing or unreadable
+// file legitimately means "no data": the fields are omitted and the UI shows no
+// chip, rather than a fake zero.
+let shellOutputSummaryCache: {
+  mtimeMs: number;
+  size: number;
+  rawTokens: number;
+  shownTokens: number;
+} | null = null;
+
+function shellOutputFilteringTotals(): {
+  rawTokens: number;
+  shownTokens: number;
+} | null {
+  const path = commandOutputTelemetryPath();
+  let stat: { mtimeMs: number; size: number } | null = null;
+  try {
+    const s = statSync(path);
+    stat = { mtimeMs: s.mtimeMs, size: s.size };
+  } catch {
+    return null;
+  }
+  if (
+    shellOutputSummaryCache &&
+    shellOutputSummaryCache.mtimeMs === stat.mtimeMs &&
+    shellOutputSummaryCache.size === stat.size
+  ) {
+    return {
+      rawTokens: shellOutputSummaryCache.rawTokens,
+      shownTokens: shellOutputSummaryCache.shownTokens,
+    };
+  }
+  try {
+    const summary = summarizeCommandOutputMetrics(path);
+    if (summary.rawTokens <= 0) return null;
+    shellOutputSummaryCache = {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      rawTokens: summary.rawTokens,
+      shownTokens: summary.shownTokens,
+    };
+    return { rawTokens: summary.rawTokens, shownTokens: summary.shownTokens };
+  } catch {
+    return null;
+  }
+}
+
 // reserved = system prompt + tool specs, constant for the tab's lifetime once
 // the loop is built. logTokens is refreshed during turns so Desktop doesn't
 // show a fake zero while the streaming call is still waiting on usage metadata.
@@ -2117,12 +2171,19 @@ function emitCtxBreakdown(tab: Tab): void {
     logTokens,
     ctxMax,
   });
+  const shellTotals = shellOutputFilteringTotals();
   emit(
     {
       type: "$ctx_breakdown",
       reservedTokens: sys + tools,
       logTokens,
       ctxMax,
+      ...(shellTotals
+        ? {
+            shellOutputRawTokens: shellTotals.rawTokens,
+            shellOutputShownTokens: shellTotals.shownTokens,
+          }
+        : {}),
     },
     tab.id,
   );
