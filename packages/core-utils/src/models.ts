@@ -1,5 +1,7 @@
 /** Built-in model catalog and capability predicates shared by the daemon and desktop UI. */
 
+export const DEFAULT_MODEL = "deepseek-v4-flash";
+
 /** Models accepted by the official DeepSeek endpoint. */
 export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
   "deepseek-v4-flash",

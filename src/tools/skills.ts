@@ -1,6 +1,6 @@
 /** runAs: inline appends the body to the parent log; subagent spawns an isolated child loop and only returns the final answer. */
 
-import { type Skill, SkillStore } from "../skills.js";
+import { type Skill, SkillStore, parseSkillDraft, serializeSkill } from "../skills.js";
 import type { ToolRegistry } from "../tools.js";
 
 /** Returns serialized tool-result string — dispatch path is pure pass-through. */
@@ -339,25 +339,15 @@ export function registerSkillTools(
       model?: unknown;
       allowedTools?: unknown;
     }) => {
-      const name = typeof args.name === "string" ? args.name.trim() : "";
-      const description =
-        typeof args.description === "string"
-          ? args.description.replace(/[\r\n]+/g, " ").trim()
-          : "";
-      const body = typeof args.body === "string" ? args.body : "";
-      if (!name) return JSON.stringify({ error: "install_skill requires a non-empty 'name'" });
-      if (!description) {
-        return JSON.stringify({
-          error:
-            "install_skill requires a non-empty 'description' — it is what appears in the Skills index and how future agents decide whether to invoke the skill",
-        });
-      }
-      if (!body.trim()) {
-        return JSON.stringify({
-          error:
-            "install_skill requires a non-empty 'body' — the playbook the skill executes when invoked",
-        });
-      }
+      const draft = parseSkillDraft({
+        name: args.name,
+        description: args.description,
+        body: args.body,
+        runAs: args.runAs,
+        model: args.model,
+        allowedTools: args.allowedTools,
+      });
+      if ("error" in draft) return JSON.stringify({ error: draft.error });
 
       const scopeRaw = typeof args.scope === "string" ? args.scope.trim() : "";
       let scope: "project" | "global";
@@ -371,42 +361,24 @@ export function registerSkillTools(
         });
       }
 
-      const runAsRaw = typeof args.runAs === "string" ? args.runAs.trim() : "";
-      const runAs: "inline" | "subagent" = runAsRaw === "subagent" ? "subagent" : "inline";
-
-      const fmLines = ["---", `name: ${name}`, `description: ${description}`];
-      if (runAs === "subagent") {
-        fmLines.push("runAs: subagent");
-        const model = typeof args.model === "string" ? args.model.trim() : "";
-        if (model) fmLines.push(`model: ${model}`);
-        if (Array.isArray(args.allowedTools)) {
-          const tools = args.allowedTools
-            .filter((t): t is string => typeof t === "string")
-            .map((t) => t.trim())
-            .filter(Boolean);
-          if (tools.length > 0) fmLines.push(`allowed-tools: ${tools.join(", ")}`);
-        }
-      }
-      fmLines.push("---", "");
-      const content = `${fmLines.join("\n")}${body.replace(/\s+$/, "")}\n`;
-
-      const result = store.createWithContent(name, scope, content);
+      const content = serializeSkill(draft);
+      const result = store.createWithContent(draft.name, scope, content);
       if ("error" in result) {
         return JSON.stringify({ error: result.error });
       }
 
       try {
-        onSkillInstalled?.({ name, path: result.path, scope });
+        onSkillInstalled?.({ name: draft.name, path: result.path, scope });
       } catch {
         // host hook failure must not undo a successful write
       }
 
       return JSON.stringify({
         ok: true,
-        name,
+        name: draft.name,
         scope,
         path: result.path,
-        runAs,
+        runAs: draft.runAs,
         note: "Skill is callable right now via run_skill({ name }). It will appear in the pinned Skills index after the next /new or launch.",
       });
     },

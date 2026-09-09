@@ -29,6 +29,12 @@ export { formatBytes } from "./format.js";
 export { messageOf } from "./error.js";
 export { DAY_MS, abortReason, sleep } from "./time.js";
 export {
+  parseSessionTimestamp,
+  sessionRecency,
+  sortSessionsDescending,
+} from "./session-order.js";
+export type { SessionRecencyInput } from "./session-order.js";
+export {
   DEEPSEEK_RATE_SCHEDULE,
   OLLAMA_RATE_SCHEDULE,
   isOffPeakRate,
@@ -41,6 +47,7 @@ export {
 export type { RateSchedule } from "./rate-periods.js";
 export {
   ANTIGRAVITY_MODELS,
+  DEFAULT_MODEL,
   GEMINI_MODELS,
   GPT56_MODELS,
   KNOWN_MODELS,
@@ -152,6 +159,7 @@ export type {
   SessionEmptyEvent,
   NeedsSetupEvent,
   SettingsEvent,
+  SettingsPayload,
   AntigravityPlan,
   AntigravityQuota,
   AntigravityQuotaEvent,

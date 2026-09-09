@@ -10,7 +10,7 @@ import {
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import { preflightStdioSpec } from "../mcp/preflight.js";
 import { type McpSpec, parseMcpSpec, specToRaw } from "../mcp/spec.js";
-import { SkillStore } from "../skills.js";
+import { SkillStore, parseSkillDraft, serializeSkill } from "../skills.js";
 import type { ToolRegistry } from "../tools.js";
 
 export interface ScaffoldToolsOptions {
@@ -20,9 +20,7 @@ export interface ScaffoldToolsOptions {
   configPath?: string;
 }
 
-const VALID_SKILL_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const VALID_SERVER_NAME = /^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$/;
-const VALID_TOOL_NAME = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
 
 export function registerScaffoldTools(
   registry: ToolRegistry,
@@ -86,43 +84,18 @@ export function registerScaffoldTools(
       run_as?: unknown;
       model?: unknown;
     }) => {
-      const name = typeof args.name === "string" ? args.name.trim() : "";
-      if (!VALID_SKILL_NAME.test(name)) {
-        return JSON.stringify({
-          error: `invalid skill name: ${JSON.stringify(name)} — use letters, digits, _, -, .`,
-        });
-      }
-      const description =
-        typeof args.description === "string" ? args.description.trim().replace(/\n+/g, " ") : "";
-      if (!description) {
-        return JSON.stringify({
-          error: "create_skill requires a non-empty 'description'",
-        });
-      }
-      const body = typeof args.body === "string" ? args.body : "";
-      if (!body.trim()) {
-        return JSON.stringify({ error: "create_skill requires a non-empty 'body'" });
-      }
+      const draft = parseSkillDraft({
+        name: args.name,
+        description: args.description,
+        body: args.body,
+        runAs: args.run_as,
+        allowedTools: args.allowed_tools,
+        model: args.model,
+      });
+      if ("error" in draft) return JSON.stringify({ error: draft.error });
       const scope: "project" | "global" =
         args.scope === "global" ? "global" : opts.projectRoot ? "project" : "global";
-      const runAs: "inline" | "subagent" = args.run_as === "subagent" ? "subagent" : "inline";
-      const allowedTools = parseAllowedTools(args.allowed_tools);
-      if (allowedTools && "error" in allowedTools) {
-        return JSON.stringify({ error: allowedTools.error });
-      }
-      const model =
-        typeof args.model === "string" && args.model.startsWith("deepseek-")
-          ? args.model
-          : undefined;
-
-      const content = serializeSkill({
-        name,
-        description,
-        runAs,
-        allowedTools: allowedTools ?? undefined,
-        model,
-        body,
-      });
+      const content = serializeSkill(draft);
 
       const store = new SkillStore({
         homeDir: opts.homeDir,
@@ -131,7 +104,7 @@ export function registerScaffoldTools(
           ? loadResolvedSkillPaths(opts.projectRoot, configPath)
           : [],
       });
-      const result = store.createWithContent(name, scope, content);
+      const result = store.createWithContent(draft.name, scope, content);
       if ("error" in result) {
         return JSON.stringify({ error: result.error });
       }
@@ -139,8 +112,8 @@ export function registerScaffoldTools(
         success: true,
         path: result.path,
         scope,
-        name,
-        run_as: runAs,
+        name: draft.name,
+        run_as: draft.runAs,
       });
     },
   });
@@ -305,49 +278,7 @@ export function registerScaffoldTools(
   return registry;
 }
 
-interface SerializeSkillArgs {
-  name: string;
-  description: string;
-  runAs: "inline" | "subagent";
-  allowedTools?: readonly string[];
-  model?: string;
-  body: string;
-}
-
-export function serializeSkill(args: SerializeSkillArgs): string {
-  const lines: string[] = ["---", `name: ${args.name}`, `description: ${args.description}`];
-  if (args.runAs === "subagent") {
-    lines.push("runAs: subagent");
-  }
-  if (args.allowedTools && args.allowedTools.length > 0) {
-    lines.push(`allowed-tools: ${args.allowedTools.join(", ")}`);
-  }
-  if (args.model) {
-    lines.push(`model: ${args.model}`);
-  }
-  lines.push("---", "");
-  return `${lines.join("\n")}\n${args.body.trim()}\n`;
-}
-
-function parseAllowedTools(raw: unknown): readonly string[] | { error: string } | undefined {
-  if (raw === undefined || raw === null) return undefined;
-  if (!Array.isArray(raw)) {
-    return { error: "'allowed_tools' must be an array of tool-name strings" };
-  }
-  const out: string[] = [];
-  for (const v of raw) {
-    if (typeof v !== "string") {
-      return { error: "'allowed_tools' entries must be strings" };
-    }
-    const trimmed = v.trim();
-    if (!trimmed) continue;
-    if (!VALID_TOOL_NAME.test(trimmed)) {
-      return { error: `invalid tool name in allowed_tools: ${JSON.stringify(trimmed)}` };
-    }
-    out.push(trimmed);
-  }
-  return out.length > 0 ? out : undefined;
-}
+export { serializeSkill };
 
 interface BuildSpecInput {
   name: string;

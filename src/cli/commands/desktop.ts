@@ -9,7 +9,6 @@ import {
   ANTIGRAVITY_MODELS,
   MAX_IMAGE_BYTES,
   flattenText,
-  isAntigravityModel,
   isUsableAntigravityModel,
   messageOf,
   redactDiagnosticText,
@@ -77,7 +76,7 @@ import {
 import { pickPrimaryBalance } from "../../client.js";
 import { codeSystemPrompt } from "../../code/prompt.js";
 import { type CodeToolset, applyPlanMode, buildCodeToolset } from "../../code/setup.js";
-import { fetchCodexQuotaViaOAuth, resolveCodexTransport } from "../../codex-backend.js";
+import { fetchCodexQuotaViaOAuth } from "../../codex-backend.js";
 import {
   DEFAULT_GEMINI_CHAT_URL,
   DEFAULT_MODEL,
@@ -190,7 +189,6 @@ import { loadDotenv } from "../../env.js";
 import { type ResolvedHook, formatHookOutcomeMessage, loadHooks, runHooks } from "../../hooks.js";
 import {
   CacheFirstLoop,
-  DeepSeekClient,
   ImmutablePrefix,
   type LoopAbortOptions,
   type LoopEvent,
@@ -214,13 +212,8 @@ import {
   sessionPath,
   timestampSuffix,
 } from "../../memory/session.js";
-import {
-  type OAuthFlow,
-  beginOAuthFlow,
-  oauthAccount,
-  resolveOpenAIToken,
-  signOutOpenAI,
-} from "../../oauth.js";
+import { createModelClient } from "../../model-client.js";
+import { type OAuthFlow, beginOAuthFlow, oauthAccount, signOutOpenAI } from "../../oauth.js";
 import {
   contextTokensForModel,
   loadOllamaVerdicts,
@@ -1057,13 +1050,7 @@ function emitSettings(tab: Tab): void {
       recentWorkspaces: recent,
       model: tab.currentModel,
       customModels: Object.keys(config.models ?? {})
-        .filter((id) => {
-          if (config.models?.[id]?.provider === "gemini") return false;
-          if (providerForModel(id) === "gemini") return false;
-          if (isUsableAntigravityModel(id) && isAntigravityModel(id)) return false;
-          if (SUPPORTED_MODELS.includes(id)) return false;
-          return true;
-        })
+        .filter((id) => providerForModel(id) !== "gemini" && !SUPPORTED_MODELS.includes(id))
         .sort(),
       ollamaBaseUrl: config.ollamaBaseUrl,
       opencodeBaseUrl: config.opencodeBaseUrl,
@@ -2609,32 +2596,11 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   } else {
     log.debug(`model ${tab.currentModel} → DeepSeek; endpoint ${ep.baseUrl ?? "default"}`);
   }
-  const client = new DeepSeekClient({
-    apiKey: ep.apiKey,
-    baseUrl: ep.baseUrl,
-    // Stable conversation identity for OpenCode's x-opencode-session routing
-    // header (opencode.ai/docs/go) — the tab's session name changes exactly
-    // when the conversation does (runtime rebuilds on session load/switch).
+  // Stable conversation identity for OpenCode's x-opencode-session routing
+  // follows the tab's session name; subagents get independent generated ids.
+  const client = createModelClient({
+    model: tab.currentModel,
     sessionId: tab.currentSession ?? undefined,
-    // Local Ollama is keyless — the client omits the Authorization header.
-    allowMissingKey: provider === "ollama" || provider === "opencode",
-    // OAuth tokens refresh per request — fallback for when the Codex backend
-    // transport declines (no OAuth creds or token refresh failed). Without
-    // OAuth, the static API key is used and requests bill to platform credits.
-    apiKeyResolver: isOpenAI ? () => resolveOpenAIToken() : undefined,
-    // Primary path: when OAuth creds exist, route through the ChatGPT Codex
-    // backend so requests consume plan quota (free), not platform credits.
-    transportResolver: isOpenAI
-      ? () => resolveCodexTransport()
-      : provider === "opencode" && tab.currentModel.startsWith("muse-")
-        ? async () => ({
-            endpoint: `${ep.baseUrl ?? DEFAULT_OPENCODE_CHAT_URL}/responses`,
-            headers: { Authorization: `Bearer ${ep.apiKey ?? "public"}` },
-            api: "responses",
-          })
-        : undefined,
-    // Gemini models authenticate via Google Antigravity OAuth (Starter quota).
-    geminiAuthResolver: provider === "gemini" ? () => resolveGeminiAuth() : undefined,
   });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = tab.currentReasoningEffort;

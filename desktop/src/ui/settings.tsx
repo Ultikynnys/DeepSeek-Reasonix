@@ -1,9 +1,10 @@
-import { modelDisplayName } from "@reasonix/core-utils";
+import { DEFAULT_MODEL, modelDisplayName } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
+import { convertUsd, currencySymbol } from "../money";
 import { MODEL_CATALOG_GROUP_LABELS, deriveModelCatalog } from "../model-catalog";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
 import {
@@ -1400,7 +1401,7 @@ function PageModels({
               className="field mono"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="deepseek-v4-flash"
+              placeholder={DEFAULT_MODEL}
             />
             <button
               type="button"
@@ -1992,7 +1993,6 @@ function PageBilling({
   usage: UsageStats;
   currency: "CNY" | "USD";
 }) {
-  const symbol = currency === "CNY" ? "¥" : "$";
   const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
   const hitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
   // Per-provider native-unit costs: USD-kind providers show a dollar figure,
@@ -2027,7 +2027,7 @@ function PageBilling({
                 {providerCosts.map(([provider, cost]) => {
                   const units = [
                     cost.totalCostUsd !== undefined
-                      ? `${symbol} ${(currency === "CNY" ? cost.totalCostUsd * 7.2 : cost.totalCostUsd).toFixed(4)}`
+                      ? `${currencySymbol(currency)} ${convertUsd(cost.totalCostUsd, currency).toFixed(4)}`
                       : null,
                     cost.quotaUsedPct !== undefined ? `${cost.quotaUsedPct.toFixed(2)}%` : null,
                   ].filter((unit): unit is string => unit !== null);

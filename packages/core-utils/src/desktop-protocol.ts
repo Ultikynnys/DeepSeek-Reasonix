@@ -648,6 +648,7 @@ export interface SettingsEvent {
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
+    baidu?: string;
     tavily?: string;
     perplexity?: string;
     exa?: string;
@@ -701,6 +702,11 @@ export interface SettingsEvent {
   pathAllowed?: string[];
   version: string;
 }
+
+/** Settings state consumed by the desktop UI, derived from the wire event contract.
+ *  Quick-send fields remain optional for compatibility with older daemons. */
+export type SettingsPayload = Omit<SettingsEvent, "type" | "quickSendId" | "quickSends"> &
+  Partial<Pick<SettingsEvent, "quickSendId" | "quickSends">>;
 
 /** Endpoint + auth state for the tab's CURRENT model — the status bar's API
  *  chip is per tab and flips between DeepSeek, OpenAI, Ollama and Gemini with the model. */

@@ -4,6 +4,7 @@ import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   ANTIGRAVITY_MODELS,
+  DEFAULT_MODEL,
   GEMINI_MODELS,
   GPT56_MODELS,
   KNOWN_MODELS,
@@ -34,10 +35,15 @@ import {
   normalizeToolRateLimitConfig,
 } from "./tools/rate-limit.js";
 
-export const DEFAULT_MODEL = "deepseek-v4-flash";
-
 /** Built-in model groups remain public from config for existing library consumers. */
-export { GEMINI_MODELS, GPT56_MODELS, OPENCODE_MODELS, SUPPORTED_OFFICIAL_MODELS, ZAI_MODELS };
+export {
+  DEFAULT_MODEL,
+  GEMINI_MODELS,
+  GPT56_MODELS,
+  OPENCODE_MODELS,
+  SUPPORTED_OFFICIAL_MODELS,
+  ZAI_MODELS,
+};
 
 /** Everything the default endpoints accept without a custom baseUrl, across providers. */
 export const SUPPORTED_MODELS: readonly string[] = KNOWN_MODELS;
@@ -70,51 +76,56 @@ const CATALOG_PROVIDERS: ReadonlyArray<{ ids: ReadonlySet<string>; provider: Mod
   { ids: new Set(ANTIGRAVITY_MODELS), provider: "gemini" },
 ];
 
-/** All curated catalog ids combined — `isKnownModelId`'s membership set. */
-const KNOWN_MODEL_IDS: ReadonlySet<string> = new Set(KNOWN_MODELS);
+interface ModelAdmission {
+  accepted: boolean;
+  provider: ModelProvider;
+  discoveredAntigravity: boolean;
+}
+
+/** Resolve model admission and routing from positive evidence in one place. */
+function resolveModelAdmission(model: string, path: string): ModelAdmission {
+  const id = model.trim();
+  if (!id) return { accepted: false, provider: "deepseek", discoveredAntigravity: false };
+
+  const cfg = readConfig(path);
+  const mapped = cfg.models?.[id]?.provider;
+  if (isModelProvider(mapped)) {
+    return { accepted: true, provider: mapped, discoveredAntigravity: false };
+  }
+
+  const discoveredAntigravity = Boolean(
+    isUsableAntigravityModel(id) && cfg.antigravityOAuth?.models?.includes(id),
+  );
+  if (discoveredAntigravity) {
+    return { accepted: true, provider: "gemini", discoveredAntigravity: true };
+  }
+  if (isDiscoveredOpencodeModel(id)) {
+    return { accepted: true, provider: "opencode", discoveredAntigravity: false };
+  }
+  for (const catalog of CATALOG_PROVIDERS) {
+    if (catalog.ids.has(id)) {
+      return { accepted: true, provider: catalog.provider, discoveredAntigravity: false };
+    }
+  }
+  if (id.startsWith("ollama/")) {
+    return { accepted: true, provider: "ollama", discoveredAntigravity: false };
+  }
+  return { accepted: false, provider: "deepseek", discoveredAntigravity: false };
+}
 
 export function providerForModel(
   model: string | undefined | null,
   path: string = defaultConfigPath(),
 ): ModelProvider {
   if (typeof model !== "string") return "deepseek";
-  const id = model.trim();
-  if (!id) return "deepseek";
-  const cfg = readConfig(path);
-  // 1. Explicit per-model mapping — the user's declaration wins.
-  const mapped = cfg.models?.[id]?.provider;
-  if (isModelProvider(mapped)) return mapped;
-  // 2. Server-discovered Antigravity models.
-  if (isUsableAntigravityModel(id) && cfg.antigravityOAuth?.models?.includes(id)) return "gemini";
-  // 3. Server-discovered OpenCode models.
-  if (isDiscoveredOpencodeModel(id)) return "opencode";
-  // 4. Curated catalogs — exact id membership.
-  for (const catalog of CATALOG_PROVIDERS) {
-    if (catalog.ids.has(id)) return catalog.provider;
-  }
-  // 5. The `ollama/` addressing namespace.
-  if (id.startsWith("ollama/")) return "ollama";
-  // 6. Documented default endpoint family.
-  return "deepseek";
+  return resolveModelAdmission(model, path).provider;
 }
 
 /** True when positive evidence places a model id: a `models` mapping, server
  *  discovery, a catalog entry, or the `ollama/` scheme — a name shape alone
  *  proves nothing. */
 export function isKnownModelId(model: string, path: string = defaultConfigPath()): boolean {
-  const id = model.trim();
-  if (!id) return false;
-  const cfg = readConfig(path);
-  const antigravityMatch = Boolean(
-    isUsableAntigravityModel(id) && cfg.antigravityOAuth?.models?.includes(id),
-  );
-  return (
-    Boolean(cfg.models?.[id]) ||
-    antigravityMatch ||
-    isDiscoveredOpencodeModel(id) ||
-    KNOWN_MODEL_IDS.has(id) ||
-    id.startsWith("ollama/")
-  );
+  return resolveModelAdmission(model, path).accepted;
 }
 
 /** Model ids that accept image attachments in user messages — shared with the
@@ -2016,10 +2027,7 @@ export function loadModel(path: string = defaultConfigPath()): string {
   // Custom-endpoint owners pick their own model namespace; trust them.
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
   if (customEndpoint) return trimmed;
-  if (cfg.models?.[trimmed]) return trimmed;
-  if (providerForModel(trimmed, path) === "ollama") return trimmed;
-  if (isDiscoveredAntigravityModel(cfg, trimmed)) return trimmed;
-  return SUPPORTED_MODELS.includes(trimmed) ? trimmed : DEFAULT_MODEL;
+  return resolveModelAdmission(trimmed, path).accepted ? trimmed : DEFAULT_MODEL;
 }
 
 export function saveModel(model: string, path: string = defaultConfigPath()): void {
@@ -2029,13 +2037,8 @@ export function saveModel(model: string, path: string = defaultConfigPath()): vo
   // Custom-endpoint owners set their own namespace — validation is on them.
   const cfg = readConfig(path);
   const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
-  const discoveredAntigravity = isDiscoveredAntigravityModel(cfg, trimmed);
-  const accepted =
-    SUPPORTED_MODELS.includes(trimmed) ||
-    Boolean(cfg.models?.[trimmed]) ||
-    providerForModel(trimmed, path) === "ollama" ||
-    discoveredAntigravity;
-  if (!customEndpoint && !accepted) {
+  const admission = resolveModelAdmission(trimmed, path);
+  if (!customEndpoint && !admission.accepted) {
     throw new Error(
       `Unsupported model "${trimmed}". Official endpoints only accept: ${SUPPORTED_MODELS.join(", ")}. Set a custom baseUrl to use other models.`,
     );
@@ -2044,17 +2047,10 @@ export function saveModel(model: string, path: string = defaultConfigPath()): vo
   // Discovery is positive endpoint evidence. Persist it in the existing
   // authoritative provider map so session restores remain correctly routed if
   // Google's current discovery response later changes.
-  if (discoveredAntigravity) {
+  if (admission.discoveredAntigravity) {
     cfg.models = { ...(cfg.models ?? {}), [trimmed]: { provider: "gemini" } };
   }
   writeConfig(cfg, path);
-}
-
-/** True when the model was reported by the signed-in Antigravity account's
- *  quota buckets (`retrieveUserQuota`), i.e. it is genuinely usable even though
- *  it is not in the static built-in catalog. */
-function isDiscoveredAntigravityModel(cfg: ReasonixConfig, model: string): boolean {
-  return Boolean(isUsableAntigravityModel(model) && cfg.antigravityOAuth?.models?.includes(model));
 }
 
 export function loadWorkspaceDir(path: string = defaultConfigPath()): string | undefined {

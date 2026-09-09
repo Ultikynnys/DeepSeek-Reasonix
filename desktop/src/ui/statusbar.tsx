@@ -12,16 +12,9 @@ import { isOffPeak, minutesUntilRateChange } from "../peak-hours";
 import type { AntigravityQuota, CodexQuota, JobInfo, OllamaQuota } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { tokenLabel } from "./format";
+import { formatMoney } from "../money";
 import { activationHandler } from "./keyboard";
 import { localizeShortcutText } from "./shortcut";
-
-const USD_TO_CNY = 7.2;
-
-function formatMoney(amountUsd: number, currency: "CNY" | "USD"): string {
-  const symbol = currency === "CNY" ? "¥" : "$";
-  const amount = currency === "CNY" ? amountUsd * USD_TO_CNY : amountUsd;
-  return `${symbol} ${amount.toFixed(4)}`;
-}
 
 /** "in 2h 15m" relative time until a quota window resets. */
 function formatReset(d: Date): string {

@@ -1,14 +1,10 @@
-import { resolveGeminiAuth } from "../antigravity-oauth.js";
-import { DeepSeekClient } from "../client.js";
-import { resolveCodexTransport } from "../codex-backend.js";
+import type { DeepSeekClient } from "../client.js";
 import {
   DEFAULT_MODEL,
   type EditMode,
   type ModelProvider,
-  isOpenAIStandardEndpoint,
   loadEditMode,
   loadEnableSubagents,
-  loadEndpointForModel,
   loadFilesystemOutlineThresholdBytes,
   loadJavaSourceEnabled,
   loadProjectShellAllowed,
@@ -20,7 +16,7 @@ import {
   searchEnabled,
 } from "../config.js";
 import { bootstrapSemanticSearchInCodeMode } from "../index/semantic/tool.js";
-import { resolveOpenAIToken } from "../oauth.js";
+import { createModelClient } from "../model-client.js";
 import { ToolRegistry } from "../tools.js";
 import { registerChoiceTool } from "../tools/choice.js";
 import { registerCodeQueryTools } from "../tools/code-query.js";
@@ -188,23 +184,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     const model = opts.subagentModel?.() ?? skill.model ?? DEFAULT_MODEL;
     let subagentClient = subagentClients.get(model);
     if (!subagentClient) {
-      const ep = loadEndpointForModel(model, opts.configPath);
-      const isOpenAI = isOpenAIStandardEndpoint(model, opts.configPath);
-      const provider = providerForModel(model, opts.configPath);
-      subagentClient = new DeepSeekClient({
-        apiKey: ep.apiKey,
-        baseUrl: ep.baseUrl,
-        // Local Ollama is keyless — the client omits the Authorization header.
-        allowMissingKey: provider === "ollama",
-        // OAuth fallback — when Codex backend is unavailable the static key is used
-        // (bills platform credits). OAuth tokens are audience-locked to api.openai.com.
-        apiKeyResolver: isOpenAI ? () => resolveOpenAIToken(opts.configPath) : undefined,
-        // Primary: route through ChatGPT Codex backend for plan-quota billing.
-        transportResolver: isOpenAI ? () => resolveCodexTransport() : undefined,
-        // Gemini models authenticate via Google Antigravity OAuth (Starter quota).
-        geminiAuthResolver:
-          provider === "gemini" ? () => resolveGeminiAuth(opts.configPath) : undefined,
-      });
+      subagentClient = createModelClient({ model, configPath: opts.configPath });
       subagentClients.set(model, subagentClient);
     }
     const billing = opts.subagentBilling?.(model);

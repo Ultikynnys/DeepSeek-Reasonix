@@ -1446,7 +1446,6 @@ describe("Desktop App session sorting", () => {
 
     const recency = sessionRecency({
       name: "desktop-20260905120000-1",
-      messageCount: 0,
       mtime: new Date(Date.UTC(2026, 8, 5, 10, 0, 0)).toISOString(),
     });
     expect(recency).toBe(Date.UTC(2026, 8, 5, 12, 0, 0));

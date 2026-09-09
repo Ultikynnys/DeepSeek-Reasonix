@@ -1,4 +1,4 @@
-import { modelDisplayName } from "@reasonix/core-utils";
+import { DEFAULT_MODEL, modelDisplayName } from "@reasonix/core-utils";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   type ChangeEvent,
@@ -15,6 +15,7 @@ import type { QueuedSend } from "../App";
 import { type TKey, t } from "../i18n";
 import { I } from "../icons";
 import { isImagePath, resolveImagePath } from "../image-attach";
+import { toWorkspaceRelative } from "../workspace-path";
 import { MODEL_CATALOG_GROUP_LABELS, deriveModelCatalog } from "../model-catalog";
 import type { EditMode, ReasoningEffort, UserImageAttachment } from "../protocol";
 import { AudioRecorder } from "../voice/audio-recorder";
@@ -81,7 +82,7 @@ export function Composer({
   busy,
   busyLabel,
   modelLabel,
-  subagentModelLabel = "deepseek-v4-flash",
+  subagentModelLabel = DEFAULT_MODEL,
   reasoningEffort,
   onModelChange,
   onSubagentModelChange = () => {},
@@ -130,7 +131,7 @@ export function Composer({
   /** Replaces the hint-row left side while the agent is running — typically "Reasoning" or "Skill · <name>". */
   busyLabel?: string;
   modelLabel: string;
-  /** Per-tab subagent model shown in the menu's subagent column. Defaults to deepseek-v4-flash when the caller omits it. */
+  /** Per-tab subagent model shown in the menu's subagent column. Defaults to the shared model default. */
   subagentModelLabel?: string;
   reasoningEffort: ReasoningEffort;
   onModelChange: (model: string) => void;
@@ -244,10 +245,7 @@ export function Composer({
         onPickImage(resolveImagePath(picked, workspaceDir));
         return;
       }
-      const rel =
-        workspaceDir && picked.startsWith(workspaceDir)
-          ? picked.slice(workspaceDir.length).replace(/^[\\/]+/, "")
-          : picked;
+      const rel = toWorkspaceRelative(picked, workspaceDir);
       setDraft((current) => (current ? `${current.replace(/\s+$/, "")} ${rel} ` : `${rel} `));
       textareaRef.current?.focus();
     } catch (err) {

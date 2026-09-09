@@ -24,6 +24,7 @@ export const SKILL_FILE = "SKILL.md";
 export const SKILLS_INDEX_MAX_CHARS = 4000;
 /** Skill identifier shape — alnum + `_` + `-` + interior `.`, 1-64 chars. */
 const VALID_SKILL_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+const VALID_TOOL_NAME = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
 
 export type SkillScope = "project" | "custom" | "global" | "builtin";
 
@@ -90,8 +91,88 @@ export function validateSkillFrontmatter(raw: string): { ok: true } | { error: s
   return { ok: true };
 }
 
-function isValidSkillName(name: string): boolean {
+export function isValidSkillName(name: string): boolean {
   return VALID_SKILL_NAME.test(name);
+}
+
+export interface SkillDraft {
+  name: string;
+  description: string;
+  body: string;
+  runAs: SkillRunAs;
+  allowedTools?: readonly string[];
+  model?: string;
+}
+
+export interface RawSkillDraft {
+  name?: unknown;
+  description?: unknown;
+  body?: unknown;
+  runAs?: unknown;
+  allowedTools?: unknown;
+  model?: unknown;
+}
+
+/** Validate and normalize the persisted contract shared by all skill-authoring tools. */
+export function parseSkillDraft(raw: RawSkillDraft): SkillDraft | { error: string } {
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (!name) return { error: "skill requires a non-empty 'name'" };
+  if (!isValidSkillName(name)) {
+    return { error: `invalid skill name: ${JSON.stringify(name)} — use letters, digits, _, -, .` };
+  }
+  const description =
+    typeof raw.description === "string" ? raw.description.replace(/[\r\n]+/g, " ").trim() : "";
+  if (!description) return { error: "skill requires a non-empty 'description'" };
+  const body = typeof raw.body === "string" ? raw.body : "";
+  if (!body.trim()) return { error: "skill requires a non-empty 'body'" };
+  const runAs: SkillRunAs = raw.runAs === "subagent" ? "subagent" : "inline";
+
+  let allowedTools: readonly string[] | undefined;
+  if (raw.allowedTools !== undefined && raw.allowedTools !== null) {
+    if (!Array.isArray(raw.allowedTools)) {
+      return { error: "'allowed_tools' must be an array of tool-name strings" };
+    }
+    const tools: string[] = [];
+    for (const value of raw.allowedTools) {
+      if (typeof value !== "string") {
+        return { error: "'allowed_tools' entries must be strings" };
+      }
+      const tool = value.trim();
+      if (!tool) continue;
+      if (!VALID_TOOL_NAME.test(tool)) {
+        return { error: `invalid tool name in allowed_tools: ${JSON.stringify(tool)}` };
+      }
+      tools.push(tool);
+    }
+    if (tools.length > 0) allowedTools = tools;
+  }
+
+  const model = typeof raw.model === "string" ? raw.model.trim() : "";
+  if (model && !model.startsWith("deepseek-")) {
+    return { error: "skill model must be a deepseek-* model id" };
+  }
+  return {
+    name,
+    description,
+    body,
+    runAs,
+    allowedTools: runAs === "subagent" ? allowedTools : undefined,
+    model: runAs === "subagent" && model ? model : undefined,
+  };
+}
+
+/** Serialize canonical skill frontmatter and normalized body text. */
+export function serializeSkill(draft: SkillDraft): string {
+  const lines = ["---", `name: ${draft.name}`, `description: ${draft.description}`];
+  if (draft.runAs === "subagent") {
+    lines.push("runAs: subagent");
+    if (draft.model) lines.push(`model: ${draft.model}`);
+    if (draft.allowedTools?.length) {
+      lines.push(`allowed-tools: ${draft.allowedTools.join(", ")}`);
+    }
+  }
+  lines.push("---", "");
+  return `${lines.join("\n")}\n${draft.body.trim()}\n`;
 }
 
 function parseAllowedTools(raw: string | undefined): readonly string[] | undefined {

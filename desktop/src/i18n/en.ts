@@ -72,7 +72,7 @@ export const en = {
     removeImage: "Remove image",
     imageAttachFailed: "Couldn't attach the image",
     imageRequiresVision:
-      "This model can't receive images. Switch to a vision-capable model (gpt-* or deepseek-v4-flash-vision-exp) to attach pasted images.",
+      "This model can't receive images. Switch to a vision-capable model to attach pasted images.",
     voiceInput: "Voice input",
     voiceUnavailable: "No voice model installed. Download one in Settings → Voice.",
     voiceRecording: "Listening... Click to stop and transcribe",
@@ -87,7 +87,7 @@ export const en = {
     close: "close",
     costCurrency: "Cost currency",
     costCurrencyHint:
-      "Display only. Internal cost is computed in USD-equiv per token, converted at fixed 7.2 FX.",
+      "Display only. Internal cost is computed in USD-equiv per token and converted at the configured display rate.",
     cnyDesc: "matches DeepSeek dashboard",
     usdDesc: "matches per-token reference rates",
     themeStyle: "Style",

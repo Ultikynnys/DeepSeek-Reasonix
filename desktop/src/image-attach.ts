@@ -7,6 +7,7 @@
 
 import { scanImageMentions, stripMentionTokens } from "@reasonix/core-utils";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { toWorkspaceAbsolute } from "./workspace-path";
 
 const MAX_EDGE = 2048;
 
@@ -17,8 +18,7 @@ export { isSupportedImagePath as isImagePath } from "@reasonix/core-utils";
 /** Resolve a mention path (workspace-relative or absolute) to the absolute
  *  path the daemon's file-read accept-list expects. */
 export function resolveImagePath(path: string, workspaceDir?: string): string {
-  if (!workspaceDir || /^([a-zA-Z]:[\\/]|[/\\])/.test(path)) return path;
-  return `${workspaceDir.replace(/[\\/]+$/, "")}/${path}`;
+  return toWorkspaceAbsolute(path, workspaceDir);
 }
 
 /** Optimistic echo for typed `@path` image mentions on ChatGPT models: strip

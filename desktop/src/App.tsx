@@ -1,5 +1,5 @@
 import {
-  type ReasoningEffort,
+  DEFAULT_MODEL,
   clipText,
   extractPathsFromArgs,
   flattenText,
@@ -10,6 +10,7 @@ import {
   redactDiagnosticText,
   redactDiagnosticValue,
   sanitizeFilename,
+  sortSessionsDescending,
 } from "@reasonix/core-utils";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -54,10 +55,10 @@ import {
   type OutgoingCommand,
   type PlanStep,
   type PlanVerdict,
-  type QuickSend,
   type RevisionVerdict,
   type SessionProviderCost,
   type SettingsPatch,
+  type SettingsPayload,
   type SkillInfo,
   type SubagentProgressEvent,
   type UserImageAttachment,
@@ -108,6 +109,7 @@ import {
 } from "./ui/startup-failure";
 import { StatusBar } from "./ui/statusbar";
 import { type ClearTabsScope, TabMenu, getTabsToClear } from "./ui/tab-menu";
+import { toWorkspaceRelative } from "./workspace-path";
 import {
   AssistantMsg,
   CheckpointApprovalCard,
@@ -360,120 +362,9 @@ export type SessionInfo = {
   workspaceStatus?: "matched" | "legacy_missing_meta";
 };
 
-export function parseSessionTimestamp(name: string): number {
-  const m = name.match(/(?:^|[-_])(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(?:(\d{2}))?(?:[-_]|$)/);
-  if (m) {
-    const [, y, mon, d, hh, mm, ss] = m;
-    return Date.UTC(+y!, +mon! - 1, +d!, +hh!, +mm!, ss ? +ss : 0);
-  }
-  return 0;
-}
+export { parseSessionTimestamp, sessionRecency, sortSessionsDescending } from "@reasonix/core-utils";
 
-export function sessionRecency(session: SessionInfo): number {
-  const mtimeMs = Date.parse(session.mtime);
-  const validMtime = Number.isFinite(mtimeMs) ? mtimeMs : 0;
-  const nameMs = parseSessionTimestamp(session.name);
-  return Math.max(validMtime, nameMs);
-}
-
-export function sortSessionsDescending(a: SessionInfo, b: SessionInfo): number {
-  const recencyDiff = sessionRecency(b) - sessionRecency(a);
-  if (recencyDiff !== 0) return recencyDiff;
-  return b.name.localeCompare(a.name);
-}
-
-export type Settings = {
-  reasoningEffort: ReasoningEffort;
-  editMode: "review" | "auto" | "yolo" | "plan";
-  /** Active quick-send action id (default "proceed"). */
-  quickSendId?: string;
-  /** User-defined quick sends (built-ins are code-defined). */
-  quickSends?: QuickSend[];
-  /** User-configured context-window cap (tokens); null = per-model default. */
-  contextTokens?: number | null;
-  /** Effective per-turn iteration cap after config, environment, and default resolution. */
-  maxIterPerTurn?: number | null;
-  /** Explicit config override; null means environment/default resolution is active. */
-  maxIterPerTurnOverride?: number | null;
-  /** When true, all automatic compaction sources are disabled. */
-  disableAutoCompaction?: boolean;
-  /** Whether subagent skills may run. Defaults to true. */
-  enableSubagents?: boolean;
-  baseUrl?: string;
-  apiKeyPrefix?: string;
-  workspaceDir: string;
-  recentWorkspaces: string[];
-  model: string;
-  /** Ids with an explicit `models` provider mapping in config.json — offered
-   *  by the model picker alongside the catalogs, since the user declared them. */
-  customModels?: string[];
-  /** Model ids hidden from every model picker. Global persistent setting
-   *  (`disabledModels` in config.json), edited from Settings → Models. */
-  disabledModels?: string[];
-  /** Ollama chat endpoint (OpenAI-compatible) — shown in the Models settings page. */
-  ollamaBaseUrl?: string;
-  webSearchEngine?:
-    | "bing"
-    | "bing-intl"
-    | "searxng"
-    | "metaso"
-    | "baidu"
-    | "tavily"
-    | "perplexity"
-    | "exa"
-    | "brave"
-    | "ollama"
-    | "zai";
-  webSearchEndpoint?: string;
-  webSearchApiKeys?: {
-    metaso?: string;
-    baidu?: string;
-    tavily?: string;
-    perplexity?: string;
-    exa?: string;
-    ollama?: string;
-    brave?: string;
-    zai?: string;
-    opencode?: string;
-  };
-  opencodeBaseUrl?: string | null;
-  /** Per-tab subagent model — default for subagent skills without an explicit `model:` frontmatter. */
-  subagentModel?: string;
-  ollamaGeneration?: import("./protocol").OllamaGenerationSettings;
-  ollamaGenerationOverrides?: import("./protocol").OllamaGenerationPatch;
-  ollamaModelDefaults?: Record<string, number>;
-  /** Per-field visibility toggles for the bottom status row. Absent = all default to true. */
-  statusBar?: {
-    showBalance?: boolean;
-    showSessionCost?: boolean;
-    showTurnCost?: boolean;
-    showCacheHit?: boolean;
-    showCtxUsage?: boolean;
-    showVersion?: boolean;
-    showFeedbackHint?: boolean;
-  };
-  /** Endpoint + auth state for the tab's current model — per tab, follows model switches. */
-  modelEndpoint?: ModelEndpointInfo;
-  /** Daemon-resolved endpoint for the tab's effective subagent model. */
-  subagentModelEndpoint?: ModelEndpointInfo;
-  openaiOAuth?: {
-    signedIn: boolean;
-    account?: string;
-    /** Last OAuth flow failure (e.g. upstream invalid_client / timeout) — drives the status-bar auth chip until the next successful sign-in. */
-    flowError?: string;
-  };
-  antigravityOAuth?: {
-    signedIn: boolean;
-    account?: string;
-    /** Exact model ids returned by Antigravity for this account. */
-    models?: string[];
-    /** Last OAuth flow failure — drives the status-bar Gemini auth chip until the next successful sign-in. */
-    flowError?: string;
-  };
-  shellAllowed?: string[];
-  pathAllowed?: string[];
-  version: string;
-};
+export type Settings = SettingsPayload;
 
 export type BalanceInfoItem = {
   currency: string;
@@ -638,6 +529,7 @@ function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
     ollamaBaseUrl: _ollamaBaseUrl,
     ollamaGeneration: _ollamaGeneration,
     webSearchEndpoint,
+    opencodeBaseUrl,
     ...rest
   } = patch;
   const sanitized: Partial<Settings> = { ...rest };
@@ -646,6 +538,9 @@ function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
   }
   if (_ollamaBaseUrl !== undefined) {
     sanitized.ollamaBaseUrl = _ollamaBaseUrl ?? undefined;
+  }
+  if (opencodeBaseUrl !== undefined) {
+    sanitized.opencodeBaseUrl = opencodeBaseUrl ?? undefined;
   }
   return sanitized;
 }
@@ -2706,16 +2601,7 @@ function TabRuntime({
           const mentionPaths = imageCapable ? paths.filter((p) => !isImagePath(p)) : paths;
           for (const p of imagePaths) attachPickedImage(p);
           if (mentionPaths.length > 0) {
-            const mentions = mentionPaths.map((p) => {
-              const norm = p.replace(/\\/g, "/");
-              if (ws) {
-                const wsNorm = ws.replace(/\\/g, "/").replace(/\/+$/, "");
-                if (norm === wsNorm || norm.startsWith(`${wsNorm}/`)) {
-                  return norm.slice(wsNorm.length).replace(/^\/+/, "") || ".";
-                }
-              }
-              return norm;
-            });
+            const mentions = mentionPaths.map((path) => toWorkspaceRelative(path, ws));
             setDraft((d) => {
               const prefix = d.trim() ? `${d.replace(/\s+$/, "")} ` : "";
               return `${prefix}${mentions.join(" ")} `;
@@ -3448,9 +3334,9 @@ function TabRuntime({
                     : undefined
                 }
                 textareaRef={composerRef}
-                modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
+                modelLabel={state.settings?.model ?? DEFAULT_MODEL}
                 subagentModelLabel={
-                  state.settings?.subagentModel ?? state.settings?.model ?? "deepseek-v4-flash"
+                  state.settings?.subagentModel ?? state.settings?.model ?? DEFAULT_MODEL
                 }
                 reasoningEffort={state.settings?.reasoningEffort ?? "high"}
                 ollamaModels={ollamaModels}

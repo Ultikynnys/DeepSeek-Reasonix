@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
-import { DAY_MS, messageOf, sanitizeFilename } from "@reasonix/core-utils";
+import { DAY_MS, messageOf, sanitizeFilename, sortSessionsDescending } from "@reasonix/core-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
 import { atomicWriteSync, tmpSiblingPath } from "../core/atomic-write.js";
 import { readJsonFileSilently } from "../core/json-file.js";
@@ -25,6 +25,12 @@ import { reasonixHome } from "../reasonix-home.js";
 import type { CacheDiagnosticEntry } from "../telemetry/cache-diagnostics.js";
 import type { SessionProviderCost } from "../telemetry/stats.js";
 import type { ChatMessage } from "../types.js";
+
+export {
+  parseSessionTimestamp,
+  sessionRecency,
+  sortSessionsDescending,
+} from "@reasonix/core-utils";
 
 /** Sidecar file suffix holding the per-session event log. */
 export const SESSION_EVENTS_SUFFIX = ".events.jsonl";
@@ -125,33 +131,6 @@ export function firstFreeSessionName(base: string, occupied: (name: string) => b
     if (!occupied(candidate)) return candidate;
   }
   return `${base}-10`;
-}
-
-/** Parse compact timestamp (YYYYMMDDHHmmss or YYYYMMDDHHmm) from session names. */
-export function parseSessionTimestamp(name: string): number {
-  const m = name.match(/(?:^|[-_])(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(?:(\d{2}))?(?:[-_]|$)/);
-  if (m) {
-    const [, y, mon, d, hh, mm, ss] = m;
-    return Date.UTC(+y!, +mon! - 1, +d!, +hh!, +mm!, ss ? +ss : 0);
-  }
-  return 0;
-}
-
-/** Compute overall recency for a session based on mtime and creation timestamp in name. */
-export function sessionRecency(session: { name: string; mtime: Date }): number {
-  const mtimeMs = Number.isFinite(session.mtime.getTime()) ? session.mtime.getTime() : 0;
-  const nameMs = parseSessionTimestamp(session.name);
-  return Math.max(mtimeMs, nameMs);
-}
-
-/** Deterministic descending sort (newest first): recency with tie-break by name. */
-export function sortSessionsDescending<T extends { name: string; mtime: Date }>(
-  a: T,
-  b: T,
-): number {
-  const recencyDiff = sessionRecency(b) - sessionRecency(a);
-  if (recencyDiff !== 0) return recencyDiff;
-  return b.name.localeCompare(a.name);
 }
 
 /** Names of `.jsonl` sessions starting with `prefix`, newest-first by filename. */

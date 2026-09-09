@@ -123,7 +123,8 @@ describe("Composer image pick button (ChatGPT vision path)", () => {
     await vi.waitFor(() => expect(setDraft).toHaveBeenCalled());
     expect(onPickImage).not.toHaveBeenCalled();
     const updater = setDraft.mock.calls[0]![0] as (cur: string) => string;
-    expect(updater("")).toBe("C:\\shots\\anim.gif ");
+    // Outside-workspace picks are slash-normalized, matching the drag-drop mention path.
+    expect(updater("")).toBe("C:/shots/anim.gif ");
   });
 
   it("inserts the file path when the model is DeepSeek", async () => {

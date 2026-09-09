@@ -8,6 +8,7 @@ import type { TKey } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
+import { toWorkspaceAbsolute } from "../workspace-path";
 import { FileMenu } from "./file-menu";
 import { activationHandler } from "./keyboard";
 
@@ -238,14 +239,7 @@ type TreeNode =
   | { kind: "file"; depth: number; name: string; path: string; key: string; status: "c" | "m" };
 
 function resolveContextAbs(path: string, settings: Settings | null): string {
-  const workspaceDir = settings?.workspaceDir;
-  const isWindows = workspaceDir?.includes("\\") ?? false;
-  const sep = isWindows ? "\\" : "/";
-  return workspaceDir && !/^[a-zA-Z]:[\\/]/.test(path) && !path.startsWith("/")
-    ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "").replace(/\//g, sep)}`
-    : isWindows
-      ? path.replace(/\//g, "\\")
-      : path;
+  return toWorkspaceAbsolute(path, settings?.workspaceDir);
 }
 
 async function openContextFile(path: string, settings: Settings | null): Promise<void> {
