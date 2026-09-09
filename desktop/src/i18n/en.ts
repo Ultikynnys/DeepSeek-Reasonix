@@ -265,6 +265,11 @@ export const en = {
     mcpTokenHint:
       "Token is optional: paste it from the extension's connection dialog — storing it skips the per-connection approval prompt.",
     mcpTokenSaved: "token saved",
+    mcpConnConnected: "server connected · {count} tools live",
+    mcpConnHandshake: "server connecting…",
+    mcpConnFailed: "server failed — {reason}",
+    mcpConnDisabled: "server disabled — enable it to bridge",
+    mcpConnIdle: "configured but not bridged yet — connects when a session starts",
     mcpBundledTitle: "Bundled copy (offline fallback)",
     mcpCopyPath: "Copy path",
     mcpOpenFolder: "Open folder",

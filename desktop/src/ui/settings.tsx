@@ -1607,8 +1607,7 @@ function PageModels({
     </>
   );
 }
-
-function PageMCP({
+export function PageMCP({
   specs,
   bridged,
   onAdd,
@@ -1651,6 +1650,27 @@ function PageMCP({
     });
   };
   const configuredWithExtension = extensionStatus?.server.hasExtensionArg ?? false;
+  const playwrightSpec = specs.find((s) => s.name === "playwright");
+  let connection: { text: string; color: string } | null = null;
+  if (playwrightSpec) {
+    if (playwrightSpec.disabled || playwrightSpec.status === "disabled") {
+      connection = { text: t("settings.mcpConnDisabled"), color: "var(--muted)" };
+    } else if (playwrightSpec.status === "connected") {
+      connection = {
+        text: t("settings.mcpConnConnected", { count: playwrightSpec.toolCount ?? 0 }),
+        color: "var(--accent)",
+      };
+    } else if (playwrightSpec.status === "handshake") {
+      connection = { text: t("settings.mcpConnHandshake"), color: "var(--muted)" };
+    } else if (playwrightSpec.status === "failed") {
+      connection = {
+        text: t("settings.mcpConnFailed", { reason: playwrightSpec.statusReason ?? "" }),
+        color: "var(--danger)",
+      };
+    } else {
+      connection = { text: t("settings.mcpConnIdle"), color: "var(--muted)" };
+    }
+  }
   return (
     <>
       <section className="section">
@@ -1708,6 +1728,11 @@ function PageMCP({
                 : t("settings.mcpConfiguredNo")
               : "…"}
           </div>
+          {connection ? (
+            <div style={{ marginTop: 4, fontSize: 11, color: connection.color }}>
+              {connection.text}
+            </div>
+          ) : null}
           <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
             {t("settings.mcpProfileHint")}
           </div>
