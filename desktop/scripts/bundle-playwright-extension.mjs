@@ -90,7 +90,9 @@ async function fetchAndExtract() {
     `?response=redirect&prodversion=130&acceptformat=crx3` +
     `&x=id%3D${EXTENSION_ID}%26uc`;
   const crxPath = join(binDir, "_playwright-extension.crx");
-  const extractDir = join(binDir, "_extension-extract");
+  const workDir = join(binDir, "_extension-extract");
+  const zipPath = join(workDir, "extension.zip");
+  const unpackDir = join(workDir, "unpacked");
 
   console.log("Downloading Playwright Extension CRX ...");
   await follow(crxUrl, crxPath);
@@ -99,37 +101,46 @@ async function fetchAndExtract() {
   const buf = readFileSync(crxPath);
   const zip = crxZipSlice(buf);
 
-  rmSync(extractDir, { recursive: true, force: true });
-  mkdirSync(extractDir, { recursive: true });
-  const zipPath = join(extractDir, "extension.zip");
+  rmSync(workDir, { recursive: true, force: true });
+  mkdirSync(unpackDir, { recursive: true });
   writeFileSync(zipPath, zip);
 
   console.log("Extracting ...");
   execSync(
-    `powershell -NoProfile -Command "Expand-Archive -Force -Path '${zipPath}' -DestinationPath '${extractDir}'"`,
+    `powershell -NoProfile -Command "Expand-Archive -Force -Path '${zipPath}' -DestinationPath '${unpackDir}'"`,
     { stdio: "inherit" },
   );
 
-  // The zip may nest one folder — find where manifest.json actually landed.
-  const entries = readdirSync(extractDir);
-  const withManifest = entries.find((e) => existsSync(join(extractDir, e, "manifest.json")));
-  if (!withManifest) {
-    console.error(`No manifest.json found after extracting (entries: ${entries.join(", ") || "none"})`);
-    process.exit(1);
+  // Store packages put the manifest at the zip root; older ones nested one
+  // folder — handle both. The zip itself lives outside unpackDir so it can
+  // never leak into the copied bundle.
+  let inner;
+  if (existsSync(join(unpackDir, "manifest.json"))) {
+    inner = unpackDir;
+  } else {
+    const entries = readdirSync(unpackDir, { withFileTypes: true });
+    const nested = entries.find(
+      (e) => e.isDirectory() && existsSync(join(unpackDir, e.name, "manifest.json")),
+    );
+    if (!nested) {
+      const names = entries.map((e) => e.name).join(", ");
+      console.error(`No manifest.json found after extracting (entries: ${names || "none"})`);
+      process.exit(1);
+    }
+    inner = join(unpackDir, nested.name);
   }
-  const inner = join(extractDir, withManifest);
   rmSync(crxPath);
   rmSync(zipPath);
-  return { inner, extractDir };
+  return { inner, workDir };
 }
 
-const { inner, extractDir } = await fetchAndExtract();
+const { inner, workDir } = await fetchAndExtract();
 
 rmSync(targetDir, { recursive: true, force: true });
 // robocopy exits 1 on successful copy — execSync would treat that as a throw,
 // so tolerate any exit and verify the result directly instead.
 try {
-  execSync(`robocopy "${inner}" "${targetDir}" /E /NFL /NDL /NJH /NJS`, { stdio: "ignore" });
+  execSync(`robocopy "${inner}" "${targetDir}" /E /XD _metadata /NFL /NDL /NJH /NJS`, { stdio: "ignore" });
 } catch {
   /* verified below */
 }
@@ -139,7 +150,7 @@ if (!existsSync(join(targetDir, "manifest.json"))) {
 }
 const manifest = JSON.parse(readFileSync(join(targetDir, "manifest.json"), "utf8"));
 writeFileSync(join(targetDir, "_store_version.txt"), String(manifest.version ?? "unknown"));
-rmSync(extractDir, { recursive: true, force: true });
+rmSync(workDir, { recursive: true, force: true });
 
 const fileCount = readdirSync(targetDir).length;
 console.log(`Done: ${targetDir} (v${manifest.version}, ${fileCount} entries)`);
