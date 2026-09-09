@@ -5,6 +5,19 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Added: prefix-preserving history folds; compaction no longer re-reads the whole conversation at cache-miss price.**
+
+- The fold used to replace the entire log with one summary message, so after every compaction the next request re-shipped the whole (new) context with zero provider cache reuse. The fold now keeps the earliest turn-boundary-aligned head span verbatim (`headKeepCut`, budget = 2% of ctxMax clamped to [1024, 8192] tokens, overridable via `keepHeadTokens` on `compactHistory` / `compactHistoryWithEvents` / the fold opts), summarizes only the middle span, and leaves the existing priced-tail, merge-at-commit race guard, and disk-rewrite paths untouched. The kept head stays byte-identical to the pre-fold request, so the provider's prefix cache survives up to the summary position and the fold re-reads only summary + tail (the same trade upstream DeepSeek Harness makes: its compaction never shadows the system head). The cut lands only immediately before user messages, so an assistant tool_calls → tool result pair is never split by the cut.
+- The summarizer instruction gains a bridging note when a head is kept ("the earliest N tokens are retained verbatim before this summary and the most recent messages follow it"), reusing the existing note-append pattern. `FoldResult` reports the preserved cache bytes additively (`keptHeadMessages` / `keptHeadTokens`); existing fields and event shapes are unchanged. Degenerate folds where the whole foldable span fits the keep budget fall back to folding from the head (previous shape). Tests: `headKeepCut` boundary/pair-safety units plus head-keep fold integration in `context-manager-cache-aligned-fold.test.ts`.
+
+**Added: a loop-level append-only wire invariant test (steady-state cache stability).**
+
+- New `loop-append-invariant.test.ts` drives two turns plus a queued steer through the shared fake-client harness and asserts every consecutive request extends the previous one by appended messages only, with earlier wire bytes byte-identical. This pins the property DeepSeek prefix caching monetizes (upstream dsh calls it "prefix stability is corollary #1") so future mid-history edits fail in CI instead of silently re-reading the conversation at miss price. Deliberate miss paths (folds, `/clear`, tool-set changes) remain exempt by design.
+
+**Investigated: system-prompt delta updates (dsh-style) evaluated and deliberately not built.**
+
+- The inventory showed every system-prompt rebuild in the loop and desktop coincides with a cache-dead moment already: `rebuildSystemPrompt` fires only from `clearLog` (/new) and `switchWorkspace` (/cwd), both of which drop the log first; desktop rebuilds (model switch, subagent toggle, semantic settle, workspace switch, session restore) each change the tool spec or rebuild the runtime in the same pass; memory writes never touch the system prompt; and `ImmutablePrefix.replaceSystem` already no-ops when the rebuilt text is byte-identical (the semantic-settle path is guarded). A delta-append mechanism would therefore have no caller that benefits: it would be unused machinery duplicating the synthetic-message append path. Revisit if mid-session system propagation (e.g. live memory refresh) ever becomes a feature.
+
 **Fixed — the statusbar tokens chip scales its unit with magnitude instead of pinning to kilo.**
 
 - The chip divided every value by 1000 with a fixed `k` suffix, so a 66.9M-token cumulative total rendered as the unreadable `66851.1k`. The adaptive formatter already existed for the subagent card's `ctx` labels (`66.9m` / `12.3k` / `999`); it is now extracted into a shared `ui/format.ts` module and used by the statusbar tokens chip too, so both surfaces agree and no token display can pin to kilo again.

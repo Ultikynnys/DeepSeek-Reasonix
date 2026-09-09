@@ -490,9 +490,11 @@ export class CacheFirstLoop {
     });
   }
 
-  /** Replace older turns with one summary message; keep tail within keepRecentTokens budget. */
+  /** Replace older turns with one summary message; keep tail within keepRecentTokens budget
+   *  and the earliest turn(s) within keepHeadTokens (head-keep fold; undefined = derive). */
   async compactHistory(opts?: {
     keepRecentTokens?: number;
+    keepHeadTokens?: number;
     protectActiveExchange?: boolean;
     userInitiated?: boolean;
   }): Promise<FoldResult> {
@@ -504,6 +506,7 @@ export class CacheFirstLoop {
    *  actions so every compaction form shares one pipeline. */
   async *compactHistoryWithEvents(opts?: {
     keepRecentTokens?: number;
+    keepHeadTokens?: number;
   }): AsyncGenerator<LoopEvent, FoldResult, void> {
     return yield* this.compactionEvents(
       `compaction-${++this._compactionSeq}`,
@@ -2099,6 +2102,7 @@ export class CacheFirstLoop {
    *  a generator instead to forward its own events through the card. */
   private foldRun(opts: {
     keepRecentTokens?: number;
+    keepHeadTokens?: number;
     protectActiveExchange?: boolean;
     requireTailBoundary?: boolean;
     userInitiated?: boolean;

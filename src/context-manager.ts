@@ -33,6 +33,14 @@ import type { ChatMessage, ToolSpec, UserContentPart } from "./types.js";
 export const HISTORY_FOLD_THRESHOLD = 0.75;
 /** Tail budget after a normal fold, as a fraction of ctxMax. */
 export const HISTORY_FOLD_TAIL_FRACTION = 0.2;
+/** Head span kept verbatim across a fold, as a fraction of ctxMax: the earliest turn(s)
+ *  survive unsummarized so the post-fold request keeps its cached prefix up to the summary
+ *  position and re-reads only summary + tail — the same trade upstream dsh makes. */
+export const HISTORY_FOLD_HEAD_KEEP_FRACTION = 0.02;
+/** Floor so small/unknown windows still keep the first turn verbatim. */
+export const HISTORY_FOLD_HEAD_KEEP_MIN_TOKENS = 1024;
+/** Ceiling — a kept head past this buys cache bytes at the cost of stale ones. */
+export const HISTORY_FOLD_HEAD_KEEP_MAX_TOKENS = 8192;
 /** Above this fraction the normal fold's tail budget didn't buy enough headroom — fold harder. */
 export const HISTORY_FOLD_AGGRESSIVE_THRESHOLD = 0.78;
 /** Tail budget after an aggressive fold — half the normal one, sacrifices recent context for headroom. */
@@ -153,6 +161,24 @@ export function trimMessageWindow(
   return { messages: kept, droppedTokens: Math.max(0, total - keptTokens) };
 }
 
+/** Longest turn-boundary-aligned prefix of `messages[0..limitIdx]` fitting `budgetTokens`:
+ *  kept head = [0..cut), summarizable span = [cut..limitIdx). Cuts land only immediately before
+ *  user messages, so a tool_calls → result pair is never split. 0 = keep nothing. Pure. */
+export function headKeepCut(
+  messages: ChatMessage[],
+  limitIdx: number,
+  budgetTokens: number,
+): number {
+  let cut = 0;
+  let acc = 0;
+  for (let i = 0; i <= limitIdx; i++) {
+    const atSafeCut = i === limitIdx || messages[i]!.role === "user";
+    if (atSafeCut && acc <= budgetTokens) cut = i;
+    if (i < limitIdx) acc += countMessageTokens(messages[i]!);
+  }
+  return cut;
+}
+
 export interface ContextManagerDeps {
   client: DeepSeekClient;
   log: AppendOnlyLog;
@@ -204,6 +230,11 @@ export interface FoldResult {
   /** File paths the triage step classified as no longer relevant — the UI drops
    *  them from "Files in context". Absent when the triage kept everything. */
   droppedFiles?: string[];
+  /** Earliest messages kept verbatim ahead of the summary (head-keep fold).
+   *  Absent when the fold summarized from the head (no head kept). */
+  keptHeadMessages?: number;
+  /** Token weight of the kept head — the cache bytes the fold preserved. */
+  keptHeadTokens?: number;
 }
 
 // Per-message token cost includes tool_calls JSON and reasoning_content;
@@ -402,6 +433,9 @@ export class ContextManager {
     model: string,
     opts?: {
       keepRecentTokens?: number;
+      /** Earliest turn(s) kept verbatim ahead of the summary (head-keep fold).
+       *  Undefined = derive from ctxMax via HISTORY_FOLD_HEAD_KEEP_FRACTION. */
+      keepHeadTokens?: number;
       requireTailBoundary?: boolean;
       // Never let the fold summarize the most recent user→assistant exchange away —
       // clamps the boundary to the last user message even when tool results blew
@@ -475,6 +509,24 @@ export class ContextManager {
     // cache-aligned summary tests still exercise the "summarize all" shape.
     if (opts?.requireTailBoundary && boundary >= all.length) return noop;
 
+    // Head keep: preserve the earliest turn-boundary-aligned span verbatim so the
+    // post-fold request re-reads only summary + tail at cache-miss price; the kept
+    // head stays byte-identical to the pre-fold request and stays provider-cached.
+    // Degenerate guard: when the keepable head would swallow the whole foldable span
+    // (tiny forced folds in tests, or a log smaller than the keep budget), keep
+    // nothing and fold from the head as before.
+    const headKeepBudget =
+      opts?.keepHeadTokens ??
+      Math.max(
+        HISTORY_FOLD_HEAD_KEEP_MIN_TOKENS,
+        Math.min(
+          HISTORY_FOLD_HEAD_KEEP_MAX_TOKENS,
+          Math.floor(ctxMax * HISTORY_FOLD_HEAD_KEEP_FRACTION),
+        ),
+      );
+    let headCut = headKeepCut(all, boundary, headKeepBudget);
+    if (headCut >= boundary) headCut = 0;
+
     // Guard: when the tail would be empty, the most recent assistant message
     // (with its pending tool_calls) is summarized away. fixToolCallPairing
     // would then drop the tool results that follow as stray/unpaired — the
@@ -510,33 +562,38 @@ export class ContextManager {
     // Message count is preserved, so the merge-at-commit slice below stays
     // valid. Active-exchange reads (after the last user message) are exempt.
     const pruned = pruneUnusedFileReads(all);
-    const prunedHead = pruned.messages.slice(0, boundary);
+    const keptHead = pruned.messages.slice(0, headCut);
+    const summarizeSpan = pruned.messages.slice(headCut, boundary);
     const prunedTail = pruned.messages.slice(boundary);
     // Deadline scales with what the summarizer actually ships — the pruned
-    // head — not the original, so dead file bodies no longer inflate the
+    // span — not the original, so dead file bodies no longer inflate the
     // fold window.
-    // Bound the summarizer input. Re-reading the ENTIRE pruned head is the dominant
+    // Bound the summarizer input. Re-reading the ENTIRE summarizable span is the dominant
     // compaction cost (up to ~240k tokens at a 300k window); a fold only needs the
-    // *recent* essence, so cap the head fed to the summarizer to a fraction of the
+    // *recent* essence, so cap the span fed to the summarizer to a fraction of the
     // window and drop the oldest overflow. Pinned skills/constraints are preserved
     // verbatim below (memoTail / constraintTail), so nothing pinned is lost.
     const summaryHeadBudget = Math.max(
       HISTORY_FOLD_SUMMARY_MIN_HEAD_TOKENS,
       Math.floor(ctxMax * HISTORY_FOLD_SUMMARY_HEAD_FRACTION),
     );
-    const trimmedHead = trimMessageWindow(prunedHead, summaryHeadBudget);
-    const trimmedHeadTokens = trimmedHead.messages.reduce(
+    const trimmedSpan = trimMessageWindow(summarizeSpan, summaryHeadBudget);
+    const trimmedSpanTokens = trimmedSpan.messages.reduce(
       (acc, m) => acc + countMessageTokens(m),
       0,
     );
+    const keptHeadTokens = keptHead.reduce((acc, m) => acc + countMessageTokens(m), 0);
 
-    const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(prunedHead);
+    const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(summarizeSpan);
     const summary = await this.summarizeForFold(
-      trimmedHead.messages,
+      trimmedSpan.messages,
       pinnedNames,
-      trimmedHeadTokens,
+      trimmedSpanTokens,
       model,
-      trimmedHead.droppedTokens,
+      trimmedSpan.droppedTokens,
+      headCut > 0
+        ? `the earliest ${keptHeadTokens} tokens of the conversation are retained verbatim before this summary and the most recent messages follow it`
+        : undefined,
     );
     if (!summary.content) {
       // Summarizer failure — surface it so the loop can warn instead of the
@@ -613,7 +670,7 @@ export class ContextManager {
       };
     }
     const liveAppends = liveEntries.slice(all.length);
-    const replacement = [summaryMsg, ...prunedTail, ...liveAppends];
+    const replacement = [...keptHead, summaryMsg, ...prunedTail, ...liveAppends];
     this.deps.log.compactInPlace(replacement);
     // Sync commit ordering: in-memory swap first, then the full-file atomic
     // rewrite. Both are synchronous, so this method cannot resolve until the
@@ -632,6 +689,7 @@ export class ContextManager {
       ...(pruned.prunedFiles.length > 0
         ? { prunedFiles: pruned.prunedFiles.length, prunedTokens: pruned.tokensSaved }
         : {}),
+      ...(headCut > 0 ? { keptHeadMessages: keptHead.length, keptHeadTokens } : {}),
       ...(droppedFiles.length > 0 ? { droppedFiles } : {}),
     };
   }
@@ -660,6 +718,9 @@ export class ContextManager {
     headTokens: number,
     activeModel: string,
     droppedTokens = 0,
+    /** Set on a head-keep fold: tells the summarizer its span sits between
+     *  verbatim-retained early history and the retained recent tail. */
+    contextNote?: string,
   ): Promise<{ content: string; reasoningContent: string; error?: string }> {
     const summaryModel = compactModelForProvider(activeModel);
     const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
@@ -673,6 +734,9 @@ export class ContextManager {
     let instruction = buildFoldSummaryInstruction(pinnedSkillNames);
     if (droppedTokens > 0) {
       instruction += `\n\n(Note: the oldest ${droppedTokens} tokens of conversation were trimmed before summarization — summarize only the context shown.)`;
+    }
+    if (contextNote) {
+      instruction += `\n\n(Note: ${contextNote} — summarize only the middle portion shown, bridging the retained early context to the recent tail.)`;
     }
     // DeepSeek models reject OpenAI image content parts (400) — collapse them
     // to a text placeholder so a session with image attachments can still fold.

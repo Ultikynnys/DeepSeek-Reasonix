@@ -210,7 +210,7 @@ describe("compaction model-call deadlines", () => {
       billingContextFor: () => ({ kind: "usd", provider: "deepseek", at: 0 }),
     });
 
-    const pending = cm.fold("test-model", { keepRecentTokens: 500 });
+    const pending = cm.fold("test-model", { keepRecentTokens: 500, keepHeadTokens: 0 });
     await vi.advanceTimersByTimeAsync(FILE_TRIAGE_TIMEOUT_MS + 100);
     const result = await pending;
 
