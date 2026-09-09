@@ -3,12 +3,16 @@
 import type { ToolCall } from "../types.js";
 import { repairRepeatingToolName, scavengeToolCalls } from "./scavenge.js";
 import { type IsMutating, type IsStormExempt, StormBreaker } from "./storm.js";
-import { repairTruncatedJson } from "./truncation.js";
+import {
+  type ArgsSplitResult,
+  repairTruncatedJson,
+  splitConcatenatedJsonObjects,
+} from "./truncation.js";
 
 export { analyzeSchema, flattenSchema, nestArguments } from "./flatten.js";
 export type { FlattenDecision } from "./flatten.js";
-export { repairTruncatedJson } from "./truncation.js";
-export type { TruncationRepairResult } from "./truncation.js";
+export { repairTruncatedJson, splitConcatenatedJsonObjects } from "./truncation.js";
+export type { TruncationRepairResult, ArgsSplitResult } from "./truncation.js";
 export { repairRepeatingToolName, scavengeToolCalls } from "./scavenge.js";
 export type { ScavengeOptions, ScavengeRange, ScavengeResult } from "./scavenge.js";
 export { StormBreaker } from "./storm.js";
@@ -16,6 +20,8 @@ export { StormBreaker } from "./storm.js";
 export interface RepairReport {
   scavenged: number;
   truncationsFixed: number;
+  /** Calls restored by splitting concatenated arguments (parallel-call fragments merged by the provider). */
+  argsSplitCalls: number;
   stormsBroken: number;
   notes: string[];
 }
@@ -58,6 +64,7 @@ export class ToolCallRepair {
     const report: RepairReport = {
       scavenged: 0,
       truncationsFixed: 0,
+      argsSplitCalls: 0,
       stormsBroken: 0,
       notes: [],
     };
@@ -117,7 +124,43 @@ export class ToolCallRepair {
       cleanedContent = nextContent.trim();
     }
 
-    // 2. Truncation repair on argument JSON.
+    // 2. Argument-JSON repair. First: concatenated-args split — one tool_call
+    // whose arguments carry several complete top-level JSON objects. Providers
+    // merge parallel-call fragments into a single arguments string (observed on
+    // ollama-served models): {"task":"a"}{"task":"b"} — every intended call dies
+    // at JSON.parse with "Unexpected non-whitespace character after JSON". One
+    // object per call restores the model's intent; the first object keeps the
+    // declared call id, the rest get derived ids so results pair up.
+    const expanded: ToolCall[] = [];
+    for (const call of merged) {
+      const split: ArgsSplitResult | null = splitConcatenatedJsonObjects(
+        call.function?.arguments ?? "",
+      );
+      if (split && call.function) {
+        call.function.arguments = split.parts[0]!;
+        expanded.push(call);
+        for (let k = 1; k < split.parts.length; k++) {
+          const clone: ToolCall = {
+            function: { name: call.function.name, arguments: split.parts[k]! },
+          };
+          if (call.type !== undefined) clone.type = call.type;
+          if (call.id) clone.id = `${call.id}-split${k + 1}`;
+          expanded.push(clone);
+        }
+        report.argsSplitCalls += split.parts.length - 1;
+        const overflowNote =
+          split.droppedObjects > 0 ? ` (${split.droppedObjects} more objects dropped)` : "";
+        report.notes.push(
+          `[${call.function.name}] split concatenated arguments into ${split.parts.length} calls${overflowNote}`,
+        );
+      } else {
+        expanded.push(call);
+      }
+    }
+    merged.length = 0;
+    merged.push(...expanded);
+
+    // 2b. Truncation repair on argument JSON.
     for (const call of merged) {
       const args = call.function?.arguments ?? "";
       const r = repairTruncatedJson(args);

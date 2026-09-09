@@ -142,4 +142,39 @@ describe("ToolCallRepair pipeline", () => {
     expect(calls.length).toBe(1);
     expect(report.stormsBroken).toBe(0);
   });
+
+  it("splits provider-concatenated parallel-call arguments into separate calls", () => {
+    // Real-world shape (session desktop-20260909140432): two parallel explore
+    // calls emitted as ONE tool_call whose arguments are both JSON objects —
+    // every intended call died at JSON.parse with "Unexpected non-whitespace
+    // character after JSON at position 2529".
+    const repair = new ToolCallRepair({ allowedToolNames: new Set(["explore"]) });
+    const args = '{"task":"dsh survey"}{"task":"reasonix survey"}';
+    const { calls, report } = repair.process([call("call_fggzx1mk", "explore", args)], null, null);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.id).toBe("call_fggzx1mk");
+    expect(calls[0]!.function.arguments).toBe('{"task":"dsh survey"}');
+    expect(calls[1]!.id).toBe("call_fggzx1mk-split2");
+    expect(calls[1]!.function.name).toBe("explore");
+    expect(calls[1]!.function.arguments).toBe('{"task":"reasonix survey"}');
+    expect(report.argsSplitCalls).toBe(1);
+    expect(report.notes.join("\n")).toContain("split concatenated arguments into 2 calls");
+  });
+
+  it("salvages the leading object when the trailing content is not valid JSON", () => {
+    const repair = new ToolCallRepair({ allowedToolNames: new Set(["explore"]) });
+    const { calls } = repair.process([call("c1", "explore", '{"task":"x"}garbage')], null, null);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0]!.function.arguments)).toEqual({ task: "x" });
+  });
+
+  it("leaves single-object arguments untouched (no split, no salvage)", () => {
+    const repair = new ToolCallRepair({ allowedToolNames: new Set(["explore"]) });
+    const args = '{"task":"only one"}';
+    const { calls, report } = repair.process([call("c1", "explore", args)], null, null);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.function.arguments).toBe(args);
+    expect(report.argsSplitCalls).toBe(0);
+    expect(report.truncationsFixed).toBe(0);
+  });
 });

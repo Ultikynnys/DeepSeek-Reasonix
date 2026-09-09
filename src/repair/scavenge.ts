@@ -220,8 +220,10 @@ function parseDsmlParameters(body: string): Record<string, unknown> {
   return args;
 }
 
-/** Yield every top-level JSON object substring in `text`. */
-function* iterateJsonObjects(text: string): Generator<string> {
+/** Yield every top-level JSON object substring in `text`. Shared scanner:
+ *  scavenge uses it to recover calls from raw text, truncation uses it to
+ *  detect concatenated/trailing content in declared arguments. */
+export function* iterateJsonObjects(text: string): Generator<string> {
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== "{") continue;
     let depth = 0;
