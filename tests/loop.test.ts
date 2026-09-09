@@ -10,7 +10,11 @@ import {
   HISTORY_FOLD_THRESHOLD,
 } from "../src/context-manager.js";
 import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
-import { CacheFirstLoop, PROVIDER_SERVER_ERROR_RETRY_DELAY_MS } from "../src/loop.js";
+import {
+  CacheFirstLoop,
+  PROVIDER_SERVER_ERROR_RETRY_DELAY_MS,
+  resumeTurnBaseline,
+} from "../src/loop.js";
 import type { LoopEvent } from "../src/loop/types.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
@@ -29,6 +33,75 @@ function makeClient(responses: FakeResponseShape[]): DeepSeekClient {
 /** Direct-fetch call sites (prefix-stability / multi-client tests) — same harness as makeClient. */
 const fakeFetch = (responses: FakeResponseShape[]): typeof fetch =>
   makeFakeClient(responses, { echoMessages: true }).fetchMock as unknown as typeof fetch;
+
+describe("resumeTurnBaseline", () => {
+  it("counts real user records as turn ordinals", () => {
+    const messages: ChatMessage[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "one" },
+      { role: "assistant", content: "reply one" },
+      { role: "user", content: "two" },
+      { role: "assistant", content: "reply two" },
+      { role: "user", content: "three" },
+    ];
+    expect(resumeTurnBaseline(messages)).toBe(3);
+  });
+
+  it("ignores failed turns' absence of assistant replies and synthetic mid-turn records", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "one" },
+      { role: "assistant", content: "reply" },
+      // Failed turn: user message logged, no assistant reply.
+      { role: "user", content: "failed" },
+      // Mid-turn steer + premature-stop nudge are machine-generated user records.
+      { role: "user", content: "steer text", synthetic: true },
+      { role: "user", content: "nudge", synthetic: true },
+      // Tool loop: several assistant records for one turn.
+      { role: "assistant", content: "", tool_calls: [] },
+      { role: "assistant", content: "final" },
+      { role: "user", content: "next" },
+    ];
+    expect(resumeTurnBaseline(messages)).toBe(3);
+  });
+
+  it("returns zero for an empty or system-only log", () => {
+    expect(resumeTurnBaseline([])).toBe(0);
+    expect(resumeTurnBaseline([{ role: "system", content: "sys" }])).toBe(0);
+  });
+});
+
+describe("retryLastUser with synthetic records", () => {
+  it("targets the last real user prompt, never a steer or nudge", () => {
+    const client = makeClient([{ content: "x" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    loop.log.append({ role: "user", content: "real one" });
+    loop.log.append({ role: "assistant", content: "reply" });
+    loop.log.append({ role: "user", content: "steer", synthetic: true });
+    loop.log.append({ role: "user", content: "real two" });
+    expect(loop.retryLastUser()).toBe("real two");
+    // The retried prompt and anything after it is dropped; the earlier steer
+    // (mid-turn context for a completed turn) legitimately survives.
+    expect(loop.log.length).toBe(3);
+  });
+
+  it("falls back to the last real prompt when the log ends with a steer", () => {
+    const client = makeClient([{ content: "x" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    loop.log.append({ role: "user", content: "real one" });
+    loop.log.append({ role: "assistant", content: "reply" });
+    loop.log.append({ role: "user", content: "steer", synthetic: true });
+    expect(loop.retryLastUser()).toBe("real one");
+    expect(loop.log.length).toBe(0);
+  });
+});
 
 describe("CacheFirstLoop (non-streaming)", () => {
   afterEach(() => {

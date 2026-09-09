@@ -3275,7 +3275,8 @@ function TabRuntime({
                         }
                         if (m.kind === "assistant") {
                           return (
-                            <div key={`a-${m.turn}`}>
+                            // biome-ignore lint/suspicious/noArrayIndexKey: transcript order is append-only
+                            <div key={`a-${m.turn}-${i}`}>
                               <AssistantRow
                                 m={m}
                                 model={state.model}

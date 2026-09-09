@@ -645,7 +645,9 @@ export class DeepSeekClient {
       // Ollama model ids are namespaced `ollama/<id>` for provider routing, but
       // the server expects the raw id (`llama3.1:latest`) — strip the prefix.
       model: isOllama ? opts.model.replace(/^ollama\//, "") : opts.model,
-      messages: provider === "deepseek" ? stampWireMessageIds(opts.messages) : opts.messages,
+      messages: stripSyntheticMarkers(
+        provider === "deepseek" ? stampWireMessageIds(opts.messages) : opts.messages,
+      ),
       stream,
     };
     if (stream && provider !== "zai") payload.stream_options = { include_usage: true };
@@ -1748,6 +1750,14 @@ function stampWireMessageIds(messages: readonly ChatMessage[]): ChatMessage[] {
     if ((m.role !== "assistant" && m.role !== "tool") || m.id !== undefined) return m;
     return { ...m, id: `msg-${i}` };
   });
+}
+
+/** `synthetic` marks machine-generated user records (mid-turn steer, premature-stop nudge)
+ *  for log accounting and timeline filtering. It must never reach the wire: non-DeepSeek
+ *  payloads pass messages through verbatim and a strict provider may reject unknown fields. */
+export function stripSyntheticMarkers(messages: readonly ChatMessage[]): ChatMessage[] {
+  if (!messages.some((m) => m.synthetic === true)) return [...messages];
+  return messages.map(({ synthetic: _synthetic, ...rest }) => rest);
 }
 
 // Mid-stream chat-completions error frame → {message, code}. `type:

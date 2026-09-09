@@ -841,17 +841,27 @@ function userLoadedMessage(content: ChatMessage["content"]): {
 
 export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
   const out: LoadedMessage[] = [];
+  // ONE turn scheme stack-wide: turn N = the Nth real (non-synthetic) user record.
+  // Assistant records inherit the turn they answer — a tool loop produces several
+  // assistant records for ONE turn, all numbered alike (the live renderer keeps one
+  // card per turn). Synthetic user records (mid-turn steer, premature-stop nudge)
+  // never start a turn and never render as user bubbles. The kernel's turn counter
+  // (resumeTurnBaseline) counts the same real user records, so error/notice anchors
+  // and these numbers stay aligned across restarts.
   let turn = 0;
+  let assistantRecord = 0;
   let pendingAssistantIdx = -1;
   for (const rec of records) {
     if (rec.role === "system") continue;
     if (rec.role === "user") {
-      out.push(userLoadedMessage(rec.content));
+      if (rec.synthetic === true) continue;
+      turn += 1;
       pendingAssistantIdx = -1;
+      out.push(userLoadedMessage(rec.content));
       continue;
     }
     if (rec.role === "assistant") {
-      turn++;
+      assistantRecord += 1;
       const segments: LoadedSegment[] = [];
       if (rec.reasoning_content) segments.push({ kind: "reasoning", text: rec.reasoning_content });
       if (typeof rec.content === "string" && rec.content) {
@@ -870,7 +880,7 @@ export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
           if (!tc) continue;
           segments.push({
             kind: "tool",
-            callId: tc.id ?? `tc-r-${turn}-${i}`,
+            callId: tc.id ?? `tc-r-${assistantRecord}-${i}`,
             name: tc.function?.name ?? "",
             args: tc.function?.arguments ?? "",
           });

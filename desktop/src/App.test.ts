@@ -343,6 +343,66 @@ describe("Desktop App reducer — usage", () => {
     ]);
   });
 
+  it("keeps error cards below their own turn's user message when numbering is unified", () => {
+    // Turn contract pinned stack-wide: the kernel's turn number equals the FE
+    // user-message position. A resumed session whose earlier turn failed (user
+    // message logged, no assistant reply) must NOT renumber — with the old
+    // assistant-count resume baseline the kernel lagged one turn behind and the
+    // error card jumped ABOVE the very "proceed" that started its turn.
+    let s = initialState();
+    const act = (action: Parameters<typeof reduce>[1]) => {
+      s = reduce(s, action);
+    };
+    const inc = (event: { type: string } & Record<string, unknown>) => {
+      s = reduce(s, { t: "incoming", event } as unknown as Parameters<typeof reduce>[1]);
+    };
+    const labels = (msgs: typeof s.messages) =>
+      msgs.map((m) => {
+        if (m.kind === "notice") return `${m.severity}-${m.turn}`;
+        if (m.kind === "user") return `user-${m.turn}`;
+        return `assistant-${m.turn}${m.pending ? "(pending)" : ""}`;
+      });
+
+    // Turn 1 completes; turn 2 fails before any model reply (no assistant card).
+    act({ t: "send_user", text: "first", clientId: "c-1" });
+    inc({
+      type: "model.turn.started",
+      id: 1,
+      ts: "t",
+      turn: 1,
+      model: "m",
+      reasoningEffort: "medium",
+      prefixHash: "h",
+    });
+    inc({ type: "model.final", id: 2, ts: "t", turn: 1, content: "hello", usage: null });
+    inc({ type: "$turn_complete", ts: "t" });
+    act({ t: "send_user", text: "second", clientId: "c-2" });
+    inc({ type: "error", id: 3, ts: "t", turn: 2, message: "404 model not found", recoverable: false });
+
+    // Unified numbering: the retry ("proceed") is turn 3 for BOTH sides — the
+    // error for turn 3 lands below user-3, never above it.
+    act({ t: "send_user", text: "proceed", clientId: "c-3" });
+    inc({
+      type: "model.turn.started",
+      id: 4,
+      ts: "t",
+      turn: 3,
+      model: "m",
+      reasoningEffort: "medium",
+      prefixHash: "h",
+    });
+    inc({ type: "error", id: 5, ts: "t", turn: 3, message: "404 model not found", recoverable: false });
+    expect(labels(s.messages)).toEqual([
+      "user-1",
+      "assistant-1",
+      "user-2",
+      "error-2",
+      "user-3",
+      "assistant-3",
+      "error-3",
+    ]);
+  });
+
   it("settles every unresolved tool card when the conversation stops", () => {
     const base = initialState();
     const state = {

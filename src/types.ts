@@ -64,6 +64,9 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   /** Must round-trip in tool-loop continuations — thinking mode 400s without it. */
   reasoning_content?: string | null;
+  /** Machine-generated user record (mid-turn steer, premature-stop nudge). Persisted for
+   *  model replay, but never counted as a turn ordinal and never rendered as a user bubble. */
+  synthetic?: boolean;
 }
 
 export interface RawUsage {

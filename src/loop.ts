@@ -129,6 +129,13 @@ function buildUserContent(
   return parts;
 }
 
+/** Turn ordinal for a resumed session: the count of REAL user records. Steer/nudge records
+ *  are marked `synthetic` (never a turn start), so the counter matches the desktop's
+ *  user-position numbering even with failed turns (no reply) or tool loops (many records). */
+export function resumeTurnBaseline(messages: readonly ChatMessage[]): number {
+  return messages.reduce((n, m) => (m.role === "user" && !m.synthetic ? n + 1 : n), 0);
+}
+
 export {
   fixToolCallPairing,
   formatLoopError,
@@ -439,7 +446,7 @@ export class CacheFirstLoop {
       const tokensSaved = shrunk.tokensSaved;
       for (const msg of messages) this.log.append(msg);
       this.resumedMessageCount = messages.length;
-      this._turn = messages.reduce((n, m) => (m.role === "assistant" ? n + 1 : n), 0);
+      this._turn = resumeTurnBaseline(messages);
       // Carry forward cumulative cost / turn count so the TUI's session
       // total continues across resumes; otherwise each restart resets to $0.
       if (messages.length > 0) {
@@ -593,6 +600,7 @@ export class CacheFirstLoop {
     this.log.compactInPlace([]);
     this.resetTransientState();
     this.sessionName = opts.sessionName;
+    this._turn = 0;
     this._lastCacheShape = null;
     this.rebuildSystemPrompt();
     return { dropped, archived };
@@ -942,7 +950,8 @@ export class CacheFirstLoop {
     const entries = this.log.entries;
     let lastUserIdx = -1;
     for (let i = entries.length - 1; i >= 0; i--) {
-      if (entries[i]!.role === "user") {
+      // Retry re-sends the last REAL user prompt — steer/nudge records are never retry targets.
+      if (entries[i]!.role === "user" && !entries[i]!.synthetic) {
         lastUserIdx = i;
         break;
       }
@@ -1235,6 +1244,7 @@ export class CacheFirstLoop {
         this.appendAndPersist({
           role: "user",
           content: formatSteerUserMessage(steer),
+          synthetic: true,
         });
         messages = this.buildMessages();
         yield {
@@ -1891,7 +1901,11 @@ export class CacheFirstLoop {
             // fall through and end the turn with the partial message — never silently.
           } else {
             this._prematureStopNudges++;
-            this.appendAndPersist({ role: "user", content: t("loop.prematureStopNudge") });
+            this.appendAndPersist({
+              role: "user",
+              content: t("loop.prematureStopNudge"),
+              synthetic: true,
+            });
             yield {
               turn: this._turn,
               role: "warning",
