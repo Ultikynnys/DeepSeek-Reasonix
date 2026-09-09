@@ -9,6 +9,7 @@ import {
   markOutputRecoveryRead,
   outputRecoveryDir,
   readOutputRecoveryMetadata,
+  shouldPersistOutputRecovery,
 } from "../src/tools/output-recovery.js";
 
 describe("OutputRecoveryCapture", () => {
@@ -20,6 +21,14 @@ describe("OutputRecoveryCapture", () => {
 
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it("shares persistence policy across command execution paths", () => {
+    expect(shouldPersistOutputRecovery(0, true, 1, true)).toBe(false);
+    expect(shouldPersistOutputRecovery(1, true, 0)).toBe(true);
+    expect(shouldPersistOutputRecovery(1, false, 1)).toBe(true);
+    expect(shouldPersistOutputRecovery(1, false, 0, true)).toBe(true);
+    expect(shouldPersistOutputRecovery(1, false, 0)).toBe(false);
   });
 
   it("stores byte-faithful text and gzip artifacts", () => {

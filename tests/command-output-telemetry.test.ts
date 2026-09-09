@@ -7,6 +7,7 @@ import {
   estimateOutputTokens,
   summarizeCommandOutputMetrics,
 } from "../src/telemetry/command-output.js";
+import { countTokensBounded } from "../src/tokenizer.js";
 
 describe("command output telemetry", () => {
   let dir: string;
@@ -19,11 +20,10 @@ describe("command output telemetry", () => {
 
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("uses the project tokenizer and scales bounded samples", () => {
-    expect(estimateOutputTokens("hello world")).toBeGreaterThan(0);
-    expect(estimateOutputTokens("x".repeat(10_000))).toBeGreaterThan(
-      estimateOutputTokens("x".repeat(100)),
-    );
+  it("delegates bounded estimation to the project tokenizer", () => {
+    for (const output of ["", "hello world", "x".repeat(10_000)]) {
+      expect(estimateOutputTokens(output)).toBe(countTokensBounded(output));
+    }
   });
 
   it("aggregates reductions without persisting raw output", () => {

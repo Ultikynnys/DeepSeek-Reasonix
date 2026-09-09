@@ -17,7 +17,7 @@ import {
 import {
   type OutputFilterResult,
   applyOutputFilter,
-  classifyCommandFamily,
+  commandSupportsOutputFiltering,
 } from "./shell/output-filter.js";
 import { isCommandAllowed, tokenizeCommand } from "./shell/parse.js";
 
@@ -162,10 +162,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         onAlwaysAllow: (prefix) => addProjectShellAllowed(rootDir, prefix),
       });
       const argv = tokenizeCommand(cmd);
-      const commandFamily = classifyCommandFamily(argv);
-      const preserveOutput =
-        opts.outputFiltering !== false &&
-        ["vitest", "typescript", "git-status", "biome"].includes(commandFamily);
+      const preserveOutput = opts.outputFiltering !== false && commandSupportsOutputFiltering(argv);
       const rawResult = await runCommand(cmd, {
         cwd: rootDir,
         timeoutSec: effectiveTimeout,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { RunCommandResult } from "../src/tools/shell/exec.js";
-import { applyOutputFilter, classifyCommandFamily } from "../src/tools/shell/output-filter.js";
+import {
+  applyOutputFilter,
+  classifyCommandFamily,
+  commandSupportsOutputFiltering,
+} from "../src/tools/shell/output-filter.js";
 
 function result(output: string, exitCode = 0): RunCommandResult {
   return {
@@ -19,13 +23,21 @@ describe("semantic shell output filters", () => {
     expect(classifyCommandFamily(["git", "status"])).toBe("git-status");
   });
 
-  it("compacts Vitest success output", () => {
+  it("uses the same registry for filtering and raw-output preservation", () => {
+    expect(commandSupportsOutputFiltering(["npx", "vitest", "run"])).toBe(true);
+    expect(commandSupportsOutputFiltering(["npx", "vitest", "--reporter=junit"])).toBe(false);
+    expect(commandSupportsOutputFiltering(["biome", "check", "src"])).toBe(true);
+    expect(commandSupportsOutputFiltering(["node", "script.mjs"])).toBe(false);
+  });
+
+  it("compacts ANSI-colored Vitest success output", () => {
     const raw =
-      "RUN v2\n ✓ a.test.ts (4 tests)\n\n Test Files  1 passed (1)\n      Tests  4 passed (4)\n Duration 1s";
+      "\u001b[36mRUN v2\u001b[0m\n ✓ a.test.ts (4 tests)\n\n Test Files  1 passed (1)\n      Tests  \u001b[32m4 passed (4)\u001b[0m\n Duration 1s";
     const filtered = applyOutputFilter(["npx", "vitest", "run"], result(raw));
     expect(filtered.filter.mode).toBe("filtered");
     expect(filtered.result.output).toContain("Tests 4 passed (4)");
     expect(filtered.result.output).not.toContain("RUN v2");
+    expect(filtered.result.output).not.toContain("\u001b");
   });
 
   it("makes malformed Vitest output visibly degraded", () => {

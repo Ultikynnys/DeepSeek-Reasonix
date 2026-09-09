@@ -2,7 +2,11 @@ import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process"
 import { existsSync, statSync } from "node:fs";
 import * as pathMod from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { OutputRecoveryCapture, type OutputRecoveryRef } from "../output-recovery.js";
+import {
+  OutputRecoveryCapture,
+  type OutputRecoveryRef,
+  shouldPersistOutputRecovery,
+} from "../output-recovery.js";
 import { killProcessTree as killProcessTreeByPid } from "../process-tree.js";
 import { parseCommandChain, runChain } from "../shell-chain.js";
 import { tokenizeCommand } from "./parse.js";
@@ -240,7 +244,7 @@ export async function runCommand(
       // The formatter only exposes the reference when output was omitted or the command failed.
       const recoveryResult = recoveryCapture.finish(
         cmd,
-        totalBytes > 0 && (truncated || exitCode !== 0 || opts.preserveOutput === true),
+        shouldPersistOutputRecovery(totalBytes, truncated, exitCode, opts.preserveOutput),
         opts.outputRecovery,
       );
       const omittedBytes = Math.max(

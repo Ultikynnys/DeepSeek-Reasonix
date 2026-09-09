@@ -5,7 +5,11 @@ import { constants, closeSync, lstatSync, openSync, realpathSync } from "node:fs
 import { devNull } from "node:os";
 import * as pathMod from "node:path";
 import { pathIsUnder } from "@reasonix/core-utils/path-utils";
-import { OutputRecoveryCapture, type OutputRecoveryRef } from "./output-recovery.js";
+import {
+  OutputRecoveryCapture,
+  type OutputRecoveryRef,
+  shouldPersistOutputRecovery,
+} from "./output-recovery.js";
 import {
   LiveOutputEmitter,
   isDqEscape,
@@ -352,7 +356,12 @@ export async function runChain(chain: CommandChain, opts: RunChainOptions): Prom
     output.length > opts.maxOutputChars || recoveryCapture.totalBytes > buf.byteLength;
   const recoveryResult = recoveryCapture.finish(
     opts.commandLabel,
-    recoveryCapture.totalBytes > 0 && (truncated || lastExit !== 0 || opts.preserveOutput === true),
+    shouldPersistOutputRecovery(
+      recoveryCapture.totalBytes,
+      truncated,
+      lastExit,
+      opts.preserveOutput,
+    ),
     opts.outputRecovery,
   );
   const preview = truncated
@@ -494,6 +503,12 @@ async function runPipeGroup(
     killAll();
   }, opts.timeoutMs);
   const onAbort = () => killAll();
+  const captureOutput = (chunk: Buffer | string) => {
+    const bytes = toBuf(chunk);
+    opts.recoveryCapture.append(bytes);
+    opts.buf.push(bytes);
+    opts.live?.push(bytes);
+  };
   if (opts.signal?.aborted) {
     onAbort();
   } else {
@@ -555,28 +570,13 @@ async function runPipeGroup(
         }
       }
       if (child.stderr && io.stderrFd === null && !(io.mergeStderrToStdout && !isLast)) {
-        child.stderr.on("data", (chunk: Buffer | string) => {
-          const b = toBuf(chunk);
-          opts.recoveryCapture.append(b);
-          opts.buf.push(b);
-          opts.live?.push(b);
-        });
+        child.stderr.on("data", captureOutput);
       }
       if (isLast && child.stdout && io.stdoutFd === null) {
-        child.stdout.on("data", (chunk: Buffer | string) => {
-          const b = toBuf(chunk);
-          opts.recoveryCapture.append(b);
-          opts.buf.push(b);
-          opts.live?.push(b);
-        });
+        child.stdout.on("data", captureOutput);
         if (io.mergeStderrToStdout && child.stderr && io.stderrFd === null) {
           child.stderr.removeAllListeners("data");
-          child.stderr.on("data", (chunk: Buffer | string) => {
-            const b = toBuf(chunk);
-            opts.recoveryCapture.append(b);
-            opts.buf.push(b);
-            opts.live?.push(b);
-          });
+          child.stderr.on("data", captureOutput);
         }
       }
     }

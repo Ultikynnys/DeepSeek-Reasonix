@@ -18,6 +18,10 @@ export interface DeclarativeFilterResult {
 
 const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_ESCAPE, "");
+}
+
 export function validateDeclarativeFilter(filter: DeclarativeOutputFilter): void {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(filter.id)) throw new Error(`invalid filter id: ${filter.id}`);
   if (!/^[a-z0-9][a-z0-9+._-]*$/i.test(filter.executable)) {
@@ -52,7 +56,7 @@ export function applyDeclarativeFilter(
   raw: string,
 ): DeclarativeFilterResult {
   validateDeclarativeFilter(filter);
-  let text = filter.stripAnsi ? raw.replace(ANSI_ESCAPE, "") : raw;
+  let text = filter.stripAnsi ? stripAnsi(raw) : raw;
   let lines = text.split(/\r?\n/);
   if (filter.stripLines?.length) {
     lines = lines.filter((line) => !filter.stripLines!.some((rule) => rule.test(line)));

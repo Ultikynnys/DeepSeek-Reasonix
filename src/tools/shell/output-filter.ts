@@ -51,39 +51,48 @@ export function classifyCommandFamily(argv: readonly string[]): string {
   return bin || "unknown";
 }
 
-function semanticFilter(argv: readonly string[], raw: string): OutputFilterResult {
+type SemanticOutputFilter = (raw: string) => OutputFilterResult;
+
+const TYPESCRIPT_DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\):\s+(error|warning)\s+(TS\d+):\s+(.+)$/;
+
+function semanticFilterFor(argv: readonly string[]): SemanticOutputFilter | null {
   const family = classifyCommandFamily(argv);
   if (family === "vitest") {
-    if (hasAny(argv, ["--reporter", "--outputFile"])) {
-      return { commandFamily: family, mode: "passthrough", output: raw, omitted: false };
-    }
-    return filterVitest(raw);
+    return hasAny(argv, ["--reporter", "--outputFile"]) ? null : filterVitest;
   }
-  if (family === "typescript")
-    return filterDiagnostics(
-      raw,
-      "typescript",
-      /^(.+?)\((\d+),(\d+)\):\s+(error|warning)\s+(TS\d+):\s+(.+)$/,
-    );
-  if (family === "git-status") return filterGitStatus(raw);
-  for (const filter of BUILTIN_DECLARATIVE_FILTERS) {
-    if (!declarativeFilterMatches(filter, argv)) continue;
-    const applied = applyDeclarativeFilter(filter, raw);
+  if (family === "typescript") {
+    return (raw) => filterDiagnostics(raw, "typescript", TYPESCRIPT_DIAGNOSTIC);
+  }
+  if (family === "git-status") return filterGitStatus;
+  const declarative = BUILTIN_DECLARATIVE_FILTERS.find((filter) =>
+    declarativeFilterMatches(filter, argv),
+  );
+  if (!declarative) return null;
+  return (raw) => {
+    const applied = applyDeclarativeFilter(declarative, raw);
     return {
-      commandFamily: filter.commandFamily,
+      commandFamily: declarative.commandFamily,
       mode: applied.changed ? "filtered" : "passthrough",
       output: applied.output,
       omitted: applied.changed || applied.truncated,
     };
-  }
-  return { commandFamily: family, mode: "passthrough", output: raw, omitted: false };
+  };
 }
 
-function estimatedTokens(text: string): number {
-  if (!text) return 0;
-  const sample = countTokensBounded(text);
-  if (text.length <= 2048) return sample;
-  return Math.ceil((sample / Math.min(text.length, 2048)) * text.length);
+export function commandSupportsOutputFiltering(argv: readonly string[]): boolean {
+  return semanticFilterFor(argv) !== null;
+}
+
+function semanticFilter(argv: readonly string[], raw: string): OutputFilterResult {
+  const filter = semanticFilterFor(argv);
+  return (
+    filter?.(raw) ?? {
+      commandFamily: classifyCommandFamily(argv),
+      mode: "passthrough",
+      output: raw,
+      omitted: false,
+    }
+  );
 }
 
 /** Includes notices in the comparison so filtering can never enlarge the model-visible body. */
@@ -114,7 +123,10 @@ export function applyOutputFilter(
         ? "\n[output filtered; full raw output is recoverable when material was omitted]"
         : "";
   const candidate = `${filtered.output}${notice}`;
-  if (filtered.mode === "filtered" && estimatedTokens(candidate) > estimatedTokens(result.output)) {
+  if (
+    filtered.mode === "filtered" &&
+    countTokensBounded(candidate) > countTokensBounded(result.output)
+  ) {
     return {
       result,
       filter: { ...filtered, mode: "passthrough", output: result.output, omitted: false },

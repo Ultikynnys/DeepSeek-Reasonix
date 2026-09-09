@@ -33,13 +33,7 @@ export function commandOutputTelemetryPath(homeDirOverride?: string): string {
 }
 
 export function estimateOutputTokens(text: string): number {
-  if (!text) return 0;
-  const maxChars = 2048;
-  const sampleChars = Math.min(text.length, maxChars);
-  const sampleTokens = countTokensBounded(text, maxChars);
-  return text.length <= maxChars
-    ? sampleTokens
-    : Math.ceil((sampleTokens / Math.max(1, sampleChars)) * text.length);
+  return countTokensBounded(text);
 }
 
 export function appendCommandOutputMetric(

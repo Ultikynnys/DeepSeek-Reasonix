@@ -1,9 +1,8 @@
+import { stripAnsi } from "../declarative-filter.js";
 import type { OutputFilterResult } from "../output-filter.js";
 
-const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
-
 export function filterVitest(raw: string): OutputFilterResult {
-  const clean = raw.replace(ANSI, "");
+  const clean = stripAnsi(raw);
   const summary = clean.match(/^\s*Tests\s+(.+)$/m);
   if (!summary) {
     return {

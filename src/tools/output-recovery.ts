@@ -45,6 +45,15 @@ export type OutputRecoveryResult =
   | { ok: true; ref: OutputRecoveryRef }
   | { ok: false; error: string; totalBytes: number; storedBytes: number };
 
+export function shouldPersistOutputRecovery(
+  totalBytes: number,
+  truncated: boolean,
+  exitCode: number | null,
+  preserveOutput = false,
+): boolean {
+  return totalBytes > 0 && (truncated || exitCode !== 0 || preserveOutput);
+}
+
 function useHomeFallback(rootDir: string): boolean {
   if (!rootDir) return true;
   const abs = resolve(rootDir);
