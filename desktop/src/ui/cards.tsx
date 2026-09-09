@@ -1116,8 +1116,8 @@ export function SubagentCard({
                 ))
               )}
               <div className="role">
-                {run.toolReadChars !== undefined
-                  ? `${run.toolReadChars.toLocaleString()} read chars`
+                {run.contextTokens !== undefined && run.contextMax !== undefined
+                  ? `ctx ${tokenLabel(run.contextTokens)} / ${tokenLabel(run.contextMax)}`
                   : ""}
                 {run.outputChars !== undefined
                   ? ` · ${run.outputChars.toLocaleString()} output chars`

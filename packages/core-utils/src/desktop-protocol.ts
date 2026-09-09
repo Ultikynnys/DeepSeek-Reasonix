@@ -201,6 +201,8 @@ export interface KernelSubagentProgressEvent extends KernelWireEventBase {
   iter?: number;
   elapsedMs?: number;
   contextTokens?: number;
+  /** Context cap the child loop enforces (resolveContextTokens of the child model). Meter denominator. */
+  contextMax?: number;
   outputChars?: number;
   reasoningChars?: number;
   toolReadChars?: number;

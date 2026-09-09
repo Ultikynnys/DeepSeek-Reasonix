@@ -422,6 +422,7 @@ export function projectSubagentEvent(ev: SubagentEvent): SubagentProgressPayload
     ...(ev.iter !== undefined ? { iter: ev.iter } : {}),
     ...(ev.elapsedMs !== undefined ? { elapsedMs: ev.elapsedMs } : {}),
     ...(ev.contextTokens !== undefined ? { contextTokens: ev.contextTokens } : {}),
+    ...(ev.contextMax !== undefined ? { contextMax: ev.contextMax } : {}),
     ...(ev.thought ? { thought: redactDesktopDiagnosticMessage(ev.thought, 500) } : {}),
     ...(ev.maxToolIters !== undefined ? { maxToolIters: ev.maxToolIters } : {}),
     ...(ev.maxElapsedMs !== undefined ? { maxElapsedMs: ev.maxElapsedMs } : {}),

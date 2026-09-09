@@ -23,6 +23,7 @@ describe("desktop subagent progress projection", () => {
         iter: 3,
         elapsedMs: 1200,
         contextTokens: 12_345,
+        contextMax: 300_000,
         outputChars: 40,
         reasoningChars: 80,
         toolReadChars: 160,
@@ -33,10 +34,22 @@ describe("desktop subagent progress projection", () => {
       iter: 3,
       elapsedMs: 1200,
       contextTokens: 12_345,
+      contextMax: 300_000,
       outputChars: 40,
       reasoningChars: 80,
       toolReadChars: 160,
     });
+  });
+
+  it("omits contextMax when the run does not report it (older tool versions)", () => {
+    const projected = projectSubagentEvent({
+      kind: "stream-progress",
+      runId: "sub-legacy",
+      task: "review changes",
+      contextTokens: 4_000,
+    });
+    expect(projected).toMatchObject({ action: "stream", contextTokens: 4_000 });
+    expect("contextMax" in projected).toBe(false);
   });
 
   it("retains parent identity on every live update", () => {

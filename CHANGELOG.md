@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Changed — the subagent card's run row shows `ctx x / y` (child prompt tokens / the cap the child loop enforces) instead of the raw "N read chars" counter.**
+
+- The old row counter ("45,678 read chars") had no reference point, so it said nothing about whether a subagent was about to run out of room. The row now reads like the main model's context meter: `ctx 12.3k / 300.0k`. Both sides are tokens — nothing is converted from chars: the numerator is the child's provider-reported `usage.promptTokens` (the `contextTokens` field that already existed on the wire and fed the card header's `ctx` label), and the denominator is `resolveContextTokens` of the child's model — exactly the cap the child loop enforces, because subagent child loops deliberately run without a `ctxMaxOverride` (the per-model default, never the user's session override). The cap travels the existing subagent progress chain as an additive `contextMax` field (core-utils protocol → `SubagentEvent` → wire projection → `SubagentRunProgress`), and is omitted by the projection when an older tool build does not supply it, in which case the row shows no meter rather than a wrong one. `toolReadChars` stays on the wire for its byte-flow proof purpose; only the display changed.
+
 **Fixed — one turn-numbering scheme across the stack; error/notice cards can no longer land above their own turn's user message.**
 
 - The kernel, the desktop session loader, and the live frontend each numbered turns differently: the kernel counted assistant records (so a turn that failed before any model reply — a provider 404, say — made the resume baseline lag one turn behind, while tool loops made it jump ahead), the session loader numbered assistant records by record ordinal (tool-loop records collided with the next turn's user message), and the frontend numbered live user messages by transcript max. Timeline anchoring compared these incompatible numbers, so after a restart error cards jumped above the very "proceed" that started their turn and model-switch notices piled at the bottom.

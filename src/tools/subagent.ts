@@ -11,6 +11,7 @@ import {
   TUI_FORMATTING_RULES,
   escalationContract,
 } from "../prompt-fragments.js";
+import { resolveContextTokens } from "../telemetry/stats.js";
 import { ToolRegistry } from "../tools.js";
 import { mergeSignals } from "./jobs.js";
 import { SUBAGENT_TYPE_NAMES, getSubagentType } from "./subagent-types.js";
@@ -45,6 +46,8 @@ export interface SubagentEvent {
   phase?: "exploring" | "summarising";
   /** Latest prompt size reported by the child model call. Updates after every child turn. */
   contextTokens?: number;
+  /** Context cap the child loop enforces (resolveContextTokens of the child model) — the meter denominator. */
+  contextMax?: number;
   /** When kind === "stream-progress": monotonic char counters across the whole spawn, throttled. Lets the UI prove bytes are flowing during the long gaps between tool calls. `toolReadChars` is the sum of tool-result string lengths — the bytes pulled INTO the subagent from its reads/searches. */
   outputChars?: number;
   reasoningChars?: number;
@@ -199,6 +202,10 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     kind: opts.billingKind ?? "usd",
     provider: providerForModel(model),
   };
+  // The child loop runs without a ctxMaxOverride, so its enforced cap is the
+  // per-model default — the denominator the UI's ctx meter displays alongside
+  // the child's measured promptTokens.
+  const contextMax = resolveContextTokens(model);
   const maxResultChars = opts.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
   const sink = opts.sink;
   const skillName = opts.skillName;
@@ -378,6 +385,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       iter: toolIter,
       elapsedMs: now - startedAt,
       contextTokens,
+      contextMax,
       outputChars,
       reasoningChars,
       toolReadChars,

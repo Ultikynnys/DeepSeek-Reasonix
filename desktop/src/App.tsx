@@ -173,6 +173,8 @@ export type SubagentRunProgress = {
   iter?: number;
   elapsedMs?: number;
   contextTokens?: number;
+  /** Child loop's enforced context cap — denominator for the ctx x/y meter. */
+  contextMax?: number;
   outputChars?: number;
   reasoningChars?: number;
   toolReadChars?: number;
@@ -1418,6 +1420,7 @@ export function applySubagentProgress(
     iter: ev.iter ?? previous?.iter,
     elapsedMs: ev.elapsedMs ?? previous?.elapsedMs,
     contextTokens: ev.contextTokens ?? previous?.contextTokens,
+    contextMax: ev.contextMax ?? previous?.contextMax,
     outputChars: ev.outputChars ?? previous?.outputChars,
     reasoningChars: ev.reasoningChars ?? previous?.reasoningChars,
     toolReadChars: ev.toolReadChars ?? previous?.toolReadChars,

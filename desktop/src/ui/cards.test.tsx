@@ -223,6 +223,36 @@ describe("SubagentCard — model visibility", () => {
     expect(header.textContent).toContain("$0.0123");
   });
 
+  it("shows the child context meter instead of raw char counters on the run row", () => {
+    const { container } = render(
+      <SubagentCard
+        name="explore"
+        runs={[
+          { ...run, contextMax: 300_000, outputChars: 1_204, toolReadChars: 45_678 },
+        ]}
+      />,
+    );
+
+    // No run row may display the old "read chars" counter — context x/y replaces it.
+    // toolReadChars is set so a revert to the raw counter would fail the ctx assertion.
+    expect(container.textContent).not.toContain("read chars");
+    const row = container.querySelector(".sub-row");
+    const statsRole = row
+      ? [...row.querySelectorAll(".role")].find((el) => el.textContent?.includes("ctx "))
+      : undefined;
+    expect(statsRole?.textContent).toContain("ctx 12.3k / 300.0k");
+    expect(statsRole?.textContent).toContain("output chars");
+  });
+
+  it("shows no row context meter when the daemon omits the cap (older versions)", () => {
+    const { container } = render(<SubagentCard name="explore" runs={[run]} />);
+    const statsRole = [
+      ...container.querySelectorAll(".sub-row .role"),
+    ].find((el) => el.textContent?.includes("ctx "));
+    expect(statsRole).toBeUndefined();
+    expect(container.textContent).not.toContain("read chars");
+  });
+
   it("shows a provider quota % instead of a dollar figure for plan-billed runs", () => {
     render(
       <SubagentCard
