@@ -191,6 +191,10 @@ jobs:
         working-directory: desktop
         run: npm run bundle:node
 
+      - name: Download bundled Playwright extension
+        working-directory: desktop
+        run: npm run bundle:extension
+
       - name: Build & verify desktop frontend
         working-directory: desktop
         shell: bash

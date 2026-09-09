@@ -217,6 +217,7 @@ export function registerScaffoldTools(
         name,
         transport: parsed.transport,
         spec: specStr.spec,
+        ...(specStr.note ? { install_note: specStr.note } : {}),
         config_path: configPath,
         active_on_next_launch: true,
       });
@@ -255,6 +256,7 @@ export function registerScaffoldTools(
             : [];
           const isBridged = tools.length > 0;
           const status = s.disabled ? "disabled" : isBridged ? "connected" : "configured";
+          const disabledTools = s.disabledTools ?? [];
           return {
             name: s.name ?? "anon",
             transport: s.transport,
@@ -265,6 +267,7 @@ export function registerScaffoldTools(
               : { url: s.url }),
             tool_count: tools.length,
             tools,
+            disabled_tools: disabledTools,
           };
         });
 
@@ -289,7 +292,9 @@ interface BuildSpecInput {
   fromCatalog?: string;
 }
 
-function buildSpecString(input: BuildSpecInput): { spec: string } | { error: string } {
+function buildSpecString(
+  input: BuildSpecInput,
+): { spec: string; note?: string } | { error: string } {
   if (input.fromCatalog) {
     const entry = MCP_CATALOG.find((e) => e.name === input.fromCatalog);
     if (!entry) {
@@ -306,7 +311,7 @@ function buildSpecString(input: BuildSpecInput): { spec: string } | { error: str
     }
     const tail = userArgs.map(quoteIfNeeded).join(" ");
     const body = `npx -y ${entry.package}${tail ? ` ${tail}` : ""}`;
-    return { spec: `${input.name}=${body}` };
+    return { spec: `${input.name}=${body}`, note: entry.note };
   }
 
   const transport = input.transport;

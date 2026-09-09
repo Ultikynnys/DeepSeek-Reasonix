@@ -425,12 +425,42 @@ export interface McpSpecInfo {
   status: McpSpecStatus;
   statusReason?: string;
   toolCount?: number;
+  /** Server-level user toggle from config — true while disabled, even before first bridge. */
+  disabled?: boolean;
+  /** Bare MCP tool names the user disabled for this server (per-tool toggles). */
+  disabledTools?: string[];
+  /** Bare MCP tool names the server exposes — feeds the per-tool toggle UI. */
+  tools?: string[];
 }
 
 export interface McpSpecsEvent {
   type: "$mcp_specs";
   specs: McpSpecInfo[];
   bridged: boolean;
+}
+
+export interface McpExtensionBundled {
+  present: boolean;
+  path: string | null;
+  version: string | null;
+}
+
+export interface McpExtensionServerState {
+  configured: boolean;
+  hasExtensionArg: boolean;
+  profileDirName: string | null;
+  args: string[];
+}
+
+export interface McpExtensionStatus {
+  storeUrl: string;
+  bundled: McpExtensionBundled;
+  server: McpExtensionServerState;
+}
+
+export interface McpExtensionStatusEvent {
+  type: "$mcp_extension_status";
+  status: McpExtensionStatus;
 }
 
 export type SkillScope = "project" | "custom" | "global" | "builtin";
@@ -1001,6 +1031,9 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mcp_specs_get" }
   | { cmd: "mcp_specs_add"; spec: string }
   | { cmd: "mcp_specs_remove"; spec: string }
+  | { cmd: "mcp_specs_toggle"; name: string; disabled: boolean; tool?: string }
+  | { cmd: "mcp_extension_status" }
+  | { cmd: "mcp_extension_configure"; profileDirName?: string }
   | { cmd: "rule_add"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "rule_remove"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "skills_get" }

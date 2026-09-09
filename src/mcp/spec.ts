@@ -29,9 +29,24 @@ export interface StreamableHttpMcpSpec {
 export type McpSpec = StdioMcpSpec | SseMcpSpec | StreamableHttpMcpSpec;
 
 export type McpServerSpec =
-  | (StdioMcpSpec & { env?: Record<string, string>; disabled?: boolean })
-  | (SseMcpSpec & { headers?: Record<string, string>; disabled?: boolean })
-  | (StreamableHttpMcpSpec & { headers?: Record<string, string>; disabled?: boolean });
+  | (StdioMcpSpec & {
+      env?: Record<string, string>;
+      disabled?: boolean;
+      /** Bare MCP tool names (pre-namespace) that must not be bridged. */
+      disabledTools?: string[];
+    })
+  | (SseMcpSpec & {
+      headers?: Record<string, string>;
+      disabled?: boolean;
+      /** Bare MCP tool names (pre-namespace) that must not be bridged. */
+      disabledTools?: string[];
+    })
+  | (StreamableHttpMcpSpec & {
+      headers?: Record<string, string>;
+      disabled?: boolean;
+      /** Bare MCP tool names (pre-namespace) that must not be bridged. */
+      disabledTools?: string[];
+    });
 
 export function getMcpServerEnv(spec: McpServerSpec): Record<string, string> | undefined {
   return spec.transport === "stdio" ? spec.env : undefined;
@@ -46,18 +61,30 @@ export function overlayMatchedSpec(
   matched: McpServerSpec | undefined,
 ): McpServerSpec {
   switch (parsed.transport) {
-    case "stdio":
-      return matched
+    case "stdio": {
+      const base = matched
         ? { ...parsed, disabled: matched.disabled, env: getMcpServerEnv(matched) }
         : { ...parsed };
-    case "sse":
-      return matched
+      return matched?.disabledTools?.length
+        ? { ...base, disabledTools: matched.disabledTools }
+        : base;
+    }
+    case "sse": {
+      const base = matched
         ? { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) }
         : { ...parsed };
-    case "streamable-http":
-      return matched
+      return matched?.disabledTools?.length
+        ? { ...base, disabledTools: matched.disabledTools }
+        : base;
+    }
+    case "streamable-http": {
+      const base = matched
         ? { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) }
         : { ...parsed };
+      return matched?.disabledTools?.length
+        ? { ...base, disabledTools: matched.disabledTools }
+        : base;
+    }
   }
 }
 

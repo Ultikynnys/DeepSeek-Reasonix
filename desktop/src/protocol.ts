@@ -44,6 +44,10 @@ import type {
   KernelWireToolCall,
   LoadedMessage,
   LoadedSegment,
+  McpExtensionBundled,
+  McpExtensionServerState,
+  McpExtensionStatus,
+  McpExtensionStatusEvent,
   McpSpecInfo,
   McpSpecStatus,
   McpSpecsEvent,
@@ -140,6 +144,10 @@ export type {
   JobsEvent,
   LoadedMessage,
   LoadedSegment,
+  McpExtensionBundled,
+  McpExtensionServerState,
+  McpExtensionStatus,
+  McpExtensionStatusEvent,
   McpSpecInfo,
   McpSpecsEvent,
   McpSpecStatus,
@@ -243,6 +251,7 @@ export type IncomingEvent = { tabId?: string } & (
   | TabClosedEvent
   | TabsSnapshotEvent
   | McpSpecsEvent
+  | McpExtensionStatusEvent
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent

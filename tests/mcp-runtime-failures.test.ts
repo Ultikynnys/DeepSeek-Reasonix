@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
       tracker: null,
     },
   }));
+  const registerSingleMcpToolMock = vi.fn(() => "");
   const inspectMcpServerMock = vi.fn(async () => ({
     protocolVersion: "2024-11-05",
     serverInfo: { name: "fake", version: "1.0.0" },
@@ -42,6 +43,7 @@ const mocks = vi.hoisted(() => {
     initializeMock,
     closeMock,
     bridgeMcpToolsMock,
+    registerSingleMcpToolMock,
     inspectMcpServerMock,
     readConfigMock,
     FakeMcpClient,
@@ -56,7 +58,10 @@ vi.mock("../src/config.js", async (importOriginal) => {
 
 vi.mock("../src/mcp/client.js", () => ({ McpClient: mocks.FakeMcpClient }));
 vi.mock("../src/mcp/inspect.js", () => ({ inspectMcpServer: mocks.inspectMcpServerMock }));
-vi.mock("../src/mcp/registry.js", () => ({ bridgeMcpTools: mocks.bridgeMcpToolsMock }));
+vi.mock("../src/mcp/registry.js", () => ({
+  bridgeMcpTools: mocks.bridgeMcpToolsMock,
+  registerSingleMcpTool: mocks.registerSingleMcpToolMock,
+}));
 vi.mock("../src/mcp/sse.js", () => ({ SseTransport: mocks.FakeTransport }));
 vi.mock("../src/mcp/stdio.js", () => ({ StdioTransport: mocks.FakeTransport }));
 vi.mock("../src/mcp/streamable-http.js", () => ({

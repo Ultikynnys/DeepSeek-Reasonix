@@ -280,6 +280,10 @@ export interface McpServerConfig {
   url?: string;
   headers?: Record<string, string>;
   disabled?: boolean;
+  /** Bare MCP tool names (as the server exposes them, before the `name__`
+   *  namespace prefix) that must NOT be bridged into the tool registry.
+   *  Per-server, so bare names are unambiguous. */
+  disabledTools?: string[];
 }
 
 export interface PricingOverride {
@@ -1059,6 +1063,18 @@ function normalizeStringRecord(value: unknown): Record<string, string> | undefin
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Sanitize a configured per-tool disable list — drop non-strings/empties, dedupe. */
+function normalizeDisabledToolsList(input: unknown): string[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const out: string[] = [];
+  for (const entry of input) {
+    if (typeof entry === "string" && entry.trim() && !out.includes(entry.trim())) {
+      out.push(entry.trim());
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]): McpServerSpec[] {
   const result: McpServerSpec[] = [];
   const seen = new Set<string>();
@@ -1090,6 +1106,7 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
     if (!serverCfg || typeof serverCfg !== "object") continue;
     const transport = inferMcpTransport(serverCfg as McpServerConfig);
     const disabled = (serverCfg as McpServerConfig).disabled === true;
+    const disabledTools = normalizeDisabledToolsList((serverCfg as McpServerConfig).disabledTools);
     if (transport === "stdio") {
       const env = normalizeStringRecord((serverCfg as McpServerConfig).env);
       const spec: McpServerSpec = {
@@ -1099,6 +1116,7 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
         args: (serverCfg as McpServerConfig).args ?? [],
         env,
         disabled,
+        disabledTools,
       };
       if (seen.has(name)) {
         const idx = result.findIndex((s) => s.name === name);
@@ -1119,6 +1137,7 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
           url,
           headers,
           disabled,
+          disabledTools,
         };
         if (seen.has(name)) {
           const idx = result.findIndex((s) => s.name === name);
@@ -1134,6 +1153,7 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
           url,
           headers,
           disabled,
+          disabledTools,
         };
         if (seen.has(name)) {
           const idx = result.findIndex((s) => s.name === name);
@@ -1147,6 +1167,107 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
   }
 
   return result;
+}
+
+/** Ensure `mcpServers[name]` exists — migrate a legacy `mcp` spec-string entry into an
+ *  object entry (carrying its `mcpEnv` overlay; one-way, spec strings can't hold toggle
+ *  state). No-op for absent names so toggles only target configured servers. */
+export function ensureMcpServersEntry(cfg: ReasonixConfig, name: string): void {
+  if (cfg.mcpServers?.[name]) return;
+  const raw = (cfg.mcp ?? []).find((s) => {
+    try {
+      return parseMcpSpec(s).name === name;
+    } catch {
+      return false;
+    }
+  });
+  if (!raw) return;
+  const parsed = parseMcpSpec(raw);
+  const entry: McpServerConfig = {};
+  if (parsed.transport === "stdio") {
+    entry.transport = "stdio";
+    entry.command = parsed.command;
+    entry.args = [...parsed.args];
+  } else {
+    entry.transport = parsed.transport;
+    entry.url = parsed.url;
+  }
+  const envOverlay = cfg.mcpEnv?.[name];
+  if (envOverlay) entry.env = { ...envOverlay };
+  cfg.mcpServers = { ...(cfg.mcpServers ?? {}), [name]: entry };
+  if (raw) {
+    const rest = (cfg.mcp ?? []).filter((s) => s !== raw);
+    if (rest.length > 0) cfg.mcp = rest;
+    else cfg.mcp = undefined;
+  }
+  if (envOverlay) {
+    const rest = { ...(cfg.mcpEnv ?? {}) };
+    delete rest[name];
+    if (Object.keys(rest).length > 0) cfg.mcpEnv = rest;
+    else cfg.mcpEnv = undefined;
+  }
+}
+
+/** Create-or-merge an `mcpServers[name]` entry (legacy spec-string entries migrate
+ *  first). Existing entries: scalar fields fill gaps only, only MISSING `--`-prefixed
+ *  args are appended — user args (incl. pinned package ids) are never touched. */
+export function mergeMcpServerEntry(
+  cfg: ReasonixConfig,
+  name: string,
+  partial: McpServerConfig,
+): void {
+  ensureMcpServersEntry(cfg, name);
+  const existing = cfg.mcpServers?.[name];
+  if (!existing) {
+    cfg.mcpServers = { ...(cfg.mcpServers ?? {}), [name]: { ...partial } };
+    return;
+  }
+  const merged: McpServerConfig = { ...existing };
+  if (merged.transport === undefined && partial.transport) merged.transport = partial.transport;
+  if (merged.type === undefined && partial.type) merged.type = partial.type;
+  if (merged.command === undefined && partial.command) merged.command = partial.command;
+  if (merged.url === undefined && partial.url) merged.url = partial.url;
+  if (merged.env === undefined && partial.env) merged.env = partial.env;
+  if (merged.headers === undefined && partial.headers) merged.headers = partial.headers;
+  const extraFlags = (partial.args ?? []).filter(
+    (a) => a.startsWith("--") && !(merged.args ?? []).includes(a),
+  );
+  if (extraFlags.length > 0) merged.args = [...(merged.args ?? []), ...extraFlags];
+  cfg.mcpServers = { ...(cfg.mcpServers ?? {}), [name]: merged };
+}
+
+/** Toggle a server on/off — persists `mcpServers[name].disabled` (migrating
+ *  legacy spec-string entries on first toggle). Returns false for unknown names. */
+export function setMcpServerDisabled(
+  cfg: ReasonixConfig,
+  name: string,
+  disabled: boolean,
+): boolean {
+  ensureMcpServersEntry(cfg, name);
+  const entry = cfg.mcpServers?.[name];
+  if (!entry) return false;
+  if (disabled) entry.disabled = true;
+  else entry.disabled = undefined;
+  return true;
+}
+
+/** Toggle one MCP tool for a server — persists `mcpServers[name].disabledTools`
+ *  (bare tool names, sorted for stable config diffs). Returns false for unknown names. */
+export function setMcpToolDisabled(
+  cfg: ReasonixConfig,
+  name: string,
+  tool: string,
+  disabled: boolean,
+): boolean {
+  ensureMcpServersEntry(cfg, name);
+  const entry = cfg.mcpServers?.[name];
+  if (!entry) return false;
+  const cur = new Set(entry.disabledTools ?? []);
+  if (disabled) cur.add(tool);
+  else cur.delete(tool);
+  if (cur.size > 0) entry.disabledTools = [...cur].sort();
+  else entry.disabledTools = undefined;
+  return true;
 }
 
 /** Load effective MCP server specs from global config and optional workspace `.mcp.json`. */

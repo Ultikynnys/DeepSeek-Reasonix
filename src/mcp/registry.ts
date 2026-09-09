@@ -36,6 +36,9 @@ export interface BridgeOptions {
   ready?: Promise<void>;
   /** How long to wait on `ready` before failing the dispatch. Default 30_000ms. */
   readyTimeoutMs?: number;
+  /** Bare MCP tool names (pre-prefix) that must NOT be registered — user-disabled
+   *  per-tool toggles. Skipped tools land in `BridgeResult.skipped`. */
+  disabledTools?: ReadonlySet<string>;
 }
 
 /** Mutable holder so `/mcp reconnect` can swap the underlying client without re-bridging tools. */
@@ -203,6 +206,10 @@ export async function bridgeMcpTools(
   for (const mcpTool of stableTools) {
     if (!mcpTool.name) {
       result.skipped.push({ name: "?", reason: "empty tool name" });
+      continue;
+    }
+    if (opts.disabledTools?.has(mcpTool.name)) {
+      result.skipped.push({ name: mcpTool.name, reason: "disabled by user" });
       continue;
     }
     const registeredName = registerSingleMcpTool(mcpTool, env);

@@ -47,6 +47,7 @@ import {
   type IncomingEvent,
   type JobInfo,
   type LoadedMessage,
+  type McpExtensionStatus,
   type McpSpecInfo,
   type MemoryDetail,
   type MemoryEntryInfo,
@@ -437,6 +438,7 @@ type State = {
   mentionPreview: MentionPreviewState | null;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
+  mcpExtensionStatus: McpExtensionStatus | null;
   skills: SkillInfo[];
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
@@ -1550,6 +1552,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         mcpSpecs: Array.isArray(ev.specs) ? ev.specs : [],
         mcpBridged: Boolean(ev.bridged),
       };
+    case "$mcp_extension_status":
+      return { ...state, mcpExtensionStatus: ev.status };
     case "$skills":
       return { ...state, skills: ev.items };
     case "$ctx_breakdown": {
@@ -2283,6 +2287,7 @@ function TabRuntime({
     mentionPreview: null,
     mcpSpecs: [],
     mcpBridged: false,
+    mcpExtensionStatus: null,
     skills: [],
     sessionFiles: [],
     memory: [],
@@ -2421,6 +2426,23 @@ function TabRuntime({
   );
   const removeMcpSpec = useCallback(
     (spec: string) => sendRpc({ cmd: "mcp_specs_remove", spec }),
+    [sendRpc],
+  );
+  const toggleMcpServer = useCallback(
+    (name: string, disabled: boolean) => sendRpc({ cmd: "mcp_specs_toggle", name, disabled }),
+    [sendRpc],
+  );
+  const toggleMcpTool = useCallback(
+    (name: string, tool: string, disabled: boolean) =>
+      sendRpc({ cmd: "mcp_specs_toggle", name, tool, disabled }),
+    [sendRpc],
+  );
+  const requestMcpExtensionStatus = useCallback(
+    () => sendRpc({ cmd: "mcp_extension_status" }),
+    [sendRpc],
+  );
+  const configureMcpExtension = useCallback(
+    (profileDirName?: string) => sendRpc({ cmd: "mcp_extension_configure", profileDirName }),
     [sendRpc],
   );
   const addRule = useCallback(
@@ -3528,6 +3550,11 @@ function TabRuntime({
             onAntigravityOAuthSignOut={() => sendRpc({ cmd: "gemini_oauth_signout" })}
             onAddMcpSpec={addMcpSpec}
             onRemoveMcpSpec={removeMcpSpec}
+            onToggleMcpServer={toggleMcpServer}
+            onToggleMcpTool={toggleMcpTool}
+            mcpExtensionStatus={state.mcpExtensionStatus}
+            onRequestMcpExtensionStatus={requestMcpExtensionStatus}
+            onConfigureMcpExtension={configureMcpExtension}
             onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
             onWriteMemory={(scope, name, description, body) =>
               sendRpc({ cmd: "memory_write", scope, name, description, body })

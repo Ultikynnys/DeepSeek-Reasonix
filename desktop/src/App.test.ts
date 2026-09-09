@@ -89,6 +89,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     mentionPreview: null,
     mcpSpecs: [],
     mcpBridged: false,
+    mcpExtensionStatus: null,
     skills: [],
     sessionFiles: [],
     memory: [],

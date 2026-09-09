@@ -177,6 +177,18 @@ describe("add_mcp_server", () => {
     expect(r.spec).toBe("memory=npx -y @modelcontextprotocol/server-memory");
   });
 
+  it("resolves the playwright catalog entry with no required user args", async () => {
+    const r = await call(s.reg, "add_mcp_server", {
+      name: "pw",
+      from_catalog: "playwright",
+    });
+    expect(r.success).toBe(true);
+    expect(r.spec).toBe("pw=npx -y @playwright/mcp");
+    // The catalog note must reach the caller so it can relay extension setup.
+    expect(r.install_note).toContain("--extension");
+    expect(r.install_note).toContain("Chrome extension");
+  });
+
   it("requires user-args for catalog entries that need them", async () => {
     const r = await call(s.reg, "add_mcp_server", {
       name: "fs",

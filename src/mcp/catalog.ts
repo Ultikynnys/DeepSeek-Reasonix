@@ -50,4 +50,11 @@ export const MCP_CATALOG: CatalogEntry[] = [
     package: "@modelcontextprotocol/server-everything",
     note: "useful for debugging your Reasonix setup",
   },
+  {
+    name: "playwright",
+    summary:
+      "Microsoft Playwright MCP — browser automation via accessibility snapshots; with its Chrome extension it drives your real logged-in tabs",
+    package: "@playwright/mcp",
+    note: 'to reuse logged-in sessions add args ["--extension"] and install the Playwright MCP Chrome extension',
+  },
 ];

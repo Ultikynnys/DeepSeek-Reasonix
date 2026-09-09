@@ -269,6 +269,74 @@ describe("normalizeMcpConfig: disabled handling", () => {
   });
 });
 
+describe("normalizeMcpConfig: disabledTools handling", () => {
+  it("propagates disabledTools from a stdio mcpServers entry", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        pw: {
+          command: "npx",
+          args: ["-y", "@playwright/mcp"],
+          disabledTools: ["browser_click", "browser_type"],
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.disabledTools).toEqual(["browser_click", "browser_type"]);
+    expect(result[0]!.disabled).toBe(false);
+  });
+
+  it("propagates disabledTools from an sse mcpServers entry", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        remote: {
+          url: "https://example.com/sse",
+          disabledTools: ["tool_x"],
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.disabledTools).toEqual(["tool_x"]);
+  });
+
+  it("sanitizes junk entries out of disabledTools", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        pw: {
+          command: "npx",
+          args: ["-y", "@playwright/mcp"],
+          disabledTools: ["ok", "", "  ", 42 as unknown as string, "ok"],
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    expect(result[0]!.disabledTools).toEqual(["ok"]);
+  });
+
+  it("drops empty disabledTools lists entirely", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        pw: {
+          command: "npx",
+          args: ["-y", "@playwright/mcp"],
+          disabledTools: [],
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    expect(result[0]!.disabledTools).toBeUndefined();
+  });
+
+  it("legacy spec-string servers carry no disabledTools (toggle migrates them)", () => {
+    const cfg: ReasonixConfig = {
+      mcp: ["fs=npx -y @scope/fs /tmp"],
+    };
+    const result = normalizeMcpConfig(cfg);
+    expect(result[0]!.disabledTools).toBeUndefined();
+  });
+});
+
 describe("normalizeMcpConfig: env and headers", () => {
   it("env from mcpServers is present on stdio specs", () => {
     const cfg: ReasonixConfig = {

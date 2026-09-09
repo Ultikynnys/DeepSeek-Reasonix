@@ -1,12 +1,18 @@
 import { DEFAULT_MODEL, modelDisplayName } from "@reasonix/core-utils";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
 import { convertUsd, currencySymbol } from "../money";
 import { MODEL_CATALOG_GROUP_LABELS, deriveModelCatalog } from "../model-catalog";
-import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
+import type {
+  McpExtensionStatus,
+  McpSpecInfo,
+  MemoryDetail,
+  MemoryEntryInfo,
+  SettingsPatch,
+} from "../protocol";
 import {
   QUICK_SEND_SHORTHAND_MAX_LENGTH,
   allQuickSends,
@@ -101,6 +107,11 @@ export function SettingsModal({
   onRefreshOpencodeModels,
   onAddMcpSpec,
   onRemoveMcpSpec,
+  onToggleMcpServer,
+  onToggleMcpTool,
+  mcpExtensionStatus,
+  onRequestMcpExtensionStatus,
+  onConfigureMcpExtension,
   onReadMemory,
   onWriteMemory,
   onDeleteMemory,
@@ -160,6 +171,11 @@ export function SettingsModal({
   onAntigravityOAuthSignOut: () => void;
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
+  onToggleMcpServer: (name: string, disabled: boolean) => void;
+  onToggleMcpTool: (name: string, tool: string, disabled: boolean) => void;
+  mcpExtensionStatus: McpExtensionStatus | null;
+  onRequestMcpExtensionStatus: () => void;
+  onConfigureMcpExtension: (profileDirName?: string) => void;
   onReadMemory: (path: string) => void;
   onWriteMemory: (
     scope: "global" | "project",
@@ -284,6 +300,11 @@ export function SettingsModal({
                 bridged={mcpBridged}
                 onAdd={onAddMcpSpec}
                 onRemove={onRemoveMcpSpec}
+                onToggleServer={onToggleMcpServer}
+                onToggleTool={onToggleMcpTool}
+                extensionStatus={mcpExtensionStatus}
+                onRequestExtensionStatus={onRequestMcpExtensionStatus}
+                onConfigureExtension={onConfigureMcpExtension}
               />
             )}
             {page === "memory" && (
@@ -1592,21 +1613,147 @@ function PageMCP({
   bridged,
   onAdd,
   onRemove,
+  onToggleServer,
+  onToggleTool,
+  extensionStatus,
+  onRequestExtensionStatus,
+  onConfigureExtension,
 }: {
   specs: McpSpecInfo[];
   bridged: boolean;
   onAdd: (spec: string) => void;
   onRemove: (spec: string) => void;
+  onToggleServer: (name: string, disabled: boolean) => void;
+  onToggleTool: (name: string, tool: string, disabled: boolean) => void;
+  extensionStatus: McpExtensionStatus | null;
+  onRequestExtensionStatus: () => void;
+  onConfigureExtension: (profileDirName?: string) => void;
 }) {
   const [draft, setDraft] = useState("");
+  const [profileDraft, setProfileDraft] = useState("");
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    onRequestExtensionStatus();
+  }, [onRequestExtensionStatus]);
   const submit = () => {
     const v = draft.trim();
     if (!v) return;
     onAdd(v);
     setDraft("");
   };
+  const toggleToolsExpanded = (raw: string) => {
+    setExpandedTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(raw)) next.delete(raw);
+      else next.add(raw);
+      return next;
+    });
+  };
+  const configuredWithExtension = extensionStatus?.server.hasExtensionArg ?? false;
   return (
     <>
+      <section className="section">
+        <div className="stitle">{t("settings.mcpBrowserTitle")}</div>
+        <div className="scard">
+          <div className="desc" style={{ marginBottom: 10 }}>{t("settings.mcpBrowserDesc")}</div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                if (extensionStatus) void openUrl(extensionStatus.storeUrl).catch(() => undefined);
+              }}
+            >
+              {t("settings.mcpOpenWebStore")}
+            </button>
+            <input
+              className="field"
+              value={profileDraft}
+              onChange={(e) => setProfileDraft(e.target.value)}
+              placeholder={t("settings.mcpProfilePlaceholder")}
+              style={{ maxWidth: 180 }}
+            />
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                onConfigureExtension(profileDraft.trim() || undefined);
+                setProfileDraft("");
+              }}
+            >
+              {configuredWithExtension ? t("settings.mcpReconfigure") : t("settings.mcpConfigure")}
+            </button>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
+            {extensionStatus
+              ? configuredWithExtension
+                ? `✓ ${t("settings.mcpConfiguredYes")}${
+                    extensionStatus.server.profileDirName
+                      ? ` · ${extensionStatus.server.profileDirName}`
+                      : ""
+                  }`
+                : t("settings.mcpConfiguredNo")
+              : "…"}
+          </div>
+          <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+            {t("settings.mcpProfileHint")}
+          </div>
+          {extensionStatus?.bundled.present && extensionStatus.bundled.path ? (
+            <div
+              style={{
+                marginTop: 10,
+                paddingTop: 8,
+                borderTop: "1px solid var(--border)",
+              }}
+            >
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                {t("settings.mcpBundledTitle")}
+                {extensionStatus.bundled.version ? ` · v${extensionStatus.bundled.version}` : ""}
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: 11,
+                    flex: 1,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={extensionStatus.bundled.path}
+                >
+                  {extensionStatus.bundled.path}
+                </span>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ fontSize: 11 }}
+                  onClick={() => {
+                    void navigator.clipboard
+                      .writeText(extensionStatus.bundled.path ?? "")
+                      .catch(() => undefined);
+                  }}
+                >
+                  {t("settings.mcpCopyPath")}
+                </button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ fontSize: 11 }}
+                  onClick={() => {
+                    void openPath(extensionStatus.bundled.path ?? "").catch(() => undefined);
+                  }}
+                >
+                  {t("settings.mcpOpenFolder")}
+                </button>
+              </div>
+              <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
+                {t("settings.mcpUnpackedHint")}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </section>
       <section className="section">
         <div className="stitle">
           {t("settings.mcpConfigured", { count: specs.length })}
@@ -1634,34 +1781,128 @@ function PageMCP({
             {t("settings.mcpEmpty")}
           </div>
         ) : (
-          specs.map((s) => (
-            <div className="scard" key={s.raw}>
-              <div className="top">
-                <span className="ico">
-                  <I.wrench size={14} />
-                </span>
-                <div className="mcp-spec-body">
-                  <div className="nm">{s.name ?? "(anonymous)"}</div>
-                  <div className="sub mcp-spec-summary" title={s.summary}>
-                    {s.summary}
+          specs.map((s) => {
+            const canToggle = s.name !== null;
+            const tools = s.tools ?? [];
+            const isExpanded = expandedTools.has(s.raw);
+            const disabledCount = s.disabledTools?.length ?? 0;
+            return (
+              <div className="scard" key={s.raw}>
+                <div className="top">
+                  <span className="ico">
+                    <I.wrench size={14} />
+                  </span>
+                  <div className="mcp-spec-body">
+                    <div className="nm">
+                      {s.name ?? "(anonymous)"}
+                      {s.disabled ? (
+                        <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 11 }}>
+                          · {t("settings.mcpDisabledBadge")}
+                        </span>
+                      ) : disabledCount > 0 ? (
+                        <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 11 }}>
+                          · {t("settings.mcpToolsDisabledNote", { count: disabledCount })}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="sub mcp-spec-summary" title={s.summary}>
+                      {s.summary}
+                    </div>
                   </div>
+                  {canToggle ? (
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      style={{ color: s.disabled ? "var(--accent)" : undefined }}
+                      onClick={() => onToggleServer(s.name as string, !s.disabled)}
+                    >
+                      {s.disabled ? t("settings.mcpEnable") : t("settings.mcpDisable")}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn ghost mcp-remove"
+                    style={{ color: "var(--danger)" }}
+                    onClick={() => onRemove(s.raw)}
+                  >
+                    {t("settings.mcpRemove")}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="btn ghost mcp-remove"
-                  style={{ color: "var(--danger)" }}
-                  onClick={() => onRemove(s.raw)}
-                >
-                  {t("settings.mcpRemove")}
-                </button>
+                {s.parseError ? (
+                  <div className="desc" style={{ color: "var(--danger)" }}>
+                    {t("settings.parseError", { error: s.parseError })}
+                  </div>
+                ) : null}
+                {canToggle && tools.length > 0 ? (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      borderTop: "1px solid var(--border)",
+                      paddingTop: 8,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      style={{ fontSize: 11 }}
+                      onClick={() => toggleToolsExpanded(s.raw)}
+                    >
+                      {isExpanded ? "▾" : "▸"} {t("settings.mcpToolsLabel", { count: tools.length })}
+                    </button>
+                    {isExpanded ? (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 2,
+                        }}
+                      >
+                        {tools.map((tool) => {
+                          const off = s.disabledTools?.includes(tool) ?? false;
+                          return (
+                            <div
+                              key={tool}
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                padding: "3px 8px",
+                                borderRadius: 6,
+                                background: off ? "var(--card)" : undefined,
+                              }}
+                            >
+                              <span
+                                className="mono"
+                                style={{
+                                  fontSize: 11,
+                                  color: off ? "var(--muted)" : undefined,
+                                  textDecoration: off ? "line-through" : undefined,
+                                }}
+                              >
+                                {tool}
+                              </span>
+                              <button
+                                type="button"
+                                className="btn ghost"
+                                style={{ fontSize: 11, color: off ? "var(--accent)" : undefined }}
+                                onClick={() => onToggleTool(s.name as string, tool, !off)}
+                              >
+                                {off ? t("settings.mcpEnable") : t("settings.mcpDisable")}
+                              </button>
+                            </div>
+                          );
+                        })}
+                        <div style={{ fontSize: 10, color: "var(--muted)", padding: "2px 8px" }}>
+                          {t("settings.mcpToolToggleHint")}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
-              {s.parseError ? (
-                <div className="desc" style={{ color: "var(--danger)" }}>
-                  {t("settings.parseError", { error: s.parseError })}
-                </div>
-              ) : null}
-            </div>
-          ))
+            );
+          })
         )}
       </section>
       <section className="section">

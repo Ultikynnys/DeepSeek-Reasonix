@@ -33,6 +33,8 @@ import type {
   JobsEvent,
   LoadedMessage,
   LoadedSegment,
+  McpExtensionStatus,
+  McpExtensionStatusEvent,
   McpSpecInfo,
   McpSpecStatus,
   McpSpecsEvent,
@@ -84,6 +86,7 @@ import {
   DEFAULT_OPENCODE_CHAT_URL,
   DEFAULT_ZAI_CHAT_URL,
   OPENCODE_MODELS,
+  type ReasonixConfig,
   SUPPORTED_MODELS,
   addProjectPathAllowed,
   addProjectShellAllowed,
@@ -127,6 +130,7 @@ import {
   loadTavilyApiKey,
   loadWorkspaceDir,
   loadZaiApiKey,
+  mergeMcpServerEntry,
   modelAcceptsImages,
   providerForModel,
   pushRecentWorkspace,
@@ -153,6 +157,8 @@ import {
   saveQuickSendId,
   saveReasoningEffort,
   saveWorkspaceDir,
+  setMcpServerDisabled,
+  setMcpToolDisabled,
   writeConfig,
 } from "../../config.js";
 import { ConcurrencyGate } from "../../core/concurrency-gate.js";
@@ -174,6 +180,11 @@ import {
 } from "../../desktop/memory-browser.js";
 import { recordDiagnostic } from "../../diagnostics.js";
 import { normalizeImageToDataUrl } from "../../image-format.js";
+import {
+  type BundledExtensionInfo,
+  PLAYWRIGHT_EXTENSION_STORE_URL,
+  resolveBundledPlaywrightExtension,
+} from "../../mcp/extension.js";
 
 import {
   ANTIGRAVITY_OAUTH_CLIENT_ID,
@@ -341,6 +352,7 @@ type EmittableEvent =
   | TabClosedEvent
   | TabsSnapshotEvent
   | McpSpecsEvent
+  | McpExtensionStatusEvent
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent
@@ -2022,13 +2034,26 @@ function summarizeMcpSpec(raw: string): McpSpecInfo {
 
 function emitMcpSpecs(tab: Tab): void {
   const normalized = loadEffectiveMcpConfig(tab.rootDir);
+  const liveTools = tab.mcpRuntime?.toolFilterState() ?? [];
+  const toolStateByRaw = new Map(liveTools.map((t) => [t.spec, t]));
   const specs = normalized.map((spec) => {
     const raw = specToRaw(spec);
     const base = summarizeMcpSpec(raw);
+    // Config-level toggle state — visible even before the first bridge.
+    base.disabled = spec.disabled === true;
+    if (spec.disabledTools?.length) base.disabledTools = spec.disabledTools;
+    const toolState = toolStateByRaw.get(raw);
+    if (toolState) {
+      base.tools = [...new Set([...toolState.enabled, ...toolState.disabled])].sort();
+    }
     const live =
       tab.mcpStatuses.get(raw) ?? (spec.name ? tab.mcpStatuses.get(spec.name) : undefined);
-    if (!live) return base;
-    return { ...base, status: live.kind, statusReason: live.reason, toolCount: live.toolCount };
+    let merged: McpSpecInfo = live
+      ? { ...base, status: live.kind, statusReason: live.reason, toolCount: live.toolCount }
+      : base;
+    // A config-disabled server never reports live "connected" — the reload path stops it.
+    if (spec.disabled) merged = { ...merged, status: "disabled" };
+    return merged;
   });
   const bridged = specs.length > 0 && specs.every((s) => s.status === "connected");
   emit({ type: "$mcp_specs", specs, bridged }, tab.id);
@@ -2037,6 +2062,33 @@ function emitMcpSpecs(tab: Tab): void {
     connected: specs.filter((spec) => spec.status === "connected").length,
     bridged,
   });
+}
+
+/** Extension-integration state for the Settings card — pure so tests can pin it. */
+export function computeMcpExtensionStatus(
+  cfg: ReasonixConfig,
+  bundled: BundledExtensionInfo,
+): McpExtensionStatus {
+  const entry = cfg.mcpServers?.playwright;
+  const args = entry?.args ?? [];
+  const profilePrefix = "--profile-dir-name=";
+  const profileArg = args.find((a) => a.startsWith(profilePrefix));
+  return {
+    storeUrl: PLAYWRIGHT_EXTENSION_STORE_URL,
+    bundled,
+    server: {
+      configured: Boolean(entry),
+      hasExtensionArg: args.includes("--extension"),
+      profileDirName: profileArg ? profileArg.slice(profilePrefix.length) || null : null,
+      args,
+    },
+  };
+}
+
+function emitMcpExtensionStatus(tab: Tab): void {
+  const status = computeMcpExtensionStatus(readConfig(), resolveBundledPlaywrightExtension());
+  const ev: McpExtensionStatusEvent = { type: "$mcp_extension_status", status };
+  emit(ev, tab.id);
 }
 
 function emitMemory(tab: Tab): void {
@@ -3101,6 +3153,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         tab.mcpStatuses.set(target, { kind: "handshake" });
         if (targetSpec.name) tab.mcpStatuses.set(targetSpec.name, { kind: "handshake" });
       } else if (event.state === "connected") {
+        tab.mcpStatuses.set(target, { kind: "connected", toolCount: event.tools });
+        if (targetSpec.name)
+          tab.mcpStatuses.set(targetSpec.name, { kind: "connected", toolCount: event.tools });
+      } else if (event.state === "tools-ready") {
+        // Per-tool toggle applied on a live server — status stays "connected", count refreshes.
         tab.mcpStatuses.set(target, { kind: "connected", toolCount: event.tools });
         if (targetSpec.name)
           tab.mcpStatuses.set(targetSpec.name, { kind: "connected", toolCount: event.tools });
@@ -4553,6 +4610,58 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           details: { specChars: msg.spec.length, ...tabDiagnosticState(tab) },
         });
         emit({ type: "$error", message: `mcp_specs_remove: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "mcp_specs_toggle") {
+      try {
+        const cfg = readConfig();
+        const ok = msg.tool
+          ? setMcpToolDisabled(cfg, msg.name, msg.tool, msg.disabled)
+          : setMcpServerDisabled(cfg, msg.name, msg.disabled);
+        if (!ok) {
+          emit(
+            { type: "$error", message: `mcp_specs_toggle: unknown server "${msg.name}"` },
+            tab.id,
+          );
+          return;
+        }
+        writeConfig(cfg);
+        emitMcpSpecs(tab);
+        void bridgeTabMcp(tab);
+      } catch (err) {
+        emitDiagnosticError("mcp.spec.toggle.failed", err, {
+          tabId: tab.id,
+          details: { name: msg.name, tool: msg.tool, disabled: msg.disabled },
+        });
+        emit({ type: "$error", message: `mcp_specs_toggle: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "mcp_extension_status") {
+      emitMcpExtensionStatus(tab);
+      return;
+    }
+    if (msg.cmd === "mcp_extension_configure") {
+      try {
+        const profile = typeof msg.profileDirName === "string" ? msg.profileDirName.trim() : "";
+        const cfg = readConfig();
+        const args = ["-y", "@playwright/mcp", "--extension"];
+        if (profile) args.push(`--profile-dir-name=${profile}`);
+        mergeMcpServerEntry(cfg, "playwright", { transport: "stdio", command: "npx", args });
+        writeConfig(cfg);
+        emitMcpSpecs(tab);
+        emitMcpExtensionStatus(tab);
+        void bridgeTabMcp(tab);
+      } catch (err) {
+        emitDiagnosticError("mcp.extension.configure.failed", err, {
+          tabId: tab.id,
+          details: { profile: msg.profileDirName },
+        });
+        emit(
+          { type: "$error", message: `mcp_extension_configure: ${(err as Error).message}` },
+          tab.id,
+        );
       }
       return;
     }
