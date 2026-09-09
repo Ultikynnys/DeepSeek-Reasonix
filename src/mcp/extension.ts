@@ -12,6 +12,9 @@ export const PLAYWRIGHT_EXTENSION_STORE_URL =
 export const PLAYWRIGHT_EXTENSION_ARG = "--extension";
 /** Relay profile picker — value is the last component of Profile Path (chrome://version). */
 export const PLAYWRIGHT_PROFILE_DIR_ARG = "--profile-dir-name=";
+/** Env var carrying the per-profile relay token — set it to skip the extension's
+ *  per-connection approval dialog (the token is shown in that dialog). */
+export const PLAYWRIGHT_EXTENSION_TOKEN_ENV = "PLAYWRIGHT_MCP_EXTENSION_TOKEN";
 
 export interface BundledExtensionInfo {
   present: boolean;

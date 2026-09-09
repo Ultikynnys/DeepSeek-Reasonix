@@ -175,7 +175,7 @@ export function SettingsModal({
   onToggleMcpTool: (name: string, tool: string, disabled: boolean) => void;
   mcpExtensionStatus: McpExtensionStatus | null;
   onRequestMcpExtensionStatus: () => void;
-  onConfigureMcpExtension: (profileDirName?: string) => void;
+  onConfigureMcpExtension: (profileDirName?: string, token?: string) => void;
   onReadMemory: (path: string) => void;
   onWriteMemory: (
     scope: "global" | "project",
@@ -1627,10 +1627,11 @@ function PageMCP({
   onToggleTool: (name: string, tool: string, disabled: boolean) => void;
   extensionStatus: McpExtensionStatus | null;
   onRequestExtensionStatus: () => void;
-  onConfigureExtension: (profileDirName?: string) => void;
+  onConfigureExtension: (profileDirName?: string, token?: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [profileDraft, setProfileDraft] = useState("");
+  const [tokenDraft, setTokenDraft] = useState("");
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   useEffect(() => {
     onRequestExtensionStatus();
@@ -1673,12 +1674,24 @@ function PageMCP({
               placeholder={t("settings.mcpProfilePlaceholder")}
               style={{ maxWidth: 180 }}
             />
+            <input
+              className="field"
+              type="password"
+              value={tokenDraft}
+              onChange={(e) => setTokenDraft(e.target.value)}
+              placeholder={t("settings.mcpTokenPlaceholder")}
+              style={{ maxWidth: 240 }}
+            />
             <button
               type="button"
               className="btn"
               onClick={() => {
-                onConfigureExtension(profileDraft.trim() || undefined);
+                onConfigureExtension(
+                  profileDraft.trim() || undefined,
+                  tokenDraft.trim() || undefined,
+                );
                 setProfileDraft("");
+                setTokenDraft("");
               }}
             >
               {configuredWithExtension ? t("settings.mcpReconfigure") : t("settings.mcpConfigure")}
@@ -1691,12 +1704,15 @@ function PageMCP({
                     extensionStatus.server.profileDirName
                       ? ` · ${extensionStatus.server.profileDirName}`
                       : ""
-                  }`
+                  }${extensionStatus.server.hasToken ? ` · ${t("settings.mcpTokenSaved")}` : ""}`
                 : t("settings.mcpConfiguredNo")
               : "…"}
           </div>
           <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
             {t("settings.mcpProfileHint")}
+          </div>
+          <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+            {t("settings.mcpTokenHint")}
           </div>
           {extensionStatus?.bundled.present && extensionStatus.bundled.path ? (
             <div

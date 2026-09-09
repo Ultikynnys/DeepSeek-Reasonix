@@ -184,6 +184,7 @@ import {
   type BundledExtensionInfo,
   PLAYWRIGHT_EXTENSION_ARG,
   PLAYWRIGHT_EXTENSION_STORE_URL,
+  PLAYWRIGHT_EXTENSION_TOKEN_ENV,
   PLAYWRIGHT_PROFILE_DIR_ARG,
   resolveBundledPlaywrightExtension,
 } from "../../mcp/extension.js";
@@ -2080,10 +2081,11 @@ export function computeMcpExtensionStatus(
     bundled,
     server: {
       configured: Boolean(entry),
-      hasExtensionArg: args.includes("--extension"),
+      hasExtensionArg: args.includes(PLAYWRIGHT_EXTENSION_ARG),
       profileDirName: profileArg
         ? profileArg.slice(PLAYWRIGHT_PROFILE_DIR_ARG.length) || null
         : null,
+      hasToken: Boolean(entry?.env?.[PLAYWRIGHT_EXTENSION_TOKEN_ENV]),
       args,
     },
   };
@@ -4649,6 +4651,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "mcp_extension_configure") {
       try {
         const profile = typeof msg.profileDirName === "string" ? msg.profileDirName.trim() : "";
+        const token = typeof msg.token === "string" ? msg.token.trim() : "";
         const cfg = readConfig();
         const entry = MCP_CATALOG.find((e) => e.name === "playwright");
         if (!entry) throw new Error("bundled catalog has no playwright entry");
@@ -4656,6 +4659,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         args.push(PLAYWRIGHT_EXTENSION_ARG);
         if (profile) args.push(`${PLAYWRIGHT_PROFILE_DIR_ARG}${profile}`);
         mergeMcpServerEntry(cfg, entry.name, { transport: "stdio", command, args });
+        if (token) {
+          // Explicit write — tokens rotate, so a newly entered one replaces any stored value.
+          const stored = cfg.mcpServers?.[entry.name];
+          if (stored) {
+            stored.env = { ...(stored.env ?? {}), [PLAYWRIGHT_EXTENSION_TOKEN_ENV]: token };
+          }
+        }
         writeConfig(cfg);
         emitMcpSpecs(tab);
         emitMcpExtensionStatus(tab);

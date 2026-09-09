@@ -8,6 +8,7 @@ import { computeMcpExtensionStatus } from "../src/cli/commands/desktop.js";
 import { type ReasonixConfig, mergeMcpServerEntry, normalizeMcpConfig } from "../src/config.js";
 import {
   PLAYWRIGHT_EXTENSION_STORE_URL,
+  PLAYWRIGHT_EXTENSION_TOKEN_ENV,
   resolveBundledPlaywrightExtension,
 } from "../src/mcp/extension.js";
 
@@ -126,6 +127,27 @@ describe("mergeMcpServerEntry", () => {
     mergeMcpServerEntry(cfg, "playwright", partial);
     expect(cfg.mcpServers?.playwright?.args).toEqual(["-y", "@playwright/mcp", "--extension"]);
   });
+
+  it("fills missing env keys per-key and never clobbers stored ones", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        playwright: {
+          command: "npx",
+          env: { [PLAYWRIGHT_EXTENSION_TOKEN_ENV]: "stored-token" },
+        },
+      },
+    };
+    mergeMcpServerEntry(cfg, "playwright", {
+      transport: "stdio",
+      command: "npx",
+      args: ["--extension"],
+      env: { OTHER_VAR: "x" },
+    });
+    expect(cfg.mcpServers?.playwright?.env).toEqual({
+      [PLAYWRIGHT_EXTENSION_TOKEN_ENV]: "stored-token",
+      OTHER_VAR: "x",
+    });
+  });
 });
 
 describe("computeMcpExtensionStatus", () => {
@@ -153,8 +175,23 @@ describe("computeMcpExtensionStatus", () => {
       configured: true,
       hasExtensionArg: true,
       profileDirName: "Profile 1",
+      hasToken: false,
       args: ["-y", "@playwright/mcp", "--extension", "--profile-dir-name=Profile 1"],
     });
+  });
+
+  it("reports whether a relay token is stored in the entry's env", () => {
+    const withToken: ReasonixConfig = {
+      mcpServers: {
+        playwright: {
+          command: "npx",
+          args: ["-y", "@playwright/mcp", "--extension"],
+          env: { [PLAYWRIGHT_EXTENSION_TOKEN_ENV]: "secret" },
+        },
+      },
+    };
+    expect(computeMcpExtensionStatus(withToken, bundled).server.hasToken).toBe(true);
+    expect(computeMcpExtensionStatus({}, bundledAbsent).server.hasToken).toBe(false);
   });
 
   it("reports unconfigured servers and absent bundles", () => {

@@ -1227,8 +1227,14 @@ export function mergeMcpServerEntry(
   if (merged.type === undefined && partial.type) merged.type = partial.type;
   if (merged.command === undefined && partial.command) merged.command = partial.command;
   if (merged.url === undefined && partial.url) merged.url = partial.url;
-  if (merged.env === undefined && partial.env) merged.env = partial.env;
-  if (merged.headers === undefined && partial.headers) merged.headers = partial.headers;
+  if (partial.env) {
+    // Per-key fill — a stored env var (e.g. a relay token) is never clobbered
+    // by a re-merge; explicit writes handle rotation.
+    merged.env = { ...partial.env, ...(merged.env ?? {}) };
+  }
+  if (partial.headers) {
+    merged.headers = { ...partial.headers, ...(merged.headers ?? {}) };
+  }
   const extraFlags = (partial.args ?? []).filter(
     (a) => a.startsWith("--") && !(merged.args ?? []).includes(a),
   );

@@ -261,6 +261,10 @@ export const en = {
     mcpProfilePlaceholder: "Profile 1",
     mcpProfileHint:
       'Profile is optional: the last part of "Profile Path" on chrome://version — lets one account per Chrome profile.',
+    mcpTokenPlaceholder: "PLAYWRIGHT_MCP_EXTENSION_TOKEN",
+    mcpTokenHint:
+      "Token is optional: paste it from the extension's connection dialog — storing it skips the per-connection approval prompt.",
+    mcpTokenSaved: "token saved",
     mcpBundledTitle: "Bundled copy (offline fallback)",
     mcpCopyPath: "Copy path",
     mcpOpenFolder: "Open folder",
