@@ -5,6 +5,7 @@ import { constants, closeSync, lstatSync, openSync, realpathSync } from "node:fs
 import { devNull } from "node:os";
 import * as pathMod from "node:path";
 import { pathIsUnder } from "@reasonix/core-utils/path-utils";
+import { OutputRecoveryCapture, type OutputRecoveryRef } from "./output-recovery.js";
 import {
   LiveOutputEmitter,
   isDqEscape,
@@ -271,6 +272,11 @@ export function chainAllowed(
 export interface ChainResult {
   exitCode: number | null;
   output: string;
+  truncated: boolean;
+  totalOutputBytes: number;
+  durationMs: number;
+  recovery?: OutputRecoveryRef;
+  recoveryError?: string;
   timedOut: boolean;
 }
 
@@ -302,11 +308,16 @@ export interface RunChainOptions {
   signal?: AbortSignal;
   /** Called with incremental stdout+stderr text while the chain runs. */
   onOutput?: (text: string) => void;
+  commandLabel: string;
+  startedAt: number;
+  outputRecovery?: import("./output-recovery.js").OutputRecoveryLimits;
+  preserveOutput?: boolean;
 }
 
 export async function runChain(chain: CommandChain, opts: RunChainOptions): Promise<ChainResult> {
   const groups = groupChain(chain);
   const buf = new OutputBuffer(opts.maxOutputChars * 2 * 4);
+  const recoveryCapture = new OutputRecoveryCapture(opts.cwd, opts.outputRecovery);
   const live = opts.onOutput ? new LiveOutputEmitter(opts.onOutput, opts.maxOutputChars * 2) : null;
   const deadline = Date.now() + opts.timeoutSec * 1000;
   let lastExit: number | null = 0;
@@ -325,6 +336,7 @@ export async function runChain(chain: CommandChain, opts: RunChainOptions): Prom
       buf,
       live,
       signal: opts.signal,
+      recoveryCapture,
     });
     live?.flushPartial();
     lastExit = result.exitCode;
@@ -337,10 +349,25 @@ export async function runChain(chain: CommandChain, opts: RunChainOptions): Prom
   live?.end();
   const output = buf.toString();
   const truncated =
-    output.length > opts.maxOutputChars
-      ? `${output.slice(0, opts.maxOutputChars)}\n\n[… truncated ${output.length - opts.maxOutputChars} chars …]`
-      : output;
-  return { exitCode: lastExit, output: truncated, timedOut };
+    output.length > opts.maxOutputChars || recoveryCapture.totalBytes > buf.byteLength;
+  const recoveryResult = recoveryCapture.finish(
+    opts.commandLabel,
+    recoveryCapture.totalBytes > 0 && (truncated || lastExit !== 0 || opts.preserveOutput === true),
+    opts.outputRecovery,
+  );
+  const preview = truncated
+    ? `${output.slice(0, opts.maxOutputChars)}\n\n[… ${Math.max(0, recoveryCapture.totalBytes - Buffer.byteLength(output.slice(0, opts.maxOutputChars)))} output bytes omitted from preview …]`
+    : output;
+  return {
+    exitCode: lastExit,
+    output: preview,
+    truncated,
+    totalOutputBytes: recoveryCapture.totalBytes,
+    durationMs: Date.now() - opts.startedAt,
+    timedOut,
+    ...(recoveryResult?.ok ? { recovery: recoveryResult.ref } : {}),
+    ...(recoveryResult && !recoveryResult.ok ? { recoveryError: recoveryResult.error } : {}),
+  };
 }
 
 interface PipeGroupResult {
@@ -355,6 +382,7 @@ interface PipeGroupOptions {
   /** Optional live feed — the same chunks that land in `buf` also stream here. */
   live: LiveOutputEmitter | null;
   signal?: AbortSignal;
+  recoveryCapture: OutputRecoveryCapture;
 }
 
 interface SegmentStdio {
@@ -529,6 +557,7 @@ async function runPipeGroup(
       if (child.stderr && io.stderrFd === null && !(io.mergeStderrToStdout && !isLast)) {
         child.stderr.on("data", (chunk: Buffer | string) => {
           const b = toBuf(chunk);
+          opts.recoveryCapture.append(b);
           opts.buf.push(b);
           opts.live?.push(b);
         });
@@ -536,6 +565,7 @@ async function runPipeGroup(
       if (isLast && child.stdout && io.stdoutFd === null) {
         child.stdout.on("data", (chunk: Buffer | string) => {
           const b = toBuf(chunk);
+          opts.recoveryCapture.append(b);
           opts.buf.push(b);
           opts.live?.push(b);
         });
@@ -543,6 +573,7 @@ async function runPipeGroup(
           child.stderr.removeAllListeners("data");
           child.stderr.on("data", (chunk: Buffer | string) => {
             const b = toBuf(chunk);
+            opts.recoveryCapture.append(b);
             opts.buf.push(b);
             opts.live?.push(b);
           });
@@ -599,6 +630,9 @@ class OutputBuffer {
       this.chunks.push(b);
       this.bytes += b.length;
     }
+  }
+  get byteLength(): number {
+    return this.bytes;
   }
   toString(): string {
     return smartDecodeOutput(Buffer.concat(this.chunks));

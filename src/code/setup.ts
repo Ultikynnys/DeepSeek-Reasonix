@@ -121,6 +121,16 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
       onJobsChanged: opts.onJobsChanged,
       onShellOutput: opts.onShellOutput,
       sensitivePaths: cfg.sensitivePaths,
+      outputFiltering: cfg.shellOutput?.filtering,
+      outputTelemetry: cfg.shellOutput?.telemetry,
+      outputRecovery: {
+        maxEntryBytes: cfg.shellOutput?.maxRecoveryBytes,
+        maxEntries: cfg.shellOutput?.maxRecoveryEntries,
+        maxAgeMs:
+          cfg.shellOutput?.recoveryDays === undefined
+            ? undefined
+            : cfg.shellOutput.recoveryDays * 24 * 60 * 60 * 1000,
+      },
     });
     registerMemoryTools(tools, { projectRoot: root });
     registerCodeQueryTools(tools, { rootDir: root });

@@ -33,6 +33,7 @@ import { inspectTextFile, readLineTail, readLineWindow } from "./fs/read.js";
 import { displayRel } from "./fs/rel.js";
 import { GLOB_METACHARS, ripgrepAvailable } from "./fs/rg.js";
 import { searchContent, searchFiles } from "./fs/search.js";
+import { markOutputRecoveryRead } from "./output-recovery.js";
 
 export { displayRel } from "./fs/rel.js";
 
@@ -288,6 +289,7 @@ export function registerFilesystemTools(
         // avoids an API compatibility break for callers and tests.
         if (sizeBytes <= outlineThresholdBytes) {
           const raw = await fh.readFile();
+          markOutputRecoveryRead(abs);
           const { text } = decodeFileBuffer(raw);
           let lines = text.split(/\r?\n/);
           if (lines.length > 0 && lines[lines.length - 1] === "") lines = lines.slice(0, -1);

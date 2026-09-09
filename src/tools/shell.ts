@@ -3,16 +3,23 @@
 import * as pathMod from "node:path";
 import { addProjectShellAllowed } from "../config.js";
 import { type PauseAskOpts, type PauseGate, pauseGate } from "../core/pause-gate.js";
+import { appendCommandOutputMetric, estimateOutputTokens } from "../telemetry/command-output.js";
 import type { ToolRegistry } from "../tools.js";
 import { ToolControlFlowError } from "./control-flow-error.js";
 import { JobRegistry, mergeSignals } from "./jobs.js";
+import type { OutputRecoveryLimits } from "./output-recovery.js";
 import {
   DEFAULT_MAX_OUTPUT_CHARS,
   DEFAULT_TIMEOUT_SEC,
   type RunCommandResult,
   runCommand,
 } from "./shell/exec.js";
-import { isCommandAllowed } from "./shell/parse.js";
+import {
+  type OutputFilterResult,
+  applyOutputFilter,
+  classifyCommandFamily,
+} from "./shell/output-filter.js";
+import { isCommandAllowed, tokenizeCommand } from "./shell/parse.js";
 
 export {
   BUILTIN_ALLOWLIST,
@@ -60,6 +67,12 @@ export interface ShellToolsOptions {
    *  desktop wires this to stream live output rows into the shell card. */
   onShellOutput?: (ev: ShellOutputEvent) => void;
   sensitivePaths?: { prefixes?: readonly string[]; patterns?: readonly string[] };
+  /** Native semantic reduction for recognized command output. Default true. */
+  outputFiltering?: boolean;
+  /** Retained command-output reduction metrics. Default true. */
+  outputTelemetry?: boolean;
+  /** Disk ceilings for content-addressed raw-output recovery. */
+  outputRecovery?: OutputRecoveryLimits;
 }
 
 /** One incremental stdout/stderr feed for a blocking `run_command` call. */
@@ -148,16 +161,46 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         },
         onAlwaysAllow: (prefix) => addProjectShellAllowed(rootDir, prefix),
       });
-      const result = await runCommand(cmd, {
+      const argv = tokenizeCommand(cmd);
+      const commandFamily = classifyCommandFamily(argv);
+      const preserveOutput =
+        opts.outputFiltering !== false &&
+        ["vitest", "typescript", "git-status", "biome"].includes(commandFamily);
+      const rawResult = await runCommand(cmd, {
         cwd: rootDir,
         timeoutSec: effectiveTimeout,
         maxOutputChars,
         signal: mergeSignals(ctx?.signal, ctx?.cancelSignal),
+        outputRecovery: opts.outputRecovery,
+        preserveOutput,
         onOutput:
           opts.onShellOutput !== undefined
             ? (text) => opts.onShellOutput!({ callId: ctx?.callId, turn: ctx?.turn, text })
             : undefined,
       });
+      const filtered = applyOutputFilter(argv, rawResult, opts.outputFiltering !== false);
+      const result = exposeRecoveryWhenNeeded(filtered.result, filtered.filter);
+      if (opts.outputTelemetry !== false) {
+        try {
+          appendCommandOutputMetric({
+            timestamp: new Date().toISOString(),
+            commandFamily: filtered.filter.commandFamily,
+            mode: filtered.filter.mode,
+            rawChars: rawResult.output.length,
+            shownChars: result.output.length,
+            rawTokens: estimateOutputTokens(rawResult.output),
+            shownTokens: estimateOutputTokens(result.output),
+            durationMs: rawResult.durationMs ?? 0,
+            exitCode: rawResult.exitCode,
+            recoveryAvailable: result.recovery !== undefined,
+            recoveryComplete: result.recovery?.complete ?? null,
+          });
+        } catch (error) {
+          process.stderr.write(
+            `reasonix: command output telemetry write failed: ${(error as Error).message}\n`,
+          );
+        }
+      }
       if (ctx?.cancelSignal?.aborted) {
         return JSON.stringify({
           cancelledByUser: true,
@@ -439,9 +482,26 @@ function tailLines(s: string, n: number): string {
   return [`[… ${dropped} earlier lines …]`, ...lines.slice(-n)].join("\n");
 }
 
+function exposeRecoveryWhenNeeded(
+  result: RunCommandResult,
+  filter: OutputFilterResult,
+): RunCommandResult {
+  const expose = result.truncated || result.exitCode !== 0 || filter.omitted;
+  return expose ? result : { ...result, recovery: undefined };
+}
+
 export function formatCommandResult(cmd: string, r: RunCommandResult): string {
   const header = r.timedOut
     ? `$ ${cmd}\n[killed after timeout]`
     : `$ ${cmd}\n[exit ${r.exitCode ?? "?"}]`;
-  return r.output ? `${header}\n${r.output}` : header;
+  const notes: string[] = [];
+  if (r.recovery) {
+    const incomplete = r.recovery.complete
+      ? ""
+      : ` (INCOMPLETE: stored ${r.recovery.storedBytes}/${r.recovery.totalBytes} bytes)`;
+    notes.push(`[full output: ${r.recovery.path}${incomplete}]`);
+  } else if (r.recoveryError) {
+    notes.push(`[output recovery failed: ${r.recoveryError}]`);
+  }
+  return [header, r.output, ...notes].filter(Boolean).join("\n");
 }

@@ -532,6 +532,18 @@ export interface ReasonixConfig {
     /** read_file flips to outline mode for files above this. Default 64 KiB — keeps the cache prefix slim while covering ~99% of source files. Raise to 524288 (512 KiB) for the pre-0.46.0 "trust the cache" behavior. */
     outlineThresholdBytes?: number;
   };
+  shellOutput?: {
+    /** Enable native semantic shell-output reduction. Defaults to true. */
+    filtering?: boolean;
+    /** Retain reduction-only telemetry without command text or raw output. Defaults to true. */
+    telemetry?: boolean;
+    /** Maximum bytes retained for one content-addressed recovery artifact. */
+    maxRecoveryBytes?: number;
+    /** Maximum number of content-addressed recovery entries retained. */
+    maxRecoveryEntries?: number;
+    /** Maximum recovery artifact age in days. */
+    recoveryDays?: number;
+  };
 }
 
 export interface CustomMemoryTypeConfig {

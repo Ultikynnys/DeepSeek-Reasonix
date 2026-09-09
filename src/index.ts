@@ -131,6 +131,34 @@ export {
 } from "./tools/shell.js";
 export type { RunCommandResult, ShellToolsOptions } from "./tools/shell.js";
 export {
+  OutputRecoveryCapture,
+  cleanupOutputRecovery,
+  markOutputRecoveryRead,
+  outputRecoveryDir,
+  readOutputRecoveryMetadata,
+} from "./tools/output-recovery.js";
+export type {
+  OutputRecoveryLimits,
+  OutputRecoveryRef,
+  OutputRecoveryResult,
+} from "./tools/output-recovery.js";
+export { applyOutputFilter, classifyCommandFamily } from "./tools/shell/output-filter.js";
+export type {
+  FilteredCommandResult,
+  OutputFilterMode,
+  OutputFilterResult,
+} from "./tools/shell/output-filter.js";
+export {
+  appendCommandOutputMetric,
+  commandOutputTelemetryPath,
+  estimateOutputTokens,
+  summarizeCommandOutputMetrics,
+} from "./telemetry/command-output.js";
+export type {
+  CommandOutputMetric,
+  CommandOutputSummary,
+} from "./telemetry/command-output.js";
+export {
   formatSearchResults,
   htmlToText,
   parseBingResults,

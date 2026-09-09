@@ -2,6 +2,7 @@ import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process"
 import { existsSync, statSync } from "node:fs";
 import * as pathMod from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { OutputRecoveryCapture, type OutputRecoveryRef } from "../output-recovery.js";
 import { killProcessTree as killProcessTreeByPid } from "../process-tree.js";
 import { parseCommandChain, runChain } from "../shell-chain.js";
 import { tokenizeCommand } from "./parse.js";
@@ -26,8 +27,18 @@ export function killProcessTree(child: ChildProcess): void {
 
 export interface RunCommandResult {
   exitCode: number | null;
-  /** Combined stdout+stderr, truncated to `maxOutputChars` with a marker. */
+  /** Combined stdout+stderr preview, bounded to `maxOutputChars`. */
   output: string;
+  /** True when output was omitted from the preview. */
+  truncated?: boolean;
+  /** Complete number of stdout+stderr bytes observed. */
+  totalOutputBytes?: number;
+  /** Wall-clock command duration. */
+  durationMs?: number;
+  /** Content-addressed recovery artifact when output was omitted. */
+  recovery?: OutputRecoveryRef;
+  /** Explicit recovery failure. Never silently discards omitted output. */
+  recoveryError?: string;
   /** True when the process was killed for exceeding `timeoutSec`. */
   timedOut: boolean;
 }
@@ -121,10 +132,14 @@ export async function runCommand(
     /** Called with incremental stdout+stderr text while the command runs. When
      *  absent (tests / non-UI callers) no streaming machinery is created. */
     onOutput?: (text: string) => void;
+    outputRecovery?: import("../output-recovery.js").OutputRecoveryLimits;
+    /** Preserve raw output because a post-execution semantic filter may omit material. */
+    preserveOutput?: boolean;
   },
 ): Promise<RunCommandResult> {
   const timeoutSec = opts.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
   const maxChars = opts.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
+  const startedAt = Date.now();
   const argv = tokenizeCommand(cmd);
   if (argv.length === 0) throw new Error("run_command: empty command");
   const chain = parseCommandChain(cmd);
@@ -135,6 +150,10 @@ export async function runCommand(
       maxOutputChars: maxChars,
       signal: opts.signal,
       onOutput: opts.onOutput,
+      commandLabel: cmd,
+      startedAt,
+      outputRecovery: opts.outputRecovery,
+      preserveOutput: opts.preserveOutput,
     });
   }
   const timeoutMs = timeoutSec * 1000;
@@ -191,8 +210,10 @@ export async function runCommand(
     // prior char cap (2× maxChars worth) so a chatty process can't
     // OOM us.
     const chunks: Buffer[] = [];
+    let bufferedBytes = 0;
     let totalBytes = 0;
     const byteCap = maxChars * 2 * 4; // worst-case 4 bytes/char for utf-8/gbk
+    const recoveryCapture = new OutputRecoveryCapture(opts.cwd, opts.outputRecovery);
     let timedOut = false;
     let settled = false;
     const live = opts.onOutput ? new LiveOutputEmitter(opts.onOutput, maxChars * 2) : null;
@@ -214,11 +235,30 @@ export async function runCommand(
       live?.end();
       const merged = Buffer.concat(chunks);
       const buf = smartDecodeOutput(merged);
-      const output =
-        buf.length > maxChars
-          ? `${buf.slice(0, maxChars)}\n\n[… truncated ${buf.length - maxChars} chars …]`
-          : buf;
-      resolve({ exitCode, output, timedOut });
+      const truncated = buf.length > maxChars || totalBytes > merged.length;
+      // Capture every non-empty result so a later semantic filter can offer the exact raw body.
+      // The formatter only exposes the reference when output was omitted or the command failed.
+      const recoveryResult = recoveryCapture.finish(
+        cmd,
+        totalBytes > 0 && (truncated || exitCode !== 0 || opts.preserveOutput === true),
+        opts.outputRecovery,
+      );
+      const omittedBytes = Math.max(
+        0,
+        totalBytes - Math.min(totalBytes, Buffer.byteLength(buf.slice(0, maxChars))),
+      );
+      const marker = truncated ? `\n\n[… truncated ${omittedBytes} chars …]` : "";
+      const output = truncated ? `${buf.slice(0, maxChars)}${marker}` : buf;
+      resolve({
+        exitCode,
+        output,
+        truncated,
+        totalOutputBytes: totalBytes,
+        durationMs: Date.now() - startedAt,
+        timedOut,
+        ...(recoveryResult?.ok ? { recovery: recoveryResult.ref } : {}),
+        ...(recoveryResult && !recoveryResult.ok ? { recoveryError: recoveryResult.error } : {}),
+      });
     };
     const killTimer = setTimeout(() => {
       timedOut = true;
@@ -240,16 +280,14 @@ export async function runCommand(
 
     const onData = (chunk: Buffer | string) => {
       const b = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      recoveryCapture.append(b);
+      totalBytes += b.length;
       live?.push(b);
-      if (totalBytes >= byteCap) return;
-      const remaining = byteCap - totalBytes;
-      if (b.length > remaining) {
-        chunks.push(b.subarray(0, remaining));
-        totalBytes = byteCap;
-      } else {
-        chunks.push(b);
-        totalBytes += b.length;
-      }
+      if (bufferedBytes >= byteCap) return;
+      const remaining = byteCap - bufferedBytes;
+      const kept = b.length > remaining ? b.subarray(0, remaining) : b;
+      chunks.push(kept);
+      bufferedBytes += kept.length;
     };
     child.stdout?.on("data", onData);
     child.stderr?.on("data", onData);
@@ -257,6 +295,7 @@ export async function runCommand(
       clearTimeout(killTimer);
       opts.signal?.removeEventListener("abort", onAbort);
       live?.end();
+      recoveryCapture.finish(cmd, false);
       reject(err);
     });
     child.on("close", (code) => finish(code));
