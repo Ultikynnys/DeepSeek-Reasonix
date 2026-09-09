@@ -69,4 +69,72 @@ describe("command output telemetry", () => {
       byMode: { filtered: 1, degraded: 1, passthrough: 0 },
     });
   });
+
+  it("scopes a since-windowed summary to metrics appended inside that window", () => {
+    appendCommandOutputMetric(
+      {
+        timestamp: new Date(1_000).toISOString(),
+        commandFamily: "vitest",
+        mode: "filtered",
+        rawChars: 1000,
+        shownChars: 100,
+        rawTokens: 250,
+        shownTokens: 25,
+        durationMs: 12,
+        exitCode: 0,
+        recoveryAvailable: true,
+        recoveryComplete: true,
+      },
+      path,
+    );
+    appendCommandOutputMetric(
+      {
+        timestamp: new Date(2_000).toISOString(),
+        commandFamily: "typescript",
+        mode: "filtered",
+        rawChars: 500,
+        shownChars: 50,
+        rawTokens: 100,
+        shownTokens: 10,
+        durationMs: 5,
+        exitCode: 0,
+        recoveryAvailable: false,
+        recoveryComplete: null,
+      },
+      path,
+    );
+    appendCommandOutputMetric(
+      {
+        // Unparseable timestamps cannot be attributed to the session and are
+        // excluded rather than silently re-aggregated.
+        timestamp: "not-a-date",
+        commandFamily: "git-status",
+        mode: "passthrough",
+        rawChars: 10,
+        shownChars: 10,
+        rawTokens: 5,
+        shownTokens: 5,
+        durationMs: 1,
+        exitCode: 0,
+        recoveryAvailable: false,
+        recoveryComplete: null,
+      },
+      path,
+    );
+
+    // All-time (no window): every metric counts.
+    expect(summarizeCommandOutputMetrics(path).commands).toBe(3);
+    // Window anchored between the first and second metric: only the second.
+    expect(summarizeCommandOutputMetrics(path, { since: 1_500 })).toEqual({
+      commands: 1,
+      rawTokens: 100,
+      shownTokens: 10,
+      reducedTokens: 90,
+      recoveryAvailable: 0,
+      byFamily: { typescript: 1 },
+      byMode: { filtered: 1, degraded: 0, passthrough: 0 },
+    });
+    // Boundary is inclusive: a metric stamped exactly at `since` belongs.
+    expect(summarizeCommandOutputMetrics(path, { since: 1_000 }).commands).toBe(2);
+  });
 });

@@ -542,6 +542,36 @@ describe("Desktop App reducer — usage", () => {
     expect(next.usage.shellOutputShownTokens).toBe(31_000);
   });
 
+  it("resets shell-output totals on session load — the chip is per-session", () => {
+    const seeded = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$ctx_breakdown",
+        reservedTokens: 10,
+        shellOutputRawTokens: 50_000,
+        shellOutputShownTokens: 31_000,
+      },
+    });
+    const next = reduce(seeded, {
+      t: "incoming",
+      event: {
+        type: "$session_loaded",
+        name: "sess-2",
+        messages: [],
+        carryover: {
+          totalCostUsd: 0,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          totalCompletionTokens: 0,
+        },
+      },
+    });
+
+    // Undefined, not 0: the chip hides until the new session emits fresh totals.
+    expect(next.usage.shellOutputRawTokens).toBeUndefined();
+    expect(next.usage.shellOutputShownTokens).toBeUndefined();
+  });
+
   it("carries shell-output totals through a model.final usage rebuild", () => {
     const seeded = reduce(initialState(), {
       t: "incoming",

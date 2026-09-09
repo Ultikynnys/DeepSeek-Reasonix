@@ -104,9 +104,9 @@ export function StatusBar({
   const totalTokens = Math.max(sessionPromptTokens, liveContextTokens);
   const cacheDenom = usage.cacheHitTokens + usage.cacheMissTokens;
   const cacheHitPct = cacheDenom > 0 ? Math.round((usage.cacheHitTokens / cacheDenom) * 100) : 0;
-  // Shell-output filtering savings — cumulative cross-session totals from the
-  // $ctx_breakdown event. Undefined = no telemetry yet, so no chip at all
-  // (never a fake 0%).
+  // Shell-output filtering savings — current-session totals from the
+  // $ctx_breakdown event. Undefined = this session has no shell telemetry yet,
+  // so no chip at all (never a fake 0%).
   const outputSavedPct =
     usage.shellOutputRawTokens !== undefined && usage.shellOutputRawTokens > 0
       ? Math.round(

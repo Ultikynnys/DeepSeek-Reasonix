@@ -345,8 +345,9 @@ export type UsageStats = {
   liveLogTokens: number;
   /** Model context cap — meter denominator + compaction-limit ticks. */
   ctxMax?: number;
-  /** Cumulative cross-session shell-output filtering totals — the statusbar "saved"
-   *  chip's numerator source. Undefined = no telemetry yet, chip hidden. */
+  /** Current-session shell-output filtering totals — the statusbar "saved"
+   *  chip's numerator source. Undefined = this session has no shell telemetry
+   *  yet, chip hidden. Resets on session switch. */
   shellOutputRawTokens?: number;
   shellOutputShownTokens?: number;
 };
@@ -1818,10 +1819,10 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           totalCompletionTokens: ev.carryover.totalCompletionTokens ?? 0,
           cacheHitTokens: ev.carryover.cacheHitTokens,
           cacheMissTokens: ev.carryover.cacheMissTokens,
-          // The filtering totals are cross-session and tab-lifetime — a session
-          // switch must not blank the statusbar chip.
-          shellOutputRawTokens: state.usage.shellOutputRawTokens,
-          shellOutputShownTokens: state.usage.shellOutputShownTokens,
+          // Filtering totals are per-session: zeroUsage() leaves them undefined
+          // so the old session's chip never bleeds into the new one. The chip
+          // reappears once the new session's first $ctx_breakdown carries fresh
+          // totals from the backend.
         },
         sessionFiles,
         activeSkill: null,
@@ -1931,7 +1932,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         lastCallCacheMiss: hasCall ? callMiss : state.usage.lastCallCacheMiss,
         reservedTokens: state.usage.reservedTokens,
         liveLogTokens: state.usage.liveLogTokens,
-        // Cumulative totals are tab-lifetime, not per-turn — carry them through the rebuild.
+        // Per-session totals are not per-turn — carry them through the rebuild
+        // (the rebuild happens within the same session).
         shellOutputRawTokens: state.usage.shellOutputRawTokens,
         shellOutputShownTokens: state.usage.shellOutputShownTokens,
       };

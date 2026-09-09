@@ -558,7 +558,7 @@ export const en = {
     cache: "cache",
     outputSaved: "saved",
     outputSavedTip:
-      "Shell output filtering: {pct}% of command-output tokens removed before reaching the model ({saved} of {raw} tokens, all sessions)",
+      "Shell output filtering: {pct}% of command-output tokens removed before reaching the model ({saved} of {raw} tokens, this session)",
     tokens: "tokens",
     thisTurn: "this turn",
     switchWorkspace: "Switch workspace · {workspace}",

@@ -56,10 +56,11 @@ function isMetric(raw: unknown): raw is CommandOutputMetric {
 
 export function summarizeCommandOutputMetrics(
   path = commandOutputTelemetryPath(),
+  opts: { since?: number } = {},
 ): CommandOutputSummary {
   const metrics = readJsonlLines(path, isMetric);
   const summary: CommandOutputSummary = {
-    commands: metrics.length,
+    commands: 0,
     rawTokens: 0,
     shownTokens: 0,
     reducedTokens: 0,
@@ -67,7 +68,21 @@ export function summarizeCommandOutputMetrics(
     byFamily: {},
     byMode: { filtered: 0, degraded: 0, passthrough: 0 },
   };
+  // `since` scopes the summary to one session's lifetime (epoch ms): the JSONL
+  // is shared across sessions, and per-session consumers (the desktop statusbar
+  // chip) must not aggregate other sessions' history. Metrics whose timestamp
+  // is missing or unparseable are excluded from a scoped summary — they cannot
+  // be attributed to this session, and including them would silently rebuild
+  // the all-time aggregate this option exists to avoid.
+  const since = opts.since;
+  const inSession = (metric: CommandOutputMetric): boolean => {
+    if (since === undefined) return true;
+    const ts = Date.parse(metric.timestamp);
+    return Number.isFinite(ts) && ts >= since;
+  };
   for (const metric of metrics) {
+    if (!inSession(metric)) continue;
+    summary.commands++;
     summary.rawTokens += metric.rawTokens;
     summary.shownTokens += metric.shownTokens;
     summary.recoveryAvailable += metric.recoveryAvailable ? 1 : 0;

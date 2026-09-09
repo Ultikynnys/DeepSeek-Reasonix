@@ -2082,20 +2082,27 @@ const reservedTokenCache = new WeakMap<
   { sys: number; sysLen: number; tools: number; toolsLen: number }
 >();
 
-// Shell-output filtering totals for the $ctx_breakdown payload. emitCtxBreakdown
-// fires after every tool event, so re-reading the telemetry JSONL each time would
-// scale with session history — instead stat the file and re-summarize only when
-// its mtime+size changed (one stat call in steady state). A missing or unreadable
-// file legitimately means "no data": the fields are omitted and the UI shows no
-// chip, rather than a fake zero.
-let shellOutputSummaryCache: {
-  mtimeMs: number;
-  size: number;
-  rawTokens: number;
-  shownTokens: number;
-} | null = null;
+// Shell-output filtering totals for the $ctx_breakdown payload — scoped to the
+// tab's CURRENT session, not the all-time aggregate: the telemetry JSONL is
+// shared across every session the backend has ever run, so an unscoped summary
+// barely moves when a new session appends a few commands (the statusbar chip
+// looked frozen at one percentage forever). emitCtxBreakdown fires after every
+// tool event, so re-reading the telemetry JSONL each time would scale with
+// session history — instead stat the file and re-summarize only when its
+// mtime+size changed (one stat call in steady state). Caches are keyed by the
+// session anchor because concurrent tabs sit in different sessions. A missing
+// or unreadable file — or a session with no commands yet — legitimately means
+// "no data": the fields are omitted and the UI shows no chip, rather than a
+// fake zero.
+const shellOutputSummaryCaches = new Map<
+  number,
+  { mtimeMs: number; size: number; rawTokens: number; shownTokens: number }
+>();
+// One entry per session that produced metrics; cap it so a long-lived backend
+// hopping between many sessions can't accumulate entries forever.
+const SHELL_OUTPUT_CACHE_CAP = 32;
 
-function shellOutputFilteringTotals(): {
+function shellOutputFilteringTotals(sinceMs: number): {
   rawTokens: number;
   shownTokens: number;
 } | null {
@@ -2107,25 +2114,22 @@ function shellOutputFilteringTotals(): {
   } catch {
     return null;
   }
-  if (
-    shellOutputSummaryCache &&
-    shellOutputSummaryCache.mtimeMs === stat.mtimeMs &&
-    shellOutputSummaryCache.size === stat.size
-  ) {
-    return {
-      rawTokens: shellOutputSummaryCache.rawTokens,
-      shownTokens: shellOutputSummaryCache.shownTokens,
-    };
+  const cached = shellOutputSummaryCaches.get(sinceMs);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return { rawTokens: cached.rawTokens, shownTokens: cached.shownTokens };
   }
   try {
-    const summary = summarizeCommandOutputMetrics(path);
+    const summary = summarizeCommandOutputMetrics(path, { since: sinceMs });
     if (summary.rawTokens <= 0) return null;
-    shellOutputSummaryCache = {
+    if (shellOutputSummaryCaches.size >= SHELL_OUTPUT_CACHE_CAP) {
+      shellOutputSummaryCaches.clear();
+    }
+    shellOutputSummaryCaches.set(sinceMs, {
       mtimeMs: stat.mtimeMs,
       size: stat.size,
       rawTokens: summary.rawTokens,
       shownTokens: summary.shownTokens,
-    };
+    });
     return { rawTokens: summary.rawTokens, shownTokens: summary.shownTokens };
   } catch {
     return null;
@@ -2136,6 +2140,16 @@ function shellOutputFilteringTotals(): {
 // the loop is built. logTokens is refreshed during turns so Desktop doesn't
 // show a fake zero while the streaming call is still waiting on usage metadata.
 function emitCtxBreakdown(tab: Tab): void {
+  // Re-anchor the per-session shell-output totals whenever the tab rebinds a
+  // session (mint / switch / load / workspace change). Comparing against the
+  // stored session name covers every `currentSession` assignment site without
+  // duplicating reset logic in each, and runs before the runtime guard so a
+  // rebind is never skipped: metrics appended before the anchor instant belong
+  // to earlier sessions and must stay out of this session's totals.
+  if (tab.currentSession !== tab.shellMetricsSession) {
+    tab.shellMetricsSession = tab.currentSession;
+    tab.shellMetricsSince = Date.now();
+  }
   if (!tab.runtime) return;
   const prefix = tab.runtime.loop.prefix;
   const toolSpecs = prefix.toolSpecs;
@@ -2171,7 +2185,7 @@ function emitCtxBreakdown(tab: Tab): void {
     logTokens,
     ctxMax,
   });
-  const shellTotals = shellOutputFilteringTotals();
+  const shellTotals = shellOutputFilteringTotals(tab.shellMetricsSince);
   emit(
     {
       type: "$ctx_breakdown",
@@ -2231,6 +2245,13 @@ interface Tab {
   readonly id: string;
   rootDir: string;
   currentSession: string;
+  /** Session name the shell-output totals are anchored to; null until the first
+   *  emitCtxBreakdown binds it. See the re-anchor block there. */
+  shellMetricsSession: string | null;
+  /** Epoch ms captured when the current session was bound — summarizeCommandOutputMetrics
+   *  counts only telemetry appended after this instant, keeping the statusbar
+   *  chip per-session instead of an all-time aggregate. */
+  shellMetricsSince: number;
   currentModel: string;
   /** Per-tab subagent model override, set only when the user picks one in the
    *  chat menu. `undefined` = subagents implicitly follow the main agent's
@@ -2844,6 +2865,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       id,
       rootDir: dir,
       currentSession: "",
+      shellMetricsSession: null,
+      shellMetricsSince: 0,
       currentModel: model,
       currentReasoningEffort: loadReasoningEffort(),
       ctxMaxOverride: loadContextTokens(),
