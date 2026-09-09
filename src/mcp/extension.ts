@@ -8,6 +8,11 @@ import { fileURLToPath } from "node:url";
 export const PLAYWRIGHT_EXTENSION_STORE_URL =
   "https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm";
 
+/** @playwright/mcp CLI flag enabling the extension-relay transport. */
+export const PLAYWRIGHT_EXTENSION_ARG = "--extension";
+/** Relay profile picker — value is the last component of Profile Path (chrome://version). */
+export const PLAYWRIGHT_PROFILE_DIR_ARG = "--profile-dir-name=";
+
 export interface BundledExtensionInfo {
   present: boolean;
   /** Candidate dir that was resolved (even when not present) — for UI hints. */

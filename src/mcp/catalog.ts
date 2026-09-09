@@ -13,6 +13,12 @@ export interface CatalogEntry {
   note?: string;
 }
 
+/** Canonical stdio launcher for a catalog entry — `npx -y <pkg>`. Shared by
+ *  add_mcp_server's spec builder and the desktop playwright-configure flow. */
+export function catalogStdioCommand(entry: CatalogEntry): { command: string; args: string[] } {
+  return { command: "npx", args: ["-y", entry.package] };
+}
+
 // Every entry below is verified to exist on npm as of this release.
 // `fetch` and `sqlite` are deliberately *absent* — their reference
 // servers are Python-only (`pip install mcp-server-fetch`), so a Node

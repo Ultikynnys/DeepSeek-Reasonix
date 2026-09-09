@@ -7,7 +7,7 @@ import {
   readConfig,
   writeConfig,
 } from "../config.js";
-import { MCP_CATALOG } from "../mcp/catalog.js";
+import { MCP_CATALOG, catalogStdioCommand } from "../mcp/catalog.js";
 import { preflightStdioSpec } from "../mcp/preflight.js";
 import { type McpSpec, parseMcpSpec, specToRaw } from "../mcp/spec.js";
 import { SkillStore, parseSkillDraft, serializeSkill } from "../skills.js";
@@ -309,8 +309,9 @@ function buildSpecString(
         error: `catalog entry "${entry.name}" needs ${entry.userArgs} — pass it via the 'args' parameter`,
       };
     }
+    const { command, args } = catalogStdioCommand(entry);
     const tail = userArgs.map(quoteIfNeeded).join(" ");
-    const body = `npx -y ${entry.package}${tail ? ` ${tail}` : ""}`;
+    const body = `${command} ${args.join(" ")}${tail ? ` ${tail}` : ""}`;
     return { spec: `${input.name}=${body}`, note: entry.note };
   }
 

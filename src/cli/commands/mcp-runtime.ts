@@ -297,6 +297,14 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     return true;
   }
 
+  /** Registered name → bare config name — strips the `server_` namespace prefix. */
+  function mcpBareToolName(prefix: string): (registeredName: string) => string {
+    return (registeredName) =>
+      prefix && registeredName.startsWith(prefix)
+        ? registeredName.slice(prefix.length)
+        : registeredName;
+  }
+
   /** Apply a new per-tool disable set to a LIVE server record — unregister
    *  newly-disabled tools and re-register newly-enabled ones from the live
    *  server listing, without closing/reopening the server process. */
@@ -308,11 +316,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     const record = records.get(raw);
     if (!record) return;
     const env = record.summary.bridgeEnv;
-    const prefix = env.prefix;
-    const bareOf = (registeredName: string): string =>
-      prefix && registeredName.startsWith(prefix)
-        ? registeredName.slice(prefix.length)
-        : registeredName;
+    const bareOf = mcpBareToolName(env.prefix);
 
     // 1. Disable — unregister tools that entered the disable set.
     const stillEnabled: string[] = [];
@@ -451,9 +455,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       .map((raw) => {
         const rec = records.get(raw);
         if (!rec) return undefined;
-        const prefix = rec.summary.bridgeEnv.prefix;
-        const bare = (n: string): string =>
-          prefix && n.startsWith(prefix) ? n.slice(prefix.length) : n;
+        const bare = mcpBareToolName(rec.summary.bridgeEnv.prefix);
         return {
           spec: raw,
           enabled: rec.registeredNames.map(bare),

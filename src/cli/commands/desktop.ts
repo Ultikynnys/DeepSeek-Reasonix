@@ -182,7 +182,9 @@ import { recordDiagnostic } from "../../diagnostics.js";
 import { normalizeImageToDataUrl } from "../../image-format.js";
 import {
   type BundledExtensionInfo,
+  PLAYWRIGHT_EXTENSION_ARG,
   PLAYWRIGHT_EXTENSION_STORE_URL,
+  PLAYWRIGHT_PROFILE_DIR_ARG,
   resolveBundledPlaywrightExtension,
 } from "../../mcp/extension.js";
 
@@ -205,6 +207,7 @@ import {
   type LoopEvent,
 } from "../../index.js";
 import { createLogger } from "../../logging.js";
+import { MCP_CATALOG, catalogStdioCommand } from "../../mcp/catalog.js";
 import { parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
   type ModelPrefs,
@@ -2071,15 +2074,16 @@ export function computeMcpExtensionStatus(
 ): McpExtensionStatus {
   const entry = cfg.mcpServers?.playwright;
   const args = entry?.args ?? [];
-  const profilePrefix = "--profile-dir-name=";
-  const profileArg = args.find((a) => a.startsWith(profilePrefix));
+  const profileArg = args.find((a) => a.startsWith(PLAYWRIGHT_PROFILE_DIR_ARG));
   return {
     storeUrl: PLAYWRIGHT_EXTENSION_STORE_URL,
     bundled,
     server: {
       configured: Boolean(entry),
       hasExtensionArg: args.includes("--extension"),
-      profileDirName: profileArg ? profileArg.slice(profilePrefix.length) || null : null,
+      profileDirName: profileArg
+        ? profileArg.slice(PLAYWRIGHT_PROFILE_DIR_ARG.length) || null
+        : null,
       args,
     },
   };
@@ -4646,9 +4650,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         const profile = typeof msg.profileDirName === "string" ? msg.profileDirName.trim() : "";
         const cfg = readConfig();
-        const args = ["-y", "@playwright/mcp", "--extension"];
-        if (profile) args.push(`--profile-dir-name=${profile}`);
-        mergeMcpServerEntry(cfg, "playwright", { transport: "stdio", command: "npx", args });
+        const entry = MCP_CATALOG.find((e) => e.name === "playwright");
+        if (!entry) throw new Error("bundled catalog has no playwright entry");
+        const { command, args } = catalogStdioCommand(entry);
+        args.push(PLAYWRIGHT_EXTENSION_ARG);
+        if (profile) args.push(`${PLAYWRIGHT_PROFILE_DIR_ARG}${profile}`);
+        mergeMcpServerEntry(cfg, entry.name, { transport: "stdio", command, args });
         writeConfig(cfg);
         emitMcpSpecs(tab);
         emitMcpExtensionStatus(tab);
