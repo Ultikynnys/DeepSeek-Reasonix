@@ -20,7 +20,12 @@
     "notification:default",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://*" }, { "url": "http://*" }]
+      "allow": [
+        { "url": "https://*" },
+        { "url": "http://*" },
+        { "url": "https://chromewebstore.google.com/*", "app": "chrome.exe" },
+        { "url": "https://chromewebstore.google.com/*", "app": "msedge.exe" }
+      ]
     },
     {
       "identifier": "opener:allow-open-path",

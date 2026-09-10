@@ -272,7 +272,7 @@ export const en = {
     mcpConfiguredNo: "playwright server not configured yet — choose a mode and configure it",
     mcpTokenPlaceholder: "PLAYWRIGHT_MCP_EXTENSION_TOKEN",
     mcpTokenHint:
-      "Chrome/Edge only. Pick the browser where you installed the extension. The optional relay token skips the per-connection approval prompt; the listing opens in your system default browser.",
+      "Chrome/Edge only. Pick the browser where you installed the extension. The optional relay token skips the per-connection approval prompt; the listing opens in the browser you selected.",
     mcpManagedHint:
       "Playwright launches and maintains a persistent profile for this browser. Firefox and WebKit do not use the extension relay.",
     mcpCdpHint:

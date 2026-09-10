@@ -16,6 +16,8 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Extension mode can target Edge, not just Chrome**: the extension card now takes a Chrome/Edge picker. Chrome writes `--extension` (the `@playwright/mcp` default); Edge writes `--extension --browser=msedge`. Previously extension mode never set `--browser`, so `@playwright/mcp` scanned Chrome's profile and reported "Playwright Extension not found" even when the bridge was installed in Edge. `parsePlaywrightConnection` reads the choice back so the card shows the saved value.
 
+- **The extension-listing button opens in the browser you selected.** Previously it handed the Chrome Web Store URL to the OS default browser. The button now passes the card's Chrome/Edge picker to `openUrl(url, "chrome.exe" | "msedge.exe")`, so the listing opens where the extension should be installed. The opener capability allow-lists the listing URL for those two programs: a bare `{ "url": "https://*" }` scope defaults its `app` to default-only, which rejects any explicit program (`ForbiddenUrl`).
+
 - **The built-in Playwright MCP server is no longer removable.** It is Reasonix-managed (dedicated settings card, on-demand browser install, managed tooling), so the spec list now flags built-in servers and hides the Remove button for them, and the `mcp_specs_remove` RPC refuses the built-in server with an explicit error. Enable/Disable stays available.
 
 **Added — Playwright MCP joins the bundled catalog; MCP servers and their individual tools can be toggled on/off from Settings.**

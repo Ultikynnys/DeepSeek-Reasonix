@@ -1769,7 +1769,11 @@ export function PageMCP({
                   type="button"
                   className="btn primary"
                   onClick={() => {
-                    if (extensionStatus) void openUrl(extensionStatus.storeUrl).catch(() => undefined);
+                    if (!extensionStatus) return;
+                    // Open in the browser picked above, not the OS default, so the
+                    // extension installs into the browser the relay will attach to.
+                    const program = extensionBrowser === "msedge" ? "msedge.exe" : "chrome.exe";
+                    void openUrl(extensionStatus.storeUrl, program).catch(() => undefined);
                   }}
                 >
                   {t("settings.mcpOpenExtensionStore")}

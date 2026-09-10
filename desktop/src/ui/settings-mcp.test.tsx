@@ -76,11 +76,20 @@ describe("PageMCP — playwright connection status", () => {
     expect(screen.getByText(/token saved/)).toBeTruthy();
   });
 
-  it("opens the extension listing through the system URL opener", async () => {
+  it("opens the extension listing in the selected browser", async () => {
     renderCard([spec()]);
     fireEvent.click(screen.getByRole("button", { name: "Open extension listing" }));
     await waitFor(() => {
-      expect(openUrl).toHaveBeenCalledWith(extensionStatus().storeUrl);
+      expect(openUrl).toHaveBeenCalledWith(extensionStatus().storeUrl, "chrome.exe");
+    });
+  });
+
+  it("opens the extension listing in Edge when Edge is selected", async () => {
+    renderCard([spec()]);
+    fireEvent.change(screen.getByLabelText("Extension browser"), { target: { value: "msedge" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open extension listing" }));
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith(extensionStatus().storeUrl, "msedge.exe");
     });
   });
 
