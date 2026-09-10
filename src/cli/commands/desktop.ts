@@ -2192,7 +2192,16 @@ export function interpretExtensionCheck(
   let errorText: string | null = null;
   const trimmed = raw.trim();
   if (/^### Error|^Error:/i.test(trimmed)) {
-    errorText = trimmed.split("\n")[0]!.slice(0, 200);
+    // Playwright prefixes tool-side failures with a bare "### Error" header and puts
+    // the real reason on the next line(s). Surface that, not the useless header.
+    const body = trimmed
+      .replace(/^### Error[ \t]*\n?/i, "")
+      .replace(/^Error:[ \t]*/i, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(" ");
+    errorText = (body || "probe failed").slice(0, 200);
   } else {
     try {
       const parsed = JSON.parse(trimmed) as { error?: unknown; cancelledByUser?: unknown };

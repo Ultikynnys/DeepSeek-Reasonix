@@ -311,10 +311,16 @@ describe("interpretExtensionCheck", () => {
     expect(result.reason).toContain("not bridged");
   });
 
-  it("surfaces plain tool-side error text (### Error) verbatim", () => {
+  it("surfaces the detail line of a tool-side error (### Error)", () => {
     const result = interpretExtensionCheck("### Error\nExtension not found", 900);
     expect(result.ok).toBe(false);
-    expect(result.reason).toBe("### Error");
+    expect(result.reason).toBe("Extension not found");
+  });
+
+  it("surfaces an inline Error: message without the prefix", () => {
+    const result = interpretExtensionCheck("Error: relay not connected", 900);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("relay not connected");
   });
 
   it("treats an empty probe result as a failure", () => {
