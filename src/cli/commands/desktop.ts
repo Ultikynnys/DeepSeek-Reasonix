@@ -182,7 +182,7 @@ import {
   writeMemoryEntry,
 } from "../../desktop/memory-browser.js";
 import { recordDiagnostic } from "../../diagnostics.js";
-import { normalizeImageToDataUrl } from "../../image-format.js";
+import { normalizeImageToDataUrls } from "../../image-format.js";
 import {
   PLAYWRIGHT_EXTENSION_ARG,
   PLAYWRIGHT_EXTENSION_STORE_URL,
@@ -800,9 +800,9 @@ async function resolveUserImages(
       // error instead of reaching the vision API and 400ing.
       const comma = att.dataUrl.indexOf(",");
       const b64 = comma >= 0 ? att.dataUrl.slice(comma + 1) : "";
-      const normalized = await normalizeImageToDataUrl(Buffer.from(b64, "base64"));
+      const normalized = await normalizeImageToDataUrls(Buffer.from(b64, "base64"));
       if (!normalized.ok) throw new Error(normalized.message);
-      out.push({ url: normalized.dataUrl });
+      for (const url of normalized.dataUrls) out.push({ url });
       continue;
     }
     const stat = statSync(att.path);
@@ -811,13 +811,16 @@ async function resolveUserImages(
         `image too large (${(stat.size / 1024 / 1024).toFixed(1)} MB > ${MAX_IMAGE_BYTES / 1024 / 1024} MB)`,
       );
     }
-    const normalized = await normalizeImageToDataUrl(await readFile(att.path));
+    const normalized = await normalizeImageToDataUrls(await readFile(att.path));
     if (!normalized.ok) {
       throw new Error(normalized.message);
     }
     // Keep the source path so the agent can open/modify the actual file, not
-    // just see the pixels.
-    out.push({ url: normalized.dataUrl, path: att.path });
+    // just see the pixels. A tiled image carries the path on its first tile
+    // only, so the user message lists it once.
+    normalized.dataUrls.forEach((url, i) => {
+      out.push(i === 0 ? { url, path: att.path } : { url });
+    });
   }
   return out;
 }

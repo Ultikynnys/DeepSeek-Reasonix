@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { MAX_IMAGE_BYTES, formatBytes } from "@reasonix/core-utils";
-import { normalizeImageToDataUrl } from "../image-format.js";
+import { normalizeImageToDataUrls } from "../image-format.js";
 import type { ToolCallContext, ToolRegistry } from "../tools.js";
 import type { UserContentPart } from "../types.js";
 
@@ -14,14 +14,14 @@ export interface SeeImageToolOptions {
 }
 
 const DESCRIPTION =
-  "Confirm and inspect images. You are vision-capable (multimodal): when the user attaches an image to their message, it is visible to you directly inside that user message; you can see and describe it without calling any tool. Call this tool when the user asks you to look at an image and you want to confirm the attachment, or pass `path` to load a specific local image file (PNG/JPEG/WebP) or data: URL into your context so you can see and describe it. Loading an image via `path` delivers its pixels to you as an image attachment. Never claim you cannot see an image you loaded or the user attached; if you are unsure whether an image is present, call this tool.";
+  "Confirm and inspect images. You are vision-capable (multimodal): when the user attaches an image to their message, it is visible to you directly inside that user message; you can see and describe it without calling any tool. Call this tool when the user asks you to look at an image and you want to confirm the attachment, or pass `path` to load a specific local image file (PNG/JPEG/WebP) or data: URL into your context so you can see and describe it. Loading an image via `path` delivers its pixels to you as an image attachment (a large image, such as a full-page screenshot, is split into tiles automatically so the whole image reaches you). Never claim you cannot see an image you loaded or the user attached; if you are unsure whether an image is present, call this tool.";
 
 /** Resolve a data URL or image file path; bytes are sniffed (not extension-trusted). */
 async function resolveImageRef(
   raw: string,
   rootDir: string | undefined,
 ): Promise<
-  { ok: true; label: string; bytes?: number; dataUrl?: string } | { ok: false; message: string }
+  { ok: true; label: string; bytes?: number; dataUrls: string[] } | { ok: false; message: string }
 > {
   const trimmed = raw.trim();
   if (trimmed.startsWith("data:image/")) {
@@ -33,9 +33,9 @@ async function resolveImageRef(
     } catch {
       return { ok: false, message: "invalid data:image URL — undecodable base64" };
     }
-    const normalized = await normalizeImageToDataUrl(buf);
+    const normalized = await normalizeImageToDataUrls(buf);
     if (!normalized.ok) return { ok: false, message: normalized.message };
-    return { ok: true, label: "data URL", bytes: trimmed.length, dataUrl: normalized.dataUrl };
+    return { ok: true, label: "data URL", bytes: trimmed.length, dataUrls: normalized.dataUrls };
   }
   const abs = isAbsolute(trimmed) ? trimmed : rootDir ? join(rootDir, trimmed) : trimmed;
   if (!existsSync(abs) || !statSync(abs).isFile()) {
@@ -48,25 +48,29 @@ async function resolveImageRef(
       message: `image too large (${formatBytes(bytes)} > ${formatBytes(MAX_IMAGE_BYTES)})`,
     };
   }
-  const normalized = await normalizeImageToDataUrl(readFileSync(abs));
+  const normalized = await normalizeImageToDataUrls(readFileSync(abs));
   if (!normalized.ok) return { ok: false, message: normalized.message };
-  return { ok: true, label: abs, bytes, dataUrl: normalized.dataUrl };
+  return { ok: true, label: abs, bytes, dataUrls: normalized.dataUrls };
 }
 
-/** Build the tool result for a resolvable image: text confirmation + the
- *  image as an `image_url` content part so a vision model receives the pixels. */
+/** Build the tool result for a resolvable image: text confirmation + one
+ *  `image_url` part per tile so a vision model receives the pixels. An image
+ *  over the vision cap is split into tiles upstream, so this may carry several. */
 function imageResultParts(
   label: string,
   bytes: number | undefined,
-  dataUrl: string,
+  dataUrls: string[],
 ): UserContentPart[] {
   const size = bytes !== undefined ? ` (${formatBytes(bytes)})` : "";
+  const tiles = dataUrls.length > 1 ? ` (split into ${dataUrls.length} tiles)` : "";
   return [
     {
       type: "text",
-      text: `Image loaded at ${label}${size}: pixels attached below. Describe what you observe.`,
+      text: `Image loaded at ${label}${size}${tiles}: pixels attached below. Describe what you observe.`,
     },
-    { type: "image_url", image_url: { url: dataUrl, detail: "low" } },
+    ...dataUrls.map(
+      (url): UserContentPart => ({ type: "image_url", image_url: { url, detail: "low" } }),
+    ),
   ];
 }
 
@@ -96,11 +100,7 @@ export function registerSeeImageTool(
       if (raw) {
         const resolved = await resolveImageRef(raw, ctx?.rootDir ?? opts.rootDir);
         if (!resolved.ok) return `see_image: ${resolved.message}`;
-        if (resolved.dataUrl) {
-          return imageResultParts(resolved.label, resolved.bytes, resolved.dataUrl);
-        }
-        const size = resolved.bytes ? ` (${formatBytes(resolved.bytes)})` : "";
-        return `Image confirmed at ${resolved.label}${size}: it is visible to you; you are vision-capable and see it directly. Describe what you observe in your response.`;
+        return imageResultParts(resolved.label, resolved.bytes, resolved.dataUrls);
       }
       const attached = ctx?.images;
       if (attached && attached.length > 0) {

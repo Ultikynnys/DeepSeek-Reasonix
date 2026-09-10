@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: an oversized image (e.g. a full-page Playwright screenshot) no longer 400s the vision request.**
+
+- DeepSeek's vision API rejects any image with a side above 8192 px ("unsupported image"), and Reasonix sent each image whole: a 1897x10226 full-page screenshot from `playwright_browser_take_screenshot`, loaded via `see_image`, failed every turn. `normalizeImageToDataUrls` (the shared image-ingestion point) now slices an oversized image into a grid of tiles no larger than 8192 px on their longest side, so `see_image` (which loads MCP screenshots implicitly) and the composer's dropped/pasted attachments both send the image in pieces, each accepted. Images already within the cap still pass through unchanged (no re-encode). The `see_image` result text notes the tile count.
+
 **Updated: DeepSeek's model offerings now track the V4.1 Flash release (2026-09-10).**
 
 - `deepseek-flash` (DeepSeek-V4.1-Flash) joins the catalog as the current model: 1M context, native vision, thinking on by default. `DEFAULT_MODEL` moves to it. Off-peak rates are `$0.003` / `$0.15` / `$0.60` per 1M (cache-hit / cache-miss / output; peak is 2x).
