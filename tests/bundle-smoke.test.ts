@@ -1,7 +1,7 @@
 /** Post-build smoke — confirm bundled `dist/{index,cli/index}.js` resolves the tokenizer data file at package-root. */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -105,5 +105,72 @@ describe("bundled dist — tokenizer path resolution", () => {
     // The daemon must have actually responded (event JSON on stdout) —
     // a commander error or instant crash would produce no events.
     expect(result.stdout).toMatch(/"type":\s*"\$/);
+  });
+});
+
+describe("base install stays lightweight — external Playwright components are opt-in", () => {
+  it("lists no Playwright dependency in any manifest", () => {
+    const offenders: string[] = [];
+    for (const rel of ["package.json", "desktop/package.json"]) {
+      const path = resolve(rel);
+      if (!existsSync(path)) continue;
+      const pkg = JSON.parse(readFileSync(path, "utf8")) as Record<string, Record<string, string>>;
+      for (const field of [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+      ]) {
+        for (const name of Object.keys(pkg[field] ?? {})) {
+          if (
+            name === "playwright" ||
+            name === "playwright-core" ||
+            name.startsWith("@playwright/")
+          ) {
+            offenders.push(`${rel}:${field}:${name}`);
+          }
+        }
+      }
+    }
+    expect(
+      offenders,
+      `Playwright packages must stay opt-in (downloaded on demand): ${offenders.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("records no Playwright package in the lockfiles", () => {
+    const offenders: string[] = [];
+    for (const rel of ["package-lock.json", "desktop/package-lock.json"]) {
+      const path = resolve(rel);
+      if (!existsSync(path)) continue;
+      const body = readFileSync(path, "utf8");
+      for (const needle of ["@playwright/mcp", "@playwright/test", "playwright-core"]) {
+        if (body.includes(needle)) offenders.push(`${rel}:${needle}`);
+      }
+    }
+    expect(offenders, `Playwright packages leaked into lockfiles: ${offenders.join(", ")}`).toEqual(
+      [],
+    );
+  });
+
+  it("packs no browser-extension or browser-cache resource in the Tauri bundles", () => {
+    for (const rel of [
+      "desktop/src-tauri/tauri.conf.json",
+      "desktop/src-tauri/tauri.windows.conf.json",
+    ]) {
+      const path = resolve(rel);
+      if (!existsSync(path)) continue;
+      const body = readFileSync(path, "utf8");
+      expect(body, `${rel} must not bundle the Playwright extension`).not.toMatch(
+        /playwright-extension/,
+      );
+      expect(body, `${rel} must not bundle a browser cache`).not.toMatch(/ms-playwright/);
+    }
+  });
+
+  it("ships no bundler script or npm script that downloads Playwright artifacts", () => {
+    expect(existsSync(resolve("desktop/scripts/bundle-playwright-extension.mjs"))).toBe(false);
+    const pkg = readFileSync(resolve("desktop/package.json"), "utf8");
+    expect(pkg).not.toMatch(/bundle:extension/);
   });
 });

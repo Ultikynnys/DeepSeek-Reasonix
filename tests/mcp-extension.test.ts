@@ -1,9 +1,6 @@
-/** Bundled Playwright extension — resolver, server-entry merge, status computation. */
+/** Playwright MCP extension — store URL, server-entry merge, status computation. */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { computeMcpExtensionStatus, interpretExtensionCheck } from "../src/cli/commands/desktop.js";
 import { type ReasonixConfig, mergeMcpServerEntry, normalizeMcpConfig } from "../src/config.js";
 import {
@@ -13,58 +10,10 @@ import {
   normalizeExtensionToken,
   parsePlaywrightConnection,
   playwrightBrowserInstallArgs,
-  resolveBundledPlaywrightExtension,
 } from "../src/mcp/extension.js";
 
-const ENV_OVERRIDE = "REASONIX_PLAYWRIGHT_EXTENSION_PATH";
-const tmpDirs: string[] = [];
-
-function tempDirWith(manifest: boolean, version?: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "reasonix-ext-"));
-  tmpDirs.push(dir);
-  if (manifest) {
-    writeFileSync(join(dir, "manifest.json"), JSON.stringify({ version: "9.9.9" }));
-    if (version !== undefined) writeFileSync(join(dir, "_store_version.txt"), version);
-  }
-  return dir;
-}
-
-beforeEach(() => {
-  delete process.env[ENV_OVERRIDE];
-});
-
-afterAll(() => {
-  for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
-  delete process.env[ENV_OVERRIDE];
-});
-
-describe("resolveBundledPlaywrightExtension", () => {
-  it("reports present with version when the bundled folder has a manifest", () => {
-    const dir = tempDirWith(true, "0.1.2");
-    process.env[ENV_OVERRIDE] = dir;
-    const info = resolveBundledPlaywrightExtension();
-    expect(info.present).toBe(true);
-    expect(info.path).toBe(dir);
-    expect(info.version).toBe("0.1.2");
-  });
-
-  it("reports present without version when the stamp file is absent", () => {
-    const dir = tempDirWith(true);
-    process.env[ENV_OVERRIDE] = dir;
-    const info = resolveBundledPlaywrightExtension();
-    expect(info.present).toBe(true);
-    expect(info.version).toBeNull();
-  });
-
-  it("reports absent when the override dir has no manifest.json", () => {
-    const dir = tempDirWith(false);
-    process.env[ENV_OVERRIDE] = dir;
-    const info = resolveBundledPlaywrightExtension();
-    expect(info.present).toBe(false);
-    expect(info.version).toBeNull();
-  });
-
-  it("always exposes the official store URL", () => {
+describe("Playwright extension store", () => {
+  it("always points at the official Chrome Web Store listing", () => {
     expect(PLAYWRIGHT_EXTENSION_STORE_URL).toMatch(/^https:\/\/chromewebstore\.google\.com\//);
     expect(PLAYWRIGHT_EXTENSION_STORE_URL).toContain("mmlmfjhmonkocbjadbfplnigmagldckm");
   });
@@ -269,13 +218,6 @@ describe("normalizeExtensionToken", () => {
 });
 
 describe("computeMcpExtensionStatus", () => {
-  const bundled = {
-    present: true,
-    path: "C:\\install\\assets\\playwright-extension",
-    version: "1.2.3",
-  };
-  const bundledAbsent = { present: false, path: null, version: null };
-
   it("reads configured state and the extension flag from the entry", () => {
     const cfg: ReasonixConfig = {
       mcpServers: {
@@ -286,9 +228,8 @@ describe("computeMcpExtensionStatus", () => {
         },
       },
     };
-    const status = computeMcpExtensionStatus(cfg, bundled);
+    const status = computeMcpExtensionStatus(cfg);
     expect(status.storeUrl).toBe(PLAYWRIGHT_EXTENSION_STORE_URL);
-    expect(status.bundled).toEqual(bundled);
     expect(status.server).toEqual({
       configured: true,
       mode: "extension",
@@ -308,18 +249,17 @@ describe("computeMcpExtensionStatus", () => {
         },
       },
     };
-    const server = computeMcpExtensionStatus(withToken, bundled).server;
+    const server = computeMcpExtensionStatus(withToken).server;
     expect(server.tokenPrefix).toBe("K3MM1p…6VE");
     expect(JSON.stringify(server)).not.toContain("K3MM1pBelgctJOQe2_sMBQD5NJwrxUcCXgvbRHv-6VE");
-    expect(computeMcpExtensionStatus({}, bundledAbsent).server.tokenPrefix).toBeUndefined();
+    expect(computeMcpExtensionStatus({}).server.tokenPrefix).toBeUndefined();
   });
 
-  it("reports unconfigured servers and absent bundles", () => {
-    const status = computeMcpExtensionStatus({}, bundledAbsent);
+  it("reports unconfigured servers", () => {
+    const status = computeMcpExtensionStatus({});
     expect(status.server.configured).toBe(false);
     expect(status.server.mode).toBe("chrome");
     expect(status.server.hasExtensionArg).toBe(false);
-    expect(status.bundled.present).toBe(false);
   });
 
   it("reports managed and CDP connection modes", () => {
@@ -328,7 +268,7 @@ describe("computeMcpExtensionStatus", () => {
         playwright: { command: "npx", args: ["-y", "@playwright/mcp", "--browser=firefox"] },
       },
     };
-    expect(computeMcpExtensionStatus(managed, bundled).server.mode).toBe("firefox");
+    expect(computeMcpExtensionStatus(managed).server.mode).toBe("firefox");
 
     const cdp: ReasonixConfig = {
       mcpServers: {
@@ -338,7 +278,7 @@ describe("computeMcpExtensionStatus", () => {
         },
       },
     };
-    expect(computeMcpExtensionStatus(cdp, bundled).server).toMatchObject({
+    expect(computeMcpExtensionStatus(cdp).server).toMatchObject({
       configured: true,
       mode: "cdp",
       cdpEndpoint: "http://localhost:9222",

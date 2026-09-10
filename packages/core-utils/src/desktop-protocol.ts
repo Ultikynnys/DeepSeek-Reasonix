@@ -439,12 +439,6 @@ export interface McpSpecsEvent {
   bridged: boolean;
 }
 
-export interface McpExtensionBundled {
-  present: boolean;
-  path: string | null;
-  version: string | null;
-}
-
 export type PlaywrightManagedBrowser = "chrome" | "firefox" | "webkit" | "msedge";
 
 export type PlaywrightMcpConnectionMode = PlaywrightManagedBrowser | "extension" | "cdp";
@@ -461,7 +455,6 @@ export interface McpExtensionServerState {
 
 export interface McpExtensionStatus {
   storeUrl: string;
-  bundled: McpExtensionBundled;
   server: McpExtensionServerState;
 }
 

@@ -1,5 +1,5 @@
 import { DEFAULT_MODEL, modelDisplayName } from "@reasonix/core-utils";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { t } from "../i18n";
@@ -1855,60 +1855,6 @@ export function PageMCP({
                   : "settings.mcpManagedHint",
             )}
           </div>
-          {extensionMode && extensionStatus?.bundled.present && extensionStatus.bundled.path ? (
-            <div
-              style={{
-                marginTop: 10,
-                paddingTop: 8,
-                borderTop: "1px solid var(--border)",
-              }}
-            >
-              <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                {t("settings.mcpBundledTitle")}
-                {extensionStatus.bundled.version ? ` · v${extensionStatus.bundled.version}` : ""}
-              </div>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
-                <span
-                  className="mono"
-                  style={{
-                    fontSize: 11,
-                    flex: 1,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={extensionStatus.bundled.path}
-                >
-                  {extensionStatus.bundled.path}
-                </span>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  style={{ fontSize: 11 }}
-                  onClick={() => {
-                    void navigator.clipboard
-                      .writeText(extensionStatus.bundled.path ?? "")
-                      .catch(() => undefined);
-                  }}
-                >
-                  {t("settings.mcpCopyPath")}
-                </button>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  style={{ fontSize: 11 }}
-                  onClick={() => {
-                    void openPath(extensionStatus.bundled.path ?? "").catch(() => undefined);
-                  }}
-                >
-                  {t("settings.mcpOpenFolder")}
-                </button>
-              </div>
-              <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
-                {t("settings.mcpUnpackedHint")}
-              </div>
-            </div>
-          ) : null}
         </div>
       </section>
       <section className="section">

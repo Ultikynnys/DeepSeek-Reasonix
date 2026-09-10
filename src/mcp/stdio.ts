@@ -141,7 +141,7 @@ export class StdioTransport extends BaseMcpTransport implements McpTransport {
   }
 }
 
-function quoteArg(s: string, windows: boolean): string {
+export function quoteArg(s: string, windows: boolean): string {
   if (!windows) {
     // POSIX: single-quote, escape single quotes.
     return `'${s.replace(/'/g, "'\\''")}'`;

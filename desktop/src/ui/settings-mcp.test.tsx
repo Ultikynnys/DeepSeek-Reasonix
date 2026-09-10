@@ -28,7 +28,6 @@ function spec(overrides: Partial<McpSpecInfo> = {}): McpSpecInfo {
 function extensionStatus(): McpExtensionStatus {
   return {
     storeUrl: "https://chromewebstore.google.com/detail/playwright-extension",
-    bundled: { present: false, path: null, version: null },
     server: {
       configured: true,
       mode: "extension",

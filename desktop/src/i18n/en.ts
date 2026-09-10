@@ -287,11 +287,6 @@ export const en = {
     mcpTestRunning: "testing relay — approve in Chrome or Edge if the dialog appears…",
     mcpTestOk: "✓ token works — browser attached in {ms} ms",
     mcpTestFailed: "check failed",
-    mcpBundledTitle: "Bundled copy (offline fallback)",
-    mcpCopyPath: "Copy path",
-    mcpOpenFolder: "Open folder",
-    mcpUnpackedHint:
-      "Chrome/Edge fallback: open the browser's extensions page, enable Developer mode, then load this folder unpacked.",
     parseError: "Parse failed: {error}",
     mcpAddSection: "Add server",
     mcpSpecLabel: "Spec string",

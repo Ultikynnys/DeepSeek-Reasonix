@@ -1,8 +1,7 @@
 {
   "bundle": {
     "resources": {
-      "binaries/node.exe": "node.exe",
-      "binaries/playwright-extension": "assets/playwright-extension"
+      "binaries/node.exe": "node.exe"
     }
   }
 }

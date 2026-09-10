@@ -184,7 +184,6 @@ import {
 import { recordDiagnostic } from "../../diagnostics.js";
 import { normalizeImageToDataUrl } from "../../image-format.js";
 import {
-  type BundledExtensionInfo,
   PLAYWRIGHT_EXTENSION_ARG,
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
@@ -193,8 +192,8 @@ import {
   normalizeExtensionToken,
   parsePlaywrightConnection,
   playwrightBrowserInstallArgs,
-  resolveBundledPlaywrightExtension,
 } from "../../mcp/extension.js";
+import { quoteArg } from "../../mcp/stdio.js";
 
 import {
   ANTIGRAVITY_OAUTH_CLIENT_ID,
@@ -2078,17 +2077,13 @@ function emitMcpSpecs(tab: Tab): void {
 }
 
 /** Extension-integration state for the Settings card — pure so tests can pin it. */
-export function computeMcpExtensionStatus(
-  cfg: ReasonixConfig,
-  bundled: BundledExtensionInfo,
-): McpExtensionStatus {
+export function computeMcpExtensionStatus(cfg: ReasonixConfig): McpExtensionStatus {
   const entry = cfg.mcpServers?.playwright;
   const args = entry?.args ?? [];
   const token = entry?.env?.[PLAYWRIGHT_EXTENSION_TOKEN_ENV];
   const connection = parsePlaywrightConnection(args);
   return {
     storeUrl: PLAYWRIGHT_EXTENSION_STORE_URL,
-    bundled,
     server: {
       configured: Boolean(entry),
       ...connection,
@@ -2100,7 +2095,7 @@ export function computeMcpExtensionStatus(
 }
 
 function emitMcpExtensionStatus(tab: Tab): void {
-  const status = computeMcpExtensionStatus(readConfig(), resolveBundledPlaywrightExtension());
+  const status = computeMcpExtensionStatus(readConfig());
   const ev: McpExtensionStatusEvent = { type: "$mcp_extension_status", status };
   emit(ev, tab.id);
 }
@@ -2140,8 +2135,18 @@ async function installPlaywrightBrowser(
   let output = "";
   try {
     const result = await new Promise<{ code: number | null; error?: string }>((resolveResult) => {
-      const command = process.platform === "win32" ? "npx.cmd" : "npx";
-      const child = spawn(command, args, { windowsHide: true, shell: false });
+      // Windows wraps `npx` as `npx.cmd`, which Node 22+ refuses to spawn
+      // without a shell (throws EINVAL). Mirror the stdio transport: on
+      // win32 build one quoted command line and run it through the shell;
+      // elsewhere spawn the bare binary. Args are already allowlisted
+      // (browser) and shape-checked (package pin), so no injection surface.
+      const shell = process.platform === "win32";
+      const child = shell
+        ? spawn(["npx", ...args.map((arg) => quoteArg(arg, true))].join(" "), [], {
+            windowsHide: true,
+            shell: true,
+          })
+        : spawn("npx", args, { windowsHide: true });
       const append = (chunk: Buffer | string) => {
         output = `${output}${String(chunk)}`.slice(-8000);
       };

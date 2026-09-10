@@ -13,8 +13,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "bundle:node": "node scripts/bundle-node.mjs",
-    "bundle:model": "node scripts/bundle-onnx-wasm.mjs",
-    "bundle:extension": "node scripts/bundle-playwright-extension.mjs"
+    "bundle:model": "node scripts/bundle-onnx-wasm.mjs"
   },
   "dependencies": {
     "@fontsource/geist": "^5.2.8",
