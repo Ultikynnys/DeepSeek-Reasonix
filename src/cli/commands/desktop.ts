@@ -186,6 +186,7 @@ import {
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
   PLAYWRIGHT_PROFILE_DIR_ARG,
+  normalizeExtensionToken,
   resolveBundledPlaywrightExtension,
 } from "../../mcp/extension.js";
 
@@ -4651,7 +4652,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "mcp_extension_configure") {
       try {
         const profile = typeof msg.profileDirName === "string" ? msg.profileDirName.trim() : "";
-        const token = typeof msg.token === "string" ? msg.token.trim() : "";
+        const token = typeof msg.token === "string" ? normalizeExtensionToken(msg.token) : "";
         const cfg = readConfig();
         const entry = MCP_CATALOG.find((e) => e.name === "playwright");
         if (!entry) throw new Error("bundled catalog has no playwright entry");

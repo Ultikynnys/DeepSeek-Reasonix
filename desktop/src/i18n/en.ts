@@ -263,7 +263,7 @@ export const en = {
       'Profile is optional: the last part of "Profile Path" on chrome://version — lets one account per Chrome profile.',
     mcpTokenPlaceholder: "PLAYWRIGHT_MCP_EXTENSION_TOKEN",
     mcpTokenHint:
-      "Token is optional: paste it from the extension's connection dialog — storing it skips the per-connection approval prompt.",
+      "Token is optional: paste the whole PLAYWRIGHT_MCP_EXTENSION_TOKEN=… line from the connection dialog (the prefix is stripped automatically) — it skips the per-connection approval prompt.",
     mcpTokenSaved: "token saved",
     mcpConnConnected: "server connected · {count} tools live",
     mcpConnHandshake: "server connecting…",

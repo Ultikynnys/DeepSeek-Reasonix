@@ -16,6 +16,23 @@ export const PLAYWRIGHT_PROFILE_DIR_ARG = "--profile-dir-name=";
  *  per-connection approval dialog (the token is shown in that dialog). */
 export const PLAYWRIGHT_EXTENSION_TOKEN_ENV = "PLAYWRIGHT_MCP_EXTENSION_TOKEN";
 
+/** Normalize a user-pasted relay token. The extension's connection dialog copies
+ *  the whole `PLAYWRIGHT_MCP_EXTENSION_TOKEN=<token>` line, so strip that prefix
+ *  (case-insensitive) plus any wrapping quotes/whitespace — store the bare token. */
+export function normalizeExtensionToken(raw: string): string {
+  let token = raw.trim();
+  const prefix = `${PLAYWRIGHT_EXTENSION_TOKEN_ENV}=`;
+  if (token.toLowerCase().startsWith(prefix.toLowerCase())) token = token.slice(prefix.length);
+  token = token.trim();
+  if (
+    (token.startsWith('"') && token.endsWith('"') && token.length >= 2) ||
+    (token.startsWith("'") && token.endsWith("'") && token.length >= 2)
+  ) {
+    token = token.slice(1, -1);
+  }
+  return token.trim();
+}
+
 export interface BundledExtensionInfo {
   present: boolean;
   /** Candidate dir that was resolved (even when not present) — for UI hints. */

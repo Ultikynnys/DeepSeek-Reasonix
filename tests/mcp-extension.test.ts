@@ -9,6 +9,7 @@ import { type ReasonixConfig, mergeMcpServerEntry, normalizeMcpConfig } from "..
 import {
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
+  normalizeExtensionToken,
   resolveBundledPlaywrightExtension,
 } from "../src/mcp/extension.js";
 
@@ -147,6 +148,38 @@ describe("mergeMcpServerEntry", () => {
       [PLAYWRIGHT_EXTENSION_TOKEN_ENV]: "stored-token",
       OTHER_VAR: "x",
     });
+  });
+});
+
+describe("normalizeExtensionToken", () => {
+  it("accepts a bare token unchanged", () => {
+    expect(normalizeExtensionToken("K3MM1pBelgctJOQe2_sMBQD5NJwrxUcCXgvbRHv-6VE")).toBe(
+      "K3MM1pBelgctJOQe2_sMBQD5NJwrxUcCXgvbRHv-6VE",
+    );
+  });
+
+  it("strips the KEY= prefix that the connection dialog's copy button produces", () => {
+    expect(
+      normalizeExtensionToken(
+        "PLAYWRIGHT_MCP_EXTENSION_TOKEN=K3MM1pBelgctJOQe2_sMBQD5NJwrxUcCXgvbRHv-6VE",
+      ),
+    ).toBe("K3MM1pBelgctJOQe2_sMBQD5NJwrxUcCXgvbRHv-6VE");
+    expect(
+      normalizeExtensionToken(
+        "playwright_mcp_extension_token=K3MM1pBelgctJOQe2_sMBQD5NJwrxUcCXgvbRHv-6VE",
+      ),
+    ).toBe("K3MM1pBelgctJOQe2_sMBQD5NJwrxUcCXgvbRHv-6VE");
+  });
+
+  it("trims whitespace and strips wrapping quotes", () => {
+    expect(normalizeExtensionToken('  "K3MM1pBelgctJOQe2"  ')).toBe("K3MM1pBelgctJOQe2");
+    expect(normalizeExtensionToken("  'K3MM1pBelgctJOQe2'\n")).toBe("K3MM1pBelgctJOQe2");
+  });
+
+  it("leaves a token that merely contains the key name elsewhere untouched", () => {
+    expect(normalizeExtensionToken("xPLAYWRIGHT_MCP_EXTENSION_TOKEN=y")).toBe(
+      "xPLAYWRIGHT_MCP_EXTENSION_TOKEN=y",
+    );
   });
 });
 
