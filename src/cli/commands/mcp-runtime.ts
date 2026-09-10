@@ -6,6 +6,12 @@ import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
+import {
+  ensurePlaywrightTooling,
+  isPlaywrightExtensionSpec,
+  playwrightDescriptionSuffix,
+  playwrightToolingNotice,
+} from "../../mcp/playwright-tooling.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { type McpClientHost, bridgeMcpTools, registerSingleMcpTool } from "../../mcp/registry.js";
 import type { McpServerSpec } from "../../mcp/spec.js";
@@ -148,6 +154,13 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
           : "";
       if (spec.transport === "stdio") preflightStdioSpec(spec);
       const workspaceDir = ctx.getWorkspaceDir?.();
+      // Hardcoded playwright tooling contract: guarantee the durable driver +
+      // AGENTS.md pair exists (create/upgrade as needed) before any agent
+      // touches the browser, and surface the maintenance duty to the agent
+      // via the bridge's first-call notice + description pointers.
+      const playwrightTooling = isPlaywrightExtensionSpec(spec)
+        ? ensurePlaywrightTooling()
+        : undefined;
       const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
       mcp = new McpClient({ transport, workspaceDir });
       await mcp.initialize({ signal });
@@ -159,6 +172,12 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         host,
         ready,
         disabledTools: spec.disabledTools ? new Set(spec.disabledTools) : undefined,
+        ...(playwrightTooling
+          ? {
+              toolingNotice: playwrightToolingNotice(playwrightTooling),
+              descriptionSuffix: playwrightDescriptionSuffix(playwrightTooling),
+            }
+          : {}),
         onProgress: (info) => ctx.progressSink.current?.(info),
         onSlow: (info) =>
           sink({

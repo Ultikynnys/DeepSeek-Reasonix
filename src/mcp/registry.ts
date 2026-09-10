@@ -39,6 +39,14 @@ export interface BridgeOptions {
   /** Bare MCP tool names (pre-prefix) that must NOT be registered — user-disabled
    *  per-tool toggles. Skipped tools land in `BridgeResult.skipped`. */
   disabledTools?: ReadonlySet<string>;
+  /** Hardcoded tooling duty (playwright driver + AGENTS.md) — appended to the
+   *  FIRST successful tool result of this bridge so every agent driving the
+   *  browser learns the maintenance contract without a schema-cost bump. */
+  toolingNotice?: string;
+  /** Compact pointer appended to every bridged tool description — keeps the
+   *  tooling dir unmissable in tool listings. Deterministic per install, so
+   *  the tool-list hash stays cache-stable. */
+  descriptionSuffix?: string;
 }
 
 /** Mutable holder so `/mcp reconnect` can swap the underlying client without re-bridging tools. */
@@ -76,6 +84,10 @@ export interface BridgeEnv {
   readyTimeoutMs?: number;
   /** Server name surfaced in timeout errors. Defaults to the prefix or "anon". */
   serverName?: string;
+  /** See BridgeOptions.toolingNotice — once-flag lives here so hot re-registrations inherit it. */
+  toolingNotice?: string;
+  toolingNoticeSeen?: boolean;
+  descriptionSuffix?: string;
 }
 
 /** Register one MCP tool's bridged closure into the registry. Returns the registered name (or "" if skipped). */
@@ -88,7 +100,11 @@ export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string 
   const registeredName = `${env.prefix}${stableTool.name}`;
   env.registry.register({
     name: registeredName,
-    description: stableTool.description ?? "",
+    description: stableTool.description
+      ? env.descriptionSuffix
+        ? `${stableTool.description} ${env.descriptionSuffix}`
+        : stableTool.description
+      : env.descriptionSuffix,
     parameters: stableTool.inputSchema as JSONSchema,
     fn: async (args: Record<string, unknown>, ctx) => {
       if (env.ready) {
@@ -114,7 +130,12 @@ export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string 
           durationMs,
           details: { server: env.serverName, tool: registeredName, ok: true },
         });
-        return flattenMcpResult(toolResult, { maxChars: env.maxResultChars });
+        const text = flattenMcpResult(toolResult, { maxChars: env.maxResultChars });
+        if (env.toolingNotice && !env.toolingNoticeSeen) {
+          env.toolingNoticeSeen = true;
+          return `${text}\n\n${env.toolingNotice}`;
+        }
+        return text;
       } catch (error) {
         recordDiagnostic("mcp.tool.completed", {
           level: "error",
@@ -195,6 +216,8 @@ export async function bridgeMcpTools(
     ready: opts.ready,
     readyTimeoutMs: opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
     serverName,
+    toolingNotice: opts.toolingNotice,
+    descriptionSuffix: opts.descriptionSuffix,
   };
   const listed = await client.listTools();
   // Canonicalize + sort so the bridged tool list is byte-stable across
