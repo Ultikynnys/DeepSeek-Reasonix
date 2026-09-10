@@ -50,6 +50,7 @@ import {
   type McpExtensionCheck,
   type McpExtensionStatus,
   type McpSpecInfo,
+  type PlaywrightMcpConnectionMode,
   type MemoryDetail,
   type MemoryEntryInfo,
   type ModelEndpointInfo,
@@ -2447,7 +2448,8 @@ function TabRuntime({
     [sendRpc],
   );
   const configureMcpExtension = useCallback(
-    (token?: string) => sendRpc({ cmd: "mcp_extension_configure", token }),
+    (mode: PlaywrightMcpConnectionMode, token?: string, cdpEndpoint?: string) =>
+      sendRpc({ cmd: "mcp_extension_configure", mode, token, cdpEndpoint }),
     [sendRpc],
   );
   const checkMcpExtension = useCallback(() => sendRpc({ cmd: "mcp_extension_check" }), [sendRpc]);

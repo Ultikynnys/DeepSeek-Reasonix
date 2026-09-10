@@ -1,4 +1,4 @@
-/** Hardcoded playwright tooling contract for extension-mode @playwright/mcp servers:
+/** Hardcoded tooling contract for @playwright/mcp servers:
  *  bootstrap + upgrade a durable driver + AGENTS.md pair, and surface the duty to agents. */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -9,7 +9,7 @@ import { recordDiagnostic } from "../diagnostics.js";
 import { reasonixHome } from "../reasonix-home.js";
 import type { McpServerSpec } from "./spec.js";
 
-export const PLAYWRIGHT_TOOLING_VERSION = 2;
+export const PLAYWRIGHT_TOOLING_VERSION = 3;
 const STAMP_RE = /playwright-tooling-version:\s*(\d+)/g;
 const PLATFORM_BEGIN = "<!-- platform:begin";
 const PLATFORM_END = "<!-- platform:end -->";
@@ -17,9 +17,9 @@ const PLATFORM_END = "<!-- platform:end -->";
 const DRIVER_FILE = "driver.mjs";
 const AGENTS_FILE = "AGENTS.md";
 
-export function isPlaywrightExtensionSpec(spec: McpServerSpec): boolean {
+export function isPlaywrightSpec(spec: McpServerSpec): boolean {
   if (spec.transport !== "stdio") return false;
-  return spec.args.some((a) => a.includes("@playwright/mcp")) && spec.args.includes("--extension");
+  return spec.args.some((arg) => /(?:^|[\\/])@playwright[\\/]mcp(?:@|$)/.test(arg));
 }
 
 export interface PlaywrightToolingPaths {
@@ -170,7 +170,7 @@ function ensurePlaywrightToolingUncached(
 }
 
 /** Agent-facing duty text injected into the first tool result of a bridged
- *  playwright extension session — every agent driving the browser sees it. */
+ *  Playwright session: every agent driving a supported browser sees it. */
 export function playwrightToolingNotice(status: PlaywrightToolingResult): string {
   const base = `[reasonix playwright tooling] The durable driver + docs for this tool family live at ${status.dir} (driver.mjs + AGENTS.md). Hard requirements: (1) read AGENTS.md before first use; (2) the server persists across invocations — drive batch flows through it (\`node <dir>/driver.mjs seq <steps.json>\`), never one-off spawns; (3) if tooling you need is missing, create it there; (4) if existing tooling needs changes, modify it in place; (5) after any change, keep AGENTS.md in that folder updated so future agents find the current state.`;
   if (status.ok) return base;

@@ -8,7 +8,7 @@ import {
   PLAYWRIGHT_TOOLING_VERSION,
   _resetForTests,
   ensurePlaywrightTooling,
-  isPlaywrightExtensionSpec,
+  isPlaywrightSpec,
   playwrightDescriptionSuffix,
   playwrightToolingNotice,
   resolvePlaywrightTemplatePath,
@@ -35,41 +35,34 @@ afterEach(() => {
   _resetForTests();
 });
 
-describe("isPlaywrightExtensionSpec", () => {
-  it("matches @playwright/mcp with --extension", () => {
+describe("isPlaywrightSpec", () => {
+  it.each([
+    ["extension", ["-y", "@playwright/mcp", "--extension"]],
+    ["managed Firefox", ["-y", "@playwright/mcp@latest", "--browser=firefox"]],
+    ["Chromium CDP", ["-y", "@playwright/mcp", "--cdp-endpoint=http://localhost:9222"]],
+  ])("matches %s mode", (_label, args) => {
     expect(
-      isPlaywrightExtensionSpec({
+      isPlaywrightSpec({
         transport: "stdio",
         name: "playwright",
         command: "npx",
-        args: ["-y", "@playwright/mcp", "--extension", "--browser", "msedge"],
+        args,
       }),
     ).toBe(true);
   });
 
-  it("rejects @playwright/mcp without --extension", () => {
-    expect(
-      isPlaywrightExtensionSpec({
-        transport: "stdio",
-        name: "playwright",
-        command: "npx",
-        args: ["-y", "@playwright/mcp"],
-      }),
-    ).toBe(false);
-  });
-
   it("rejects other stdio servers and non-stdio transports", () => {
     expect(
-      isPlaywrightExtensionSpec({
+      isPlaywrightSpec({
         transport: "stdio",
         name: "fs",
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
       }),
     ).toBe(false);
-    expect(
-      isPlaywrightExtensionSpec({ transport: "sse", name: "x", url: "https://example.com/sse" }),
-    ).toBe(false);
+    expect(isPlaywrightSpec({ transport: "sse", name: "x", url: "https://example.com/sse" })).toBe(
+      false,
+    );
   });
 });
 

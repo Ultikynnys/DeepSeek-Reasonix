@@ -141,6 +141,7 @@ export type {
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,
+  PlaywrightMcpConnectionMode,
   SkillScope,
   SkillInfo,
   SkillsEvent,

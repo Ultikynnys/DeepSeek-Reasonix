@@ -10,6 +10,7 @@ import type {
   McpExtensionCheck,
   McpExtensionStatus,
   McpSpecInfo,
+  PlaywrightMcpConnectionMode,
   MemoryDetail,
   MemoryEntryInfo,
   SettingsPatch,
@@ -179,7 +180,11 @@ export function SettingsModal({
   mcpExtensionStatus: McpExtensionStatus | null;
   mcpExtensionCheck: McpExtensionCheck | null;
   onRequestMcpExtensionStatus: () => void;
-  onConfigureMcpExtension: (token?: string) => void;
+  onConfigureMcpExtension: (
+    mode: PlaywrightMcpConnectionMode,
+    token?: string,
+    cdpEndpoint?: string,
+  ) => void;
   onCheckMcpExtension: () => void;
   onReadMemory: (path: string) => void;
   onWriteMemory: (
@@ -1636,15 +1641,26 @@ export function PageMCP({
   extensionStatus: McpExtensionStatus | null;
   extensionCheck: McpExtensionCheck | null;
   onRequestExtensionStatus: () => void;
-  onConfigureExtension: (token?: string) => void;
+  onConfigureExtension: (
+    mode: PlaywrightMcpConnectionMode,
+    token?: string,
+    cdpEndpoint?: string,
+  ) => void;
   onCheckExtension: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
+  const [mode, setMode] = useState<PlaywrightMcpConnectionMode>("chrome");
+  const [cdpEndpoint, setCdpEndpoint] = useState("");
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   useEffect(() => {
     onRequestExtensionStatus();
   }, [onRequestExtensionStatus]);
+  useEffect(() => {
+    if (!extensionStatus) return;
+    setMode(extensionStatus.server.mode);
+    setCdpEndpoint(extensionStatus.server.cdpEndpoint ?? "");
+  }, [extensionStatus]);
   const submit = () => {
     const v = draft.trim();
     if (!v) return;
@@ -1659,7 +1675,8 @@ export function PageMCP({
       return next;
     });
   };
-  const configuredWithExtension = extensionStatus?.server.hasExtensionArg ?? false;
+  const configuredMode = extensionStatus?.server.mode;
+  const extensionMode = mode === "extension";
   const playwrightSpec = specs.find((s) => s.name === "playwright");
   let connection: { text: string; color: string } | null = null;
   if (playwrightSpec) {
@@ -1690,44 +1707,79 @@ export function PageMCP({
             {t("settings.mcpBrowserDesc")}
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => {
-                if (extensionStatus) void openUrl(extensionStatus.storeUrl).catch(() => undefined);
-              }}
-            >
-              {t("settings.mcpOpenWebStore")}
-            </button>
-            <input
+            <select
               className="field"
-              type="password"
-              value={tokenDraft}
-              onChange={(e) => setTokenDraft(e.target.value)}
-              placeholder={
-                extensionStatus?.server.tokenPrefix ?? t("settings.mcpTokenPlaceholder")
-              }
-              style={{ maxWidth: 240 }}
-            />
+              aria-label={t("settings.mcpModeLabel")}
+              value={mode}
+              onChange={(event) => setMode(event.target.value as PlaywrightMcpConnectionMode)}
+            >
+              <option value="chrome">{t("settings.mcpModeChrome")}</option>
+              <option value="firefox">{t("settings.mcpModeFirefox")}</option>
+              <option value="webkit">{t("settings.mcpModeWebkit")}</option>
+              <option value="msedge">{t("settings.mcpModeEdge")}</option>
+              <option value="extension">{t("settings.mcpModeExtension")}</option>
+              <option value="cdp">{t("settings.mcpModeCdp")}</option>
+            </select>
+            {mode === "cdp" ? (
+              <input
+                className="field"
+                aria-label={t("settings.mcpCdpEndpoint")}
+                value={cdpEndpoint}
+                onChange={(event) => setCdpEndpoint(event.target.value)}
+                placeholder="http://localhost:9222"
+                style={{ minWidth: 240 }}
+              />
+            ) : null}
+            {extensionMode ? (
+              <>
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => {
+                    if (extensionStatus) void openUrl(extensionStatus.storeUrl).catch(() => undefined);
+                  }}
+                >
+                  {t("settings.mcpOpenExtensionStore")}
+                </button>
+                <input
+                  className="field"
+                  type="password"
+                  value={tokenDraft}
+                  onChange={(event) => setTokenDraft(event.target.value)}
+                  placeholder={
+                    extensionStatus?.server.tokenPrefix ?? t("settings.mcpTokenPlaceholder")
+                  }
+                  style={{ maxWidth: 240 }}
+                />
+              </>
+            ) : null}
             <button
               type="button"
               className="btn"
               onClick={() => {
-                onConfigureExtension(tokenDraft.trim() || undefined);
+                onConfigureExtension(
+                  mode,
+                  extensionMode ? tokenDraft.trim() || undefined : undefined,
+                  mode === "cdp" ? cdpEndpoint.trim() : undefined,
+                );
                 setTokenDraft("");
               }}
             >
-              {configuredWithExtension ? t("settings.mcpReconfigure") : t("settings.mcpConfigure")}
+              {configuredMode === mode ? t("settings.mcpReconfigure") : t("settings.mcpConfigure")}
             </button>
-            <button type="button" className="btn" onClick={onCheckExtension}>
-              {t("settings.mcpTestConn")}
-            </button>
+            {extensionMode ? (
+              <button type="button" className="btn" onClick={onCheckExtension}>
+                {t("settings.mcpTestConn")}
+              </button>
+            ) : null}
           </div>
           <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
             {extensionStatus
-              ? configuredWithExtension
-                ? `✓ ${t("settings.mcpConfiguredYes")}${
-                    extensionStatus.server.tokenPrefix ? ` · ${t("settings.mcpTokenSaved")}` : ""
+              ? extensionStatus.server.configured
+                ? `✓ ${t("settings.mcpConfiguredMode", { mode: configuredMode ?? "chrome" })}${
+                    extensionMode && extensionStatus.server.tokenPrefix
+                      ? ` · ${t("settings.mcpTokenSaved")}`
+                      : ""
                   }`
                 : t("settings.mcpConfiguredNo")
               : "…"}
@@ -1737,7 +1789,7 @@ export function PageMCP({
               {connection.text}
             </div>
           ) : null}
-          {extensionCheck?.phase === "running" ? (
+          {extensionMode && extensionCheck?.phase === "running" ? (
             <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
               {t("settings.mcpTestRunning")}
             </div>
@@ -1755,9 +1807,15 @@ export function PageMCP({
             </div>
           ) : null}
           <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
-            {t("settings.mcpTokenHint")}
+            {t(
+              extensionMode
+                ? "settings.mcpTokenHint"
+                : mode === "cdp"
+                  ? "settings.mcpCdpHint"
+                  : "settings.mcpManagedHint",
+            )}
           </div>
-          {extensionStatus?.bundled.present && extensionStatus.bundled.path ? (
+          {extensionMode && extensionStatus?.bundled.present && extensionStatus.bundled.path ? (
             <div
               style={{
                 marginTop: 10,

@@ -186,9 +186,10 @@ import {
   PLAYWRIGHT_EXTENSION_ARG,
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
+  configurePlaywrightArgs,
   normalizeExtensionToken,
+  parsePlaywrightConnection,
   resolveBundledPlaywrightExtension,
-  stripPlaywrightProfileArgs,
 } from "../../mcp/extension.js";
 
 import {
@@ -2079,11 +2080,13 @@ export function computeMcpExtensionStatus(
   const entry = cfg.mcpServers?.playwright;
   const args = entry?.args ?? [];
   const token = entry?.env?.[PLAYWRIGHT_EXTENSION_TOKEN_ENV];
+  const connection = parsePlaywrightConnection(args);
   return {
     storeUrl: PLAYWRIGHT_EXTENSION_STORE_URL,
     bundled,
     server: {
       configured: Boolean(entry),
+      ...connection,
       hasExtensionArg: args.includes(PLAYWRIGHT_EXTENSION_ARG),
       tokenPrefix: token ? `${token.slice(0, 6)}…${token.slice(-3)}` : undefined,
       args,
@@ -2128,7 +2131,7 @@ export function interpretExtensionCheck(
   if (timedOut || /aborted|cancelled/i.test(errorText)) {
     return {
       ok: false,
-      reason: `no browser responded within ${seconds}s — the stored token is likely wrong, or Edge isn't running with the extension installed`,
+      reason: `no browser responded within ${seconds}s — the stored token is likely wrong, or Chrome or Edge isn't running with the extension installed`,
       elapsedMs,
     };
   }
@@ -2144,7 +2147,7 @@ export function interpretExtensionCheck(
 
 /** End-to-end relay check: dispatch one cheap browser tool through the live
  *  bridge with a bounded timeout. Success proves the stored token actually works
- *  (the browser validates it, not us); a timeout means wrong token or no Edge. */
+ *  (the browser validates it, not us); a timeout means a wrong token or no supported browser. */
 async function runMcpExtensionCheck(tab: Tab): Promise<void> {
   emit({ type: "$mcp_extension_check", check: { phase: "running" } }, tab.id);
   const t0 = Date.now();
@@ -4756,16 +4759,18 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const entry = MCP_CATALOG.find((e) => e.name === "playwright");
         if (!entry) throw new Error("bundled catalog has no playwright entry");
         const { command, args } = catalogStdioCommand(entry);
-        args.push(PLAYWRIGHT_EXTENSION_ARG);
         mergeMcpServerEntry(cfg, entry.name, { transport: "stdio", command, args });
         const stored = cfg.mcpServers?.[entry.name];
-        if (stored?.args) stored.args = stripPlaywrightProfileArgs(stored.args);
-        if (token) {
-          // Explicit write — tokens rotate, so a newly entered one replaces any stored value.
-          if (stored) {
-            stored.env = { ...(stored.env ?? {}), [PLAYWRIGHT_EXTENSION_TOKEN_ENV]: token };
-          }
+        if (!stored) throw new Error("failed to create the playwright server entry");
+        stored.args = configurePlaywrightArgs(stored.args ?? args, msg.mode, msg.cdpEndpoint);
+        const env = { ...(stored.env ?? {}) };
+        if (msg.mode === "extension" && token) {
+          // Explicit write: tokens rotate, so a newly entered one replaces any stored value.
+          env[PLAYWRIGHT_EXTENSION_TOKEN_ENV] = token;
+        } else if (msg.mode !== "extension") {
+          delete env[PLAYWRIGHT_EXTENSION_TOKEN_ENV];
         }
+        stored.env = Object.keys(env).length > 0 ? env : undefined;
         writeConfig(cfg);
         emitMcpSpecs(tab);
         emitMcpExtensionStatus(tab);

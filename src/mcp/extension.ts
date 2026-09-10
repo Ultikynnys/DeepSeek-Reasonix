@@ -1,11 +1,9 @@
-/** Locates and configures the Playwright MCP Chrome extension bundled at packaging time. */
+/** Configures Playwright MCP browser connections and locates the bundled extension. */
 
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { recordDiagnostic } from "../diagnostics.js";
-import type { McpServerSpec } from "./spec.js";
+import type { PlaywrightMcpConnectionMode } from "@reasonix/core-utils/desktop-protocol";
 
 /** Official Chrome Web Store listing — "Playwright Extension" (Microsoft, Apache-2.0). */
 export const PLAYWRIGHT_EXTENSION_STORE_URL =
@@ -16,101 +14,60 @@ export const PLAYWRIGHT_EXTENSION_ARG = "--extension";
 /** Env var carrying the per-profile relay token — set it to skip the extension's
  *  per-connection approval dialog (the token is shown in that dialog). */
 export const PLAYWRIGHT_EXTENSION_TOKEN_ENV = "PLAYWRIGHT_MCP_EXTENSION_TOKEN";
-/** Env var understood by @playwright/mcp for choosing the extension host browser. */
-export const PLAYWRIGHT_BROWSER_ENV = "PLAYWRIGHT_MCP_BROWSER";
+const CONNECTION_VALUE_ARGS = new Set(["--browser", "--cdp-endpoint", "--profile-dir-name"]);
+const MANAGED_MODES = new Set<PlaywrightMcpConnectionMode>([
+  "chrome",
+  "firefox",
+  "webkit",
+  "msedge",
+]);
 
-/** Remove profile pinning so Playwright can discover the active profile that has the extension. */
-export function stripPlaywrightProfileArgs(args: string[]): string[] {
+/** Parse Reasonix's supported connection modes from a Playwright MCP argv. */
+export function parsePlaywrightConnection(args: string[]): {
+  mode: PlaywrightMcpConnectionMode;
+  cdpEndpoint?: string;
+} {
+  if (args.includes(PLAYWRIGHT_EXTENSION_ARG)) return { mode: "extension" };
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    const cdpEndpoint =
+      arg === "--cdp-endpoint" ? args[index + 1] : arg.match(/^--cdp-endpoint=(.+)$/)?.[1];
+    if (cdpEndpoint) return { mode: "cdp", cdpEndpoint };
+    const browser = arg === "--browser" ? args[index + 1] : arg.match(/^--browser=(.+)$/)?.[1];
+    if (browser && MANAGED_MODES.has(browser as PlaywrightMcpConnectionMode)) {
+      return { mode: browser as PlaywrightMcpConnectionMode };
+    }
+  }
+  return { mode: "chrome" };
+}
+
+/** Replace connection-specific flags while preserving package pins and unrelated user options. */
+export function configurePlaywrightArgs(
+  args: string[],
+  mode: PlaywrightMcpConnectionMode,
+  cdpEndpoint?: string,
+): string[] {
   const result: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
-    if (arg === "--profile-dir-name") {
+    if (arg === PLAYWRIGHT_EXTENSION_ARG) continue;
+    if (CONNECTION_VALUE_ARGS.has(arg)) {
       index += 1;
       continue;
     }
-    if (arg.startsWith("--profile-dir-name=")) continue;
+    if (/^--(?:browser|cdp-endpoint|profile-dir-name)=/.test(arg)) continue;
     result.push(arg);
   }
-  return result;
-}
-
-const WINDOWS_HTTPS_USER_CHOICE =
-  "HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice";
-const WINDOWS_REG_EXE = join(process.env.SystemRoot || "C:\\Windows", "System32", "reg.exe");
-
-export type PlaywrightExtensionBrowser = "chrome" | "msedge";
-
-export interface PlaywrightExtensionBrowserSelection {
-  browser: PlaywrightExtensionBrowser;
-  source: "default-chrome" | "default-edge" | "forced-edge" | "non-windows";
-  progId: string | null;
-}
-
-/** Parse the Windows `reg query` response for the current HTTPS handler. */
-export function parseWindowsDefaultBrowserProgId(output: string): string | null {
-  return /^\s*ProgId\s+REG_\w+\s+(.+?)\s*$/im.exec(output)?.[1]?.trim() || null;
-}
-
-/** Select the only browsers supported by Playwright's extension relay. */
-export function selectPlaywrightExtensionBrowser(
-  progId: string | null,
-  platform: NodeJS.Platform = process.platform,
-): PlaywrightExtensionBrowserSelection {
-  if (platform !== "win32") return { browser: "chrome", source: "non-windows", progId };
-  if (progId && /^ChromeHTML(?:\.|$)/i.test(progId)) {
-    return { browser: "chrome", source: "default-chrome", progId };
+  if (mode === "extension") return [...result, PLAYWRIGHT_EXTENSION_ARG];
+  if (mode === "cdp") {
+    const endpoint = cdpEndpoint?.trim();
+    if (!endpoint) throw new Error("a Chromium CDP endpoint is required");
+    if (!/^https?:\/\/|^wss?:\/\//i.test(endpoint)) {
+      throw new Error("the Chromium CDP endpoint must use http, https, ws, or wss");
+    }
+    return [...result, `--cdp-endpoint=${endpoint}`];
   }
-  if (progId && /^MSEdgeHTM(?:\.|$)/i.test(progId)) {
-    return { browser: "msedge", source: "default-edge", progId };
-  }
-  return { browser: "msedge", source: "forced-edge", progId };
-}
-
-/** Read Windows' per-user HTTPS association. Unknown/non-Chromium defaults are
- *  handled explicitly as Edge, which ships with supported Windows versions. */
-export function resolvePlaywrightExtensionBrowser(
-  query: typeof spawnSync = spawnSync,
-  platform: NodeJS.Platform = process.platform,
-): PlaywrightExtensionBrowserSelection {
-  if (platform !== "win32") return selectPlaywrightExtensionBrowser(null, platform);
-  const result = query(WINDOWS_REG_EXE, ["query", WINDOWS_HTTPS_USER_CHOICE, "/v", "ProgId"], {
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  const progId = result.status === 0 ? parseWindowsDefaultBrowserProgId(result.stdout ?? "") : null;
-  const selection = selectPlaywrightExtensionBrowser(progId, platform);
-  recordDiagnostic("playwright.extension.browser_selected", {
-    level: selection.source === "forced-edge" ? "info" : "debug",
-    details: {
-      browser: selection.browser,
-      source: selection.source,
-      progId: selection.progId,
-      registryStatus: result.status,
-      registryError: result.error?.message,
-    },
-  });
-  return selection;
-}
-
-/** Overlay browser selection only for Playwright extension mode. Explicit user
- *  configuration wins; Reasonix supplies a browser only when none was set. */
-export function withPlaywrightExtensionBrowser(spec: McpServerSpec): McpServerSpec {
-  if (
-    process.platform !== "win32" ||
-    spec.transport !== "stdio" ||
-    !spec.args.some((arg) => arg.includes("@playwright/mcp")) ||
-    !spec.args.includes(PLAYWRIGHT_EXTENSION_ARG) ||
-    spec.args.some((arg) => arg === "--browser" || arg.startsWith("--browser=")) ||
-    spec.env?.[PLAYWRIGHT_BROWSER_ENV] ||
-    process.env[PLAYWRIGHT_BROWSER_ENV]
-  ) {
-    return spec;
-  }
-  const selection = resolvePlaywrightExtensionBrowser();
-  return {
-    ...spec,
-    env: { ...(spec.env ?? {}), [PLAYWRIGHT_BROWSER_ENV]: selection.browser },
-  };
+  return [...result, `--browser=${mode}`];
 }
 
 /** Normalize a user-pasted relay token. The extension's connection dialog copies

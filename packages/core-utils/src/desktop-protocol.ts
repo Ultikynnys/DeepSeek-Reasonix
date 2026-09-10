@@ -445,9 +445,19 @@ export interface McpExtensionBundled {
   version: string | null;
 }
 
+export type PlaywrightMcpConnectionMode =
+  | "chrome"
+  | "firefox"
+  | "webkit"
+  | "msedge"
+  | "extension"
+  | "cdp";
+
 export interface McpExtensionServerState {
   configured: boolean;
+  mode: PlaywrightMcpConnectionMode;
   hasExtensionArg: boolean;
+  cdpEndpoint?: string;
   /** Redacted relay-token identifier for saved-state UI; never contains the full token. */
   tokenPrefix?: string;
   args: string[];
@@ -1045,7 +1055,12 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mcp_specs_remove"; spec: string }
   | { cmd: "mcp_specs_toggle"; name: string; disabled: boolean; tool?: string }
   | { cmd: "mcp_extension_status" }
-  | { cmd: "mcp_extension_configure"; token?: string }
+  | {
+      cmd: "mcp_extension_configure";
+      mode: PlaywrightMcpConnectionMode;
+      token?: string;
+      cdpEndpoint?: string;
+    }
   | { cmd: "mcp_extension_check" }
   | { cmd: "rule_add"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "rule_remove"; ruleType: "shell" | "path"; pattern: string }

@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { McpExtensionStatus, McpSpecInfo } from "../protocol";
 import { PageMCP } from "./settings";
 
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn().mockResolvedValue(undefined),
+}));
 
 afterEach(cleanup);
 
@@ -28,6 +31,7 @@ function extensionStatus(): McpExtensionStatus {
     bundled: { present: false, path: null, version: null },
     server: {
       configured: true,
+      mode: "extension",
       hasExtensionArg: true,
       tokenPrefix: undefined,
       args: ["-y", "@playwright/mcp", "--extension"],
@@ -39,6 +43,7 @@ function renderCard(
   specs: McpSpecInfo[],
   status: McpExtensionStatus | null = extensionStatus(),
   extensionCheck: Parameters<typeof PageMCP>[0]["extensionCheck"] = null,
+  onConfigureExtension = vi.fn(),
 ) {
   return render(
     <PageMCP
@@ -51,7 +56,7 @@ function renderCard(
       extensionStatus={status}
       extensionCheck={extensionCheck}
       onRequestExtensionStatus={vi.fn()}
-      onConfigureExtension={vi.fn()}
+      onConfigureExtension={onConfigureExtension}
       onCheckExtension={vi.fn()}
     />,
   );
@@ -66,6 +71,38 @@ describe("PageMCP — playwright connection status", () => {
     expect(input.type).toBe("password");
     expect(input.value).toBe("");
     expect(screen.getByText(/token saved/)).toBeTruthy();
+  });
+
+  it("opens the extension listing through the system URL opener", async () => {
+    renderCard([spec()]);
+    fireEvent.click(screen.getByRole("button", { name: "Open extension listing" }));
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith(extensionStatus().storeUrl);
+    });
+  });
+
+  it("configures each managed browser explicitly", () => {
+    const status = extensionStatus();
+    status.server.mode = "firefox";
+    status.server.hasExtensionArg = false;
+    status.server.args = ["-y", "@playwright/mcp", "--browser=firefox"];
+    const onConfigure = vi.fn();
+    renderCard([spec()], status, null, onConfigure);
+    expect(screen.queryByRole("button", { name: "Open extension listing" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Browser connection"), { target: { value: "webkit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Configure server" }));
+    expect(onConfigure).toHaveBeenCalledWith("webkit", undefined, undefined);
+  });
+
+  it("passes a CDP endpoint for other Chromium browsers", () => {
+    const onConfigure = vi.fn();
+    renderCard([spec()], extensionStatus(), null, onConfigure);
+    fireEvent.change(screen.getByLabelText("Browser connection"), { target: { value: "cdp" } });
+    fireEvent.change(screen.getByLabelText("Chromium CDP endpoint"), {
+      target: { value: "http://localhost:9222" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Configure server" }));
+    expect(onConfigure).toHaveBeenCalledWith("cdp", undefined, "http://localhost:9222");
   });
 
   it("shows live connection state with the tool count when bridged", () => {

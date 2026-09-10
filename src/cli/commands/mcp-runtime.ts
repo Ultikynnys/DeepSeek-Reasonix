@@ -5,11 +5,10 @@ import { formatMcpSlowToast } from "../../desktop/mcp-toast.js";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
-import { withPlaywrightExtensionBrowser } from "../../mcp/extension.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import {
   ensurePlaywrightTooling,
-  isPlaywrightExtensionSpec,
+  isPlaywrightSpec,
   playwrightDescriptionSuffix,
   playwrightToolingNotice,
 } from "../../mcp/playwright-tooling.js";
@@ -139,7 +138,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       const parsed = parseMcpSpec(raw);
       label = parsed.name ?? "anon";
       const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
-      const spec = withPlaywrightExtensionBrowser(overlayMatchedSpec(parsed, matched));
+      const spec = overlayMatchedSpec(parsed, matched);
       if (spec.disabled) {
         sink({ state: "disabled", name: label });
         rejectReady(new Error(`MCP server "${label}" is disabled`));
@@ -159,9 +158,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       // AGENTS.md pair exists (create/upgrade as needed) before any agent
       // touches the browser, and surface the maintenance duty to the agent
       // via the bridge's first-call notice + description pointers.
-      const playwrightTooling = isPlaywrightExtensionSpec(spec)
-        ? ensurePlaywrightTooling()
-        : undefined;
+      const playwrightTooling = isPlaywrightSpec(spec) ? ensurePlaywrightTooling() : undefined;
       const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
       mcp = new McpClient({ transport, workspaceDir });
       await mcp.initialize({ signal });

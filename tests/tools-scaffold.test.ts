@@ -184,9 +184,10 @@ describe("add_mcp_server", () => {
     });
     expect(r.success).toBe(true);
     expect(r.spec).toBe("pw=npx -y @playwright/mcp");
-    // The catalog note must reach the caller so it can relay extension setup.
+    // The catalog note must distinguish supported extension and Chromium CDP setup.
     expect(r.install_note).toContain("--extension");
-    expect(r.install_note).toContain("Chrome extension");
+    expect(r.install_note).toContain("Chrome/Edge");
+    expect(r.install_note).toContain("--cdp-endpoint");
   });
 
   it("requires user-args for catalog entries that need them", async () => {

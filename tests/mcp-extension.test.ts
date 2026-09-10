@@ -9,11 +9,10 @@ import { type ReasonixConfig, mergeMcpServerEntry, normalizeMcpConfig } from "..
 import {
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
+  configurePlaywrightArgs,
   normalizeExtensionToken,
-  parseWindowsDefaultBrowserProgId,
+  parsePlaywrightConnection,
   resolveBundledPlaywrightExtension,
-  selectPlaywrightExtensionBrowser,
-  stripPlaywrightProfileArgs,
 } from "../src/mcp/extension.js";
 
 const ENV_OVERRIDE = "REASONIX_PLAYWRIGHT_EXTENSION_PATH";
@@ -154,77 +153,60 @@ describe("mergeMcpServerEntry", () => {
   });
 });
 
-describe("Playwright extension browser selection", () => {
-  it("parses the current HTTPS ProgId from reg.exe output", () => {
+describe("Playwright connection configuration", () => {
+  it.each(["chrome", "firefox", "webkit", "msedge"] as const)(
+    "configures and parses managed %s mode",
+    (mode) => {
+      const args = configurePlaywrightArgs(["-y", "@playwright/mcp@0.0.80", "--caps=vision"], mode);
+      expect(args).toEqual(["-y", "@playwright/mcp@0.0.80", "--caps=vision", `--browser=${mode}`]);
+      expect(parsePlaywrightConnection(args)).toEqual({ mode });
+    },
+  );
+
+  it("switches conflicting connection modes without losing unrelated arguments", () => {
     expect(
-      parseWindowsDefaultBrowserProgId(`
-HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice
-    ProgId    REG_SZ    ChromeHTML
-`),
-    ).toBe("ChromeHTML");
+      configurePlaywrightArgs(
+        [
+          "-y",
+          "@playwright/mcp@0.0.80",
+          "--browser",
+          "firefox",
+          "--extension",
+          "--cdp-endpoint=http://localhost:9222",
+          "--profile-dir-name=Profile 1",
+          "--caps=vision",
+        ],
+        "msedge",
+      ),
+    ).toEqual(["-y", "@playwright/mcp@0.0.80", "--caps=vision", "--browser=msedge"]);
   });
 
-  it("keeps Chrome when Chrome is the Windows default", () => {
-    expect(selectPlaywrightExtensionBrowser("ChromeHTML", "win32")).toEqual({
-      browser: "chrome",
-      source: "default-chrome",
-      progId: "ChromeHTML",
-    });
-    expect(selectPlaywrightExtensionBrowser("ChromeHTML.ABC123", "win32").browser).toBe("chrome");
-  });
-
-  it("keeps Edge when Edge is the Windows default", () => {
-    expect(selectPlaywrightExtensionBrowser("MSEdgeHTM", "win32")).toEqual({
-      browser: "msedge",
-      source: "default-edge",
-      progId: "MSEdgeHTM",
-    });
-  });
-
-  it("forces Edge for a known non-Chromium Windows default", () => {
-    expect(selectPlaywrightExtensionBrowser("FirefoxURL-308046B0AF4A39CB", "win32")).toEqual({
-      browser: "msedge",
-      source: "forced-edge",
-      progId: "FirefoxURL-308046B0AF4A39CB",
-    });
-  });
-
-  it("forces Edge when the Windows association could not be read", () => {
-    expect(selectPlaywrightExtensionBrowser(null, "win32")).toEqual({
-      browser: "msedge",
-      source: "forced-edge",
-      progId: null,
-    });
-  });
-
-  it("leaves upstream Chrome selection unchanged outside Windows", () => {
-    expect(selectPlaywrightExtensionBrowser(null, "darwin")).toEqual({
-      browser: "chrome",
-      source: "non-windows",
-      progId: null,
-    });
-  });
-});
-
-describe("stripPlaywrightProfileArgs", () => {
-  it("removes both profile argument forms without changing other arguments", () => {
+  it("configures extension mode without pinning a browser or profile", () => {
     expect(
-      stripPlaywrightProfileArgs([
-        "-y",
-        "@playwright/mcp",
-        "--profile-dir-name=Profile 1",
-        "--extension",
-      ]),
+      configurePlaywrightArgs(
+        ["-y", "@playwright/mcp", "--browser=chrome", "--profile-dir-name", "Profile 2"],
+        "extension",
+      ),
     ).toEqual(["-y", "@playwright/mcp", "--extension"]);
-    expect(
-      stripPlaywrightProfileArgs([
-        "-y",
-        "@playwright/mcp",
-        "--profile-dir-name",
-        "Profile 2",
-        "--extension",
-      ]),
-    ).toEqual(["-y", "@playwright/mcp", "--extension"]);
+  });
+
+  it("configures Chromium CDP and validates its endpoint", () => {
+    const args = configurePlaywrightArgs(
+      ["-y", "@playwright/mcp", "--browser=webkit"],
+      "cdp",
+      "http://localhost:9222",
+    );
+    expect(args).toEqual(["-y", "@playwright/mcp", "--cdp-endpoint=http://localhost:9222"]);
+    expect(parsePlaywrightConnection(args)).toEqual({
+      mode: "cdp",
+      cdpEndpoint: "http://localhost:9222",
+    });
+    expect(() => configurePlaywrightArgs(args, "cdp", "")).toThrow(/endpoint is required/);
+    expect(() => configurePlaywrightArgs(args, "cdp", "localhost:9222")).toThrow(/must use/);
+  });
+
+  it("treats an unqualified Playwright server as managed Chrome", () => {
+    expect(parsePlaywrightConnection(["-y", "@playwright/mcp"])).toEqual({ mode: "chrome" });
   });
 });
 
@@ -283,6 +265,7 @@ describe("computeMcpExtensionStatus", () => {
     expect(status.bundled).toEqual(bundled);
     expect(status.server).toEqual({
       configured: true,
+      mode: "extension",
       hasExtensionArg: true,
       tokenPrefix: undefined,
       args: ["-y", "@playwright/mcp", "--extension", "--profile-dir-name=Profile 1"],
@@ -308,17 +291,33 @@ describe("computeMcpExtensionStatus", () => {
   it("reports unconfigured servers and absent bundles", () => {
     const status = computeMcpExtensionStatus({}, bundledAbsent);
     expect(status.server.configured).toBe(false);
+    expect(status.server.mode).toBe("chrome");
     expect(status.server.hasExtensionArg).toBe(false);
     expect(status.bundled.present).toBe(false);
   });
 
-  it("flags an entry that lacks the --extension arg", () => {
-    const cfg: ReasonixConfig = {
-      mcpServers: { playwright: { command: "npx", args: ["-y", "@playwright/mcp"] } },
+  it("reports managed and CDP connection modes", () => {
+    const managed: ReasonixConfig = {
+      mcpServers: {
+        playwright: { command: "npx", args: ["-y", "@playwright/mcp", "--browser=firefox"] },
+      },
     };
-    const status = computeMcpExtensionStatus(cfg, bundled);
-    expect(status.server.configured).toBe(true);
-    expect(status.server.hasExtensionArg).toBe(false);
+    expect(computeMcpExtensionStatus(managed, bundled).server.mode).toBe("firefox");
+
+    const cdp: ReasonixConfig = {
+      mcpServers: {
+        playwright: {
+          command: "npx",
+          args: ["-y", "@playwright/mcp", "--cdp-endpoint=http://localhost:9222"],
+        },
+      },
+    };
+    expect(computeMcpExtensionStatus(cdp, bundled).server).toMatchObject({
+      configured: true,
+      mode: "cdp",
+      cdpEndpoint: "http://localhost:9222",
+      hasExtensionArg: false,
+    });
   });
 });
 
@@ -328,7 +327,7 @@ describe("interpretExtensionCheck", () => {
     expect(interpretExtensionCheck(raw, 1200)).toEqual({ ok: true, reason: null, elapsedMs: 1200 });
   });
 
-  it("maps a timeout to the wrong-token-or-no-Edge guidance", () => {
+  it("maps a timeout to the wrong-token-or-no-supported-browser guidance", () => {
     const raw = JSON.stringify({
       error: "browser_tabs: This operation was aborted due to timeout",
     });
@@ -336,6 +335,7 @@ describe("interpretExtensionCheck", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("no browser responded within 25s");
     expect(result.reason).toContain("token is likely wrong");
+    expect(result.reason).toContain("Chrome or Edge");
   });
 
   it("maps an unregistered tool to the not-bridged guidance", () => {

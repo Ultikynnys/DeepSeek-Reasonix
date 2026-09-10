@@ -59,8 +59,8 @@ export const MCP_CATALOG: CatalogEntry[] = [
   {
     name: "playwright",
     summary:
-      "Microsoft Playwright MCP — browser automation via accessibility snapshots; with its Chrome extension it drives your real logged-in tabs",
+      "Microsoft Playwright MCP: managed Chrome, Firefox, WebKit, and Edge automation via accessibility snapshots",
     package: "@playwright/mcp",
-    note: 'to reuse logged-in sessions add args ["--extension"] and install the Playwright MCP Chrome extension; Reasonix bootstraps a durable driver + AGENTS.md to ~/.reasonix/tools/playwright/ automatically — agents must use/extend them and keep AGENTS.md updated',
+    note: "use --extension only for existing Chrome/Edge tabs; use --cdp-endpoint for other Chromium browsers exposing CDP; Reasonix bootstraps durable browser tooling automatically",
   },
 ];

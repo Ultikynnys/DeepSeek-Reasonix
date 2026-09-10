@@ -1,11 +1,11 @@
-// playwright-tooling-version: 2
-// Reasonix playwright driver — drives the user's real browser through the
-// @playwright/mcp extension relay, with no repo or npm dependencies.
+// playwright-tooling-version: 3
+// Reasonix playwright driver: drives the configured @playwright/mcp browser
+// connection with no repo or npm dependencies.
 //
 // The server is PERSISTENT: the first invocation spawns it (HTTP transport on
 // a localhost port) and records it in .server.json; later invocations reuse
 // the same server + relay session, so the bridged tool set is created once
-// and reused — no per-invocation spawns, connect-page tabs, or relay churn.
+// and reused: no per-invocation spawns or connection churn.
 //
 // Usage:
 //   node driver.mjs list                       # tabs listing (also the connection check)
@@ -15,7 +15,7 @@
 //   node driver.mjs --close-tabs-all <cmd>     # also close every tab in the group
 //   node driver.mjs stop                       # end the persistent server (closes group tabs)
 //
-// Server + token come from mcpServers.playwright in ~/.reasonix/config.json.
+// Server args and environment come from mcpServers.playwright in ~/.reasonix/config.json.
 // Read AGENTS.md next to this file before first use in a session.
 //
 // PLATFORM-MANAGED: this file is overwritten when Reasonix ships a newer
