@@ -4,7 +4,13 @@ export function isThinkingModeModel(model: string): boolean {
   if (model.includes("reasoner")) return true;
   if (model.startsWith("glm-")) return true;
   // DeepSeek v4 models (official API or Ollama-hosted like ollama/deepseek-v4-flash:0731)
-  if (model.includes("deepseek-v4-flash") || model.includes("deepseek-v4-pro")) return true;
+  if (
+    model.includes("deepseek-flash") ||
+    model.includes("deepseek-v4-flash") ||
+    model.includes("deepseek-v4-pro")
+  ) {
+    return true;
+  }
   // Ollama DeepSeek R1 models (e.g. ollama/deepseek-r1:14b, deepseek-r1:7b)
   if (model.includes("deepseek-r1")) return true;
   return false;
@@ -17,7 +23,13 @@ export function thinkingModeForModel(model: string): "enabled" | "disabled" | un
   if (model.startsWith("glm-")) return "enabled";
   if (model.includes("reasoner")) return "enabled";
   // DeepSeek v4 models (official API or Ollama-hosted like ollama/deepseek-v4-flash:0731)
-  if (model.includes("deepseek-v4-flash") || model.includes("deepseek-v4-pro")) return "enabled";
+  if (
+    model.includes("deepseek-flash") ||
+    model.includes("deepseek-v4-flash") ||
+    model.includes("deepseek-v4-pro")
+  ) {
+    return "enabled";
+  }
   // Ollama DeepSeek R1 models (e.g. ollama/deepseek-r1:14b, deepseek-r1:8b)
   if (model.includes("deepseek-r1")) return "enabled";
   return undefined;

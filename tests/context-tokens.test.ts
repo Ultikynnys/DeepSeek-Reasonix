@@ -39,12 +39,12 @@ describe("resolveContextTokens", () => {
     expect(resolveContextTokens("some-future-model")).toBe(DEFAULT_CONTEXT_TOKENS);
   });
 
-  it("clamps a configured override to the model's known max context length", () => {
-    // The user may set any value in settings, but the model's capability
-    // wins: never advertise a window above what the model accepts.
-    expect(resolveContextTokens("deepseek-v4-flash", 750_000)).toBe(300_000);
-    expect(resolveContextTokens("deepseek-v4-flash", 1_000_000)).toBe(300_000);
-    expect(resolveContextTokens("gpt-5.6-sol", 900_000)).toBe(300_000);
+  it("honors an override above the model's default window, up to the API ceiling", () => {
+    // An explicit override is the source of truth; the table only supplies
+    // the default when no override is set.
+    expect(resolveContextTokens("deepseek-v4-flash", 750_000)).toBe(750_000);
+    expect(resolveContextTokens("deepseek-v4-flash", 1_000_000)).toBe(1_000_000);
+    expect(resolveContextTokens("gpt-5.6-sol", 900_000)).toBe(900_000);
   });
 
   it("an override below the max stays in effect (floored to the config range)", () => {
@@ -63,10 +63,10 @@ describe("resolveContextTokens", () => {
   });
 
   it("floors fractional overrides and ignores non-finite ones", () => {
-    expect(resolveContextTokens("deepseek-v4-flash", 350_000.9)).toBe(300_000);
+    expect(resolveContextTokens("deepseek-v4-flash", 350_000.9)).toBe(350_000);
     expect(resolveContextTokens("some-future-model", 350_000.9)).toBe(350_000);
-    expect(resolveContextTokens("deepseek-v4-flash", Number.NaN)).toBe(300_000);
-    expect(resolveContextTokens("deepseek-v4-flash", Number.POSITIVE_INFINITY)).toBe(300_000);
+    expect(resolveContextTokens("deepseek-v4-flash", Number.NaN)).toBe(1_000_000);
+    expect(resolveContextTokens("deepseek-v4-flash", Number.POSITIVE_INFINITY)).toBe(1_000_000);
   });
 });
 
@@ -86,20 +86,29 @@ describe("ContextManager ctxMaxOverride", () => {
     expect(decision.tailBudget).toBe(Math.floor(1_000_000 * HISTORY_FOLD_TAIL_FRACTION));
   });
 
-  it("a raised override never lifts a known model past its max window", () => {
+  it("a raised override lifts a known model's cap too (the table is only the default)", () => {
     const log = new AppendOnlyLog();
     log.append({ role: "user", content: "seed" });
     const mgr = makeManager(log, 1_000_000);
-    const decision = mgr.decideAfterUsage(
+    const raised = mgr.decideAfterUsage(
       new Usage(280_000, 0, 280_000, 0, 280_000),
-      "deepseek-v4-flash",
+      "gpt-5.6-sol",
       false,
     );
-    // 280K / 300K = 0.93 → the clamped cap still force-summarizes. Without
-    // the model clamp the cap would be 1M and this usage would read 0.28
-    // (no compaction) — exactly the "above model capabilities" failure mode.
-    expect(decision.ctxMax).toBe(300_000);
-    expect(decision.kind).toBe("exit-with-summary");
+    // The explicit override is the cap: 280K / 1M = 0.28 → nothing folds.
+    expect(raised.ctxMax).toBe(1_000_000);
+    expect(raised.kind).toBe("none");
+
+    // Clearing the override falls back to the model's 300K default, where the
+    // same usage (0.93) force-summarizes.
+    mgr.ctxMaxOverride = undefined;
+    const base = mgr.decideAfterUsage(
+      new Usage(280_000, 0, 280_000, 0, 280_000),
+      "gpt-5.6-sol",
+      false,
+    );
+    expect(base.ctxMax).toBe(300_000);
+    expect(base.kind).toBe("exit-with-summary");
   });
 
   it("the same absolute usage force-summarizes at the default 300K cap", () => {
@@ -108,7 +117,7 @@ describe("ContextManager ctxMaxOverride", () => {
     const mgr = makeManager(log);
     const decision = mgr.decideAfterUsage(
       new Usage(760_000, 0, 760_000, 0, 760_000),
-      "deepseek-v4-flash",
+      "gpt-5.6-sol",
       false,
     );
     expect(decision.ctxMax).toBe(300_000);

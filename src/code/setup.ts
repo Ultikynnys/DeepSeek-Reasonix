@@ -70,7 +70,7 @@ export interface CodeToolsetOpts {
   onShellOutput?: (ev: import("../tools/shell.js").ShellOutputEvent) => void;
   /** Shared `{current: callback}` sink the TUI populates after mount. Setup forwards it into every `spawnSubagent` so live progress events reach the rich subagent row even though setup runs before the UI does. */
   subagentSink?: SubagentSink;
-  /** True when the tab's model accepts image content parts (gpt-*, deepseek-v4-flash-vision-exp, confirmed Ollama vision models). Registers the `see_image` tool so the model's toolset matches its vision capability. */
+  /** True when the tab's model accepts image content parts (gpt-*, the DeepSeek Flash line, Gemini, confirmed Ollama vision models). Registers the `see_image` tool so the model's toolset matches its vision capability. */
   visionEnabled?: boolean;
   /** Declares how a subagent model bills, per resolved model id. Omitted → "usd"
    *  (token-priced cost). Desktop supplies this so plan-based providers show a

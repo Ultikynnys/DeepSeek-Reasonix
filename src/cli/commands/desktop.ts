@@ -3520,7 +3520,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         {
           type: "$error",
           message:
-            "Images require a vision-capable model (gpt-* or deepseek-v4-flash-vision-exp) — switch models to attach images.",
+            "Images require a vision-capable model (gpt-*, Gemini, or DeepSeek V4.1 Flash). Switch models to attach images.",
         },
         tab.id,
       );

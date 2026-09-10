@@ -24,13 +24,18 @@ export interface ModelPricing {
 /** USD per 1M tokens at each provider's off-peak base rate. */
 export const DEEPSEEK_PRICING: Record<string, ModelPricing> = {
   // Official DeepSeek API pricing (api-docs.deepseek.com/quick_start/pricing).
-  "deepseek-v4-flash": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
+  // `deepseek-flash` = V4.1 Flash (2026-09-10). The retired `deepseek-v4-flash`
+  // and `deepseek-v4-flash-vision-exp` ids are routed to it and billed at the
+  // same price.
+  "deepseek-flash": { inputCacheHit: 0.003, inputCacheMiss: 0.15, output: 0.6 },
+  "deepseek-v4-flash": { inputCacheHit: 0.003, inputCacheMiss: 0.15, output: 0.6 },
+  "deepseek-v4-flash-vision-exp": { inputCacheHit: 0.003, inputCacheMiss: 0.15, output: 0.6 },
+  // V4 Pro keeps its own price until it retires 2026-09-14 04:00 UTC; after
+  // that the API routes it to V4.1 Flash at the Flash price above.
   "deepseek-v4-pro": { inputCacheHit: 0.022, inputCacheMiss: 0.66, output: 1.98 },
-  // The vision-preview line bills at the same rate as v4-flash.
-  "deepseek-v4-flash-vision-exp": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
-  // Compat aliases — priced as v4-flash per the deprecation notice.
-  "deepseek-chat": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
-  "deepseek-reasoner": { inputCacheHit: 0.007, inputCacheMiss: 0.22, output: 0.66 },
+  // Legacy aliases discontinued 2026-07-24; kept for stale configs, priced as the Flash line.
+  "deepseek-chat": { inputCacheHit: 0.003, inputCacheMiss: 0.15, output: 0.6 },
+  "deepseek-reasoner": { inputCacheHit: 0.003, inputCacheMiss: 0.15, output: 0.6 },
   // GPT-5.6 family (Sol/Terra/Luna) — official pricing (2026-07 GA). Cache
   // reads bill at 10% of input (90% discount). Override via `pricingOverride`.
   "gpt-5.6": { inputCacheHit: 0.5, inputCacheMiss: 5, output: 30 },
@@ -53,6 +58,7 @@ export interface PricingContext {
 }
 
 const DEEPSEEK_PRICED_MODELS = new Set([
+  "deepseek-flash",
   "deepseek-v4-flash",
   "deepseek-v4-pro",
   "deepseek-v4-flash-vision-exp",
@@ -113,16 +119,18 @@ function priceMultiplier(context?: PricingContext): number {
 /** Reference Claude Sonnet 4.6 pricing (USD per 1M tokens). */
 export const CLAUDE_SONNET_PRICING = { input: 3.0, output: 15.0 };
 
-/** Known per-model max context length (tokens), prompt-side only. This is the model's
- *  capability: resolveContextTokens clamps any `contextTokens` setting to it, so the
- *  effective cap never exceeds the model's max window. */
+/** Default per-model context window (tokens), prompt-side only. Supplies the cap when no
+ *  user `contextTokens` override is set; an explicit override may exceed this up to the 1M
+ *  API ceiling (see resolveContextTokens). */
 export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
-  "deepseek-v4-flash": 300_000,
+  // V4.1 Flash (2026-09-10) has a 1M window; the retired v4-flash ids route to it.
+  "deepseek-flash": 1_000_000,
+  "deepseek-v4-flash": 1_000_000,
+  "deepseek-v4-flash-vision-exp": 1_000_000,
   "deepseek-v4-pro": 300_000,
-  "deepseek-v4-flash-vision-exp": 300_000,
   "deepseek-chat": 300_000,
   "deepseek-reasoner": 300_000,
-  // GPT-5.6 advertises a 1.05M window; same 300K quality cap as DeepSeek
+  // GPT-5.6 advertises a 1.05M window but is held to a 300K quality cap here
   // (compaction thresholds are fractions of this cap).
   "gpt-5.6": 300_000,
   "gpt-5.6-sol": 300_000,
@@ -148,9 +156,9 @@ export const MAX_CONTEXT_TOKENS = 1_000_000;
 /** Fallback when the caller's model id isn't in the table — safe lower bound. */
 export const DEFAULT_CONTEXT_TOKENS = 131_072;
 
-/** The effective context cap for a model: the configured `contextTokens` override when set,
- *  clamped to the model's known max context length, else the model table, else the safe
- *  fallback — every ctxMax consumer resolves through here so they all agree. */
+/** The effective context cap for a model: the configured `contextTokens` override when set
+ *  (honored up to the 1M API ceiling, even above the model's default window), else the model
+ *  table, else the safe fallback — every ctxMax consumer resolves through here so they agree. */
 export function resolveContextTokens(model: string, configured?: number): number {
   // Ollama windows are set by the model/server (`num_ctx`) and can be far
   // below the DeepSeek 300K floor — never clamp an explicit Ollama value up.
@@ -158,14 +166,12 @@ export function resolveContextTokens(model: string, configured?: number): number
   const modelDefault = DEEPSEEK_CONTEXT_TOKENS[model];
   if (typeof configured === "number" && Number.isFinite(configured)) {
     const floor = isOllama ? 1_024 : MIN_CONTEXT_TOKENS;
-    const v = Math.max(floor, Math.floor(configured));
-    // Hard invariant: the effective cap never exceeds the model's known max
-    // context length (the table is the model's capability). The user may set
-    // any value in settings, but the model max clamps it here — so the meter,
-    // the compaction thresholds and the turn-start budget check all agree
-    // with what the model actually accepts.
-    if (modelDefault !== undefined) return Math.min(v, modelDefault);
-    return Math.min(v, MAX_CONTEXT_TOKENS);
+    // An explicit override is the source of truth: honor it up to the 1M API
+    // ceiling, even above the model's default window. The table only supplies
+    // the default when no override is set, so the meter, the compaction
+    // thresholds and the turn-start budget check all agree on the value the
+    // user asked for.
+    return Math.min(MAX_CONTEXT_TOKENS, Math.max(floor, Math.floor(configured)));
   }
   return modelDefault ?? DEFAULT_CONTEXT_TOKENS;
 }

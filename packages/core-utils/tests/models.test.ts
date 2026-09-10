@@ -20,6 +20,8 @@ describe("modelAcceptsImages", () => {
   });
 
   it("accepts DeepSeek, Z.AI, and OpenCode vision models", () => {
+    expect(modelAcceptsImages("deepseek-flash")).toBe(true);
+    expect(modelAcceptsImages("deepseek-v4-flash")).toBe(true);
     expect(modelAcceptsImages("deepseek-v4-flash-vision-exp")).toBe(true);
     expect(modelAcceptsImages("glm-5.3-flash")).toBe(true);
     expect(modelAcceptsImages("glm-4.6v")).toBe(true);
@@ -47,8 +49,7 @@ describe("modelAcceptsImages", () => {
     expect(isAntigravityModel("tab_flash_lite_preview")).toBe(false);
   });
 
-  it("rejects plain DeepSeek, Ollama, and unknown ids", () => {
-    expect(modelAcceptsImages("deepseek-v4-flash")).toBe(false);
+  it("rejects text-only DeepSeek, Ollama, and unknown ids", () => {
     expect(modelAcceptsImages("deepseek-v4-pro")).toBe(false);
     expect(modelAcceptsImages("ollama/llama3.1:latest")).toBe(false);
     expect(modelAcceptsImages("made-up")).toBe(false);
@@ -85,6 +86,7 @@ describe("modelAcceptsImages", () => {
 
 describe("KNOWN_MODELS", () => {
   it("offers DeepSeek's official line including the vision model", () => {
+    expect(KNOWN_MODELS).toContain("deepseek-flash");
     expect(KNOWN_MODELS).toContain("deepseek-v4-flash");
     expect(KNOWN_MODELS).toContain("deepseek-v4-pro");
     expect(KNOWN_MODELS).toContain("deepseek-v4-flash-vision-exp");

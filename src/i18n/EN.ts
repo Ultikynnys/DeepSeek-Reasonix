@@ -202,7 +202,7 @@ export const EN: TranslationSchema = {
     resumeHint: "force-resume the named session (even if idle)",
     newHint: "force a fresh session (ignore --session / --continue)",
     transcriptHint: "path to write the JSONL transcript",
-    modelIdHint: "DeepSeek model id (e.g. deepseek-v4-flash)",
+    modelIdHint: "DeepSeek model id (e.g. deepseek-flash)",
     systemPromptHint: "override the default system prompt",
     effortHint: "reasoning effort — low|medium|high|xhigh|max",
     sessionNameHint: "session name (default: 'default')",
@@ -249,7 +249,7 @@ export const EN: TranslationSchema = {
     mcpMaxPagesHint: "cap how many pages to walk while searching (default 20)",
     jsonHintCatalog: "output as JSON",
     jsonHintReport: "output the inspection report as JSON",
-    modelOverrideFlash: "override the model (default: deepseek-v4-flash)",
+    modelOverrideFlash: "override the model (default: deepseek-flash)",
     skipConfirmHint: "skip the confirmation prompt",
     yoloHint:
       "auto-approve plan checkpoints for this invocation (equivalent to editMode=yolo without mutating config)",
@@ -974,7 +974,7 @@ export const EN: TranslationSchema = {
       cwdUsageNoCurrent: "usage: /cwd <path>   re-points the workspace root to <path>.",
     },
     model: {
-      modelHint: "try deepseek-v4-flash or deepseek-v4-pro — run /models to fetch the live list",
+      modelHint: "try deepseek-flash or deepseek-v4-pro — run /models to fetch the live list",
       modelUsage: "usage: /model <id>   ({hint})",
       modelNotInCatalog:
         "model → {id}   (⚠ not in the fetched catalog: {list}. If this is wrong the next call will 400 — run /models to refresh.)",

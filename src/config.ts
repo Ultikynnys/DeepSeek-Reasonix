@@ -380,8 +380,8 @@ export interface ReasonixConfig {
    *  unlimited API budget. Default 50. Env `REASONIX_MAX_ITER` overrides. */
   maxIterPerTurn?: number;
   /** Context-window cap in tokens, overriding the per-model default (300K). Clamped to
-   *  [128000, 1000000] at load; the effective cap is also clamped to the model's max
-   *  context length (resolveContextTokens), so a value above it is reduced internally. */
+   *  [128000, 1000000] at load; an explicit value is honored up to that ceiling by
+   *  resolveContextTokens, even above the model's default window. */
   contextTokens?: number;
   /** When true, disable all automatic compaction (turn-start auto-fold, post-response fold, context guards). Manual compaction remains available. */
   disableAutoCompaction?: boolean;
@@ -2031,8 +2031,8 @@ export function loadFilesystemOutlineThresholdBytes(
 }
 
 /** User-configured context-window cap in tokens, clamped to [128K, 1M] (the API ceiling).
- *  Unset / non-numeric → undefined (callers fall back to the per-model default). The
- *  effective per-model cap is further clamped to the model's max in resolveContextTokens. */
+ *  Unset / non-numeric → undefined (callers fall back to the per-model default). An explicit
+ *  value is honored up to that ceiling in resolveContextTokens, above the model's default. */
 export function loadContextTokens(path: string = defaultConfigPath()): number | undefined {
   const v = readConfig(path).contextTokens;
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
@@ -2040,8 +2040,8 @@ export function loadContextTokens(path: string = defaultConfigPath()): number | 
 }
 
 /** Persist the context-window cap. `null` / undefined clears it back to the per-model
- *  default; out-of-range values clamp to [128K, 1M]. Values above the model's max are kept
- *  as entered and clamped only at resolve time (resolveContextTokens). */
+ *  default; out-of-range values clamp to [128K, 1M]. Values are kept as entered and resolved
+ *  at run time (resolveContextTokens), which honors them up to the 1M ceiling. */
 export function saveContextTokens(
   value: number | null | undefined,
   path: string = defaultConfigPath(),

@@ -1,9 +1,14 @@
 /** Built-in model catalog and capability predicates shared by the daemon and desktop UI. */
 
-export const DEFAULT_MODEL = "deepseek-v4-flash";
+export const DEFAULT_MODEL = "deepseek-flash";
 
-/** Models accepted by the official DeepSeek endpoint. */
+/** Models accepted by the official DeepSeek endpoint. `deepseek-flash` is the
+ *  current model (DeepSeek-V4.1-Flash: 1M context, native vision). The
+ *  `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` ids are retired but
+ *  still accepted: the API routes them to V4.1 Flash and bills at its price.
+ *  `deepseek-v4-pro` retires 12:00 Beijing / 04:00 UTC on 2026-09-14. */
 export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
+  "deepseek-flash",
   "deepseek-v4-flash",
   "deepseek-v4-pro",
   "deepseek-v4-flash-vision-exp",
@@ -150,6 +155,15 @@ export const OPENCODE_VISION_MODELS: ReadonlySet<string> = new Set([
   "x-preview-f-free",
 ]);
 
+/** The current DeepSeek Flash line (V4.1 Flash) is natively multimodal; the two
+ *  retired ids are routed to it, so they accept images too. `deepseek-v4-pro`
+ *  is text-only (DeepSeek's table lists no vision for it). */
+export const DEEPSEEK_FLASH_VISION_MODELS: ReadonlySet<string> = new Set([
+  "deepseek-flash",
+  "deepseek-v4-flash",
+  "deepseek-v4-flash-vision-exp",
+]);
+
 /** Model ids that accept image attachments in user messages — the GPT-5.6
  *  family, DeepSeek's vision line, and every Gemini model (natively
  *  multimodal). Drives the composer's paste/drop affordance, the daemon's
@@ -170,7 +184,7 @@ export function modelAcceptsImages(
 ): boolean {
   if (typeof model !== "string") return false;
   if (model.startsWith("gpt-")) return true;
-  if (model === "deepseek-v4-flash-vision-exp") return true;
+  if (DEEPSEEK_FLASH_VISION_MODELS.has(model)) return true;
   if (model === "glm-5.3-flash" || /^glm-\d+(?:\.\d+)?v(?:-|$)/.test(model)) return true;
   if (opencodeVision ? opencodeVision.has(model) : OPENCODE_VISION_MODELS.has(model)) return true;
   if (isAntigravityModel(model)) return true;

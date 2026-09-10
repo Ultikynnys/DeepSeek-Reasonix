@@ -56,11 +56,12 @@ describe("Usage.cacheHitRatio", () => {
 
 describe("costUsd", () => {
   it("matches DeepSeek's published V4 USD pricing sheet", () => {
-    expect(DEEPSEEK_PRICING["deepseek-v4-flash"]).toEqual({
-      inputCacheHit: 0.007,
-      inputCacheMiss: 0.22,
-      output: 0.66,
+    expect(DEEPSEEK_PRICING["deepseek-flash"]).toEqual({
+      inputCacheHit: 0.003,
+      inputCacheMiss: 0.15,
+      output: 0.6,
     });
+    expect(DEEPSEEK_PRICING["deepseek-v4-flash"]).toEqual(DEEPSEEK_PRICING["deepseek-flash"]);
     expect(DEEPSEEK_PRICING["deepseek-v4-pro"]).toEqual({
       inputCacheHit: 0.022,
       inputCacheMiss: 0.66,
@@ -151,7 +152,7 @@ describe("costUsd", () => {
       at,
     });
     expect(explicitlyOllama).toBeCloseTo((0.22 + 0.66) * 2, 10);
-    expect(resolvedDeepSeek).toBeCloseTo(0.22 + 0.66, 10);
+    expect(resolvedDeepSeek).toBeCloseTo(0.15 + 0.6, 10);
     expect(resolvedOpenAI).toBe(0);
   });
 
@@ -305,12 +306,14 @@ describe("inputCostUsd / outputCostUsd", () => {
   it("v4-pro cost is computed with its own tier, not flash's", () => {
     // Sanity: passing the pro model to costUsd doesn't silently fall
     // back to flash rates, otherwise billing on pro would under-count.
-    const u = new Usage(0, 100, 0, 0, 1000);
+    // Pure-output usage: pro bills at pro.output, flash at flash.output, so
+    // the ratio is just pro.output/flash.output — never a flash fallback.
+    const u = new Usage(0, 100, 0, 0, 0);
     const flashCost = costUsd("deepseek-v4-flash", u);
     const proCost = costUsd("deepseek-v4-pro", u);
-    // Official off-peak rates: pro is exactly 3x flash on cache-miss and
-    // output ($0.66/$1.98), and 3.14x on cache hits ($0.007/$0.022).
-    expect(proCost / flashCost).toBeCloseTo(3, 10);
+    const flash = DEEPSEEK_PRICING["deepseek-v4-flash"]!;
+    const pro = DEEPSEEK_PRICING["deepseek-v4-pro"]!;
+    expect(proCost / flashCost).toBeCloseTo(pro.output / flash.output, 10);
     expect(proCost).toBeGreaterThan(flashCost); // own tier, not a flash fallback
   });
 
@@ -525,7 +528,7 @@ describe("SessionStats explicit billing context", () => {
       costByProvider: { deepseek: { kind: "usd", totalCostUsd: 1 } },
     });
     stats.record(1, "deepseek-v4-flash", new Usage(1_000_000, 0, 1_000_000, 0, 1_000_000));
-    expect(stats.totalCost).toBeCloseTo(10.22, 10);
+    expect(stats.totalCost).toBeCloseTo(10.15, 10);
   });
 
   it("keeps local Ollama unpriced", () => {
