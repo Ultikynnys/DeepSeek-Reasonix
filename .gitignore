@@ -41,6 +41,9 @@ desktop/src-tauri/binaries/
 .probe-snapshots/
 .reasonix-harness-inspect/
 
+# Playwright MCP live-session scratch output (console/page logs).
+.playwright-mcp/
+
 # Local per-user Reasonix state at any depth (logs, truncated results, scratch).
 # This also hides team-level settings and skills inside every .reasonix directory.
 **/.reasonix/
