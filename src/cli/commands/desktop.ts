@@ -186,9 +186,9 @@ import {
   PLAYWRIGHT_EXTENSION_ARG,
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
-  PLAYWRIGHT_PROFILE_DIR_ARG,
   normalizeExtensionToken,
   resolveBundledPlaywrightExtension,
+  stripPlaywrightProfileArgs,
 } from "../../mcp/extension.js";
 
 import {
@@ -2078,17 +2078,14 @@ export function computeMcpExtensionStatus(
 ): McpExtensionStatus {
   const entry = cfg.mcpServers?.playwright;
   const args = entry?.args ?? [];
-  const profileArg = args.find((a) => a.startsWith(PLAYWRIGHT_PROFILE_DIR_ARG));
+  const token = entry?.env?.[PLAYWRIGHT_EXTENSION_TOKEN_ENV];
   return {
     storeUrl: PLAYWRIGHT_EXTENSION_STORE_URL,
     bundled,
     server: {
       configured: Boolean(entry),
       hasExtensionArg: args.includes(PLAYWRIGHT_EXTENSION_ARG),
-      profileDirName: profileArg
-        ? profileArg.slice(PLAYWRIGHT_PROFILE_DIR_ARG.length) || null
-        : null,
-      hasToken: Boolean(entry?.env?.[PLAYWRIGHT_EXTENSION_TOKEN_ENV]),
+      tokenPrefix: token ? `${token.slice(0, 6)}…${token.slice(-3)}` : undefined,
       args,
     },
   };
@@ -4754,18 +4751,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "mcp_extension_configure") {
       try {
-        const profile = typeof msg.profileDirName === "string" ? msg.profileDirName.trim() : "";
         const token = typeof msg.token === "string" ? normalizeExtensionToken(msg.token) : "";
         const cfg = readConfig();
         const entry = MCP_CATALOG.find((e) => e.name === "playwright");
         if (!entry) throw new Error("bundled catalog has no playwright entry");
         const { command, args } = catalogStdioCommand(entry);
         args.push(PLAYWRIGHT_EXTENSION_ARG);
-        if (profile) args.push(`${PLAYWRIGHT_PROFILE_DIR_ARG}${profile}`);
         mergeMcpServerEntry(cfg, entry.name, { transport: "stdio", command, args });
+        const stored = cfg.mcpServers?.[entry.name];
+        if (stored?.args) stored.args = stripPlaywrightProfileArgs(stored.args);
         if (token) {
           // Explicit write — tokens rotate, so a newly entered one replaces any stored value.
-          const stored = cfg.mcpServers?.[entry.name];
           if (stored) {
             stored.env = { ...(stored.env ?? {}), [PLAYWRIGHT_EXTENSION_TOKEN_ENV]: token };
           }
@@ -4777,7 +4773,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       } catch (err) {
         emitDiagnosticError("mcp.extension.configure.failed", err, {
           tabId: tab.id,
-          details: { profile: msg.profileDirName },
         });
         emit(
           { type: "$error", message: `mcp_extension_configure: ${(err as Error).message}` },

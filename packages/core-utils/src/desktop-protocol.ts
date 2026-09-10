@@ -448,9 +448,8 @@ export interface McpExtensionBundled {
 export interface McpExtensionServerState {
   configured: boolean;
   hasExtensionArg: boolean;
-  profileDirName: string | null;
-  /** Relay token stored in the entry's env — skips the per-connection approval dialog. */
-  hasToken: boolean;
+  /** Redacted relay-token identifier for saved-state UI; never contains the full token. */
+  tokenPrefix?: string;
   args: string[];
 }
 
@@ -1046,7 +1045,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mcp_specs_remove"; spec: string }
   | { cmd: "mcp_specs_toggle"; name: string; disabled: boolean; tool?: string }
   | { cmd: "mcp_extension_status" }
-  | { cmd: "mcp_extension_configure"; profileDirName?: string; token?: string }
+  | { cmd: "mcp_extension_configure"; token?: string }
   | { cmd: "mcp_extension_check" }
   | { cmd: "rule_add"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "rule_remove"; ruleType: "shell" | "path"; pattern: string }

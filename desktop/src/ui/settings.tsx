@@ -179,7 +179,7 @@ export function SettingsModal({
   mcpExtensionStatus: McpExtensionStatus | null;
   mcpExtensionCheck: McpExtensionCheck | null;
   onRequestMcpExtensionStatus: () => void;
-  onConfigureMcpExtension: (profileDirName?: string, token?: string) => void;
+  onConfigureMcpExtension: (token?: string) => void;
   onCheckMcpExtension: () => void;
   onReadMemory: (path: string) => void;
   onWriteMemory: (
@@ -1636,11 +1636,10 @@ export function PageMCP({
   extensionStatus: McpExtensionStatus | null;
   extensionCheck: McpExtensionCheck | null;
   onRequestExtensionStatus: () => void;
-  onConfigureExtension: (profileDirName?: string, token?: string) => void;
+  onConfigureExtension: (token?: string) => void;
   onCheckExtension: () => void;
 }) {
   const [draft, setDraft] = useState("");
-  const [profileDraft, setProfileDraft] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   useEffect(() => {
@@ -1687,7 +1686,9 @@ export function PageMCP({
       <section className="section">
         <div className="stitle">{t("settings.mcpBrowserTitle")}</div>
         <div className="scard">
-          <div className="desc" style={{ marginBottom: 10 }}>{t("settings.mcpBrowserDesc")}</div>
+          <div className="desc" style={{ marginBottom: 10 }}>
+            {t("settings.mcpBrowserDesc")}
+          </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <button
               type="button"
@@ -1700,28 +1701,19 @@ export function PageMCP({
             </button>
             <input
               className="field"
-              value={profileDraft}
-              onChange={(e) => setProfileDraft(e.target.value)}
-              placeholder={t("settings.mcpProfilePlaceholder")}
-              style={{ maxWidth: 180 }}
-            />
-            <input
-              className="field"
               type="password"
               value={tokenDraft}
               onChange={(e) => setTokenDraft(e.target.value)}
-              placeholder={t("settings.mcpTokenPlaceholder")}
+              placeholder={
+                extensionStatus?.server.tokenPrefix ?? t("settings.mcpTokenPlaceholder")
+              }
               style={{ maxWidth: 240 }}
             />
             <button
               type="button"
               className="btn"
               onClick={() => {
-                onConfigureExtension(
-                  profileDraft.trim() || undefined,
-                  tokenDraft.trim() || undefined,
-                );
-                setProfileDraft("");
+                onConfigureExtension(tokenDraft.trim() || undefined);
                 setTokenDraft("");
               }}
             >
@@ -1735,10 +1727,8 @@ export function PageMCP({
             {extensionStatus
               ? configuredWithExtension
                 ? `✓ ${t("settings.mcpConfiguredYes")}${
-                    extensionStatus.server.profileDirName
-                      ? ` · ${extensionStatus.server.profileDirName}`
-                      : ""
-                  }${extensionStatus.server.hasToken ? ` · ${t("settings.mcpTokenSaved")}` : ""}`
+                    extensionStatus.server.tokenPrefix ? ` · ${t("settings.mcpTokenSaved")}` : ""
+                  }`
                 : t("settings.mcpConfiguredNo")
               : "…"}
           </div>
@@ -1764,9 +1754,6 @@ export function PageMCP({
                 : `✗ ${extensionCheck.reason ?? t("settings.mcpTestFailed")}`}
             </div>
           ) : null}
-          <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
-            {t("settings.mcpProfileHint")}
-          </div>
           <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
             {t("settings.mcpTokenHint")}
           </div>

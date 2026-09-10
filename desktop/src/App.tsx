@@ -2447,8 +2447,7 @@ function TabRuntime({
     [sendRpc],
   );
   const configureMcpExtension = useCallback(
-    (profileDirName?: string, token?: string) =>
-      sendRpc({ cmd: "mcp_extension_configure", profileDirName, token }),
+    (token?: string) => sendRpc({ cmd: "mcp_extension_configure", token }),
     [sendRpc],
   );
   const checkMcpExtension = useCallback(() => sendRpc({ cmd: "mcp_extension_check" }), [sendRpc]);

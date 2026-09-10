@@ -29,8 +29,7 @@ function extensionStatus(): McpExtensionStatus {
     server: {
       configured: true,
       hasExtensionArg: true,
-      profileDirName: null,
-      hasToken: false,
+      tokenPrefix: undefined,
       args: ["-y", "@playwright/mcp", "--extension"],
     },
   };
@@ -59,6 +58,16 @@ function renderCard(
 }
 
 describe("PageMCP — playwright connection status", () => {
+  it("shows a saved token's redacted identifier in the password field", () => {
+    const status = extensionStatus();
+    status.server.tokenPrefix = "K3MM1p…6VE";
+    renderCard([spec()], status);
+    const input = screen.getByPlaceholderText("K3MM1p…6VE") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    expect(input.value).toBe("");
+    expect(screen.getByText(/token saved/)).toBeTruthy();
+  });
+
   it("shows live connection state with the tool count when bridged", () => {
     renderCard([spec()]);
     expect(screen.getByText(/server connected · 24 tools live/)).toBeTruthy();
@@ -92,21 +101,22 @@ describe("PageMCP — playwright connection status", () => {
   });
 
   it("shows the successful check verdict with elapsed time", () => {
-    renderCard([spec()], extensionStatus(), { phase: "done", ok: true, reason: null, elapsedMs: 1400 });
+    renderCard([spec()], extensionStatus(), {
+      phase: "done",
+      ok: true,
+      reason: null,
+      elapsedMs: 1400,
+    });
     expect(screen.getByText(/token works — browser attached in 1400 ms/)).toBeTruthy();
   });
 
   it("shows the failed check verdict with the reason", () => {
-    renderCard(
-      [spec()],
-      extensionStatus(),
-      {
-        phase: "done",
-        ok: false,
-        reason: "no browser responded within 25s — the stored token is likely wrong",
-        elapsedMs: 25000,
-      },
-    );
+    renderCard([spec()], extensionStatus(), {
+      phase: "done",
+      ok: false,
+      reason: "no browser responded within 25s — the stored token is likely wrong",
+      elapsedMs: 25000,
+    });
     expect(screen.getByText(/✗ no browser responded/)).toBeTruthy();
   });
 });

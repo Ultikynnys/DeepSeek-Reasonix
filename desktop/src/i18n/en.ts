@@ -258,9 +258,6 @@ export const en = {
     mcpReconfigure: "Reconfigure server",
     mcpConfiguredYes: "playwright server configured with --extension",
     mcpConfiguredNo: "playwright server not configured yet — click Configure server",
-    mcpProfilePlaceholder: "Profile 1",
-    mcpProfileHint:
-      'Profile is optional: the last part of "Profile Path" on chrome://version — lets one account per Chrome profile.',
     mcpTokenPlaceholder: "PLAYWRIGHT_MCP_EXTENSION_TOKEN",
     mcpTokenHint:
       "Token is optional: paste the whole PLAYWRIGHT_MCP_EXTENSION_TOKEN=… line from the connection dialog (the prefix is stripped automatically) — it skips the per-connection approval prompt.",
