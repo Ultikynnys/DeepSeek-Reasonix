@@ -1,19 +1,5 @@
-/** Hardcoded playwright tooling contract. When a playwright extension-mode MCP
- *  server is bridged, Reasonix guarantees a durable driver + AGENTS.md pair in
- *  the user's global tooling dir (`~/.reasonix/tools/playwright/`):
- *
- *  - the pair is bootstrapped from the bundled templates on first encounter;
- *  - `driver.mjs` is platform-managed — overwritten on version bumps (agent
- *    extensions belong in separate sibling files);
- *  - `AGENTS.md`'s platform section is refreshed on version bumps while the
- *    agent's own notes (below the `platform:end` marker) are preserved;
- *  - every agent driving the browser is told the duty — use the driver, extend
- *    it when tooling is missing, modify it in place when it needs changes, and
- *    keep AGENTS.md updated — via the first-call notice the registry injects.
- *
- *  Detection keys on the server's command line (`@playwright/mcp` +
- *  `--extension`), never on a model name — this is package identity, not
- *  provider categorization. */
+/** Hardcoded playwright tooling contract for extension-mode @playwright/mcp servers:
+ *  bootstrap + upgrade a durable driver + AGENTS.md pair, and surface the duty to agents. */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -55,10 +41,8 @@ export type PlaywrightToolingResult = (
   /** The dir always has a concrete path — the agent-facing notice uses it even on failure. */
 };
 
-/** Template lookup mirrors the tokenizer-data pattern (resolveDataPath): ESM
- *  relative candidates for dist root, dist/cli, src layouts + package-root
- *  fallback. Bundled under `data/` so both the CLI package and the desktop
- *  resources mapping carry it. */
+/** Template lookup mirrors the tokenizer-data pattern: ESM candidates for
+ *  dist root / dist/cli / src layouts + package-root fallback. Bundled in `data/`. */
 export function resolvePlaywrightTemplatePath(file: string): string {
   const rel = join("tooling", "playwright", file);
   const candidates: string[] = [];
@@ -98,11 +82,9 @@ function stampOf(content: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** Create-or-upgrade the global tooling pair. Never clobbers agent-owned
- *  content: driver.mjs is machine-managed (overwritten on version diff),
- *  AGENTS.md only gets its platform-managed section refreshed — a file without
- *  platform markers is treated as agent-owned and left untouched (the newest
- *  platform section lands in `AGENTS.md.platform-latest.md` alongside). */
+/** Create-or-upgrade the global tooling pair, never clobbering agent content:
+ *  driver.mjs is machine-managed (overwritten on version diff); AGENTS.md only
+ *  refreshes its platform section — unmarked files are staged alongside. */
 export function ensurePlaywrightTooling(
   opts: { homeDir?: string; templateDir?: string } = {},
 ): PlaywrightToolingResult {
