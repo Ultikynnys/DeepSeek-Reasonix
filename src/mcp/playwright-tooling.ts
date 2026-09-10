@@ -9,8 +9,8 @@ import { recordDiagnostic } from "../diagnostics.js";
 import { reasonixHome } from "../reasonix-home.js";
 import type { McpServerSpec } from "./spec.js";
 
-export const PLAYWRIGHT_TOOLING_VERSION = 1;
-const STAMP_RE = /playwright-tooling-version:\s*(\d+)/;
+export const PLAYWRIGHT_TOOLING_VERSION = 2;
+const STAMP_RE = /playwright-tooling-version:\s*(\d+)/g;
 const PLATFORM_BEGIN = "<!-- platform:begin";
 const PLATFORM_END = "<!-- platform:end -->";
 
@@ -78,8 +78,11 @@ function readBundledTemplate(file: string): string {
 }
 
 function stampOf(content: string): number | null {
-  const m = STAMP_RE.exec(content.slice(0, 1024));
-  return m ? Number(m[1]) : null;
+  // LAST match wins: after a section refresh the superseded pre-marker stamp
+  // may linger above the platform block — the in-section stamp is current.
+  const matches = [...content.slice(0, 1024).matchAll(STAMP_RE)];
+  if (matches.length === 0) return null;
+  return Number(matches[matches.length - 1]![1]);
 }
 
 /** Create-or-upgrade the global tooling pair, never clobbering agent content:
@@ -145,7 +148,12 @@ function ensurePlaywrightToolingUncached(
         const begin = onDisk.indexOf(PLATFORM_BEGIN);
         const end = onDisk.indexOf(PLATFORM_END);
         if (begin !== -1 && end !== -1 && end > begin) {
-          const merged = `${onDisk.slice(0, begin)}${bundledAgents.slice(bundledAgents.indexOf(PLATFORM_BEGIN), bundledAgents.indexOf(PLATFORM_END) + PLATFORM_END.length)}${onDisk.slice(end)}`;
+          // Drop superseded stamps that sit above the platform section so the
+          // refreshed in-section stamp is the only one (keeps upgrades one-shot).
+          const head = onDisk
+            .slice(0, begin)
+            .replace(/<!-- playwright-tooling-version: \d+ -->\n?/g, "");
+          const merged = `${head}${bundledAgents.slice(bundledAgents.indexOf(PLATFORM_BEGIN), bundledAgents.indexOf(PLATFORM_END) + PLATFORM_END.length)}${onDisk.slice(end)}`;
           writeFileSync(agentsPath, merged, "utf8");
         } else {
           writeFileSync(agentsPath, bundledAgents, "utf8");
@@ -164,7 +172,7 @@ function ensurePlaywrightToolingUncached(
 /** Agent-facing duty text injected into the first tool result of a bridged
  *  playwright extension session — every agent driving the browser sees it. */
 export function playwrightToolingNotice(status: PlaywrightToolingResult): string {
-  const base = `[reasonix playwright tooling] The durable driver + docs for this tool family live at ${status.dir} (driver.mjs + AGENTS.md). Hard requirements: (1) read AGENTS.md before first use; (2) for multi-step or repeated browser flows, drive through \`node <dir>/driver.mjs seq <steps.json>\` instead of one-off calls; (3) if tooling you need is missing, create it there; (4) if existing tooling needs changes, modify it in place; (5) after any change, keep AGENTS.md in that folder updated so future agents find the current state.`;
+  const base = `[reasonix playwright tooling] The durable driver + docs for this tool family live at ${status.dir} (driver.mjs + AGENTS.md). Hard requirements: (1) read AGENTS.md before first use; (2) the server persists across invocations — drive batch flows through it (\`node <dir>/driver.mjs seq <steps.json>\`), never one-off spawns; (3) if tooling you need is missing, create it there; (4) if existing tooling needs changes, modify it in place; (5) after any change, keep AGENTS.md in that folder updated so future agents find the current state.`;
   if (status.ok) return base;
   return `${base} NOTE: bootstrap failed (${status.error}) — create the folder per the bundled template before relying on it.`;
 }

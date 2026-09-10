@@ -1,5 +1,5 @@
 <!-- platform:begin — this section is auto-managed by Reasonix (overwritten on playwright-tooling-version bumps). Your additions go below the platform:end marker and survive upgrades. -->
-<!-- playwright-tooling-version: 1 -->
+<!-- playwright-tooling-version: 2 -->
 
 # Playwright driver — real-browser control through the extension relay
 
@@ -10,10 +10,11 @@ tabs) through the Playwright MCP extension relay. It is zero-dependency: plain
 
 ## What this is
 
-`driver.mjs` spawns `@playwright/mcp` in `--extension` mode exactly as
+`driver.mjs` starts `@playwright/mcp` in `--extension` mode exactly as
 configured in `~/.reasonix/config.json` (`mcpServers.playwright`, relay token
-included), speaks JSON-RPC over stdio, and forwards your tool calls to the
-browser. The token is validated **by the extension in the browser** — a wrong
+included) — over an HTTP transport on a localhost port, once, persistently —
+and forwards your tool calls to the browser over the MCP Streamable HTTP
+endpoint. The token is validated **by the extension in the browser** — a wrong
 token does not error, it silently hangs until timeout. That is why every run
 starts with a cheap call.
 
@@ -24,6 +25,7 @@ node ~/.reasonix/tools/playwright/driver.mjs list                     # tabs lis
 node ~/.reasonix/tools/playwright/driver.mjs open <url>               # new tab + listing
 node ~/.reasonix/tools/playwright/driver.mjs call <tool> '{"args":1}' # one tool call
 node ~/.reasonix/tools/playwright/driver.mjs seq steps.json           # multi-step flow, stops on first isError
+node ~/.reasonix/tools/playwright/driver.mjs stop                     # end the persistent server (closes group tabs)
 ```
 
 Timeouts default to 30s (`DRIVER_TIMEOUT_MS` env overrides). Exit codes:
@@ -97,21 +99,41 @@ Timeouts default to 30s (`DRIVER_TIMEOUT_MS` env overrides). Exit codes:
 8. **Token hygiene**: the config stores the bare token. If you ever paste the
    dialog's copy (`PLAYWRIGHT_MCP_EXTENSION_TOKEN=…`) anywhere, strip the
    prefix first.
+9. **The HTTP server is `localhost`-only, literally**: it binds the IPv6
+   loopback (`[::1]:PORT`) and rejects anything else. Hand-rolled probes must
+   use `http://localhost:PORT/mcp` — raw `127.0.0.1` is connection-refused
+   (nothing on IPv4), and explicit `http://[::1]:PORT` answers **403 "Access
+   is only allowed at localhost:PORT"**. Also: `netstat -ano -p TCP` shows no
+   listener for it (IPv4 only) — drop `-p TCP` or use `netstat -ano` to see it.
 
-## Waste policy (why teardown closes tabs)
+## Persistent server (the reuse contract)
 
-Every driver invocation spawns a fresh server; the extension opens one
-`connect.html` tab per run, and a killed server leaves that tab behind as a
-dead group. The driver therefore **auto-closes connect-page tabs at teardown**.
-Rules for agents:
+The driver keeps **one server alive across invocations**: state lives in
+`.server.json` next to this file (port, pid, relay session id). The first
+command auto-starts the server (~4s); later commands attach in well under a
+second — same server, same relay session, same tab group, no new
+connect-page tab. That is the whole point: the tool set exists once.
 
-- Prefer ONE `seq` run with many steps over N separate invocations — each
-  invocation costs a fresh server spawn (~4s) + a connect tab.
-- `--close-tabs-all` closes every tab in your group at teardown — use it for
-  throwaway flows (tests, screenshots), NEVER when the user wants to keep the
-  end state (e.g. a paused video for them to see).
+- End it explicitly with `node driver.mjs stop` (closes the group's tabs, then
+  kills the server) — e.g. before switching `--browser` in the config, or when
+  you know the session is done.
+- A stale `.server.json` (server crashed) self-heals: the next invocation
+  re-handshakes or respawns automatically.
+- The relay session also persists; if the server expired it server-side
+  (404), the driver re-handshakes transparently.
+- `DRIVER_PORT` env overrides the port (default 8931; scans upward if busy).
+
+## Waste policy (tab groups)
+
+- Prefer ONE `seq` run with many steps over N separate invocations — even
+  though the server persists, fewer calls mean less relay chatter.
+- `--close-tabs-all` closes every tab in your group — use it for throwaway
+  flows (tests, screenshots), NEVER when the user wants to keep the end state
+  (e.g. a paused video for them to see).
 - If you leave tabs open, say so in your reply and tell the user which group
   they live in ("reasonix" group in Edge).
+- Dead tab groups from a killed stdio-mode session (pre-v2 runs) are user
+  cleanup — point them out if you see them accumulate.
 
 ## Proven recipe (2026-09-10 session)
 

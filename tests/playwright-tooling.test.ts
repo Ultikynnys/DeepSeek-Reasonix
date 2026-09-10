@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { McpClient } from "../src/mcp/client.js";
 import {
+  PLAYWRIGHT_TOOLING_VERSION,
   _resetForTests,
   ensurePlaywrightTooling,
   isPlaywrightExtensionSpec,
@@ -73,13 +74,14 @@ describe("isPlaywrightExtensionSpec", () => {
 });
 
 describe("ensurePlaywrightTooling", () => {
-  it("resolves the bundled templates from the repo data dir", () => {
+  it("resolves the bundled templates from the repo data dir at the current version", () => {
     const driver = resolvePlaywrightTemplatePath("driver.mjs");
     const agents = resolvePlaywrightTemplatePath("AGENTS.md");
     expect(existsSync(driver)).toBe(true);
     expect(existsSync(agents)).toBe(true);
-    expect(readFileSync(driver, "utf8")).toMatch(/playwright-tooling-version: 1/);
-    expect(readFileSync(agents, "utf8")).toMatch(/platform:begin/);
+    const stamp = `playwright-tooling-version: ${PLAYWRIGHT_TOOLING_VERSION}`;
+    expect(readFileSync(driver, "utf8")).toContain(stamp);
+    expect(readFileSync(agents, "utf8")).toContain(stamp);
   });
 
   it("bootstraps both files into the global tooling dir on first call", () => {
@@ -117,20 +119,24 @@ describe("ensurePlaywrightTooling", () => {
     ).toBe(true);
   });
 
-  it("overwrites a stale driver and refreshes the platform section of a marked AGENTS.md", () => {
+  it("upgrades a one-version-stale pair: driver replaced, AGENTS.md platform section refreshed, agent notes preserved", () => {
     const home = tmpHome();
     cleanups.push(home);
     const dir = join(home, ".reasonix", "tools", "playwright");
     mkdirSync(dir, { recursive: true });
     const bundledDriver = readFileSync(resolvePlaywrightTemplatePath("driver.mjs"), "utf8");
     const bundledAgents = readFileSync(resolvePlaywrightTemplatePath("AGENTS.md"), "utf8");
+    const staleStamp = PLAYWRIGHT_TOOLING_VERSION - 1;
     writeFileSync(
       join(dir, "driver.mjs"),
-      bundledDriver.replace("playwright-tooling-version: 1", "playwright-tooling-version: 0"),
+      bundledDriver.replace(
+        `playwright-tooling-version: ${PLAYWRIGHT_TOOLING_VERSION}`,
+        `playwright-tooling-version: ${staleStamp}`,
+      ),
     );
     const agentsOld = bundledAgents.replace(
-      "playwright-tooling-version: 1",
-      "playwright-tooling-version: 0",
+      `playwright-tooling-version: ${PLAYWRIGHT_TOOLING_VERSION}`,
+      `playwright-tooling-version: ${staleStamp}`,
     );
     writeFileSync(join(dir, "AGENTS.md"), `${agentsOld}\n\n## Agent notes\nmy finding\n`);
     const status = ensurePlaywrightTooling({ homeDir: home });
@@ -139,7 +145,7 @@ describe("ensurePlaywrightTooling", () => {
     // Driver is overwritten with the current version; agent notes are preserved.
     expect(readFileSync(join(dir, "driver.mjs"), "utf8")).toBe(bundledDriver);
     const refreshed = readFileSync(join(dir, "AGENTS.md"), "utf8");
-    expect(refreshed).toMatch(/playwright-tooling-version: 1/);
+    expect(refreshed).toContain(`playwright-tooling-version: ${PLAYWRIGHT_TOOLING_VERSION}`);
     expect(refreshed).toContain("my finding");
   });
 
