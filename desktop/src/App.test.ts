@@ -90,6 +90,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     mcpSpecs: [],
     mcpBridged: false,
     mcpExtensionStatus: null,
+    mcpExtensionCheck: null,
     skills: [],
     sessionFiles: [],
     memory: [],

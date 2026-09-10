@@ -47,6 +47,7 @@ import {
   type IncomingEvent,
   type JobInfo,
   type LoadedMessage,
+  type McpExtensionCheck,
   type McpExtensionStatus,
   type McpSpecInfo,
   type MemoryDetail,
@@ -439,6 +440,7 @@ type State = {
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   mcpExtensionStatus: McpExtensionStatus | null;
+  mcpExtensionCheck: McpExtensionCheck | null;
   skills: SkillInfo[];
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
@@ -1554,6 +1556,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "$mcp_extension_status":
       return { ...state, mcpExtensionStatus: ev.status };
+    case "$mcp_extension_check":
+      return { ...state, mcpExtensionCheck: ev.check };
     case "$skills":
       return { ...state, skills: ev.items };
     case "$ctx_breakdown": {
@@ -2288,6 +2292,7 @@ function TabRuntime({
     mcpSpecs: [],
     mcpBridged: false,
     mcpExtensionStatus: null,
+    mcpExtensionCheck: null,
     skills: [],
     sessionFiles: [],
     memory: [],
@@ -2446,6 +2451,7 @@ function TabRuntime({
       sendRpc({ cmd: "mcp_extension_configure", profileDirName, token }),
     [sendRpc],
   );
+  const checkMcpExtension = useCallback(() => sendRpc({ cmd: "mcp_extension_check" }), [sendRpc]);
   const addRule = useCallback(
     (ruleType: "shell" | "path", pattern: string) =>
       sendRpc({ cmd: "rule_add", ruleType, pattern }),
@@ -3554,8 +3560,10 @@ function TabRuntime({
             onToggleMcpServer={toggleMcpServer}
             onToggleMcpTool={toggleMcpTool}
             mcpExtensionStatus={state.mcpExtensionStatus}
+            mcpExtensionCheck={state.mcpExtensionCheck}
             onRequestMcpExtensionStatus={requestMcpExtensionStatus}
             onConfigureMcpExtension={configureMcpExtension}
+            onCheckMcpExtension={checkMcpExtension}
             onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
             onWriteMemory={(scope, name, description, body) =>
               sendRpc({ cmd: "memory_write", scope, name, description, body })

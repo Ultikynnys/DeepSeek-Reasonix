@@ -36,7 +36,11 @@ function extensionStatus(): McpExtensionStatus {
   };
 }
 
-function renderCard(specs: McpSpecInfo[], status: McpExtensionStatus | null = extensionStatus()) {
+function renderCard(
+  specs: McpSpecInfo[],
+  status: McpExtensionStatus | null = extensionStatus(),
+  extensionCheck: Parameters<typeof PageMCP>[0]["extensionCheck"] = null,
+) {
   return render(
     <PageMCP
       specs={specs}
@@ -46,8 +50,10 @@ function renderCard(specs: McpSpecInfo[], status: McpExtensionStatus | null = ex
       onToggleServer={vi.fn()}
       onToggleTool={vi.fn()}
       extensionStatus={status}
+      extensionCheck={extensionCheck}
       onRequestExtensionStatus={vi.fn()}
       onConfigureExtension={vi.fn()}
+      onCheckExtension={vi.fn()}
     />,
   );
 }
@@ -78,5 +84,29 @@ describe("PageMCP — playwright connection status", () => {
     renderCard([]);
     expect(screen.queryByText(/server connected/)).toBeNull();
     expect(screen.queryByText(/not bridged yet/)).toBeNull();
+  });
+
+  it("shows the running phase while the relay probe is in flight", () => {
+    renderCard([spec()], extensionStatus(), { phase: "running" });
+    expect(screen.getByText(/testing relay/)).toBeTruthy();
+  });
+
+  it("shows the successful check verdict with elapsed time", () => {
+    renderCard([spec()], extensionStatus(), { phase: "done", ok: true, reason: null, elapsedMs: 1400 });
+    expect(screen.getByText(/token works — browser attached in 1400 ms/)).toBeTruthy();
+  });
+
+  it("shows the failed check verdict with the reason", () => {
+    renderCard(
+      [spec()],
+      extensionStatus(),
+      {
+        phase: "done",
+        ok: false,
+        reason: "no browser responded within 25s — the stored token is likely wrong",
+        elapsedMs: 25000,
+      },
+    );
+    expect(screen.getByText(/✗ no browser responded/)).toBeTruthy();
   });
 });

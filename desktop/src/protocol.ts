@@ -45,6 +45,8 @@ import type {
   LoadedMessage,
   LoadedSegment,
   McpExtensionBundled,
+  McpExtensionCheck,
+  McpExtensionCheckEvent,
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,
@@ -145,6 +147,8 @@ export type {
   LoadedMessage,
   LoadedSegment,
   McpExtensionBundled,
+  McpExtensionCheck,
+  McpExtensionCheckEvent,
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,
@@ -252,6 +256,7 @@ export type IncomingEvent = { tabId?: string } & (
   | TabsSnapshotEvent
   | McpSpecsEvent
   | McpExtensionStatusEvent
+  | McpExtensionCheckEvent
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent

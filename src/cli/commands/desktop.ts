@@ -33,6 +33,7 @@ import type {
   JobsEvent,
   LoadedMessage,
   LoadedSegment,
+  McpExtensionCheckEvent,
   McpExtensionStatus,
   McpExtensionStatusEvent,
   McpSpecInfo,
@@ -358,6 +359,7 @@ type EmittableEvent =
   | TabsSnapshotEvent
   | McpSpecsEvent
   | McpExtensionStatusEvent
+  | McpExtensionCheckEvent
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent
@@ -2096,6 +2098,106 @@ function emitMcpExtensionStatus(tab: Tab): void {
   const status = computeMcpExtensionStatus(readConfig(), resolveBundledPlaywrightExtension());
   const ev: McpExtensionStatusEvent = { type: "$mcp_extension_status", status };
   emit(ev, tab.id);
+}
+
+/** Classify a live relay probe's raw dispatch result. MCP bridge errors come back
+ *  as JSON `{ error }` strings; tool-side failures surface as "### Error" text;
+ *  anything else is a successful browser attach. Exported pure for tests. */
+export function interpretExtensionCheck(
+  raw: string | null,
+  elapsedMs: number,
+): { ok: boolean; reason: string | null; elapsedMs: number } {
+  if (raw === null || raw.trim() === "") {
+    return { ok: false, reason: "probe returned no result", elapsedMs };
+  }
+  const seconds = Math.max(1, Math.round(elapsedMs / 1000));
+  const timedOut = /timed?\s*out|aborted|cancelled/i.test(raw);
+  let errorText: string | null = null;
+  const trimmed = raw.trim();
+  if (/^### Error|^Error:/i.test(trimmed)) {
+    errorText = trimmed.split("\n")[0]!.slice(0, 200);
+  } else {
+    try {
+      const parsed = JSON.parse(trimmed) as { error?: unknown; cancelledByUser?: unknown };
+      if (parsed && typeof parsed === "object" && (parsed.error || parsed.cancelledByUser)) {
+        errorText = String(parsed.error ?? "cancelled");
+      }
+    } catch {
+      /* plain text success — tabs listing is not JSON-error shaped */
+    }
+  }
+  if (errorText === null) return { ok: true, reason: null, elapsedMs };
+  if (timedOut || /aborted|cancelled/i.test(errorText)) {
+    return {
+      ok: false,
+      reason: `no browser responded within ${seconds}s — the stored token is likely wrong, or Edge isn't running with the extension installed`,
+      elapsedMs,
+    };
+  }
+  if (/unknown tool/i.test(errorText)) {
+    return {
+      ok: false,
+      reason: "playwright tools are not bridged — the server is not connected in this session",
+      elapsedMs,
+    };
+  }
+  return { ok: false, reason: errorText, elapsedMs };
+}
+
+/** End-to-end relay check: dispatch one cheap browser tool through the live
+ *  bridge with a bounded timeout. Success proves the stored token actually works
+ *  (the browser validates it, not us); a timeout means wrong token or no Edge. */
+async function runMcpExtensionCheck(tab: Tab): Promise<void> {
+  emit({ type: "$mcp_extension_check", check: { phase: "running" } }, tab.id);
+  const t0 = Date.now();
+  try {
+    const tools = tab.toolset?.tools;
+    if (!tools) throw new Error("toolset gone");
+    const tabsTool = tools.specs().find((s) => s.function.name.endsWith("browser_tabs"));
+    if (!tabsTool) {
+      emit(
+        {
+          type: "$mcp_extension_check",
+          check: {
+            phase: "done",
+            ok: false,
+            reason:
+              "playwright server is not bridged — no browser_tabs tool registered (starts with a session, or the server/tools are disabled)",
+            elapsedMs: Date.now() - t0,
+          },
+        },
+        tab.id,
+      );
+      return;
+    }
+    const raw = await tools.dispatch(
+      tabsTool.function.name,
+      { action: "list" },
+      { signal: AbortSignal.timeout(25000) },
+    );
+    const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    emit(
+      {
+        type: "$mcp_extension_check",
+        check: { phase: "done", ...interpretExtensionCheck(text, Date.now() - t0) },
+      },
+      tab.id,
+    );
+  } catch (err) {
+    emit(
+      {
+        type: "$mcp_extension_check",
+        check: {
+          phase: "done",
+          ok: false,
+          reason: interpretExtensionCheck(`Error: ${(err as Error).message}`, Date.now() - t0)
+            .reason,
+          elapsedMs: Date.now() - t0,
+        },
+      },
+      tab.id,
+    );
+  }
 }
 
 function emitMemory(tab: Tab): void {
@@ -4681,6 +4783,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           tab.id,
         );
       }
+      return;
+    }
+    if (msg.cmd === "mcp_extension_check") {
+      void runMcpExtensionCheck(tab);
       return;
     }
     if (msg.cmd === "rule_add") {

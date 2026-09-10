@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { computeMcpExtensionStatus } from "../src/cli/commands/desktop.js";
+import { computeMcpExtensionStatus, interpretExtensionCheck } from "../src/cli/commands/desktop.js";
 import { type ReasonixConfig, mergeMcpServerEntry, normalizeMcpConfig } from "../src/config.js";
 import {
   PLAYWRIGHT_EXTENSION_STORE_URL,
@@ -242,5 +242,40 @@ describe("computeMcpExtensionStatus", () => {
     const status = computeMcpExtensionStatus(cfg, bundled);
     expect(status.server.configured).toBe(true);
     expect(status.server.hasExtensionArg).toBe(false);
+  });
+});
+
+describe("interpretExtensionCheck", () => {
+  it("passes a successful tabs listing through as ok", () => {
+    const raw = JSON.stringify({ tabs: [{ id: "t1", url: "https://example.com" }] });
+    expect(interpretExtensionCheck(raw, 1200)).toEqual({ ok: true, reason: null, elapsedMs: 1200 });
+  });
+
+  it("maps a timeout to the wrong-token-or-no-Edge guidance", () => {
+    const raw = JSON.stringify({
+      error: "browser_tabs: This operation was aborted due to timeout",
+    });
+    const result = interpretExtensionCheck(raw, 25000);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("no browser responded within 25s");
+    expect(result.reason).toContain("token is likely wrong");
+  });
+
+  it("maps an unregistered tool to the not-bridged guidance", () => {
+    const raw = JSON.stringify({ error: "unknown tool: playwright_browser_tabs" });
+    const result = interpretExtensionCheck(raw, 5);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("not bridged");
+  });
+
+  it("surfaces plain tool-side error text (### Error) verbatim", () => {
+    const result = interpretExtensionCheck("### Error\nExtension not found", 900);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("### Error");
+  });
+
+  it("treats an empty probe result as a failure", () => {
+    expect(interpretExtensionCheck(null, 0).ok).toBe(false);
+    expect(interpretExtensionCheck("   ", 0).ok).toBe(false);
   });
 });

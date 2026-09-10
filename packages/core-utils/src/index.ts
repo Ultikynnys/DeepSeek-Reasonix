@@ -136,6 +136,8 @@ export type {
   McpSpecInfo,
   McpSpecsEvent,
   McpExtensionBundled,
+  McpExtensionCheck,
+  McpExtensionCheckEvent,
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,

@@ -7,6 +7,7 @@ import { I } from "../icons";
 import { convertUsd, currencySymbol } from "../money";
 import { MODEL_CATALOG_GROUP_LABELS, deriveModelCatalog } from "../model-catalog";
 import type {
+  McpExtensionCheck,
   McpExtensionStatus,
   McpSpecInfo,
   MemoryDetail,
@@ -110,8 +111,10 @@ export function SettingsModal({
   onToggleMcpServer,
   onToggleMcpTool,
   mcpExtensionStatus,
+  mcpExtensionCheck,
   onRequestMcpExtensionStatus,
   onConfigureMcpExtension,
+  onCheckMcpExtension,
   onReadMemory,
   onWriteMemory,
   onDeleteMemory,
@@ -174,8 +177,10 @@ export function SettingsModal({
   onToggleMcpServer: (name: string, disabled: boolean) => void;
   onToggleMcpTool: (name: string, tool: string, disabled: boolean) => void;
   mcpExtensionStatus: McpExtensionStatus | null;
+  mcpExtensionCheck: McpExtensionCheck | null;
   onRequestMcpExtensionStatus: () => void;
   onConfigureMcpExtension: (profileDirName?: string, token?: string) => void;
+  onCheckMcpExtension: () => void;
   onReadMemory: (path: string) => void;
   onWriteMemory: (
     scope: "global" | "project",
@@ -303,8 +308,10 @@ export function SettingsModal({
                 onToggleServer={onToggleMcpServer}
                 onToggleTool={onToggleMcpTool}
                 extensionStatus={mcpExtensionStatus}
+                extensionCheck={mcpExtensionCheck}
                 onRequestExtensionStatus={onRequestMcpExtensionStatus}
                 onConfigureExtension={onConfigureMcpExtension}
+                onCheckExtension={onCheckMcpExtension}
               />
             )}
             {page === "memory" && (
@@ -1615,8 +1622,10 @@ export function PageMCP({
   onToggleServer,
   onToggleTool,
   extensionStatus,
+  extensionCheck,
   onRequestExtensionStatus,
   onConfigureExtension,
+  onCheckExtension,
 }: {
   specs: McpSpecInfo[];
   bridged: boolean;
@@ -1625,8 +1634,10 @@ export function PageMCP({
   onToggleServer: (name: string, disabled: boolean) => void;
   onToggleTool: (name: string, tool: string, disabled: boolean) => void;
   extensionStatus: McpExtensionStatus | null;
+  extensionCheck: McpExtensionCheck | null;
   onRequestExtensionStatus: () => void;
   onConfigureExtension: (profileDirName?: string, token?: string) => void;
+  onCheckExtension: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [profileDraft, setProfileDraft] = useState("");
@@ -1716,6 +1727,9 @@ export function PageMCP({
             >
               {configuredWithExtension ? t("settings.mcpReconfigure") : t("settings.mcpConfigure")}
             </button>
+            <button type="button" className="btn" onClick={onCheckExtension}>
+              {t("settings.mcpTestConn")}
+            </button>
           </div>
           <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
             {extensionStatus
@@ -1731,6 +1745,23 @@ export function PageMCP({
           {connection ? (
             <div style={{ marginTop: 4, fontSize: 11, color: connection.color }}>
               {connection.text}
+            </div>
+          ) : null}
+          {extensionCheck?.phase === "running" ? (
+            <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+              {t("settings.mcpTestRunning")}
+            </div>
+          ) : extensionCheck?.phase === "done" ? (
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: extensionCheck.ok ? "var(--accent)" : "var(--danger)",
+              }}
+            >
+              {extensionCheck.ok
+                ? t("settings.mcpTestOk", { ms: extensionCheck.elapsedMs })
+                : `✗ ${extensionCheck.reason ?? t("settings.mcpTestFailed")}`}
             </div>
           ) : null}
           <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>

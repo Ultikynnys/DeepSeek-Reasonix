@@ -465,6 +465,17 @@ export interface McpExtensionStatusEvent {
   status: McpExtensionStatus;
 }
 
+/** Live relay probe — "running" fires when the probe starts, "done" carries the
+ *  verdict: whether a browser actually attached through the stored token. */
+export type McpExtensionCheck =
+  | { phase: "running" }
+  | { phase: "done"; ok: boolean; reason: string | null; elapsedMs: number };
+
+export interface McpExtensionCheckEvent {
+  type: "$mcp_extension_check";
+  check: McpExtensionCheck;
+}
+
 export type SkillScope = "project" | "custom" | "global" | "builtin";
 
 export interface SkillInfo {
@@ -1036,6 +1047,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mcp_specs_toggle"; name: string; disabled: boolean; tool?: string }
   | { cmd: "mcp_extension_status" }
   | { cmd: "mcp_extension_configure"; profileDirName?: string; token?: string }
+  | { cmd: "mcp_extension_check" }
   | { cmd: "rule_add"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "rule_remove"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "skills_get" }
