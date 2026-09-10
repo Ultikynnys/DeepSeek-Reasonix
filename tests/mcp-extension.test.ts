@@ -12,6 +12,7 @@ import {
   configurePlaywrightArgs,
   normalizeExtensionToken,
   parsePlaywrightConnection,
+  playwrightBrowserInstallArgs,
   resolveBundledPlaywrightExtension,
 } from "../src/mcp/extension.js";
 
@@ -150,6 +151,31 @@ describe("mergeMcpServerEntry", () => {
       [PLAYWRIGHT_EXTENSION_TOKEN_ENV]: "stored-token",
       OTHER_VAR: "x",
     });
+  });
+});
+
+describe("playwrightBrowserInstallArgs", () => {
+  it.each(["chrome", "firefox", "webkit", "msedge"] as const)(
+    "builds the official managed-browser installer for %s",
+    (browser) => {
+      expect(playwrightBrowserInstallArgs(browser)).toEqual([
+        "-y",
+        "@playwright/mcp",
+        "install-browser",
+        browser,
+      ]);
+    },
+  );
+
+  it("preserves a safe pinned package and rejects non-managed values", () => {
+    expect(playwrightBrowserInstallArgs("firefox", "@playwright/mcp@0.0.80")).toEqual([
+      "-y",
+      "@playwright/mcp@0.0.80",
+      "install-browser",
+      "firefox",
+    ]);
+    expect(() => playwrightBrowserInstallArgs("extension")).toThrow(/unsupported/);
+    expect(() => playwrightBrowserInstallArgs("firefox && calc")).toThrow(/unsupported/);
   });
 });
 

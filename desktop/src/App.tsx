@@ -50,6 +50,8 @@ import {
   type McpExtensionCheck,
   type McpExtensionStatus,
   type McpSpecInfo,
+  type PlaywrightBrowserInstall,
+  type PlaywrightManagedBrowser,
   type PlaywrightMcpConnectionMode,
   type MemoryDetail,
   type MemoryEntryInfo,
@@ -442,6 +444,7 @@ type State = {
   mcpBridged: boolean;
   mcpExtensionStatus: McpExtensionStatus | null;
   mcpExtensionCheck: McpExtensionCheck | null;
+  playwrightBrowserInstall: PlaywrightBrowserInstall | null;
   skills: SkillInfo[];
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
@@ -1559,6 +1562,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, mcpExtensionStatus: ev.status };
     case "$mcp_extension_check":
       return { ...state, mcpExtensionCheck: ev.check };
+    case "$playwright_browser_install":
+      return { ...state, playwrightBrowserInstall: ev.install };
     case "$skills":
       return { ...state, skills: ev.items };
     case "$ctx_breakdown": {
@@ -2294,6 +2299,7 @@ function TabRuntime({
     mcpBridged: false,
     mcpExtensionStatus: null,
     mcpExtensionCheck: null,
+    playwrightBrowserInstall: null,
     skills: [],
     sessionFiles: [],
     memory: [],
@@ -2453,6 +2459,10 @@ function TabRuntime({
     [sendRpc],
   );
   const checkMcpExtension = useCallback(() => sendRpc({ cmd: "mcp_extension_check" }), [sendRpc]);
+  const installPlaywrightBrowser = useCallback(
+    (browser: PlaywrightManagedBrowser) => sendRpc({ cmd: "playwright_browser_install", browser }),
+    [sendRpc],
+  );
   const addRule = useCallback(
     (ruleType: "shell" | "path", pattern: string) =>
       sendRpc({ cmd: "rule_add", ruleType, pattern }),
@@ -3562,9 +3572,11 @@ function TabRuntime({
             onToggleMcpTool={toggleMcpTool}
             mcpExtensionStatus={state.mcpExtensionStatus}
             mcpExtensionCheck={state.mcpExtensionCheck}
+            playwrightBrowserInstall={state.playwrightBrowserInstall}
             onRequestMcpExtensionStatus={requestMcpExtensionStatus}
             onConfigureMcpExtension={configureMcpExtension}
             onCheckMcpExtension={checkMcpExtension}
+            onInstallPlaywrightBrowser={installPlaywrightBrowser}
             onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
             onWriteMemory={(scope, name, description, body) =>
               sendRpc({ cmd: "memory_write", scope, name, description, body })

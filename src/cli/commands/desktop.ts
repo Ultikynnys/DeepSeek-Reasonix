@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -54,6 +55,7 @@ import type {
   PlanClearedEvent,
   PlanRequiredEvent,
   PlanStep,
+  PlaywrightBrowserInstallEvent,
   RetryResultEvent,
   RevisionRequiredEvent,
   SessionCompactedEvent,
@@ -187,8 +189,10 @@ import {
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
   configurePlaywrightArgs,
+  isPlaywrightManagedBrowser,
   normalizeExtensionToken,
   parsePlaywrightConnection,
+  playwrightBrowserInstallArgs,
   resolveBundledPlaywrightExtension,
 } from "../../mcp/extension.js";
 
@@ -361,6 +365,7 @@ type EmittableEvent =
   | McpSpecsEvent
   | McpExtensionStatusEvent
   | McpExtensionCheckEvent
+  | PlaywrightBrowserInstallEvent
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent
@@ -2098,6 +2103,73 @@ function emitMcpExtensionStatus(tab: Tab): void {
   const status = computeMcpExtensionStatus(readConfig(), resolveBundledPlaywrightExtension());
   const ev: McpExtensionStatusEvent = { type: "$mcp_extension_status", status };
   emit(ev, tab.id);
+}
+
+const playwrightBrowserInstalls = new Set<string>();
+
+async function installPlaywrightBrowser(
+  tab: Tab,
+  browser: unknown,
+  onInstalled: () => void,
+): Promise<void> {
+  if (!isPlaywrightManagedBrowser(browser)) {
+    emit(
+      { type: "$error", message: "playwright_browser_install: unsupported managed browser" },
+      tab.id,
+    );
+    return;
+  }
+  if (playwrightBrowserInstalls.has(browser)) {
+    emit(
+      {
+        type: "$playwright_browser_install",
+        install: { phase: "done", browser, ok: false, reason: "installation already running" },
+      } satisfies PlaywrightBrowserInstallEvent,
+      tab.id,
+    );
+    return;
+  }
+  playwrightBrowserInstalls.add(browser);
+  emit({ type: "$playwright_browser_install", install: { phase: "running", browser } }, tab.id);
+  const configuredArgs = readConfig().mcpServers?.playwright?.args ?? [];
+  const configuredPackage = configuredArgs.find((arg) => /^@playwright\/mcp(?:@|$)/.test(arg));
+  const packageId = /^@playwright\/mcp(?:@[A-Za-z0-9._-]+)?$/.test(configuredPackage ?? "")
+    ? configuredPackage
+    : undefined;
+  const args = playwrightBrowserInstallArgs(browser, packageId);
+  let output = "";
+  try {
+    const result = await new Promise<{ code: number | null; error?: string }>((resolveResult) => {
+      const command = process.platform === "win32" ? "npx.cmd" : "npx";
+      const child = spawn(command, args, { windowsHide: true, shell: false });
+      const append = (chunk: Buffer | string) => {
+        output = `${output}${String(chunk)}`.slice(-8000);
+      };
+      child.stdout?.on("data", append);
+      child.stderr?.on("data", append);
+      child.once("error", (error) => resolveResult({ code: null, error: error.message }));
+      child.once("close", (code) => resolveResult({ code }));
+    });
+    const ok = result.code === 0;
+    const reason = ok
+      ? null
+      : (result.error ?? output.trim().slice(-1000)) || `installer exited with code ${result.code}`;
+    emit(
+      { type: "$playwright_browser_install", install: { phase: "done", browser, ok, reason } },
+      tab.id,
+    );
+    if (ok) onInstalled();
+  } catch (error) {
+    emit(
+      {
+        type: "$playwright_browser_install",
+        install: { phase: "done", browser, ok: false, reason: messageOf(error) },
+      },
+      tab.id,
+    );
+  } finally {
+    playwrightBrowserInstalls.delete(browser);
+  }
 }
 
 /** Classify a live relay probe's raw dispatch result. MCP bridge errors come back
@@ -4750,6 +4822,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "mcp_extension_status") {
       emitMcpExtensionStatus(tab);
+      return;
+    }
+    if (msg.cmd === "playwright_browser_install") {
+      void installPlaywrightBrowser(tab, msg.browser, () => void bridgeTabMcp(tab));
       return;
     }
     if (msg.cmd === "mcp_extension_configure") {

@@ -50,6 +50,9 @@ import type {
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,
+  PlaywrightBrowserInstall,
+  PlaywrightBrowserInstallEvent,
+  PlaywrightManagedBrowser,
   PlaywrightMcpConnectionMode,
   McpSpecInfo,
   McpSpecStatus,
@@ -153,6 +156,9 @@ export type {
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,
+  PlaywrightBrowserInstall,
+  PlaywrightBrowserInstallEvent,
+  PlaywrightManagedBrowser,
   PlaywrightMcpConnectionMode,
   McpSpecInfo,
   McpSpecsEvent,
@@ -259,6 +265,7 @@ export type IncomingEvent = { tabId?: string } & (
   | McpSpecsEvent
   | McpExtensionStatusEvent
   | McpExtensionCheckEvent
+  | PlaywrightBrowserInstallEvent
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent

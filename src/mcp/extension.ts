@@ -15,12 +15,22 @@ export const PLAYWRIGHT_EXTENSION_ARG = "--extension";
  *  per-connection approval dialog (the token is shown in that dialog). */
 export const PLAYWRIGHT_EXTENSION_TOKEN_ENV = "PLAYWRIGHT_MCP_EXTENSION_TOKEN";
 const CONNECTION_VALUE_ARGS = new Set(["--browser", "--cdp-endpoint", "--profile-dir-name"]);
-const MANAGED_MODES = new Set<PlaywrightMcpConnectionMode>([
-  "chrome",
-  "firefox",
-  "webkit",
-  "msedge",
-]);
+export const PLAYWRIGHT_MANAGED_BROWSERS = ["chrome", "firefox", "webkit", "msedge"] as const;
+const MANAGED_MODES = new Set<PlaywrightMcpConnectionMode>(PLAYWRIGHT_MANAGED_BROWSERS);
+
+export function isPlaywrightManagedBrowser(
+  value: unknown,
+): value is (typeof PLAYWRIGHT_MANAGED_BROWSERS)[number] {
+  return typeof value === "string" && MANAGED_MODES.has(value as PlaywrightMcpConnectionMode);
+}
+
+export function playwrightBrowserInstallArgs(
+  browser: unknown,
+  packageId = "@playwright/mcp",
+): string[] {
+  if (!isPlaywrightManagedBrowser(browser)) throw new Error("unsupported managed browser");
+  return ["-y", packageId, "install-browser", browser];
+}
 
 /** Parse Reasonix's supported connection modes from a Playwright MCP argv. */
 export function parsePlaywrightConnection(args: string[]): {

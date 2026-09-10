@@ -44,6 +44,8 @@ function renderCard(
   status: McpExtensionStatus | null = extensionStatus(),
   extensionCheck: Parameters<typeof PageMCP>[0]["extensionCheck"] = null,
   onConfigureExtension = vi.fn(),
+  onInstallBrowser = vi.fn(),
+  browserInstall: Parameters<typeof PageMCP>[0]["browserInstall"] = null,
 ) {
   return render(
     <PageMCP
@@ -55,9 +57,11 @@ function renderCard(
       onToggleTool={vi.fn()}
       extensionStatus={status}
       extensionCheck={extensionCheck}
+      browserInstall={browserInstall}
       onRequestExtensionStatus={vi.fn()}
       onConfigureExtension={onConfigureExtension}
       onCheckExtension={vi.fn()}
+      onInstallBrowser={onInstallBrowser}
     />,
   );
 }
@@ -94,6 +98,43 @@ describe("PageMCP — playwright connection status", () => {
     expect(onConfigure).toHaveBeenCalledWith("webkit", undefined, undefined);
   });
 
+  it("offers the managed Firefox installer and dispatches it", () => {
+    const status = extensionStatus();
+    status.server.mode = "firefox";
+    status.server.hasExtensionArg = false;
+    const onInstall = vi.fn();
+    renderCard([spec()], status, null, vi.fn(), onInstall);
+    fireEvent.click(screen.getByRole("button", { name: "Install firefox" }));
+    expect(onInstall).toHaveBeenCalledWith("firefox");
+  });
+
+  it("shows managed-browser installation progress and results", () => {
+    const status = extensionStatus();
+    status.server.mode = "firefox";
+    status.server.hasExtensionArg = false;
+    renderCard(
+      [spec()],
+      status,
+      null,
+      vi.fn(),
+      vi.fn(),
+      { phase: "running", browser: "firefox" },
+    );
+    expect(
+      (screen.getByRole("button", { name: "Installing browser…" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    cleanup();
+    renderCard(
+      [spec()],
+      status,
+      null,
+      vi.fn(),
+      vi.fn(),
+      { phase: "done", browser: "firefox", ok: true, reason: null },
+    );
+    expect(screen.getByText(/firefox installed/)).toBeTruthy();
+  });
+
   it("passes a CDP endpoint for other Chromium browsers", () => {
     const onConfigure = vi.fn();
     renderCard([spec()], extensionStatus(), null, onConfigure);
@@ -101,6 +142,7 @@ describe("PageMCP — playwright connection status", () => {
     fireEvent.change(screen.getByLabelText("Chromium CDP endpoint"), {
       target: { value: "http://localhost:9222" },
     });
+    expect(screen.queryByText(/Install cdp/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Configure server" }));
     expect(onConfigure).toHaveBeenCalledWith("cdp", undefined, "http://localhost:9222");
   });

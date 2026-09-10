@@ -10,6 +10,8 @@ import type {
   McpExtensionCheck,
   McpExtensionStatus,
   McpSpecInfo,
+  PlaywrightBrowserInstall,
+  PlaywrightManagedBrowser,
   PlaywrightMcpConnectionMode,
   MemoryDetail,
   MemoryEntryInfo,
@@ -113,9 +115,11 @@ export function SettingsModal({
   onToggleMcpTool,
   mcpExtensionStatus,
   mcpExtensionCheck,
+  playwrightBrowserInstall,
   onRequestMcpExtensionStatus,
   onConfigureMcpExtension,
   onCheckMcpExtension,
+  onInstallPlaywrightBrowser,
   onReadMemory,
   onWriteMemory,
   onDeleteMemory,
@@ -179,6 +183,7 @@ export function SettingsModal({
   onToggleMcpTool: (name: string, tool: string, disabled: boolean) => void;
   mcpExtensionStatus: McpExtensionStatus | null;
   mcpExtensionCheck: McpExtensionCheck | null;
+  playwrightBrowserInstall: PlaywrightBrowserInstall | null;
   onRequestMcpExtensionStatus: () => void;
   onConfigureMcpExtension: (
     mode: PlaywrightMcpConnectionMode,
@@ -186,6 +191,7 @@ export function SettingsModal({
     cdpEndpoint?: string,
   ) => void;
   onCheckMcpExtension: () => void;
+  onInstallPlaywrightBrowser: (browser: PlaywrightManagedBrowser) => void;
   onReadMemory: (path: string) => void;
   onWriteMemory: (
     scope: "global" | "project",
@@ -314,9 +320,11 @@ export function SettingsModal({
                 onToggleTool={onToggleMcpTool}
                 extensionStatus={mcpExtensionStatus}
                 extensionCheck={mcpExtensionCheck}
+                browserInstall={playwrightBrowserInstall}
                 onRequestExtensionStatus={onRequestMcpExtensionStatus}
                 onConfigureExtension={onConfigureMcpExtension}
                 onCheckExtension={onCheckMcpExtension}
+                onInstallBrowser={onInstallPlaywrightBrowser}
               />
             )}
             {page === "memory" && (
@@ -1628,9 +1636,11 @@ export function PageMCP({
   onToggleTool,
   extensionStatus,
   extensionCheck,
+  browserInstall,
   onRequestExtensionStatus,
   onConfigureExtension,
   onCheckExtension,
+  onInstallBrowser,
 }: {
   specs: McpSpecInfo[];
   bridged: boolean;
@@ -1640,6 +1650,7 @@ export function PageMCP({
   onToggleTool: (name: string, tool: string, disabled: boolean) => void;
   extensionStatus: McpExtensionStatus | null;
   extensionCheck: McpExtensionCheck | null;
+  browserInstall: PlaywrightBrowserInstall | null;
   onRequestExtensionStatus: () => void;
   onConfigureExtension: (
     mode: PlaywrightMcpConnectionMode,
@@ -1647,6 +1658,7 @@ export function PageMCP({
     cdpEndpoint?: string,
   ) => void;
   onCheckExtension: () => void;
+  onInstallBrowser: (browser: PlaywrightManagedBrowser) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
@@ -1677,6 +1689,9 @@ export function PageMCP({
   };
   const configuredMode = extensionStatus?.server.mode;
   const extensionMode = mode === "extension";
+  const managedMode = mode !== "extension" && mode !== "cdp";
+  const installRunning =
+    managedMode && browserInstall?.phase === "running" && browserInstall.browser === mode;
   const playwrightSpec = specs.find((s) => s.name === "playwright");
   let connection: { text: string; color: string } | null = null;
   if (playwrightSpec) {
@@ -1772,6 +1787,18 @@ export function PageMCP({
                 {t("settings.mcpTestConn")}
               </button>
             ) : null}
+            {managedMode ? (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={installRunning}
+                onClick={() => onInstallBrowser(mode)}
+              >
+                {installRunning
+                  ? t("settings.mcpBrowserInstalling")
+                  : t("settings.mcpBrowserInstall", { browser: mode })}
+              </button>
+            ) : null}
           </div>
           <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
             {extensionStatus
@@ -1787,6 +1814,19 @@ export function PageMCP({
           {connection ? (
             <div style={{ marginTop: 4, fontSize: 11, color: connection.color }}>
               {connection.text}
+            </div>
+          ) : null}
+          {managedMode && browserInstall?.phase === "done" && browserInstall.browser === mode ? (
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: browserInstall.ok ? "var(--accent)" : "var(--danger)",
+              }}
+            >
+              {browserInstall.ok
+                ? t("settings.mcpBrowserInstallOk", { browser: mode })
+                : `✗ ${browserInstall.reason ?? t("settings.mcpBrowserInstallFailed")}`}
             </div>
           ) : null}
           {extensionMode && extensionCheck?.phase === "running" ? (

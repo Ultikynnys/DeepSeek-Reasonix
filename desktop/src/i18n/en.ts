@@ -273,6 +273,10 @@ export const en = {
       "Playwright launches and maintains a persistent profile for this browser. Firefox and WebKit do not use the extension relay.",
     mcpCdpHint:
       "For Brave, Vivaldi, Opera, Chromium, and similar browsers started with a remote debugging endpoint.",
+    mcpBrowserInstall: "Install {browser}",
+    mcpBrowserInstalling: "Installing browser…",
+    mcpBrowserInstallOk: "✓ {browser} installed — reconnecting the Playwright server",
+    mcpBrowserInstallFailed: "browser installation failed",
     mcpTokenSaved: "token saved",
     mcpConnConnected: "server connected · {count} tools live",
     mcpConnHandshake: "server connecting…",

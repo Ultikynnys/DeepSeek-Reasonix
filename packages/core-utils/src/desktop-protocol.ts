@@ -445,13 +445,9 @@ export interface McpExtensionBundled {
   version: string | null;
 }
 
-export type PlaywrightMcpConnectionMode =
-  | "chrome"
-  | "firefox"
-  | "webkit"
-  | "msedge"
-  | "extension"
-  | "cdp";
+export type PlaywrightManagedBrowser = "chrome" | "firefox" | "webkit" | "msedge";
+
+export type PlaywrightMcpConnectionMode = PlaywrightManagedBrowser | "extension" | "cdp";
 
 export interface McpExtensionServerState {
   configured: boolean;
@@ -483,6 +479,20 @@ export type McpExtensionCheck =
 export interface McpExtensionCheckEvent {
   type: "$mcp_extension_check";
   check: McpExtensionCheck;
+}
+
+export type PlaywrightBrowserInstall =
+  | { phase: "running"; browser: PlaywrightManagedBrowser }
+  | {
+      phase: "done";
+      browser: PlaywrightManagedBrowser;
+      ok: boolean;
+      reason: string | null;
+    };
+
+export interface PlaywrightBrowserInstallEvent {
+  type: "$playwright_browser_install";
+  install: PlaywrightBrowserInstall;
 }
 
 export type SkillScope = "project" | "custom" | "global" | "builtin";
@@ -1062,6 +1072,7 @@ export type OutgoingCommand = { tabId?: string } & (
       cdpEndpoint?: string;
     }
   | { cmd: "mcp_extension_check" }
+  | { cmd: "playwright_browser_install"; browser: PlaywrightManagedBrowser }
   | { cmd: "rule_add"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "rule_remove"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "skills_get" }
