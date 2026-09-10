@@ -215,7 +215,8 @@ import {
 } from "../../index.js";
 import { createLogger } from "../../logging.js";
 import { MCP_CATALOG, catalogStdioCommand } from "../../mcp/catalog.js";
-import { parseMcpSpec, specToRaw } from "../../mcp/spec.js";
+import { isPlaywrightSpec } from "../../mcp/playwright-tooling.js";
+import { type McpServerSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
   type ModelPrefs,
   type SessionMeta,
@@ -2053,6 +2054,8 @@ function emitMcpSpecs(tab: Tab): void {
     const base = summarizeMcpSpec(raw);
     // Config-level toggle state — visible even before the first bridge.
     base.disabled = spec.disabled === true;
+    // Reasonix-managed servers are built-in — disableable but not removable.
+    base.builtin = isPlaywrightSpec(spec);
     if (spec.disabledTools?.length) base.disabledTools = spec.disabledTools;
     const toolState = toolStateByRaw.get(raw);
     if (toolState) {
@@ -4775,6 +4778,25 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "mcp_specs_remove") {
       try {
+        let parsedSpec: McpServerSpec | null = null;
+        try {
+          parsedSpec = parseMcpSpec(msg.spec);
+        } catch (err) {
+          emitDiagnosticError("mcp.spec.parse.ignored", err, {
+            tabId: tab.id,
+            details: { spec: msg.spec },
+          });
+        }
+        if (parsedSpec && isPlaywrightSpec(parsedSpec)) {
+          emit(
+            {
+              type: "$error",
+              message: "mcp_specs_remove: the built-in Playwright server can't be removed",
+            },
+            tab.id,
+          );
+          return;
+        }
         const cfg = readConfig();
         let changed = false;
         const list = cfg.mcp ?? [];
@@ -4782,15 +4804,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           cfg.mcp = list.filter((s) => s !== msg.spec);
           changed = true;
         }
-        let parsedName: string | null = null;
-        try {
-          parsedName = parseMcpSpec(msg.spec).name;
-        } catch (err) {
-          emitDiagnosticError("mcp.spec.parse.ignored", err, {
-            tabId: tab.id,
-            details: { spec: msg.spec },
-          });
-        }
+        const parsedName = parsedSpec?.name ?? null;
         if (parsedName && cfg.mcpServers && parsedName in cfg.mcpServers) {
           delete cfg.mcpServers[parsedName];
           changed = true;
@@ -4852,7 +4866,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         mergeMcpServerEntry(cfg, entry.name, { transport: "stdio", command, args });
         const stored = cfg.mcpServers?.[entry.name];
         if (!stored) throw new Error("failed to create the playwright server entry");
-        stored.args = configurePlaywrightArgs(stored.args ?? args, msg.mode, msg.cdpEndpoint);
+        stored.args = configurePlaywrightArgs(
+          stored.args ?? args,
+          msg.mode,
+          msg.cdpEndpoint,
+          msg.extensionBrowser,
+        );
         const env = { ...(stored.env ?? {}) };
         if (msg.mode === "extension" && token) {
           // Explicit write: tokens rotate, so a newly entered one replaces any stored value.

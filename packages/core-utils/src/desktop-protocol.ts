@@ -431,6 +431,9 @@ export interface McpSpecInfo {
   disabledTools?: string[];
   /** Bare MCP tool names the server exposes — feeds the per-tool toggle UI. */
   tools?: string[];
+  /** Reasonix-managed server (currently Playwright) — disableable and
+   *  reconfigureable through its card, but never removable from the list. */
+  builtin?: boolean;
 }
 
 export interface McpSpecsEvent {
@@ -441,6 +444,10 @@ export interface McpSpecsEvent {
 
 export type PlaywrightManagedBrowser = "chrome" | "firefox" | "webkit" | "msedge";
 
+/** Extension relay targets: the Playwright Extension is Chromium-only, so the
+ *  card chooses between Chrome (the default) and Edge. */
+export type PlaywrightExtensionBrowser = "chrome" | "msedge";
+
 export type PlaywrightMcpConnectionMode = PlaywrightManagedBrowser | "extension" | "cdp";
 
 export interface McpExtensionServerState {
@@ -448,6 +455,8 @@ export interface McpExtensionServerState {
   mode: PlaywrightMcpConnectionMode;
   hasExtensionArg: boolean;
   cdpEndpoint?: string;
+  /** Browser the extension relay targets when mode is "extension" (defaults to chrome). */
+  extensionBrowser?: PlaywrightExtensionBrowser;
   /** Redacted relay-token identifier for saved-state UI; never contains the full token. */
   tokenPrefix?: string;
   args: string[];
@@ -1063,6 +1072,7 @@ export type OutgoingCommand = { tabId?: string } & (
       mode: PlaywrightMcpConnectionMode;
       token?: string;
       cdpEndpoint?: string;
+      extensionBrowser?: PlaywrightExtensionBrowser;
     }
   | { cmd: "mcp_extension_check" }
   | { cmd: "playwright_browser_install"; browser: PlaywrightManagedBrowser }

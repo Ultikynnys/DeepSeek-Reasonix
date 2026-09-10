@@ -142,6 +142,7 @@ export type {
   McpExtensionStatusEvent,
   PlaywrightManagedBrowser,
   PlaywrightMcpConnectionMode,
+  PlaywrightExtensionBrowser,
   PlaywrightBrowserInstall,
   PlaywrightBrowserInstallEvent,
   SkillScope,

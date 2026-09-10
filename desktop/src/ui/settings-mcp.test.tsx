@@ -94,7 +94,7 @@ describe("PageMCP — playwright connection status", () => {
     expect(screen.queryByRole("button", { name: "Open extension listing" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Browser connection"), { target: { value: "webkit" } });
     fireEvent.click(screen.getByRole("button", { name: "Configure server" }));
-    expect(onConfigure).toHaveBeenCalledWith("webkit", undefined, undefined);
+    expect(onConfigure).toHaveBeenCalledWith("webkit", undefined, undefined, undefined);
   });
 
   it("offers the managed Firefox installer and dispatches it", () => {
@@ -143,7 +143,27 @@ describe("PageMCP — playwright connection status", () => {
     });
     expect(screen.queryByText(/Install cdp/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Configure server" }));
-    expect(onConfigure).toHaveBeenCalledWith("cdp", undefined, "http://localhost:9222");
+    expect(onConfigure).toHaveBeenCalledWith("cdp", undefined, "http://localhost:9222", undefined);
+  });
+
+  it("offers a Chrome/Edge picker for extension mode and forwards the choice", () => {
+    const onConfigure = vi.fn();
+    renderCard([spec()], extensionStatus(), null, onConfigure);
+    fireEvent.change(screen.getByLabelText("Extension browser"), { target: { value: "msedge" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reconfigure server" }));
+    expect(onConfigure).toHaveBeenCalledWith("extension", undefined, undefined, "msedge");
+  });
+
+  it("hides the Remove button for a built-in server", () => {
+    renderCard([spec({ builtin: true })]);
+    expect(screen.getByText(/built-in/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
+  it("keeps the Remove button for a user-added server", () => {
+    renderCard([spec()]);
+    expect(screen.getByRole("button", { name: "Remove" })).toBeTruthy();
+    expect(screen.queryByText(/built-in/)).toBeNull();
   });
 
   it("shows live connection state with the tool count when bridged", () => {

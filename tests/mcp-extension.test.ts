@@ -165,6 +165,27 @@ describe("Playwright connection configuration", () => {
     ).toEqual(["-y", "@playwright/mcp", "--extension"]);
   });
 
+  it("targets Edge for the extension relay when asked", () => {
+    const args = configurePlaywrightArgs(
+      ["-y", "@playwright/mcp", "--extension"],
+      "extension",
+      undefined,
+      "msedge",
+    );
+    expect(args).toEqual(["-y", "@playwright/mcp", "--browser=msedge", "--extension"]);
+    expect(parsePlaywrightConnection(args)).toEqual({
+      mode: "extension",
+      extensionBrowser: "msedge",
+    });
+  });
+
+  it("defaults the extension relay to Chrome when no browser is set", () => {
+    expect(parsePlaywrightConnection(["-y", "@playwright/mcp", "--extension"])).toEqual({
+      mode: "extension",
+      extensionBrowser: "chrome",
+    });
+  });
+
   it("configures Chromium CDP and validates its endpoint", () => {
     const args = configurePlaywrightArgs(
       ["-y", "@playwright/mcp", "--browser=webkit"],
@@ -233,6 +254,7 @@ describe("computeMcpExtensionStatus", () => {
     expect(status.server).toEqual({
       configured: true,
       mode: "extension",
+      extensionBrowser: "chrome",
       hasExtensionArg: true,
       tokenPrefix: undefined,
       args: ["-y", "@playwright/mcp", "--extension", "--profile-dir-name=Profile 1"],

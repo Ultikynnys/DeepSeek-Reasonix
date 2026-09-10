@@ -1,7 +1,10 @@
 /** Configures Playwright MCP browser connections. The extension comes from the
  *  Chrome Web Store; no bundled copy ships, so the base install stays lightweight. */
 
-import type { PlaywrightMcpConnectionMode } from "@reasonix/core-utils/desktop-protocol";
+import type {
+  PlaywrightExtensionBrowser,
+  PlaywrightMcpConnectionMode,
+} from "@reasonix/core-utils/desktop-protocol";
 
 /** Official Chrome Web Store listing — "Playwright Extension" (Microsoft, Apache-2.0). */
 export const PLAYWRIGHT_EXTENSION_STORE_URL =
@@ -30,12 +33,28 @@ export function playwrightBrowserInstallArgs(
   return ["-y", packageId, "install-browser", browser];
 }
 
+/** Read the `--browser`/`--browser=` value from a Playwright MCP argv, if any. */
+function browserArg(args: string[]): string | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    const value = arg === "--browser" ? args[index + 1] : arg.match(/^--browser=(.+)$/)?.[1];
+    if (value) return value;
+  }
+  return undefined;
+}
+
 /** Parse Reasonix's supported connection modes from a Playwright MCP argv. */
 export function parsePlaywrightConnection(args: string[]): {
   mode: PlaywrightMcpConnectionMode;
   cdpEndpoint?: string;
+  extensionBrowser?: PlaywrightExtensionBrowser;
 } {
-  if (args.includes(PLAYWRIGHT_EXTENSION_ARG)) return { mode: "extension" };
+  if (args.includes(PLAYWRIGHT_EXTENSION_ARG)) {
+    return {
+      mode: "extension",
+      extensionBrowser: browserArg(args) === "msedge" ? "msedge" : "chrome",
+    };
+  }
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
     const cdpEndpoint =
@@ -54,6 +73,7 @@ export function configurePlaywrightArgs(
   args: string[],
   mode: PlaywrightMcpConnectionMode,
   cdpEndpoint?: string,
+  extensionBrowser: PlaywrightExtensionBrowser = "chrome",
 ): string[] {
   const result: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -66,7 +86,12 @@ export function configurePlaywrightArgs(
     if (/^--(?:browser|cdp-endpoint|profile-dir-name)=/.test(arg)) continue;
     result.push(arg);
   }
-  if (mode === "extension") return [...result, PLAYWRIGHT_EXTENSION_ARG];
+  if (mode === "extension") {
+    // Chrome is @playwright/mcp's extension default; only Edge needs the flag.
+    return extensionBrowser === "msedge"
+      ? [...result, "--browser=msedge", PLAYWRIGHT_EXTENSION_ARG]
+      : [...result, PLAYWRIGHT_EXTENSION_ARG];
+  }
   if (mode === "cdp") {
     const endpoint = cdpEndpoint?.trim();
     if (!endpoint) throw new Error("a Chromium CDP endpoint is required");

@@ -53,6 +53,7 @@ import {
   type PlaywrightBrowserInstall,
   type PlaywrightManagedBrowser,
   type PlaywrightMcpConnectionMode,
+  type PlaywrightExtensionBrowser,
   type MemoryDetail,
   type MemoryEntryInfo,
   type ModelEndpointInfo,
@@ -2454,8 +2455,12 @@ function TabRuntime({
     [sendRpc],
   );
   const configureMcpExtension = useCallback(
-    (mode: PlaywrightMcpConnectionMode, token?: string, cdpEndpoint?: string) =>
-      sendRpc({ cmd: "mcp_extension_configure", mode, token, cdpEndpoint }),
+    (
+      mode: PlaywrightMcpConnectionMode,
+      token?: string,
+      cdpEndpoint?: string,
+      extensionBrowser?: PlaywrightExtensionBrowser,
+    ) => sendRpc({ cmd: "mcp_extension_configure", mode, token, cdpEndpoint, extensionBrowser }),
     [sendRpc],
   );
   const checkMcpExtension = useCallback(() => sendRpc({ cmd: "mcp_extension_check" }), [sendRpc]);

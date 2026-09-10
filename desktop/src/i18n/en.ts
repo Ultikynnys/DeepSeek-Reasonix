@@ -247,6 +247,7 @@ export const en = {
     mcpEnable: "Enable",
     mcpDisable: "Disable",
     mcpDisabledBadge: "disabled",
+    mcpBuiltinBadge: "built-in",
     mcpToolsLabel: "Tools ({count})",
     mcpToolsDisabledNote: "{count} tool(s) toggled off",
     mcpToolToggleHint: "Disabled tools stay unregistered until re-enabled",
@@ -260,6 +261,9 @@ export const en = {
     mcpModeEdge: "Managed Microsoft Edge",
     mcpModeExtension: "Existing Chrome/Edge tabs (extension)",
     mcpModeCdp: "Other Chromium browser (CDP)",
+    mcpExtensionBrowserLabel: "Extension browser",
+    mcpExtensionBrowserChrome: "Google Chrome",
+    mcpExtensionBrowserEdge: "Microsoft Edge",
     mcpCdpEndpoint: "Chromium CDP endpoint",
     mcpOpenExtensionStore: "Open extension listing",
     mcpConfigure: "Configure server",
@@ -268,7 +272,7 @@ export const en = {
     mcpConfiguredNo: "playwright server not configured yet — choose a mode and configure it",
     mcpTokenPlaceholder: "PLAYWRIGHT_MCP_EXTENSION_TOKEN",
     mcpTokenHint:
-      "Chrome/Edge only. The optional relay token skips the per-connection approval prompt. The listing opens in your system default browser.",
+      "Chrome/Edge only. Pick the browser where you installed the extension. The optional relay token skips the per-connection approval prompt; the listing opens in your system default browser.",
     mcpManagedHint:
       "Playwright launches and maintains a persistent profile for this browser. Firefox and WebKit do not use the extension relay.",
     mcpCdpHint:

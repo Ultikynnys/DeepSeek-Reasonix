@@ -13,6 +13,7 @@ import type {
   PlaywrightBrowserInstall,
   PlaywrightManagedBrowser,
   PlaywrightMcpConnectionMode,
+  PlaywrightExtensionBrowser,
   MemoryDetail,
   MemoryEntryInfo,
   SettingsPatch,
@@ -189,6 +190,7 @@ export function SettingsModal({
     mode: PlaywrightMcpConnectionMode,
     token?: string,
     cdpEndpoint?: string,
+    extensionBrowser?: PlaywrightExtensionBrowser,
   ) => void;
   onCheckMcpExtension: () => void;
   onInstallPlaywrightBrowser: (browser: PlaywrightManagedBrowser) => void;
@@ -1656,6 +1658,7 @@ export function PageMCP({
     mode: PlaywrightMcpConnectionMode,
     token?: string,
     cdpEndpoint?: string,
+    extensionBrowser?: PlaywrightExtensionBrowser,
   ) => void;
   onCheckExtension: () => void;
   onInstallBrowser: (browser: PlaywrightManagedBrowser) => void;
@@ -1663,6 +1666,7 @@ export function PageMCP({
   const [draft, setDraft] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
   const [mode, setMode] = useState<PlaywrightMcpConnectionMode>("chrome");
+  const [extensionBrowser, setExtensionBrowser] = useState<PlaywrightExtensionBrowser>("chrome");
   const [cdpEndpoint, setCdpEndpoint] = useState("");
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   useEffect(() => {
@@ -1671,6 +1675,7 @@ export function PageMCP({
   useEffect(() => {
     if (!extensionStatus) return;
     setMode(extensionStatus.server.mode);
+    setExtensionBrowser(extensionStatus.server.extensionBrowser ?? "chrome");
     setCdpEndpoint(extensionStatus.server.cdpEndpoint ?? "");
   }, [extensionStatus]);
   const submit = () => {
@@ -1745,6 +1750,19 @@ export function PageMCP({
                 style={{ minWidth: 240 }}
               />
             ) : null}
+            {mode === "extension" ? (
+              <select
+                className="field"
+                aria-label={t("settings.mcpExtensionBrowserLabel")}
+                value={extensionBrowser}
+                onChange={(event) =>
+                  setExtensionBrowser(event.target.value as PlaywrightExtensionBrowser)
+                }
+              >
+                <option value="chrome">{t("settings.mcpExtensionBrowserChrome")}</option>
+                <option value="msedge">{t("settings.mcpExtensionBrowserEdge")}</option>
+              </select>
+            ) : null}
             {extensionMode ? (
               <>
                 <button
@@ -1776,6 +1794,7 @@ export function PageMCP({
                   mode,
                   extensionMode ? tokenDraft.trim() || undefined : undefined,
                   mode === "cdp" ? cdpEndpoint.trim() : undefined,
+                  mode === "extension" ? extensionBrowser : undefined,
                 );
                 setTokenDraft("");
               }}
@@ -1898,6 +1917,11 @@ export function PageMCP({
                   <div className="mcp-spec-body">
                     <div className="nm">
                       {s.name ?? "(anonymous)"}
+                      {s.builtin ? (
+                        <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 11 }}>
+                          · {t("settings.mcpBuiltinBadge")}
+                        </span>
+                      ) : null}
                       {s.disabled ? (
                         <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 11 }}>
                           · {t("settings.mcpDisabledBadge")}
@@ -1922,14 +1946,16 @@ export function PageMCP({
                       {s.disabled ? t("settings.mcpEnable") : t("settings.mcpDisable")}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="btn ghost mcp-remove"
-                    style={{ color: "var(--danger)" }}
-                    onClick={() => onRemove(s.raw)}
-                  >
-                    {t("settings.mcpRemove")}
-                  </button>
+                  {s.builtin ? null : (
+                    <button
+                      type="button"
+                      className="btn ghost mcp-remove"
+                      style={{ color: "var(--danger)" }}
+                      onClick={() => onRemove(s.raw)}
+                    >
+                      {t("settings.mcpRemove")}
+                    </button>
+                  )}
                 </div>
                 {s.parseError ? (
                   <div className="desc" style={{ color: "var(--danger)" }}>
