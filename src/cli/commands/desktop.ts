@@ -2123,7 +2123,8 @@ export function interpretExtensionCheck(
         errorText = String(parsed.error ?? "cancelled");
       }
     } catch {
-      /* plain text success — tabs listing is not JSON-error shaped */
+      // Not JSON — the tabs listing is plain text; fall through as success.
+      errorText = null;
     }
   }
   if (errorText === null) return { ok: true, reason: null, elapsedMs };
