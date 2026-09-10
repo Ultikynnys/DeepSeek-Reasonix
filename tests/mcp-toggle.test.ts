@@ -172,10 +172,14 @@ const mocks = vi.hoisted(() => {
     elapsedMs: 1,
   }));
   class FakeMcpClient {
+    static instances: FakeMcpClient[] = [];
     protocolVersion = "2024-11-05";
     serverInfo = { name: "fake", version: "1.0.0" };
     serverCapabilities = { tools: {} };
     closed = 0;
+    constructor() {
+      FakeMcpClient.instances.push(this);
+    }
     async initialize(): Promise<void> {}
     async close(): Promise<void> {
       this.closed += 1;
@@ -211,7 +215,9 @@ vi.mock("../src/mcp/stdio.js", () => ({ StdioTransport: mocks.FakeTransport }));
 vi.mock("../src/mcp/sse.js", () => ({ SseTransport: mocks.FakeTransport }));
 vi.mock("../src/mcp/streamable-http.js", () => ({ StreamableHttpTransport: mocks.FakeTransport }));
 
-function demoCfg(overrides: { disabled?: boolean; disabledTools?: string[] } = {}): {
+function demoCfg(
+  overrides: { disabled?: boolean; disabledTools?: string[]; env?: Record<string, string> } = {},
+): {
   mcpServers: Record<string, unknown>;
 } {
   const server: Record<string, unknown> = {
@@ -221,6 +227,7 @@ function demoCfg(overrides: { disabled?: boolean; disabledTools?: string[] } = {
   };
   if (overrides.disabled !== undefined) server.disabled = overrides.disabled;
   if (overrides.disabledTools) server.disabledTools = overrides.disabledTools;
+  if (overrides.env) server.env = overrides.env;
   return { mcpServers: { demo: server } };
 }
 
@@ -329,5 +336,32 @@ describe("MCP runtime — server & per-tool toggle application", () => {
     expect(runtime.size()).toBe(1);
     expect(specNames(tools)).toEqual(["demo_a"]);
     expect(runtime.summaries()[0]!.toolCount).toBe(1);
+  });
+
+  it("respawns a live bridge when its env changes (e.g. a rotated token)", async () => {
+    mocks.readConfigMock.mockReturnValue(demoCfg({ env: { TOKEN: "old" } }));
+    const { runtime } = buildRuntime();
+    mocks.FakeMcpClient.instances.length = 0;
+    await runtime.reloadFromConfig();
+    expect(runtime.size()).toBe(1);
+    expect(mocks.FakeMcpClient.instances).toHaveLength(1);
+
+    // Same raw spec, different env — must tear down and rebuild so the new env
+    // (PLAYWRIGHT_MCP_EXTENSION_TOKEN) actually reaches the spawned server.
+    mocks.readConfigMock.mockReturnValue(demoCfg({ env: { TOKEN: "new" } }));
+    await runtime.reloadFromConfig();
+    expect(runtime.size()).toBe(1);
+    expect(mocks.FakeMcpClient.instances).toHaveLength(2);
+    expect(mocks.FakeMcpClient.instances[0]!.closed).toBe(1);
+  });
+
+  it("keeps the live bridge when env is unchanged (no churn)", async () => {
+    mocks.readConfigMock.mockReturnValue(demoCfg({ env: { TOKEN: "same" } }));
+    const { runtime } = buildRuntime();
+    mocks.FakeMcpClient.instances.length = 0;
+    await runtime.reloadFromConfig();
+    await runtime.reloadFromConfig();
+    expect(runtime.size()).toBe(1);
+    expect(mocks.FakeMcpClient.instances).toHaveLength(1);
   });
 });

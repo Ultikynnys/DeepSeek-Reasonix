@@ -15,7 +15,13 @@ import {
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { type McpClientHost, bridgeMcpTools, registerSingleMcpTool } from "../../mcp/registry.js";
 import type { McpServerSpec } from "../../mcp/spec.js";
-import { overlayMatchedSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
+import {
+  getMcpServerEnv,
+  getMcpServerHeaders,
+  overlayMatchedSpec,
+  parseMcpSpec,
+  specToRaw,
+} from "../../mcp/spec.js";
 import { buildMcpServerSummary } from "../../mcp/summary.js";
 import type { McpServerSummary } from "../../mcp/summary.js";
 import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
@@ -40,6 +46,10 @@ interface SpecRecord {
   /** Bare MCP tool names currently filtered out of the registry (user toggles).
    *  Diffs against config to decide which tools to un/register without respawn. */
   disabledTools: string[];
+  /** Fingerprint of the env/headers this bridge was spawned with. A change (e.g.
+   *  a rotated extension token) must force a respawn — `specToRaw` omits these,
+   *  so a raw-spec diff alone would silently keep a stale bridge. */
+  runtimeKey: string;
 }
 
 export interface RuntimeContext {
@@ -99,6 +109,19 @@ export interface McpRuntime {
   closeAll(): Promise<void>;
   /** Replace the sink that lifecycle events flow through — App.tsx swaps this in on mount so toasts land in the alt-screen UI instead of corrupting it via stderr. */
   setLifecycleSink(sink: McpLifecycleSink): void;
+}
+
+/** Identity of the env/headers a bridge was spawned with. The raw spec string
+ *  (`specToRaw`) can't carry these, so `reloadFromConfig` must diff them
+ *  explicitly to notice a rotated token or changed header and respawn. */
+function runtimeFingerprint(spec: McpServerSpec): string {
+  const stable = (rec?: Record<string, string>): Array<[string, string]> | null =>
+    rec
+      ? Object.keys(rec)
+          .sort()
+          .map((k) => [k, rec[k]!])
+      : null;
+  return JSON.stringify([stable(getMcpServerEnv(spec)), stable(getMcpServerHeaders(spec))]);
 }
 
 export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
@@ -214,6 +237,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         }),
         registeredNames: bridge.registeredNames,
         registeredSpecs,
+        runtimeKey: runtimeFingerprint(spec),
         disabledTools: spec.disabledTools ?? [],
       });
       insertionOrder.push(raw);
@@ -266,6 +290,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         summary,
         registeredNames: bridge.registeredNames,
         registeredSpecs,
+        runtimeKey: runtimeFingerprint(spec),
         disabledTools: spec.disabledTools ?? [],
       });
       // Hot-add: shift the prefix so the live loop sees the new tools
@@ -427,6 +452,15 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
           reason: "disabled by user",
           at: Date.now(),
         });
+        continue;
+      }
+      // Env/header change while live (e.g. a rotated extension token) — the raw
+      // spec string can't carry these, so respawn so the bridge picks them up.
+      const record = records.get(spec)!;
+      if (runtimeFingerprint(next) !== record.runtimeKey) {
+        await removeSpec(spec, loop);
+        const respawned = await addSpec(spec, loop);
+        if (!respawned.ok) failed.push({ spec, reason: respawned.reason });
         continue;
       }
       // Per-tool disable delta — hot un/register without respawning.
