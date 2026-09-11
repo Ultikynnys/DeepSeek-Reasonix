@@ -737,6 +737,8 @@ export interface SettingsEvent {
   disableAutoCompaction?: boolean;
   /** Whether subagent skills may run. Defaults to true when absent. */
   enableSubagents?: boolean;
+  /** Whether `run_command` may run commands elevated via Windows UAC. Defaults to false. */
+  elevationEnabled?: boolean;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -1009,6 +1011,8 @@ export interface SettingsPatch {
   disableAutoCompaction?: boolean;
   /** Allow dedicated and skill-based subagents to run. */
   enableSubagents?: boolean;
+  /** Allow `run_command` to run commands elevated via Windows UAC. */
+  elevationEnabled?: boolean;
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;

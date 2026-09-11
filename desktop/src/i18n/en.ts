@@ -765,6 +765,15 @@ export const en = {
     disableSubagents: "Disable subagents",
     subagentsEnabledDesc: "Dedicated and skill-based subagents can run.",
     subagentsDisabledDesc: "Subagent calls are blocked. Inline skills remain available.",
+    elevation: "Elevation (Windows UAC)",
+    elevationEnabled: "Enabled",
+    elevationDisabled: "Disabled",
+    enableElevation: "Enable elevation",
+    disableElevation: "Disable elevation",
+    elevationEnabledDesc:
+      "run_command can run a command elevated via the Windows UAC prompt. Each elevated run still asks for approval and shows the UAC dialog.",
+    elevationDisabledDesc:
+      "Elevated commands are blocked. run_command refuses elevate=true until this is enabled.",
     compactionDisabled: "auto-compaction disabled",
     autoCompactionDisabledTooltip: "Auto-compaction disabled (manual button only)",
     ollamaGeneration: "Ollama generation",

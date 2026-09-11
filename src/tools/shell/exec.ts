@@ -1,5 +1,7 @@
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
+import { readFile, unlink, writeFile } from "node:fs/promises";
+import * as os from "node:os";
 import * as pathMod from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import {
@@ -247,22 +249,19 @@ export async function runCommand(
         shouldPersistOutputRecovery(totalBytes, truncated, exitCode, opts.preserveOutput),
         opts.outputRecovery,
       );
-      const omittedBytes = Math.max(
-        0,
-        totalBytes - Math.min(totalBytes, Buffer.byteLength(buf.slice(0, maxChars))),
+      resolve(
+        assembleResult({
+          buf,
+          totalBytes,
+          rawByteLength: merged.length,
+          exitCode,
+          durationMs: Date.now() - startedAt,
+          timedOut,
+          maxChars,
+          recovery: recoveryResult?.ok ? recoveryResult.ref : undefined,
+          recoveryError: recoveryResult && !recoveryResult.ok ? recoveryResult.error : undefined,
+        }),
       );
-      const marker = truncated ? `\n\n[… truncated ${omittedBytes} chars …]` : "";
-      const output = truncated ? `${buf.slice(0, maxChars)}${marker}` : buf;
-      resolve({
-        exitCode,
-        output,
-        truncated,
-        totalOutputBytes: totalBytes,
-        durationMs: Date.now() - startedAt,
-        timedOut,
-        ...(recoveryResult?.ok ? { recovery: recoveryResult.ref } : {}),
-        ...(recoveryResult && !recoveryResult.ok ? { recoveryError: recoveryResult.error } : {}),
-      });
     };
     const killTimer = setTimeout(() => {
       timedOut = true;
@@ -304,6 +303,235 @@ export async function runCommand(
     });
     child.on("close", (code) => finish(code));
   });
+}
+
+/** Shared result assembly for runCommand and runCommandElevated: apply the char
+ *  cap, build the truncation marker, and attach any content-addressed recovery
+ *  ref. Kept pure so both the piped and the elevated (temp-file) paths converge. */
+export function assembleResult(args: {
+  /** Decoded stdout+stderr (already passed through smartDecodeOutput). */
+  buf: string;
+  /** Total stdout+stderr bytes observed (may exceed rawByteLength when capped). */
+  totalBytes: number;
+  /** Byte length of the buffer `buf` was decoded from. */
+  rawByteLength: number;
+  exitCode: number | null;
+  durationMs: number;
+  timedOut: boolean;
+  maxChars: number;
+  recovery?: OutputRecoveryRef;
+  recoveryError?: string;
+}): RunCommandResult {
+  const truncated = args.buf.length > args.maxChars || args.totalBytes > args.rawByteLength;
+  const omittedBytes = Math.max(
+    0,
+    args.totalBytes -
+      Math.min(args.totalBytes, Buffer.byteLength(args.buf.slice(0, args.maxChars))),
+  );
+  const marker = truncated ? `\n\n[… truncated ${omittedBytes} chars …]` : "";
+  const output = truncated ? `${args.buf.slice(0, args.maxChars)}${marker}` : args.buf;
+  return {
+    exitCode: args.exitCode,
+    output,
+    truncated,
+    totalOutputBytes: args.totalBytes,
+    durationMs: args.durationMs,
+    timedOut: args.timedOut,
+    ...(args.recovery ? { recovery: args.recovery } : {}),
+    ...(args.recoveryError ? { recoveryError: args.recoveryError } : {}),
+  };
+}
+
+/** Exit code the launcher powershell exits with when `Start-Process -Verb RunAs`
+ *  is cancelled at the UAC prompt (ERROR_CANCELLED = 1223) or fails to launch. */
+export const ELEVATION_DECLINED_EXIT = 1223;
+
+/** Non-elevated launcher that raises the UAC consent prompt. */
+export interface ElevatedInvocation {
+  bin: string;
+  args: string[];
+}
+
+// Pure builder for the launcher that elevates `wrapperPath` via UAC consent.
+// The launcher is a plain powershell.exe; elevation happens inside it via
+// `Start-Process -Verb RunAs`, which shows the real Windows UAC dialog. It waits
+// (`-Wait -PassThru`) and exits with the elevated process's code. No filesystem
+// or process access here, so the shape is unit-testable; the caller owns writing
+// the wrapper + temp files.
+export function buildElevatedInvocation(wrapperPath: string): ElevatedInvocation {
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    "try {",
+    `  $p = Start-Process -FilePath $env:ComSpec -ArgumentList '/d','/s','/c','"${wrapperPath}"' -Verb RunAs -Wait -PassThru`,
+    "  exit $p.ExitCode",
+    "} catch {",
+    "  [Console]::Error.WriteLine('ELEVATION_DECLINED: ' + $_.Exception.Message)",
+    `  exit ${ELEVATION_DECLINED_EXIT}`,
+    "}",
+  ].join("\n");
+  return {
+    bin: "powershell.exe",
+    args: ["-NoProfile", "-NonInteractive", "-Command", script],
+  };
+}
+
+export interface ElevatedCommandResult extends RunCommandResult {
+  /** True when the user dismissed the Windows UAC consent prompt. */
+  elevationDeclined?: boolean;
+}
+
+// Minimal spawn + wait + capture used by the elevated runner. Unlike runCommand
+// it does not stream live output or retain a large stdout buffer: the elevated
+// process writes its real output to a temp file, so the launcher's stdout/stderr
+// only carry diagnostics (e.g. a UAC-decline message). On timeout/abort the
+// launcher tree is killed; the elevated process itself is a separate integrity
+// level and may survive (documented limitation).
+function spawnCollect(
+  bin: string,
+  args: string[],
+  opts: { cwd: string; timeoutSec: number; signal?: AbortSignal },
+): Promise<{ exitCode: number | null; stdout: Buffer; stderr: Buffer; timedOut: boolean }> {
+  return new Promise((resolve, reject) => {
+    let child: ChildProcess;
+    try {
+      child = spawn(bin, args, {
+        cwd: opts.cwd,
+        shell: false,
+        windowsHide: true,
+        detached: process.platform !== "win32",
+      });
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let timedOut = false;
+    let settled = false;
+    const finish = (exitCode: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killTimer);
+      opts.signal?.removeEventListener("abort", onAbort);
+      resolve({ exitCode, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), timedOut });
+    };
+    const killChildTree = () => killProcessTree(child);
+    const killTimer = setTimeout(() => {
+      timedOut = true;
+      killChildTree();
+      finish(null);
+    }, opts.timeoutSec * 1000);
+    const onAbort = () => {
+      killChildTree();
+      finish(null);
+    };
+    if (opts.signal?.aborted) {
+      onAbort();
+    } else {
+      opts.signal?.addEventListener("abort", onAbort, { once: true });
+    }
+    child.stdout?.on("data", (c: Buffer) => stdout.push(c));
+    child.stderr?.on("data", (c: Buffer) => stderr.push(c));
+    child.on("error", (err) => {
+      clearTimeout(killTimer);
+      opts.signal?.removeEventListener("abort", onAbort);
+      reject(err);
+    });
+    child.on("close", (code) => finish(code));
+  });
+}
+
+// Run `cmd` in an elevated context on Windows via UAC consent. Windows-only:
+// `Start-Process -Verb RunAs` raises the OS UAC dialog and cannot pipe to our
+// stdout, so the command is written to a generated temp `.cmd` wrapper that
+// redirects combined stdout+stderr to a temp file; the file is read back and fed
+// through the same truncation/recovery pipeline. A dismissed UAC prompt is
+// surfaced as `elevationDeclined` rather than a silent empty result.
+export async function runCommandElevated(
+  cmd: string,
+  opts: {
+    cwd: string;
+    timeoutSec?: number;
+    maxOutputChars?: number;
+    signal?: AbortSignal;
+    outputRecovery?: import("../output-recovery.js").OutputRecoveryLimits;
+    preserveOutput?: boolean;
+    platform?: NodeJS.Platform;
+  },
+): Promise<ElevatedCommandResult> {
+  const platform = opts.platform ?? process.platform;
+  if (platform !== "win32") {
+    throw new Error("run_command: elevate=true is only supported on Windows");
+  }
+  const timeoutSec = opts.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
+  const maxChars = opts.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
+  const startedAt = Date.now();
+
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const wrapperPath = pathMod.join(os.tmpdir(), `rsx-elev-${token}.cmd`);
+  const outPath = pathMod.join(os.tmpdir(), `rsx-elev-${token}.out`);
+  // UTF-8 codepage, then the command with combined stdout+stderr redirected to
+  // the temp file. cmd-native chaining (|, &&, …) still applies inside the wrapper.
+  const wrapper = `@echo off\r\nchcp 65001>nul 2>&1\r\n${cmd} > "${outPath}" 2>&1\r\n`;
+
+  try {
+    await writeFile(wrapperPath, wrapper, "utf8");
+    const { bin, args } = buildElevatedInvocation(wrapperPath);
+    const collected = await spawnCollect(bin, args, {
+      cwd: opts.cwd,
+      timeoutSec,
+      signal: opts.signal,
+    });
+
+    let raw: Buffer = Buffer.alloc(0);
+    try {
+      raw = await readFile(outPath);
+    } catch {
+      /* output file absent — e.g. UAC declined before the wrapper ran */
+    }
+    const stderrText = smartDecodeOutput(collected.stderr);
+    const elevationDeclined =
+      collected.exitCode === ELEVATION_DECLINED_EXIT || /ELEVATION_DECLINED/.test(stderrText);
+
+    const buf = smartDecodeOutput(raw);
+    const totalBytes = raw.length;
+    const recoveryCapture = new OutputRecoveryCapture(opts.cwd, opts.outputRecovery);
+    recoveryCapture.append(raw);
+    const recoveryResult = recoveryCapture.finish(
+      cmd,
+      shouldPersistOutputRecovery(
+        totalBytes,
+        buf.length > maxChars,
+        collected.exitCode,
+        opts.preserveOutput,
+      ),
+      opts.outputRecovery,
+    );
+    const result = assembleResult({
+      buf,
+      totalBytes,
+      rawByteLength: raw.length,
+      exitCode: collected.exitCode,
+      durationMs: Date.now() - startedAt,
+      timedOut: collected.timedOut,
+      maxChars,
+      recovery: recoveryResult?.ok ? recoveryResult.ref : undefined,
+      recoveryError: recoveryResult && !recoveryResult.ok ? recoveryResult.error : undefined,
+    });
+
+    if (elevationDeclined) {
+      const note =
+        "\n\n[elevation declined: the Windows UAC consent prompt was dismissed or failed to launch — the command did not run elevated]";
+      return {
+        ...result,
+        elevationDeclined: true,
+        output: `${result.output}${stderrText ? `\n${stderrText}` : ""}${note}`,
+      };
+    }
+    return result;
+  } finally {
+    await Promise.allSettled([unlink(wrapperPath), unlink(outPath)]);
+  }
 }
 
 /** GBK fallback on Windows — cmd.exe's localized error DLL and native EXE stderr ignore chcp 65001. */

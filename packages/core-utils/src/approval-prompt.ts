@@ -102,6 +102,7 @@ function shellPrompt(
 ): ApprovalPrompt {
   const command = String(payload.command ?? "");
   const cwd = payload.cwd ? String(payload.cwd) : undefined;
+  const elevated = payload.elevated === true;
   const timeoutSec =
     !isBackground && typeof payload.timeoutSec === "number" ? payload.timeoutSec : undefined;
   const waitSec = isBackground && typeof payload.waitSec === "number" ? payload.waitSec : undefined;
@@ -111,37 +112,61 @@ function shellPrompt(
   if (cwd) meta.cwd = cwd;
   if (timeoutSec !== undefined) meta.timeout = `${timeoutSec}s`;
   if (waitSec !== undefined) meta.wait = `${waitSec}s`;
+  if (elevated) meta.elevation = "UAC consent required";
 
   return {
     id,
     kind: "shell",
-    tone: "warn",
-    title: isBackground ? "Run background command" : "Run command",
+    tone: elevated ? "error" : "warn",
+    title: elevated
+      ? "Run command (ELEVATED)"
+      : isBackground
+        ? "Run background command"
+        : "Run command",
     subtitle: command,
     preview: command,
     meta: Object.keys(meta).length > 0 ? meta : undefined,
-    actions: [
-      {
-        id: "run_once",
-        label: "Run once",
-        kind: "allow_once",
-      },
-      {
-        id: "always_allow",
-        label: `Always allow — ${prefix}`,
-        kind: "allow_always",
-      },
-      {
-        id: "deny",
-        label: "Deny",
-        kind: "reject",
-        secondaryInput: {
-          hint: "Reason for denial (optional)",
-          required: false,
-        },
-      },
-    ],
-    data: { prefix },
+    // Elevated runs are a privilege change: no "always allow" action, so every
+    // elevated command is re-confirmed and raises the OS UAC prompt afresh.
+    actions: elevated
+      ? [
+          {
+            id: "run_once",
+            label: "Run elevated (UAC prompt)",
+            kind: "allow_once",
+          },
+          {
+            id: "deny",
+            label: "Deny",
+            kind: "reject",
+            secondaryInput: {
+              hint: "Reason for denial (optional)",
+              required: false,
+            },
+          },
+        ]
+      : [
+          {
+            id: "run_once",
+            label: "Run once",
+            kind: "allow_once",
+          },
+          {
+            id: "always_allow",
+            label: `Always allow — ${prefix}`,
+            kind: "allow_always",
+          },
+          {
+            id: "deny",
+            label: "Deny",
+            kind: "reject",
+            secondaryInput: {
+              hint: "Reason for denial (optional)",
+              required: false,
+            },
+          },
+        ],
+    data: elevated ? {} : { prefix },
   };
 }
 

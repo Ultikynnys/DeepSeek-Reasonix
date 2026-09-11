@@ -13,6 +13,7 @@ import {
   DEFAULT_TIMEOUT_SEC,
   type RunCommandResult,
   runCommand,
+  runCommandElevated,
 } from "./shell/exec.js";
 import {
   type OutputFilterResult,
@@ -30,7 +31,12 @@ export {
   isDqEscape,
   tokenizeCommand,
 } from "./shell/parse.js";
-export type { ResolveExecutableOptions, RunCommandResult } from "./shell/exec.js";
+export type {
+  ElevatedCommandResult,
+  ElevatedInvocation,
+  ResolveExecutableOptions,
+  RunCommandResult,
+} from "./shell/exec.js";
 
 // Explanatory note appended to every force-cancelled shell tool result. It is
 // written to the log the instant the cancel fires (fast-settle in exec.ts /
@@ -39,12 +45,15 @@ export type { ResolveExecutableOptions, RunCommandResult } from "./shell/exec.js
 export const USER_CANCEL_NOTE =
   "This is an intentional user cancellation — users do this when a task stalls indefinitely or takes too long. Do not blindly retry the same command; check what it was waiting on, adjust, or proceed with the conversation.";
 export {
+  buildElevatedInvocation,
+  ELEVATION_DECLINED_EXIT,
   injectPowerShellUtf8,
   killProcessTree,
   prepareSpawn,
   quoteForCmdExe,
   resolveExecutable,
   runCommand,
+  runCommandElevated,
   smartDecodeOutput,
   withUtf8Codepage,
   LiveOutputEmitter,
@@ -60,6 +69,11 @@ export interface ShellToolsOptions {
   extraAllowed?: readonly string[] | (() => readonly string[]);
   /** Getter form lets `editMode === "yolo"` flip mid-session without re-registering tools. */
   allowAll?: boolean | (() => boolean);
+  /** Whether `run_command` may run a command elevated via Windows UAC (`elevate: true`).
+   *  Opt-in: default false. Getter form lets a mid-session config toggle take effect. */
+  elevationEnabled?: boolean | (() => boolean);
+  /** Override the detected platform (tests only). Defaults to process.platform. */
+  platform?: NodeJS.Platform;
   jobs?: JobRegistry;
   /** Fired after `run_background` / `stop_job` mutate the registry — used by the desktop popover for near-real-time updates without polling. */
   onJobsChanged?: () => void;
@@ -117,6 +131,12 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   // are wrapped into a thunk for uniformity.
   const isAllowAll: () => boolean =
     typeof opts.allowAll === "function" ? opts.allowAll : () => opts.allowAll === true;
+  // Elevation is opt-in (config gate). Resolve dynamically so a mid-session
+  // toggle is honored without re-registering the tool.
+  const isElevationEnabled: () => boolean =
+    typeof opts.elevationEnabled === "function"
+      ? opts.elevationEnabled
+      : () => opts.elevationEnabled === true;
 
   registry.register({
     name: "run_command",
@@ -126,7 +146,9 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
     // cargo check, ls, grep …) so the model can actually investigate
     // during planning. Anything that would otherwise trigger a
     // confirmation prompt is treated as "not read-only" and bounced.
-    readOnlyCheck: (args: { command?: unknown }) => {
+    readOnlyCheck: (args: { command?: unknown; elevate?: unknown }) => {
+      // Elevated runs are a privilege change — never read-only, always confirmed.
+      if (args?.elevate === true) return false;
       if (isAllowAll()) return true;
       const cmd = typeof args?.command === "string" ? args.command.trim() : "";
       if (!cmd) return false;
@@ -144,23 +166,68 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
           type: "integer",
           description: `Override the default ${timeoutSec}s timeout for a single command.`,
         },
+        elevate: {
+          type: "boolean",
+          description:
+            "Windows only. Run the command elevated via the OS UAC consent prompt (a real UAC dialog appears; the user must approve). Use only when the task genuinely needs admin rights (e.g. reading NVMe SMART / storage reliability counters). Requires elevation to be enabled in Settings → Tools. Elevated runs are always re-confirmed and can never be allowlisted.",
+        },
       },
       required: ["command"],
     },
-    fn: async (args: { command: string; timeoutSec?: number }, ctx) => {
+    fn: async (args: { command: string; timeoutSec?: number; elevate?: boolean }, ctx) => {
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_command: empty command");
       const effectiveTimeout = Math.max(1, Math.min(600, args.timeoutSec ?? timeoutSec));
+      const elevate = args.elevate === true;
+      const platform = opts.platform ?? process.platform;
+      if (elevate && platform !== "win32") {
+        throw new Error("run_command: elevate=true is only supported on Windows (UAC).");
+      }
+      if (elevate && !isElevationEnabled()) {
+        throw new Error(
+          "run_command: elevate=true is disabled. Enable it in Settings → Tools (Elevation) before requesting an elevated command.",
+        );
+      }
       await confirmShellCommand(cmd, {
         gate: ctx?.confirmationGate ?? pauseGate,
+        // Elevated runs are a privilege change: ALWAYS confirm, never allowlisted.
         isAllowed:
-          isAllowAll() || isCommandAllowed(cmd, getExtraAllowed(), rootDir, opts.sensitivePaths),
+          !elevate &&
+          (isAllowAll() || isCommandAllowed(cmd, getExtraAllowed(), rootDir, opts.sensitivePaths)),
         ask: {
           kind: "run_command",
-          payload: { command: cmd, cwd: rootDir, timeoutSec: effectiveTimeout },
+          payload: {
+            command: cmd,
+            cwd: rootDir,
+            timeoutSec: effectiveTimeout,
+            ...(elevate ? { elevated: true } : {}),
+          },
         },
         onAlwaysAllow: (prefix) => addProjectShellAllowed(rootDir, prefix),
       });
+
+      if (elevate) {
+        // Validate parseability before elevating (unclosed quotes etc.), then run
+        // the raw command through a UAC-elevated temp wrapper on Windows.
+        tokenizeCommand(cmd);
+        const elevatedResult = await runCommandElevated(cmd, {
+          cwd: rootDir,
+          timeoutSec: effectiveTimeout,
+          maxOutputChars,
+          signal: mergeSignals(ctx?.signal, ctx?.cancelSignal),
+          outputRecovery: opts.outputRecovery,
+        });
+        if (ctx?.cancelSignal?.aborted) {
+          return JSON.stringify({
+            cancelledByUser: true,
+            error: `Command force-stopped by the user. ${USER_CANCEL_NOTE}`,
+            output: elevatedResult.output,
+            exitCode: elevatedResult.exitCode,
+          });
+        }
+        return `[elevated · Windows UAC]\n${formatCommandResult(cmd, elevatedResult)}`;
+      }
+
       const argv = tokenizeCommand(cmd);
       const preserveOutput = opts.outputFiltering !== false && commandSupportsOutputFiltering(argv);
       const rawResult = await runCommand(cmd, {

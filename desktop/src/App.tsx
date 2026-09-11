@@ -1667,6 +1667,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           maxIterPerTurnOverride: ev.maxIterPerTurnOverride ?? null,
           disableAutoCompaction: ev.disableAutoCompaction ?? false,
           enableSubagents: ev.enableSubagents ?? true,
+          elevationEnabled: ev.elevationEnabled ?? false,
           baseUrl: ev.baseUrl,
           apiKeyPrefix: ev.apiKeyPrefix,
           workspaceDir: ev.workspaceDir,

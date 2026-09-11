@@ -750,6 +750,47 @@ describe("ContextPanel files", () => {
     expect(onSaveSettings).toHaveBeenCalledWith({ enableSubagents: false });
   });
 
+  it("renders the Elevation toggle below Subagents and updates the setting", () => {
+    const onSaveSettings = vi.fn();
+    render(
+      <ContextPanel
+        settings={settings}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onSaveSettings={onSaveSettings}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    const subagents = screen.getByText("Subagents");
+    const elevation = screen.getByText("Elevation (Windows UAC)");
+    expect(
+      subagents.compareDocumentPosition(elevation) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const enableBtn = screen.getByRole("button", { name: "Enable elevation" });
+    const disableBtn = screen.getByRole("button", { name: "Disable elevation" });
+    // Elevation is opt-in: absent setting reads as off.
+    expect(enableBtn.getAttribute("data-on")).toBe("false");
+    expect(disableBtn.getAttribute("data-on")).toBe("true");
+
+    fireEvent.click(enableBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({ elevationEnabled: true });
+    fireEvent.click(disableBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({ elevationEnabled: false });
+  });
+
   it("displays auto-compaction disabled indicator in context meter legend when active", () => {
     render(
       <ContextPanel

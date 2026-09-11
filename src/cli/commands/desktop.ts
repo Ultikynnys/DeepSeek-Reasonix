@@ -112,6 +112,7 @@ import {
   loadDisabledModels,
   loadEditMode,
   loadEffectiveMcpConfig,
+  loadElevationEnabled,
   loadEnableSubagents,
   loadEndpoint,
   loadEndpointForModel,
@@ -154,6 +155,7 @@ import {
   saveDisableAutoCompaction,
   saveDisabledModels,
   saveEditMode,
+  saveElevationEnabled,
   saveEnableSubagents,
   saveGmailOAuth,
   saveMailProvider,
@@ -1095,6 +1097,7 @@ function emitSettings(tab: Tab): void {
         typeof config.maxIterPerTurn === "number" ? config.maxIterPerTurn : null,
       disableAutoCompaction: tab.runtime?.loop.disableAutoCompaction ?? loadDisableAutoCompaction(),
       enableSubagents: loadEnableSubagents(),
+      elevationEnabled: loadElevationEnabled(),
       disabledModels: loadDisabledModels(),
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
@@ -5906,6 +5909,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             refreshSubagentKnowledge(openTab, msg.enableSubagents);
             emitSettings(openTab);
           }
+        }
+        if (msg.elevationEnabled !== undefined) {
+          // The shell tool reads this via a live getter, so no toolset rebuild
+          // is needed — persisting + re-emitting settings is enough.
+          saveElevationEnabled(msg.elevationEnabled);
+          for (const openTab of tabs.values()) emitSettings(openTab);
         }
         if (msg.disabledModels !== undefined) {
           saveDisabledModels(Array.isArray(msg.disabledModels) ? msg.disabledModels : []);

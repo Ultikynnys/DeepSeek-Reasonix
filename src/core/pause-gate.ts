@@ -46,7 +46,7 @@ interface PauseResponseMap {
 type PauseKind = keyof PauseResponseMap;
 
 interface PausePayloadMap {
-  run_command: { command: string; cwd?: string; timeoutSec?: number };
+  run_command: { command: string; cwd?: string; timeoutSec?: number; elevated?: boolean };
   run_background: { command: string; cwd?: string; waitSec?: number };
   outlook_send: {
     toolName: string;

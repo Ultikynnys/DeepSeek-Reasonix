@@ -402,6 +402,10 @@ export interface ReasonixConfig {
   disableAutoCompaction?: boolean;
   /** Whether subagent skills may run. Defaults to true when absent. */
   enableSubagents?: boolean;
+  /** Whether `run_command` may run a command elevated via Windows UAC consent.
+   *  Defaults to false: even if the model requests `elevate: true`, the tool
+   *  refuses unless the user has pre-authorized the capability. */
+  elevationEnabled?: boolean;
   /** Default workspace root for the desktop client. CLI uses cwd. */
   workspaceDir?: string;
   /** Last N workspace paths the desktop client has opened, most recent first. */
@@ -2021,6 +2025,20 @@ export function loadEnableSubagents(path: string = defaultConfigPath()): boolean
 export function saveEnableSubagents(enabled: boolean, path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
   cfg.enableSubagents = enabled;
+  writeConfig(cfg, path);
+}
+
+/** Whether `run_command` may run a command elevated via Windows UAC consent.
+ *  Defaults to false: the capability is opt-in, so the model cannot even
+ *  prompt for elevation until the user has enabled it. */
+export function loadElevationEnabled(path: string = defaultConfigPath()): boolean {
+  return readConfig(path).elevationEnabled === true;
+}
+
+/** Persist whether `run_command` may run commands elevated. */
+export function saveElevationEnabled(enabled: boolean, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.elevationEnabled = enabled;
   writeConfig(cfg, path);
 }
 

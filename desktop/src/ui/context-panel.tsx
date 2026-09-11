@@ -943,6 +943,39 @@ function CtxTools({
         </div>
       </div>
 
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.elevation")}</span>
+          <span className="right">
+            <div className="seg-ctrl" style={{ fontSize: "10.5px" }}>
+              <button
+                type="button"
+                aria-label={t("contextPanel.enableElevation")}
+                aria-pressed={settings?.elevationEnabled === true}
+                data-on={settings?.elevationEnabled === true}
+                onClick={() => onSaveSettings?.({ elevationEnabled: true })}
+              >
+                {t("contextPanel.elevationEnabled")}
+              </button>
+              <button
+                type="button"
+                aria-label={t("contextPanel.disableElevation")}
+                aria-pressed={settings?.elevationEnabled !== true}
+                data-on={settings?.elevationEnabled !== true}
+                onClick={() => onSaveSettings?.({ elevationEnabled: false })}
+              >
+                {t("contextPanel.elevationDisabled")}
+              </button>
+            </div>
+          </span>
+        </div>
+        <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>
+          {settings?.elevationEnabled === true
+            ? t("contextPanel.elevationEnabledDesc")
+            : t("contextPanel.elevationDisabledDesc")}
+        </div>
+      </div>
+
       {settings &&
       (settings.modelEndpoint?.provider === "ollama" ||
         settings.subagentModelEndpoint?.provider === "ollama") ? (
