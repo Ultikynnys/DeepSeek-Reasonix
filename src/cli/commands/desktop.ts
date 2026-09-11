@@ -51,6 +51,8 @@ import type {
   OllamaModelsEvent,
   OllamaQuotaEvent,
   OpencodeModelsEvent,
+  OutlookMailAuthEvent,
+  OutlookMailAuthState,
   PathAccessRequiredEvent,
   PlanClearedEvent,
   PlanRequiredEvent,
@@ -215,6 +217,13 @@ import {
 } from "../../index.js";
 import { createLogger } from "../../logging.js";
 import { MCP_CATALOG, catalogStdioCommand } from "../../mcp/catalog.js";
+import {
+  OUTLOOK_MAIL_ARGS,
+  OUTLOOK_MAIL_SERVER_NAME,
+  isOutlookMailSpec,
+  parseOutlookDeviceCode,
+  parseOutlookLoginStatus,
+} from "../../mcp/outlook-mail.js";
 import { isPlaywrightSpec } from "../../mcp/playwright-tooling.js";
 import { type McpServerSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
@@ -365,6 +374,7 @@ type EmittableEvent =
   | McpSpecsEvent
   | McpExtensionStatusEvent
   | McpExtensionCheckEvent
+  | OutlookMailAuthEvent
   | PlaywrightBrowserInstallEvent
   | SkillsEvent
   | CtxBreakdownEvent
@@ -2057,8 +2067,8 @@ function emitMcpSpecs(tab: Tab): void {
     const base = summarizeMcpSpec(raw);
     // Config-level toggle state — visible even before the first bridge.
     base.disabled = spec.disabled === true;
-    // Reasonix-managed servers are built-in — disableable but not removable.
-    base.builtin = isPlaywrightSpec(spec);
+    // Reasonix-managed servers are built-in: disableable but not removable.
+    base.builtin = isManagedMcpSpec(spec);
     if (spec.disabledTools?.length) base.disabledTools = spec.disabledTools;
     const toolState = toolStateByRaw.get(raw);
     if (toolState) {
@@ -2104,6 +2114,193 @@ function emitMcpExtensionStatus(tab: Tab): void {
   const status = computeMcpExtensionStatus(readConfig());
   const ev: McpExtensionStatusEvent = { type: "$mcp_extension_status", status };
   emit(ev, tab.id);
+}
+
+const outlookMailAuthGeneration = new Map<string, number>();
+const outlookMailAuthControllers = new Map<string, AbortController>();
+
+function nextOutlookMailAuthGeneration(tab: Tab): number {
+  const generation = (outlookMailAuthGeneration.get(tab.id) ?? 0) + 1;
+  outlookMailAuthGeneration.set(tab.id, generation);
+  return generation;
+}
+
+function emitOutlookMailAuth(tab: Tab, state: OutlookMailAuthState): void {
+  emit({ type: "$outlook_mail_auth", state }, tab.id);
+}
+
+export function isManagedMcpSpec(spec: McpServerSpec): boolean {
+  return isPlaywrightSpec(spec) || isOutlookMailSpec(spec);
+}
+
+function outlookMailConfigured(tab: Tab): boolean {
+  return loadEffectiveMcpConfig(tab.rootDir).some(isOutlookMailSpec);
+}
+
+function configureOutlookMailServer(): void {
+  const cfg = readConfig();
+  const entry = MCP_CATALOG.find((candidate) => candidate.name === OUTLOOK_MAIL_SERVER_NAME);
+  if (!entry) throw new Error("bundled catalog has no Outlook Mail entry");
+  mergeMcpServerEntry(cfg, OUTLOOK_MAIL_SERVER_NAME, {
+    transport: "stdio",
+    command: "npx",
+    args: [...OUTLOOK_MAIL_ARGS],
+  });
+  const stored = cfg.mcpServers?.[OUTLOOK_MAIL_SERVER_NAME];
+  if (!stored) throw new Error("failed to create the Outlook Mail server entry");
+  stored.transport = "stdio";
+  stored.command = "npx";
+  stored.args = [...OUTLOOK_MAIL_ARGS];
+  // Managed auth owns the token cache. Drop legacy/custom auth env so no access token,
+  // client secret, or alternate tenant silently survives migration into this integration.
+  stored.env = { MS365_MCP_TENANT_ID: "consumers" };
+  writeConfig(cfg);
+}
+
+async function waitForOutlookMailRuntime(
+  tab: Tab,
+  bridge: (tab: Tab) => Promise<void>,
+): Promise<void> {
+  await bridge(tab);
+  await tab.mcpBridgePromise;
+  if (!tab.mcpRuntime) throw new Error("Outlook Mail MCP runtime is unavailable");
+}
+
+async function refreshOutlookMailAuth(
+  tab: Tab,
+  bridge: (tab: Tab) => Promise<void>,
+): Promise<void> {
+  const configured = outlookMailConfigured(tab);
+  if (!configured) {
+    emitOutlookMailAuth(tab, { configured: false, phase: "unconfigured" });
+    return;
+  }
+  try {
+    emitOutlookMailAuth(tab, { configured: true, phase: "checking" });
+    await waitForOutlookMailRuntime(tab, bridge);
+    const raw = await tab.mcpRuntime!.callServerTool(
+      OUTLOOK_MAIL_SERVER_NAME,
+      "verify-login",
+      {},
+      AbortSignal.timeout(15_000),
+    );
+    const status = parseOutlookLoginStatus(raw);
+    emitOutlookMailAuth(tab, {
+      configured: true,
+      phase: status.success ? "connected" : "disconnected",
+      ...(status.account ? { account: status.account } : {}),
+      message: status.message,
+    });
+  } catch (error) {
+    emitOutlookMailAuth(tab, {
+      configured: true,
+      phase: "error",
+      message: messageOf(error),
+    });
+  }
+}
+
+async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): Promise<void> {
+  const generation = nextOutlookMailAuthGeneration(tab);
+  outlookMailAuthControllers.get(tab.id)?.abort();
+  const controller = new AbortController();
+  outlookMailAuthControllers.set(tab.id, controller);
+  try {
+    configureOutlookMailServer();
+    emitMcpSpecs(tab);
+    emitOutlookMailAuth(tab, { configured: true, phase: "starting" });
+    await waitForOutlookMailRuntime(tab, bridge);
+    if (outlookMailAuthGeneration.get(tab.id) !== generation) return;
+    const raw = await tab.mcpRuntime!.callServerTool(
+      OUTLOOK_MAIL_SERVER_NAME,
+      "login",
+      { force: true },
+      AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]),
+    );
+    if (outlookMailAuthGeneration.get(tab.id) !== generation) return;
+    const immediate = parseOutlookLoginStatus(raw);
+    if (immediate.success) {
+      emitOutlookMailAuth(tab, {
+        configured: true,
+        phase: "connected",
+        ...(immediate.account ? { account: immediate.account } : {}),
+        message: immediate.message,
+      });
+      return;
+    }
+    const deviceCode = parseOutlookDeviceCode(raw);
+    if (!deviceCode) throw new Error(immediate.message);
+    emitOutlookMailAuth(tab, {
+      configured: true,
+      phase: "device-code",
+      verificationUrl: deviceCode.verificationUrl,
+      ...(deviceCode.userCode ? { userCode: deviceCode.userCode } : {}),
+      message: deviceCode.message,
+    });
+    const deadline = Date.now() + 15 * 60_000;
+    while (Date.now() < deadline && outlookMailAuthGeneration.get(tab.id) === generation) {
+      await sleep(2_000);
+      if (outlookMailAuthGeneration.get(tab.id) !== generation) return;
+      const verifiedRaw = await tab.mcpRuntime!.callServerTool(
+        OUTLOOK_MAIL_SERVER_NAME,
+        "verify-login",
+        {},
+        AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+      );
+      const verified = parseOutlookLoginStatus(verifiedRaw);
+      if (verified.success) {
+        emitOutlookMailAuth(tab, {
+          configured: true,
+          phase: "connected",
+          ...(verified.account ? { account: verified.account } : {}),
+          message: verified.message,
+        });
+        return;
+      }
+    }
+    if (outlookMailAuthGeneration.get(tab.id) === generation) {
+      emitOutlookMailAuth(tab, {
+        configured: true,
+        phase: "error",
+        message: "Microsoft sign-in timed out. Start the connection again for a new code.",
+      });
+    }
+  } catch (error) {
+    if (outlookMailAuthGeneration.get(tab.id) !== generation) return;
+    emitOutlookMailAuth(tab, {
+      configured: outlookMailConfigured(tab),
+      phase: "error",
+      message: messageOf(error),
+    });
+  } finally {
+    if (outlookMailAuthControllers.get(tab.id) === controller) {
+      outlookMailAuthControllers.delete(tab.id);
+    }
+  }
+}
+
+async function signOutOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): Promise<void> {
+  nextOutlookMailAuthGeneration(tab);
+  try {
+    await waitForOutlookMailRuntime(tab, bridge);
+    await tab.mcpRuntime!.callServerTool(
+      OUTLOOK_MAIL_SERVER_NAME,
+      "logout",
+      {},
+      AbortSignal.timeout(30_000),
+    );
+    emitOutlookMailAuth(tab, {
+      configured: true,
+      phase: "disconnected",
+      message: "Signed out of Microsoft.",
+    });
+  } catch (error) {
+    emitOutlookMailAuth(tab, {
+      configured: outlookMailConfigured(tab),
+      phase: "error",
+      message: messageOf(error),
+    });
+  }
 }
 
 const playwrightBrowserInstalls = new Set<string>();
@@ -3417,6 +3614,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
   async function closeTab(tab: Tab): Promise<void> {
     emitTabDiagnostic(tab, "tab.close.started", undefined, "info");
+    nextOutlookMailAuthGeneration(tab);
+    outlookMailAuthControllers.get(tab.id)?.abort();
+    outlookMailAuthControllers.delete(tab.id);
     abortTurn(tab);
     try {
       await tab.toolset?.jobs.shutdown();
@@ -4083,7 +4283,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         pauseGate.resolve(req.id, auto.verdict);
       }, auto.ms);
     }
-    if (req.kind === "run_command" || req.kind === "run_background") {
+    if (
+      req.kind === "run_command" ||
+      req.kind === "run_background" ||
+      req.kind === "outlook_send"
+    ) {
       const payload = req.payload as {
         command?: string;
         cwd?: string;
@@ -4790,11 +4994,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             details: { spec: msg.spec },
           });
         }
-        if (parsedSpec && isPlaywrightSpec(parsedSpec)) {
+        if (parsedSpec && isManagedMcpSpec(parsedSpec)) {
           emit(
             {
               type: "$error",
-              message: "mcp_specs_remove: the built-in Playwright server can't be removed",
+              message: "mcp_specs_remove: Reasonix-managed MCP servers can't be removed",
             },
             tab.id,
           );
@@ -4853,6 +5057,44 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "mcp_extension_status") {
       emitMcpExtensionStatus(tab);
+      return;
+    }
+    if (msg.cmd === "outlook_mail_status") {
+      void refreshOutlookMailAuth(tab, bridgeTabMcp);
+      return;
+    }
+    if (msg.cmd === "outlook_mail_configure") {
+      try {
+        configureOutlookMailServer();
+        emitMcpSpecs(tab);
+        emitOutlookMailAuth(tab, { configured: true, phase: "disconnected" });
+        void bridgeTabMcp(tab).then(() => refreshOutlookMailAuth(tab, bridgeTabMcp));
+      } catch (error) {
+        emitOutlookMailAuth(tab, {
+          configured: false,
+          phase: "error",
+          message: messageOf(error),
+        });
+      }
+      return;
+    }
+    if (msg.cmd === "outlook_mail_connect") {
+      void connectOutlookMail(tab, bridgeTabMcp);
+      return;
+    }
+    if (msg.cmd === "outlook_mail_cancel") {
+      nextOutlookMailAuthGeneration(tab);
+      outlookMailAuthControllers.get(tab.id)?.abort();
+      outlookMailAuthControllers.delete(tab.id);
+      emitOutlookMailAuth(tab, {
+        configured: outlookMailConfigured(tab),
+        phase: "disconnected",
+        message: "Microsoft sign-in cancelled.",
+      });
+      return;
+    }
+    if (msg.cmd === "outlook_mail_signout") {
+      void signOutOutlookMail(tab, bridgeTabMcp);
       return;
     }
     if (msg.cmd === "playwright_browser_install") {

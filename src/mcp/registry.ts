@@ -3,6 +3,7 @@ import { withDeadline } from "../core/with-deadline.js";
 import { recordDiagnostic } from "../diagnostics.js";
 import { countTokens, countTokensBounded } from "../tokenizer.js";
 import { ToolRegistry } from "../tools.js";
+import type { ToolCallContext } from "../tools.js";
 import type { JSONSchema } from "../types.js";
 import type { McpClient } from "./client.js";
 import { LatencyTracker, type SlowEvent } from "./latency.js";
@@ -47,6 +48,12 @@ export interface BridgeOptions {
    *  tooling dir unmissable in tool listings. Deterministic per install, so
    *  the tool-list hash stays cache-stable. */
   descriptionSuffix?: string;
+  /** Optional server-specific safety gate before the upstream MCP call. A string blocks dispatch. */
+  beforeCall?: (
+    toolName: string,
+    args: Record<string, unknown>,
+    ctx?: ToolCallContext,
+  ) => Promise<string | null>;
 }
 
 /** Mutable holder so `/mcp reconnect` can swap the underlying client without re-bridging tools. */
@@ -88,6 +95,7 @@ export interface BridgeEnv {
   toolingNotice?: string;
   toolingNoticeSeen?: boolean;
   descriptionSuffix?: string;
+  beforeCall?: BridgeOptions["beforeCall"];
 }
 
 /** Register one MCP tool's bridged closure into the registry. Returns the registered name (or "" if skipped). */
@@ -114,6 +122,10 @@ export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string 
           env.serverName ?? (env.prefix.replace(/_$/, "") || "anon"),
           ctx?.signal,
         );
+      }
+      if (env.beforeCall) {
+        const blocked = await env.beforeCall(stableTool.name, args, ctx);
+        if (blocked !== null) return blocked;
       }
       const t0 = performance.now();
       try {
@@ -218,6 +230,7 @@ export async function bridgeMcpTools(
     serverName,
     toolingNotice: opts.toolingNotice,
     descriptionSuffix: opts.descriptionSuffix,
+    beforeCall: opts.beforeCall,
   };
   const listed = await client.listTools();
   // Canonicalize + sort so the bridged tool list is byte-stable across

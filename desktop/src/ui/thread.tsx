@@ -579,24 +579,45 @@ export function ConfirmApprovalCard({
   const rejectAction = prompt.actions.find((a) => a.kind === "reject");
   return (
     <ApprovalCard
-      kind={t("thread.shellConfirmationKind")}
+      kind={
+        prompt.kind === "email" ? t("thread.emailConfirmationKind") : t("thread.shellConfirmationKind")
+      }
       tone={mapTone(prompt.tone)}
       title={prompt.title}
       sub={prompt.subtitle}
       preview={
-        <>
-          <span style={{ color: "var(--accent)" }}>$</span> {prompt.preview ?? prompt.subtitle}
-        </>
+        prompt.kind === "email" ? (
+          <div style={{ whiteSpace: "pre-wrap" }}>
+            {Object.entries(prompt.meta ?? {}).map(([key, value]) => (
+              <div key={key}>
+                <strong>{key}:</strong> {value}
+              </div>
+            ))}
+            <div style={{ marginTop: 8 }}>{prompt.preview}</div>
+          </div>
+        ) : (
+          <>
+            <span style={{ color: "var(--accent)" }}>$</span> {prompt.preview ?? prompt.subtitle}
+          </>
+        )
       }
-      meta={t("thread.riskMedium", {
-        kind: prompt.kind === "shell" ? "run_command" : "run_background",
-      })}
+      meta={
+        prompt.kind === "email"
+          ? t("thread.emailConfirmationMeta")
+          : t("thread.riskMedium", {
+              kind: prompt.kind === "shell" ? "run_command" : "run_background",
+            })
+      }
       primaryLabel={allowAction?.label ?? t("thread.execute")}
       secondaryLabel={rejectAction?.label ?? t("thread.reject")}
-      tertiaryLabel={alwaysAllowAction?.label ?? t("thread.alwaysAllow", { prefix })}
+      tertiaryLabel={
+        prompt.kind === "email"
+          ? undefined
+          : (alwaysAllowAction?.label ?? t("thread.alwaysAllow", { prefix }))
+      }
       onPrimary={onAllow}
       onSecondary={onDeny}
-      onTertiary={() => onAlwaysAllow(prefix)}
+      onTertiary={prompt.kind === "email" ? undefined : () => onAlwaysAllow(prefix)}
     />
   );
 }

@@ -7,6 +7,13 @@ import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import {
+  confirmOutlookSend,
+  isOutlookMailSpec,
+  isOutlookSendCapableTool,
+  managedMcpToolsHiddenFromModel,
+  mcpTextResult,
+} from "../../mcp/outlook-mail.js";
+import {
   ensurePlaywrightTooling,
   isPlaywrightSpec,
   playwrightDescriptionSuffix,
@@ -94,6 +101,13 @@ export interface McpRuntime {
   /** Per-spec bare tool names currently registered (enabled) vs filtered out (disabled) —
    *  drives the per-tool toggle UI and its current state. */
   toolFilterState(): Array<{ spec: string; enabled: string[]; disabled: string[] }>;
+  /** Call a server tool directly without registering it in the model-facing tool registry. */
+  callServerTool(
+    serverName: string,
+    toolName: string,
+    args?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<string>;
   addSpec(
     raw: string,
     loop?: CacheFirstLoop,
@@ -186,13 +200,34 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       mcp = new McpClient({ transport, workspaceDir });
       await mcp.initialize({ signal });
       const host: McpClientHost = { client: mcp };
+      const hiddenTools = new Set(managedMcpToolsHiddenFromModel(spec));
+      if (isOutlookMailSpec(spec)) {
+        const listed = await mcp.listTools();
+        for (const tool of listed.tools) {
+          if (tool.name !== "send-mail" && isOutlookSendCapableTool(tool.name)) {
+            hiddenTools.add(tool.name);
+          }
+        }
+      }
+      const disabledTools = new Set([...(spec.disabledTools ?? []), ...hiddenTools]);
       const bridge = await bridgeMcpTools(mcp, {
         registry: tools,
         namePrefix,
         serverName: label,
         host,
         ready,
-        disabledTools: spec.disabledTools ? new Set(spec.disabledTools) : undefined,
+        disabledTools,
+        ...(isOutlookMailSpec(spec)
+          ? {
+              beforeCall: (toolName, args, toolContext) =>
+                confirmOutlookSend({
+                  toolName,
+                  args,
+                  client: host.client,
+                  gate: toolContext?.confirmationGate,
+                }),
+            }
+          : {}),
         ...(playwrightTooling
           ? {
               toolingNotice: playwrightToolingNotice(playwrightTooling),
@@ -238,7 +273,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         registeredNames: bridge.registeredNames,
         registeredSpecs,
         runtimeKey: runtimeFingerprint(spec),
-        disabledTools: spec.disabledTools ?? [],
+        disabledTools: [...disabledTools],
       });
       insertionOrder.push(raw);
       resolveReady();
@@ -291,7 +326,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         registeredNames: bridge.registeredNames,
         registeredSpecs,
         runtimeKey: runtimeFingerprint(spec),
-        disabledTools: spec.disabledTools ?? [],
+        disabledTools: [...disabledTools],
       });
       // Hot-add: shift the prefix so the live loop sees the new tools
       // on the very next turn. Each addTool is one cache-miss turn.
@@ -464,7 +499,16 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         continue;
       }
       // Per-tool disable delta — hot un/register without respawning.
-      const nextTools = new Set(next.disabledTools ?? []);
+      const protectedSendTools = isOutlookMailSpec(next)
+        ? record.disabledTools.filter(
+            (name) => name !== "send-mail" && isOutlookSendCapableTool(name),
+          )
+        : [];
+      const nextTools = new Set([
+        ...(next.disabledTools ?? []),
+        ...managedMcpToolsHiddenFromModel(next),
+        ...protectedSendTools,
+      ]);
       const cur = new Set(records.get(spec)?.disabledTools ?? []);
       const changed = nextTools.size !== cur.size || [...nextTools].some((t) => !cur.has(t));
       if (changed) {
@@ -507,13 +551,28 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         const rec = records.get(raw);
         if (!rec) return undefined;
         const bare = mcpBareToolName(rec.summary.bridgeEnv.prefix);
+        const parsed = parseMcpSpec(raw);
+        const hidden = managedMcpToolsHiddenFromModel(parsed);
         return {
           spec: raw,
           enabled: rec.registeredNames.map(bare),
-          disabled: [...rec.disabledTools],
+          disabled: rec.disabledTools.filter((name) => !hidden.has(name)),
         };
       })
       .filter((s): s is { spec: string; enabled: string[]; disabled: string[] } => Boolean(s));
+  }
+  async function callServerTool(
+    serverName: string,
+    toolName: string,
+    args: Record<string, unknown> = {},
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const record = [...records.values()].find(
+      (candidate) => candidate.summary.label === serverName,
+    );
+    if (!record) throw new Error(`MCP server "${serverName}" is not connected`);
+    const result = await record.client.callTool(toolName, args, { signal });
+    return mcpTextResult(result);
   }
   function setLifecycleSink(s: McpLifecycleSink): void {
     sink = s;
@@ -524,6 +583,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     summaries,
     failures,
     toolFilterState,
+    callServerTool,
     addSpec,
     removeSpec,
     reloadFromConfig,

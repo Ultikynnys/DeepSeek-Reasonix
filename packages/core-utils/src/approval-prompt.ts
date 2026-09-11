@@ -21,7 +21,14 @@ import type {
   RevisionVerdict,
 } from "./permission-types.js";
 
-export type ApprovalPromptKind = "shell" | "path" | "plan" | "checkpoint" | "revision" | "choice";
+export type ApprovalPromptKind =
+  | "shell"
+  | "email"
+  | "path"
+  | "plan"
+  | "checkpoint"
+  | "revision"
+  | "choice";
 
 export type ApprovalTone = "warn" | "error" | "info" | "accent";
 
@@ -62,6 +69,8 @@ export function toApprovalPrompt(req: {
       return shellPrompt(req.id, payload, false);
     case "run_background":
       return shellPrompt(req.id, payload, true);
+    case "outlook_send":
+      return outlookSendPrompt(req.id, payload);
     case "path_access":
       return pathPrompt(req.id, payload);
     case "plan_proposed":
@@ -133,6 +142,39 @@ function shellPrompt(
       },
     ],
     data: { prefix },
+  };
+}
+
+function outlookSendPrompt(id: number, payload: Record<string, unknown>): ApprovalPrompt {
+  const list = (key: string): string[] =>
+    Array.isArray(payload[key]) ? (payload[key] as unknown[]).map(String) : [];
+  const from = String(payload.from ?? "");
+  const to = list("to");
+  const cc = list("cc");
+  const bcc = list("bcc");
+  const subject = String(payload.subject ?? "");
+  const body = String(payload.body ?? "");
+  const attachments = list("attachments");
+  const meta: Record<string, string> = {
+    From: from,
+    To: to.join(", ") || "(none)",
+    Subject: subject || "(none)",
+  };
+  if (cc.length > 0) meta.Cc = cc.join(", ");
+  if (bcc.length > 0) meta.Bcc = bcc.join(", ");
+  if (attachments.length > 0) meta.Attachments = attachments.join(", ");
+  return {
+    id,
+    kind: "email",
+    tone: "error",
+    title: "Confirm Outlook email send",
+    subtitle: `${from} → ${to.join(", ") || "(no recipient)"}`,
+    preview: body,
+    meta,
+    actions: [
+      { id: "run_once", label: "Send this email", kind: "allow_once" },
+      { id: "deny", label: "Cancel send", kind: "reject" },
+    ],
   };
 }
 
@@ -299,6 +341,7 @@ export function resolveApprovalPrompt(
 
   switch (prompt.kind) {
     case "shell":
+    case "email":
     case "path": {
       if (action.kind === "reject") {
         return { type: "deny", denyContext: secondaryInput };
@@ -337,6 +380,7 @@ function safeDefaultForKind(
 ): ConfirmationChoice | PlanVerdict | CheckpointVerdict | RevisionVerdict | ChoiceVerdict {
   switch (kind) {
     case "shell":
+    case "email":
     case "path":
       return { type: "deny" };
     case "plan":

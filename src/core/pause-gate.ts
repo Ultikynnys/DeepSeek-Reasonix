@@ -35,6 +35,7 @@ export type ToolConfirmationAuditEvent =
 interface PauseResponseMap {
   run_command: ConfirmationChoice;
   run_background: ConfirmationChoice;
+  outlook_send: ConfirmationChoice;
   path_access: ConfirmationChoice;
   plan_proposed: PlanVerdict;
   plan_checkpoint: CheckpointVerdict;
@@ -47,6 +48,16 @@ type PauseKind = keyof PauseResponseMap;
 interface PausePayloadMap {
   run_command: { command: string; cwd?: string; timeoutSec?: number };
   run_background: { command: string; cwd?: string; waitSec?: number };
+  outlook_send: {
+    toolName: string;
+    from: string;
+    to: string[];
+    cc: string[];
+    bcc: string[];
+    subject: string;
+    body: string;
+    attachments: string[];
+  };
   path_access: {
     /** Absolute path the tool wants to touch. */
     path: string;
@@ -218,6 +229,7 @@ function safeCancelVerdict(kind: PauseKind): unknown {
   switch (kind) {
     case "run_command":
     case "run_background":
+    case "outlook_send":
     case "path_access":
       return { type: "deny" };
     case "plan_proposed":

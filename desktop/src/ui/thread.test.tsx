@@ -69,6 +69,46 @@ function makePathPrompt(
 afterEach(cleanup);
 
 describe("ConfirmApprovalCard — ApprovalPrompt rendering", () => {
+  it("renders immutable Outlook send details without an always-allow action", () => {
+    const prompt: import("@reasonix/core-utils").ApprovalPrompt = {
+      id: 3,
+      kind: "email",
+      tone: "error",
+      title: "Confirm Outlook email send",
+      subtitle: "sender@outlook.com → recipient@example.com",
+      preview: "Complete application body",
+      meta: {
+        From: "sender@outlook.com",
+        To: "recipient@example.com",
+        Cc: "copy@example.com",
+        Bcc: "hidden@example.com",
+        Subject: "Application",
+        Attachments: "CV.pdf",
+      },
+      actions: [
+        { id: "run_once", label: "Send this email", kind: "allow_once" },
+        { id: "deny", label: "Cancel send", kind: "reject" },
+      ],
+    };
+    const { container } = render(
+      <ConfirmApprovalCard
+        prompt={prompt}
+        onAllow={() => {}}
+        onAlwaysAllow={() => {}}
+        onDeny={() => {}}
+      />,
+    );
+    expect(container.textContent).toContain("From: sender@outlook.com");
+    expect(container.textContent).toContain("To: recipient@example.com");
+    expect(container.textContent).toContain("Bcc: hidden@example.com");
+    expect(container.textContent).toContain("Subject: Application");
+    expect(container.textContent).toContain("Complete application body");
+    expect(container.textContent).toContain("Attachments: CV.pdf");
+    expect(screen.getByRole("button", { name: "Send this email" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel send" })).toBeTruthy();
+    expect(screen.queryByText(/Always allow/)).toBeNull();
+  });
+
   it("renders title, subtitle, and action buttons from prompt", () => {
     const { container } = render(
       <ConfirmApprovalCard

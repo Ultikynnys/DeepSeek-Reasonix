@@ -295,7 +295,7 @@ export interface DesktopDiagnosticEvent {
 export interface ConfirmRequiredEvent {
   type: "$confirm_required";
   id: number;
-  kind: "run_command" | "run_background";
+  kind: "run_command" | "run_background" | "outlook_send";
   command: string;
   prompt?: ApprovalPrompt;
 }
@@ -481,6 +481,31 @@ export type McpExtensionCheck =
 export interface McpExtensionCheckEvent {
   type: "$mcp_extension_check";
   check: McpExtensionCheck;
+}
+
+export type OutlookMailAuthPhase =
+  | "unconfigured"
+  | "disconnected"
+  | "checking"
+  | "starting"
+  | "device-code"
+  | "verifying"
+  | "connected"
+  | "error";
+
+/** Sanitized Microsoft auth state. OAuth tokens never cross the desktop wire protocol. */
+export interface OutlookMailAuthState {
+  configured: boolean;
+  phase: OutlookMailAuthPhase;
+  account?: string;
+  verificationUrl?: string;
+  userCode?: string;
+  message?: string;
+}
+
+export interface OutlookMailAuthEvent {
+  type: "$outlook_mail_auth";
+  state: OutlookMailAuthState;
 }
 
 export type PlaywrightBrowserInstall =
@@ -1075,6 +1100,11 @@ export type OutgoingCommand = { tabId?: string } & (
       extensionBrowser?: PlaywrightExtensionBrowser;
     }
   | { cmd: "mcp_extension_check" }
+  | { cmd: "outlook_mail_status" }
+  | { cmd: "outlook_mail_configure" }
+  | { cmd: "outlook_mail_connect" }
+  | { cmd: "outlook_mail_cancel" }
+  | { cmd: "outlook_mail_signout" }
   | { cmd: "playwright_browser_install"; browser: PlaywrightManagedBrowser }
   | { cmd: "rule_add"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "rule_remove"; ruleType: "shell" | "path"; pattern: string }

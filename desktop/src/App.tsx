@@ -50,6 +50,7 @@ import {
   type McpExtensionCheck,
   type McpExtensionStatus,
   type McpSpecInfo,
+  type OutlookMailAuthState,
   type PlaywrightBrowserInstall,
   type PlaywrightManagedBrowser,
   type PlaywrightMcpConnectionMode,
@@ -268,7 +269,7 @@ export type ChatMessage =
 
 export type PendingConfirm = {
   id: number;
-  kind: "run_command" | "run_background";
+  kind: "run_command" | "run_background" | "outlook_send";
   command: string;
   prompt: import("@reasonix/core-utils").ApprovalPrompt;
 };
@@ -445,6 +446,7 @@ type State = {
   mcpBridged: boolean;
   mcpExtensionStatus: McpExtensionStatus | null;
   mcpExtensionCheck: McpExtensionCheck | null;
+  outlookMailAuth: OutlookMailAuthState | null;
   playwrightBrowserInstall: PlaywrightBrowserInstall | null;
   skills: SkillInfo[];
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
@@ -1563,6 +1565,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, mcpExtensionStatus: ev.status };
     case "$mcp_extension_check":
       return { ...state, mcpExtensionCheck: ev.check };
+    case "$outlook_mail_auth":
+      return { ...state, outlookMailAuth: ev.state };
     case "$playwright_browser_install":
       return { ...state, playwrightBrowserInstall: ev.install };
     case "$skills":
@@ -2300,6 +2304,7 @@ function TabRuntime({
     mcpBridged: false,
     mcpExtensionStatus: null,
     mcpExtensionCheck: null,
+    outlookMailAuth: null,
     playwrightBrowserInstall: null,
     skills: [],
     sessionFiles: [],
@@ -2466,6 +2471,26 @@ function TabRuntime({
   const checkMcpExtension = useCallback(() => sendRpc({ cmd: "mcp_extension_check" }), [sendRpc]);
   const installPlaywrightBrowser = useCallback(
     (browser: PlaywrightManagedBrowser) => sendRpc({ cmd: "playwright_browser_install", browser }),
+    [sendRpc],
+  );
+  const requestOutlookMailStatus = useCallback(
+    () => sendRpc({ cmd: "outlook_mail_status" }),
+    [sendRpc],
+  );
+  const configureOutlookMail = useCallback(
+    () => sendRpc({ cmd: "outlook_mail_configure" }),
+    [sendRpc],
+  );
+  const connectOutlookMail = useCallback(
+    () => sendRpc({ cmd: "outlook_mail_connect" }),
+    [sendRpc],
+  );
+  const cancelOutlookMail = useCallback(
+    () => sendRpc({ cmd: "outlook_mail_cancel" }),
+    [sendRpc],
+  );
+  const signOutOutlookMail = useCallback(
+    () => sendRpc({ cmd: "outlook_mail_signout" }),
     [sendRpc],
   );
   const addRule = useCallback(
@@ -3582,6 +3607,12 @@ function TabRuntime({
             onConfigureMcpExtension={configureMcpExtension}
             onCheckMcpExtension={checkMcpExtension}
             onInstallPlaywrightBrowser={installPlaywrightBrowser}
+            outlookMailAuth={state.outlookMailAuth}
+            onRequestOutlookMailStatus={requestOutlookMailStatus}
+            onConfigureOutlookMail={configureOutlookMail}
+            onConnectOutlookMail={connectOutlookMail}
+            onCancelOutlookMail={cancelOutlookMail}
+            onSignOutOutlookMail={signOutOutlookMail}
             onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
             onWriteMemory={(scope, name, description, body) =>
               sendRpc({ cmd: "memory_write", scope, name, description, body })

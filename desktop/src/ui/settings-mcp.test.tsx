@@ -45,6 +45,9 @@ function renderCard(
   onConfigureExtension = vi.fn(),
   onInstallBrowser = vi.fn(),
   browserInstall: Parameters<typeof PageMCP>[0]["browserInstall"] = null,
+  outlookMailAuth: Parameters<typeof PageMCP>[0]["outlookMailAuth"] = null,
+  onConnectOutlookMail = vi.fn(),
+  onRequestOutlookMailStatus = vi.fn(),
 ) {
   return render(
     <PageMCP
@@ -61,9 +64,84 @@ function renderCard(
       onConfigureExtension={onConfigureExtension}
       onCheckExtension={vi.fn()}
       onInstallBrowser={onInstallBrowser}
+      outlookMailAuth={outlookMailAuth}
+      onRequestOutlookMailStatus={onRequestOutlookMailStatus}
+      onConfigureOutlookMail={vi.fn()}
+      onConnectOutlookMail={onConnectOutlookMail}
+      onCancelOutlookMail={vi.fn()}
+      onSignOutOutlookMail={vi.fn()}
     />,
   );
 }
+
+describe("PageMCP: Outlook Mail", () => {
+  it("offers first-class configuration without exposing credentials", () => {
+    renderCard([]);
+    expect(screen.getByRole("button", { name: "Configure Outlook Mail" })).toBeTruthy();
+    expect(screen.getByText(/OAuth tokens stay in the local MCP server/)).toBeTruthy();
+  });
+
+  it("shows the Microsoft device code and opens the system browser from the card", async () => {
+    renderCard([], extensionStatus(), null, vi.fn(), vi.fn(), null, {
+      configured: true,
+      phase: "device-code",
+      verificationUrl: "https://microsoft.com/devicelogin",
+      userCode: "ABCD-EFGH",
+      message: "Enter the code",
+    });
+    expect(screen.getByText("ABCD-EFGH")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Microsoft sign-in" }));
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith("https://microsoft.com/devicelogin");
+    });
+  });
+
+  it("connects a configured personal account from the UI", () => {
+    const connect = vi.fn();
+    renderCard(
+      [],
+      extensionStatus(),
+      null,
+      vi.fn(),
+      vi.fn(),
+      null,
+      { configured: true, phase: "disconnected" },
+      connect,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Connect Microsoft account" }));
+    expect(connect).toHaveBeenCalledOnce();
+  });
+
+  it("tests an existing connection without starting OAuth", () => {
+    const connect = vi.fn();
+    const testConnection = vi.fn();
+    renderCard(
+      [],
+      extensionStatus(),
+      null,
+      vi.fn(),
+      vi.fn(),
+      null,
+      { configured: true, phase: "connected", account: "ada@outlook.com" },
+      connect,
+      testConnection,
+    );
+    testConnection.mockClear(); // Ignore the card's initial status refresh.
+    const buttons = screen.getAllByRole("button", { name: "Test connection" });
+    fireEvent.click(buttons[buttons.length - 1]!);
+    expect(testConnection).toHaveBeenCalledOnce();
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("shows disabled progress while testing the connection", () => {
+    renderCard([], extensionStatus(), null, vi.fn(), vi.fn(), null, {
+      configured: true,
+      phase: "checking",
+    });
+    const button = screen.getByRole("button", { name: "Testing connection…" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+});
 
 describe("PageMCP — playwright connection status", () => {
   it("shows a saved token's redacted identifier in the password field", () => {

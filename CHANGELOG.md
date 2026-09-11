@@ -5,6 +5,13 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Added: Outlook Mail is now a managed MCP integration with desktop authentication.**
+
+- Settings → MCP can configure a pinned, mail-only Microsoft 365 MCP server and complete personal Outlook/Hotmail device-code sign-in without using a terminal.
+- Microsoft authentication and account-management tools remain daemon-internal; the model receives mail tools only, while OAuth tokens stay in the local MCP server credential cache.
+- Direct Outlook sends now stop at a non-bypassable confirmation card, including in YOLO mode. The card displays the verified From account, To/Cc/Bcc recipients, subject, complete body, and attachment names. Reply/forward/draft-send and generic Graph batch tools remain hidden until Reasonix can bind an equally complete immutable preview.
+
+
 **Fixed: an oversized image (e.g. a full-page Playwright screenshot) no longer 400s the vision request.**
 
 - DeepSeek's vision API rejects any image with a side above 8192 px ("unsupported image"), and Reasonix sent each image whole: a 1897x10226 full-page screenshot from `playwright_browser_take_screenshot`, loaded via `see_image`, failed every turn. `normalizeImageToDataUrls` (the shared image-ingestion point) now slices an oversized image into a grid of tiles no larger than 8192 px on their longest side, so `see_image` (which loads MCP screenshots implicitly) and the composer's dropped/pasted attachments both send the image in pieces, each accepted. Images already within the cap still pass through unchanged (no re-encode). The `see_image` result text notes the tile count.

@@ -81,6 +81,31 @@ describe("autoResolveVerdict (yolo mode)", () => {
     expect(bridged).toBe(false);
   });
 
+  it("never auto-resolves Outlook sends in yolo mode", async () => {
+    const gate = new PauseGate();
+    let bridgedReqId: number | null = null;
+    makeListener({ yolo: true }, "review")(gate, (id) => {
+      bridgedReqId = id;
+      gate.resolve(id, { type: "deny" } as never);
+    });
+
+    const result = await gate.ask({
+      kind: "outlook_send",
+      payload: {
+        toolName: "send-mail",
+        from: "sender@outlook.com",
+        to: ["recipient@example.com"],
+        cc: [],
+        bcc: [],
+        subject: "Application",
+        body: "Complete body",
+        attachments: ["CV.pdf"],
+      },
+    });
+    expect(bridgedReqId).not.toBeNull();
+    expect(result).toEqual({ type: "deny" });
+  });
+
   it("auto-resolves run_background (run_once) with --yolo for the same reason", async () => {
     const gate = new PauseGate();
     let bridged = false;

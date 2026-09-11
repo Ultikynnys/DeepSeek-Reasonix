@@ -63,4 +63,11 @@ export const MCP_CATALOG: CatalogEntry[] = [
     package: "@playwright/mcp",
     note: "use --extension only for existing Chrome/Edge tabs; use --cdp-endpoint for other Chromium browsers exposing CDP; Reasonix bootstraps durable browser tooling automatically",
   },
+  {
+    name: "outlook_mail",
+    summary: "Outlook and Hotmail mail with Microsoft device-code authentication",
+    package: "@softeria/ms-365-mcp-server@0.85.0",
+    userArgs: "--preset mail",
+    note: "Reasonix keeps authentication controls in the desktop UI and exposes only mail operations to the model",
+  },
 ];

@@ -49,6 +49,9 @@ import type {
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,
+  OutlookMailAuthEvent,
+  OutlookMailAuthPhase,
+  OutlookMailAuthState,
   PlaywrightBrowserInstall,
   PlaywrightBrowserInstallEvent,
   PlaywrightManagedBrowser,
@@ -155,6 +158,9 @@ export type {
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,
+  OutlookMailAuthEvent,
+  OutlookMailAuthPhase,
+  OutlookMailAuthState,
   PlaywrightBrowserInstall,
   PlaywrightBrowserInstallEvent,
   PlaywrightManagedBrowser,
@@ -265,6 +271,7 @@ export type IncomingEvent = { tabId?: string } & (
   | McpSpecsEvent
   | McpExtensionStatusEvent
   | McpExtensionCheckEvent
+  | OutlookMailAuthEvent
   | PlaywrightBrowserInstallEvent
   | SkillsEvent
   | CtxBreakdownEvent
