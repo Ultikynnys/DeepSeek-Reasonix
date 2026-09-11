@@ -141,6 +141,7 @@ const DEFAULT_SENSITIVE_PREFIXES: ReadonlyArray<string> = [
   "~/.aws",
   "~/.gnupg",
   "~/.kube",
+  "~/.ms-365-mcp-server",
   "/etc/shadow",
   "/etc/sudoers",
 ];
@@ -155,6 +156,7 @@ const DEFAULT_SENSITIVE_PATTERNS: ReadonlyArray<string> = [
   "id_ed25519*",
   "*credentials*",
   "*secret*",
+  "*token-cache*",
 ];
 
 /** Resolve `~` to `homedir()` and normalize. Non-path-like tokens (flags, URLs, env vars) are skipped. */

@@ -1,3 +1,4 @@
+import { messageOf } from "@reasonix/core-utils";
 import type { PauseGate } from "../core/pause-gate.js";
 import type { McpClient } from "./client.js";
 import type { McpServerSpec } from "./spec.js";
@@ -28,7 +29,6 @@ export const OUTLOOK_MAIL_INTERNAL_TOOLS = new Set([
   "get-current-user",
   // These can send without carrying the complete final message in their arguments.
   // Keep them unavailable until Reasonix can fetch and bind an immutable preview.
-  "send-draft-message",
   "reply-mail-message",
   "reply-all-mail-message",
   "forward-mail-message",
@@ -37,6 +37,11 @@ export const OUTLOOK_MAIL_INTERNAL_TOOLS = new Set([
 ]);
 
 export const OUTLOOK_MAIL_CONFIRMED_SEND_TOOL = "send-mail";
+export const OUTLOOK_MAIL_CONFIRMED_SEND_TOOLS = new Set(["send-mail", "send-draft-message"]);
+
+export function isOutlookConfirmedSendTool(toolName: string): boolean {
+  return OUTLOOK_MAIL_CONFIRMED_SEND_TOOLS.has(toolName);
+}
 
 /** Administrative folder, inbox-rule, and mailbox-configuration tools disabled by default.
  *  Kept off the model surface unless the user explicitly enables them in Settings → MCP. */
@@ -75,13 +80,21 @@ export function managedMcpToolsHiddenFromModel(spec: McpServerSpec): ReadonlySet
 
 interface MailAddress {
   emailAddress?: { address?: unknown };
+  EmailAddress?: { Address?: unknown };
+  address?: unknown;
+  Address?: unknown;
 }
 
 function addressList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((entry) => (entry as MailAddress)?.emailAddress?.address)
-    .filter((address): address is string => typeof address === "string" && address.length > 0);
+    .map((entry) => {
+      if (typeof entry === "string" && entry.length > 0) return entry;
+      const m = entry as MailAddress;
+      const addr = m?.emailAddress?.address ?? m?.EmailAddress?.Address ?? m?.address ?? m?.Address;
+      return typeof addr === "string" && addr.length > 0 ? addr : null;
+    })
+    .filter((address): address is string => Boolean(address));
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -103,23 +116,84 @@ export function parseOutlookSendArgs(
   toolName: string,
   args: Record<string, unknown>,
 ): Omit<OutlookSendPreview, "from"> | null {
-  if (toolName !== OUTLOOK_MAIL_CONFIRMED_SEND_TOOL) return null;
-  const requestBody = record(args.body) ?? args;
-  const message = record(requestBody.message ?? requestBody.Message ?? requestBody);
+  if (toolName !== "send-mail") return null;
+  const requestBody = record(args.body) ?? record(args.Body) ?? args;
+  const message = record(
+    requestBody.message ?? requestBody.Message ?? args.message ?? args.Message ?? requestBody,
+  );
   if (!message) return null;
-  const body = record(message.body)?.content;
-  const attachments = Array.isArray(message.attachments)
-    ? message.attachments
-        .map((attachment) => record(attachment)?.name)
+  const bodyField = message.body ?? message.Body;
+  const bodyContent =
+    typeof bodyField === "string"
+      ? bodyField
+      : (record(bodyField)?.content ?? record(bodyField)?.Content);
+  const subject = message.subject ?? message.Subject;
+  const rawAttachments = message.attachments ?? message.Attachments;
+  const attachments = Array.isArray(rawAttachments)
+    ? rawAttachments
+        .map((attachment) => record(attachment)?.name ?? record(attachment)?.Name)
         .filter((name): name is string => typeof name === "string" && name.length > 0)
     : [];
   return {
     toolName,
-    to: addressList(message.toRecipients),
-    cc: addressList(message.ccRecipients),
-    bcc: addressList(message.bccRecipients),
-    subject: typeof message.subject === "string" ? message.subject : "",
-    body: typeof body === "string" ? body : "",
+    to: addressList(message.toRecipients ?? message.ToRecipients),
+    cc: addressList(message.ccRecipients ?? message.CcRecipients),
+    bcc: addressList(message.bccRecipients ?? message.BccRecipients),
+    subject: typeof subject === "string" ? subject : "",
+    body: typeof bodyContent === "string" ? bodyContent : "",
+    attachments,
+  };
+}
+
+export function extractOutlookMessageId(args: Record<string, unknown>): string | null {
+  const body = record(args.body) ?? record(args.Body);
+  const candidate =
+    args.messageId ??
+    args.MessageId ??
+    args["message-id"] ??
+    args.id ??
+    args.Id ??
+    body?.messageId ??
+    body?.MessageId ??
+    body?.["message-id"] ??
+    body?.id ??
+    body?.Id;
+  return typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : null;
+}
+
+export function parseOutlookDraftMessage(
+  toolName: string,
+  draft: Record<string, unknown>,
+): Omit<OutlookSendPreview, "from"> {
+  const bodyField = draft.body ?? draft.Body;
+  const bodyContent =
+    typeof bodyField === "string"
+      ? bodyField
+      : (record(bodyField)?.content ??
+        record(bodyField)?.Content ??
+        draft.bodyPreview ??
+        draft.BodyPreview ??
+        "");
+  const subject = draft.subject ?? draft.Subject;
+  const rawAttachments = draft.attachments ?? draft.Attachments;
+  const attachments = Array.isArray(rawAttachments)
+    ? rawAttachments
+        .map((att) => record(att)?.name ?? record(att)?.Name)
+        .filter((name): name is string => typeof name === "string" && name.length > 0)
+    : [];
+
+  return {
+    toolName,
+    to: addressList(draft.toRecipients ?? draft.ToRecipients),
+    cc: addressList(draft.ccRecipients ?? draft.CcRecipients),
+    bcc: addressList(draft.bccRecipients ?? draft.BccRecipients),
+    subject:
+      typeof subject === "string"
+        ? subject
+        : typeof draft.Subject === "string"
+          ? draft.Subject
+          : "",
+    body: typeof bodyContent === "string" ? bodyContent : "",
     attachments,
   };
 }
@@ -130,14 +204,92 @@ export async function confirmOutlookSend(opts: {
   client: McpClient;
   gate?: PauseGate;
 }): Promise<string | null> {
-  const partial = parseOutlookSendArgs(opts.toolName, opts.args);
-  if (!partial) return null;
+  if (!isOutlookSendCapableTool(opts.toolName)) return null;
+
+  if (!isOutlookConfirmedSendTool(opts.toolName)) {
+    return JSON.stringify({
+      error: `Outlook email operation blocked: ${opts.toolName} cannot be safely confirmed. Use send-mail or create a draft and send with send-draft-message.`,
+      rejectedReason: "unsupported-send-tool",
+    });
+  }
+
   if (!opts.gate) {
     return JSON.stringify({
       error: "Outlook email send blocked: no interactive confirmation gate is available.",
       rejectedReason: "confirmation-unavailable",
     });
   }
+
+  let partial: Omit<OutlookSendPreview, "from"> | null = null;
+
+  if (opts.toolName === "send-mail") {
+    partial = parseOutlookSendArgs(opts.toolName, opts.args);
+  } else if (opts.toolName === "send-draft-message") {
+    const messageId = extractOutlookMessageId(opts.args);
+    if (!messageId) {
+      return JSON.stringify({
+        error: "Outlook email send blocked: messageId is required to send a draft.",
+        rejectedReason: "incomplete-email-preview",
+      });
+    }
+
+    try {
+      let draftResult: CallToolResult;
+      try {
+        draftResult = await opts.client.callTool("get-mail-message", {
+          messageId,
+          expand: ["attachments"],
+        });
+      } catch {
+        draftResult = await opts.client.callTool("get-mail-message", { messageId });
+      }
+      const draftText = mcpTextResult(draftResult).trim();
+      const draft = JSON.parse(draftText) as Record<string, unknown>;
+      if (draft.error) {
+        return JSON.stringify({
+          error: `Outlook email send blocked: draft message could not be loaded (${String(draft.error)}).`,
+          rejectedReason: "draft-not-found",
+        });
+      }
+      partial = parseOutlookDraftMessage(opts.toolName, draft);
+      if (
+        partial.attachments.length === 0 &&
+        (draft.hasAttachments === true || draft.HasAttachments === true)
+      ) {
+        try {
+          const attResult = await opts.client.callTool("list-mail-attachments", { messageId });
+          const attText = mcpTextResult(attResult).trim();
+          const parsedAtt = JSON.parse(attText) as Record<string, unknown>;
+          const items = Array.isArray(parsedAtt)
+            ? parsedAtt
+            : Array.isArray(parsedAtt?.value)
+              ? (parsedAtt.value as unknown[])
+              : [];
+          const names = items
+            .map((att) => record(att)?.name ?? record(att)?.Name)
+            .filter((name): name is string => typeof name === "string" && name.length > 0);
+          if (names.length > 0) {
+            partial.attachments = names;
+          }
+        } catch {
+          // Non-fatal: if attachment listing fails, still proceed with draft's existing attachments
+        }
+      }
+    } catch (err) {
+      return JSON.stringify({
+        error: `Outlook email send blocked: failed to inspect draft message before sending (${messageOf(err)}).`,
+        rejectedReason: "draft-not-found",
+      });
+    }
+  }
+
+  if (!partial) {
+    return JSON.stringify({
+      error: "Outlook email send blocked: could not parse email preview.",
+      rejectedReason: "incomplete-email-preview",
+    });
+  }
+
   if (partial.to.length === 0 || !partial.subject || !partial.body) {
     return JSON.stringify({
       error:
@@ -145,6 +297,7 @@ export async function confirmOutlookSend(opts: {
       rejectedReason: "incomplete-email-preview",
     });
   }
+
   const login = parseOutlookLoginStatus(await opts.client.callTool("verify-login", {}));
   if (!login.success || !login.account) {
     return JSON.stringify({
@@ -152,6 +305,7 @@ export async function confirmOutlookSend(opts: {
       rejectedReason: "sender-unverified",
     });
   }
+
   const verdict = await opts.gate.ask({
     kind: "outlook_send",
     payload: { ...partial, from: login.account },

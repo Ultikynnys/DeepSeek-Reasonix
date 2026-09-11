@@ -10,6 +10,7 @@ import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import {
   OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS,
   confirmOutlookSend,
+  isOutlookConfirmedSendTool,
   isOutlookMailSpec,
   isOutlookSendCapableTool,
   managedMcpToolsHiddenFromModel,
@@ -215,7 +216,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       if (isOutlookMailSpec(spec)) {
         const listed = await mcp.listTools();
         for (const tool of listed.tools) {
-          if (tool.name !== "send-mail" && isOutlookSendCapableTool(tool.name)) {
+          if (!isOutlookConfirmedSendTool(tool.name) && isOutlookSendCapableTool(tool.name)) {
             hiddenTools.add(tool.name);
           }
         }
@@ -514,7 +515,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       // Per-tool disable delta — hot un/register without respawning.
       const protectedSendTools = isOutlookMailSpec(next)
         ? record.disabledTools.filter(
-            (name) => name !== "send-mail" && isOutlookSendCapableTool(name),
+            (name) => !isOutlookConfirmedSendTool(name) && isOutlookSendCapableTool(name),
           )
         : [];
       const nextConfiguredDisabled =
