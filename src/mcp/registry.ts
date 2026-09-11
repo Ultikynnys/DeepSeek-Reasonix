@@ -7,6 +7,7 @@ import type { ToolCallContext } from "../tools.js";
 import type { JSONSchema } from "../types.js";
 import type { McpClient } from "./client.js";
 import { LatencyTracker, type SlowEvent } from "./latency.js";
+import { pruneMcpToolSchema } from "./schema-prune.js";
 import type { CallToolResult, McpContentBlock, McpTool } from "./types.js";
 
 export interface BridgeOptions {
@@ -258,9 +259,10 @@ export async function bridgeMcpTools(
  *  arrays (`required`, `dependentRequired`) so the registry's tool-list hash is
  *  stable across server responses, reconnects, and sessions. Prefix-cache safety. */
 export function canonicalizeMcpToolForCache(tool: McpTool): McpTool {
+  const prunedSchema = pruneMcpToolSchema(tool.inputSchema as JSONSchema);
   return {
     ...tool,
-    inputSchema: canonicalizeSchemaForCache(tool.inputSchema) as McpTool["inputSchema"],
+    inputSchema: canonicalizeSchemaForCache(prunedSchema) as McpTool["inputSchema"],
   };
 }
 
