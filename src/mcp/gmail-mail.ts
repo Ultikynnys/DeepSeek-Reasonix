@@ -5,6 +5,7 @@ import {
   readConfig,
   saveGmailOAuth,
 } from "../config.js";
+import { singleFlight } from "../core/lazy.js";
 import {
   type LocalhostOAuthFlow,
   type TokenResponse,
@@ -99,7 +100,7 @@ async function refreshGmailToken(creds: GmailOAuthCreds): Promise<GmailOAuthCred
   return tokenCreds(await postTokenForm(GMAIL_TOKEN_URL, body), creds, creds.refreshToken);
 }
 
-let refreshInFlight: Promise<string> | null = null;
+const refreshGmailTokenOnce = singleFlight<string>();
 
 export async function resolveGmailToken(path: string = defaultConfigPath()): Promise<string> {
   const creds = readConfig(path).gmailOAuth;
@@ -108,19 +109,15 @@ export async function resolveGmailToken(path: string = defaultConfigPath()): Pro
   }
   if (!creds.accessToken || !creds.expiresAt) throw new Error("Gmail is not signed in");
   if (isTokenFresh(creds.expiresAt, creds.refreshToken)) return creds.accessToken;
-  if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
+  return refreshGmailTokenOnce(async () => {
     try {
       const refreshed = await refreshGmailToken(creds);
       saveGmailOAuth(refreshed, path);
       return refreshed.accessToken as string;
     } catch (error) {
       throw new Error(`Gmail OAuth refresh failed: ${(error as Error).message}`, { cause: error });
-    } finally {
-      refreshInFlight = null;
     }
-  })();
-  return refreshInFlight;
+  });
 }
 
 export async function beginGmailOAuthFlow(

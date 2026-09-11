@@ -1,16 +1,18 @@
+/** DeepSeek v4 models (official API or Ollama-hosted like ollama/deepseek-v4-flash:0731). */
+function isDeepSeekV4ThinkingModel(model: string): boolean {
+  return (
+    model.includes("deepseek-flash") ||
+    model.includes("deepseek-v4-flash") ||
+    model.includes("deepseek-v4-pro")
+  );
+}
+
 /** True when the model emits reasoning_content and requires it round-tripped on follow-ups. */
 export function isThinkingModeModel(model: string): boolean {
   if (model.startsWith("gpt-")) return false;
   if (model.includes("reasoner")) return true;
   if (model.startsWith("glm-")) return true;
-  // DeepSeek v4 models (official API or Ollama-hosted like ollama/deepseek-v4-flash:0731)
-  if (
-    model.includes("deepseek-flash") ||
-    model.includes("deepseek-v4-flash") ||
-    model.includes("deepseek-v4-pro")
-  ) {
-    return true;
-  }
+  if (isDeepSeekV4ThinkingModel(model)) return true;
   // Ollama DeepSeek R1 models (e.g. ollama/deepseek-r1:14b, deepseek-r1:7b)
   if (model.includes("deepseek-r1")) return true;
   return false;
@@ -22,14 +24,7 @@ export function thinkingModeForModel(model: string): "enabled" | "disabled" | un
   if (model === "deepseek-chat") return "disabled";
   if (model.startsWith("glm-")) return "enabled";
   if (model.includes("reasoner")) return "enabled";
-  // DeepSeek v4 models (official API or Ollama-hosted like ollama/deepseek-v4-flash:0731)
-  if (
-    model.includes("deepseek-flash") ||
-    model.includes("deepseek-v4-flash") ||
-    model.includes("deepseek-v4-pro")
-  ) {
-    return "enabled";
-  }
+  if (isDeepSeekV4ThinkingModel(model)) return "enabled";
   // Ollama DeepSeek R1 models (e.g. ollama/deepseek-r1:14b, deepseek-r1:8b)
   if (model.includes("deepseek-r1")) return "enabled";
   return undefined;

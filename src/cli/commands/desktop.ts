@@ -2161,6 +2161,32 @@ function emitMailAuth(
   emit({ type: "$mail_auth", state: { provider, ...state } }, tab.id);
 }
 
+interface MailAuthFlow {
+  controller: AbortController;
+  /** True once a newer flow started (or this one was cancelled) — bail out. */
+  isStale: () => boolean;
+  /** Release the controller slot when it's still ours. */
+  finish: () => void;
+}
+
+/** Open a fresh auth flow for a provider: invalidate any prior generation, abort its
+ *  controller, and install ours. Callers poll `isStale()` between awaits and call
+ *  `finish()` in a `finally`. */
+function beginMailAuthFlow(tab: Tab, provider: MailProvider): MailAuthFlow {
+  const key = mailAuthKey(tab, provider);
+  const generation = nextMailAuthGeneration(tab, provider);
+  mailAuthControllers.get(key)?.abort();
+  const controller = new AbortController();
+  mailAuthControllers.set(key, controller);
+  return {
+    controller,
+    isStale: () => mailAuthGeneration.get(key) !== generation,
+    finish: () => {
+      if (mailAuthControllers.get(key) === controller) mailAuthControllers.delete(key);
+    },
+  };
+}
+
 export function isManagedMcpSpec(spec: McpServerSpec): boolean {
   return isPlaywrightSpec(spec) || isOutlookMailSpec(spec) || isGmailMailSpec(spec);
 }
@@ -2299,24 +2325,20 @@ async function refreshGmailMailAuth(tab: Tab): Promise<void> {
 
 async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): Promise<void> {
   const provider = MailProvider.Outlook;
-  const key = mailAuthKey(tab, provider);
-  const generation = nextMailAuthGeneration(tab, provider);
-  mailAuthControllers.get(key)?.abort();
-  const controller = new AbortController();
-  mailAuthControllers.set(key, controller);
+  const { controller, isStale, finish } = beginMailAuthFlow(tab, provider);
   try {
     configureOutlookMailServer();
     emitMcpSpecs(tab);
     emitMailAuth(tab, provider, { configured: true, phase: "starting" });
     await waitForMailRuntime(tab, bridge);
-    if (mailAuthGeneration.get(key) !== generation) return;
+    if (isStale()) return;
     const raw = await tab.mcpRuntime!.callServerTool(
       OUTLOOK_MAIL_SERVER_NAME,
       "login",
       { force: true },
       AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]),
     );
-    if (mailAuthGeneration.get(key) !== generation) return;
+    if (isStale()) return;
     const immediate = parseOutlookLoginStatus(raw);
     if (immediate.success) {
       emitMailAuth(tab, provider, {
@@ -2337,9 +2359,9 @@ async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>)
       message: deviceCode.message,
     });
     const deadline = Date.now() + 15 * 60_000;
-    while (Date.now() < deadline && mailAuthGeneration.get(key) === generation) {
+    while (Date.now() < deadline && !isStale()) {
       await sleep(2_000);
-      if (mailAuthGeneration.get(key) !== generation) return;
+      if (isStale()) return;
       const verifiedRaw = await tab.mcpRuntime!.callServerTool(
         OUTLOOK_MAIL_SERVER_NAME,
         "verify-login",
@@ -2357,7 +2379,7 @@ async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>)
         return;
       }
     }
-    if (mailAuthGeneration.get(key) === generation) {
+    if (!isStale()) {
       emitMailAuth(tab, provider, {
         configured: true,
         phase: "error",
@@ -2365,26 +2387,20 @@ async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>)
       });
     }
   } catch (error) {
-    if (mailAuthGeneration.get(key) !== generation) return;
+    if (isStale()) return;
     emitMailAuth(tab, provider, {
       configured: outlookMailConfigured(tab),
       phase: "error",
       message: messageOf(error),
     });
   } finally {
-    if (mailAuthControllers.get(key) === controller) {
-      mailAuthControllers.delete(key);
-    }
+    finish();
   }
 }
 
 async function connectGmailMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): Promise<void> {
   const provider = MailProvider.Gmail;
-  const key = mailAuthKey(tab, provider);
-  const generation = nextMailAuthGeneration(tab, provider);
-  mailAuthControllers.get(key)?.abort();
-  const controller = new AbortController();
-  mailAuthControllers.set(key, controller);
+  const { controller, isStale, finish } = beginMailAuthFlow(tab, provider);
   const gmailBase = {
     hasClientId: true,
     hasClientSecret: true,
@@ -2399,20 +2415,20 @@ async function connectGmailMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): 
     emitMcpSpecs(tab);
     emitMailAuth(tab, provider, { configured: true, phase: "starting", ...gmailBase });
     await waitForMailRuntime(tab, bridge);
-    if (mailAuthGeneration.get(key) !== generation) return;
-    const flow = await beginGmailOAuthFlow();
+    if (isStale()) return;
+    const oauthFlow = await beginGmailOAuthFlow();
     emitMailAuth(tab, provider, {
       configured: true,
       phase: "browser",
-      verificationUrl: flow.url,
+      verificationUrl: oauthFlow.url,
       ...gmailBase,
       message: "Complete Google sign-in in your browser.",
     });
-    const onAbort = () => flow.cancel();
+    const onAbort = () => oauthFlow.cancel();
     controller.signal.addEventListener("abort", onAbort, { once: true });
-    const finalCreds = await flow.done;
+    const finalCreds = await oauthFlow.done;
     controller.signal.removeEventListener("abort", onAbort);
-    if (mailAuthGeneration.get(key) !== generation) return;
+    if (isStale()) return;
     saveGmailOAuth(finalCreds);
     emitMailAuth(tab, provider, {
       configured: true,
@@ -2422,7 +2438,7 @@ async function connectGmailMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): 
       message: "Signed in to Gmail.",
     });
   } catch (error) {
-    if (mailAuthGeneration.get(key) !== generation) return;
+    if (isStale()) return;
     const creds = readConfig().gmailOAuth;
     emitMailAuth(tab, provider, {
       configured: Boolean(creds?.clientId && creds?.clientSecret),
@@ -2433,9 +2449,7 @@ async function connectGmailMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): 
       message: messageOf(error),
     });
   } finally {
-    if (mailAuthControllers.get(key) === controller) {
-      mailAuthControllers.delete(key);
-    }
+    finish();
   }
 }
 

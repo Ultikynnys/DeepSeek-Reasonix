@@ -8,6 +8,7 @@ import {
   readConfig,
   saveOpenAIOAuth,
 } from "./config.js";
+import { singleFlight } from "./core/lazy.js";
 import {
   type LocalhostOAuthFlow,
   type TokenResponse,
@@ -167,7 +168,7 @@ export async function oauthAccount(accessToken: string): Promise<string | undefi
   return fetchUserEmail(openAIUserinfoUrl(), accessToken);
 }
 
-let refreshInFlight: Promise<string | undefined> | null = null;
+const refreshOpenAITokenOnce = singleFlight<string | undefined>();
 
 /** A usable OpenAI access token — refreshes from the stored refresh token
  *  when expired or within 5 min of expiry. Undefined when no OAuth creds
@@ -178,8 +179,7 @@ export async function resolveOpenAIToken(
   const creds = readConfig(path).openaiOAuth;
   if (!creds?.accessToken) return undefined;
   if (isTokenFresh(creds.expiresAt, creds.refreshToken)) return creds.accessToken;
-  if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
+  return refreshOpenAITokenOnce(async () => {
     try {
       const next = await refreshOAuthToken(creds.refreshToken, openAIClientId());
       saveOpenAIOAuth(next, path);
@@ -187,11 +187,8 @@ export async function resolveOpenAIToken(
     } catch (err) {
       console.warn(`reasonix: OpenAI OAuth refresh failed — ${(err as Error).message}`);
       return undefined;
-    } finally {
-      refreshInFlight = null;
     }
-  })();
-  return refreshInFlight;
+  });
 }
 
 export interface OAuthFlow extends LocalhostOAuthFlow<OpenAIOAuthCreds> {}

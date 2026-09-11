@@ -8,6 +8,7 @@ import {
   readConfig,
   saveAntigravityOAuth,
 } from "./config.js";
+import { singleFlight } from "./core/lazy.js";
 import {
   type LocalhostOAuthFlow,
   type TokenResponse,
@@ -126,7 +127,7 @@ export async function antigravityAccount(accessToken: string): Promise<string | 
   return fetchUserEmail(antigravityUserinfoUrl(), accessToken);
 }
 
-let refreshInFlight: Promise<string | undefined> | null = null;
+const refreshAntigravityTokenOnce = singleFlight<string | undefined>();
 
 /** A usable Google access token. Refresh failures are surfaced to the caller so
  *  an invalid or revoked credential is never misreported as a missing sign-in. */
@@ -140,8 +141,7 @@ export async function resolveAntigravityToken(
     throw new Error("Stored Antigravity OAuth credentials use an obsolete client; sign in again");
   }
   if (isTokenFresh(creds.expiresAt, creds.refreshToken)) return creds.accessToken;
-  if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
+  return refreshAntigravityTokenOnce(async () => {
     try {
       const next = await refreshAntigravityToken(creds.refreshToken);
       saveAntigravityOAuth(
@@ -153,11 +153,8 @@ export async function resolveAntigravityToken(
       throw new Error(`Antigravity OAuth refresh failed: ${(err as Error).message}`, {
         cause: err,
       });
-    } finally {
-      refreshInFlight = null;
     }
-  })();
-  return refreshInFlight;
+  });
 }
 
 // ── Antigravity project discovery ──────────────────────────────────────────
