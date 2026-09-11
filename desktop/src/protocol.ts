@@ -49,9 +49,9 @@ import type {
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,
-  OutlookMailAuthEvent,
-  OutlookMailAuthPhase,
-  OutlookMailAuthState,
+  MailAuthEvent,
+  MailAuthPhase,
+  MailAuthState,
   PlaywrightBrowserInstall,
   PlaywrightBrowserInstallEvent,
   PlaywrightManagedBrowser,
@@ -119,6 +119,7 @@ export { isAntigravityModel } from "@reasonix/core-utils";
 export {
   BUILTIN_QUICK_SENDS,
   QUICK_SEND_SHORTHAND_MAX_LENGTH,
+  MailProvider,
   allQuickSends,
   enforceQuickSendShorthand,
   isQuickSend,
@@ -158,9 +159,9 @@ export type {
   McpExtensionServerState,
   McpExtensionStatus,
   McpExtensionStatusEvent,
-  OutlookMailAuthEvent,
-  OutlookMailAuthPhase,
-  OutlookMailAuthState,
+  MailAuthEvent,
+  MailAuthPhase,
+  MailAuthState,
   PlaywrightBrowserInstall,
   PlaywrightBrowserInstallEvent,
   PlaywrightManagedBrowser,
@@ -271,7 +272,7 @@ export type IncomingEvent = { tabId?: string } & (
   | McpSpecsEvent
   | McpExtensionStatusEvent
   | McpExtensionCheckEvent
-  | OutlookMailAuthEvent
+  | MailAuthEvent
   | PlaywrightBrowserInstallEvent
   | SkillsEvent
   | CtxBreakdownEvent

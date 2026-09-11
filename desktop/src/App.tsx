@@ -50,7 +50,7 @@ import {
   type McpExtensionCheck,
   type McpExtensionStatus,
   type McpSpecInfo,
-  type OutlookMailAuthState,
+  type MailAuthState,
   type PlaywrightBrowserInstall,
   type PlaywrightManagedBrowser,
   type PlaywrightMcpConnectionMode,
@@ -69,6 +69,7 @@ import {
   type SkillInfo,
   type SubagentProgressEvent,
   type UserImageAttachment,
+  MailProvider,
   resolveActiveQuickSend,
   rpcSend,
 } from "./protocol";
@@ -446,7 +447,7 @@ type State = {
   mcpBridged: boolean;
   mcpExtensionStatus: McpExtensionStatus | null;
   mcpExtensionCheck: McpExtensionCheck | null;
-  outlookMailAuth: OutlookMailAuthState | null;
+  mailAuth: MailAuthState | null;
   playwrightBrowserInstall: PlaywrightBrowserInstall | null;
   skills: SkillInfo[];
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
@@ -1565,8 +1566,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, mcpExtensionStatus: ev.status };
     case "$mcp_extension_check":
       return { ...state, mcpExtensionCheck: ev.check };
-    case "$outlook_mail_auth":
-      return { ...state, outlookMailAuth: ev.state };
+    case "$mail_auth":
+      return { ...state, mailAuth: ev.state };
     case "$playwright_browser_install":
       return { ...state, playwrightBrowserInstall: ev.install };
     case "$skills":
@@ -1686,6 +1687,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           subagentModelEndpoint: ev.subagentModelEndpoint,
           openaiOAuth: ev.openaiOAuth,
           antigravityOAuth: ev.antigravityOAuth,
+          mailProvider: ev.mailProvider ?? MailProvider.Outlook,
           version: ev.version,
         },
         oauthWaiting: ev.openaiOAuth?.signedIn ? false : state.oauthWaiting,
@@ -2304,7 +2306,7 @@ function TabRuntime({
     mcpBridged: false,
     mcpExtensionStatus: null,
     mcpExtensionCheck: null,
-    outlookMailAuth: null,
+    mailAuth: null,
     playwrightBrowserInstall: null,
     skills: [],
     sessionFiles: [],
@@ -2473,24 +2475,29 @@ function TabRuntime({
     (browser: PlaywrightManagedBrowser) => sendRpc({ cmd: "playwright_browser_install", browser }),
     [sendRpc],
   );
-  const requestOutlookMailStatus = useCallback(
-    () => sendRpc({ cmd: "outlook_mail_status" }),
+  const setMailProvider = useCallback(
+    (provider: MailProvider) => sendRpc({ cmd: "mail_provider_set", provider }),
     [sendRpc],
   );
-  const configureOutlookMail = useCallback(
-    () => sendRpc({ cmd: "outlook_mail_configure" }),
+  const requestMailStatus = useCallback(
+    (provider: MailProvider) => sendRpc({ cmd: "mail_status", provider }),
     [sendRpc],
   );
-  const connectOutlookMail = useCallback(
-    () => sendRpc({ cmd: "outlook_mail_connect" }),
+  const configureMail = useCallback(
+    (provider: MailProvider, clientId?: string, clientSecret?: string) =>
+      sendRpc({ cmd: "mail_configure", provider, clientId, clientSecret }),
     [sendRpc],
   );
-  const cancelOutlookMail = useCallback(
-    () => sendRpc({ cmd: "outlook_mail_cancel" }),
+  const connectMail = useCallback(
+    (provider: MailProvider) => sendRpc({ cmd: "mail_connect", provider }),
     [sendRpc],
   );
-  const signOutOutlookMail = useCallback(
-    () => sendRpc({ cmd: "outlook_mail_signout" }),
+  const cancelMail = useCallback(
+    (provider: MailProvider) => sendRpc({ cmd: "mail_cancel", provider }),
+    [sendRpc],
+  );
+  const signOutMail = useCallback(
+    (provider: MailProvider) => sendRpc({ cmd: "mail_signout", provider }),
     [sendRpc],
   );
   const addRule = useCallback(
@@ -3607,12 +3614,14 @@ function TabRuntime({
             onConfigureMcpExtension={configureMcpExtension}
             onCheckMcpExtension={checkMcpExtension}
             onInstallPlaywrightBrowser={installPlaywrightBrowser}
-            outlookMailAuth={state.outlookMailAuth}
-            onRequestOutlookMailStatus={requestOutlookMailStatus}
-            onConfigureOutlookMail={configureOutlookMail}
-            onConnectOutlookMail={connectOutlookMail}
-            onCancelOutlookMail={cancelOutlookMail}
-            onSignOutOutlookMail={signOutOutlookMail}
+            mailProvider={state.settings?.mailProvider ?? MailProvider.Outlook}
+            mailAuth={state.mailAuth}
+            onSetMailProvider={setMailProvider}
+            onRequestMailStatus={requestMailStatus}
+            onConfigureMail={configureMail}
+            onConnectMail={connectMail}
+            onCancelMail={cancelMail}
+            onSignOutMail={signOutMail}
             onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
             onWriteMemory={(scope, name, description, body) =>
               sendRpc({ cmd: "memory_write", scope, name, description, body })

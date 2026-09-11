@@ -91,7 +91,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     mcpBridged: false,
     mcpExtensionStatus: null,
     mcpExtensionCheck: null,
-    outlookMailAuth: null,
+    mailAuth: null,
     playwrightBrowserInstall: null,
     skills: [],
     sessionFiles: [],

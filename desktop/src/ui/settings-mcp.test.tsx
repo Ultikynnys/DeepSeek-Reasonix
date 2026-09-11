@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { McpExtensionStatus, McpSpecInfo } from "../protocol";
+import { MailProvider } from "../protocol";
 import { PageMCP } from "./settings";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
@@ -45,9 +46,10 @@ function renderCard(
   onConfigureExtension = vi.fn(),
   onInstallBrowser = vi.fn(),
   browserInstall: Parameters<typeof PageMCP>[0]["browserInstall"] = null,
-  outlookMailAuth: Parameters<typeof PageMCP>[0]["outlookMailAuth"] = null,
-  onConnectOutlookMail = vi.fn(),
-  onRequestOutlookMailStatus = vi.fn(),
+  mailAuth: Parameters<typeof PageMCP>[0]["mailAuth"] = null,
+  onConnectMail = vi.fn(),
+  onRequestMailStatus = vi.fn(),
+  mailProvider: Parameters<typeof PageMCP>[0]["mailProvider"] = MailProvider.Outlook,
 ) {
   return render(
     <PageMCP
@@ -64,12 +66,14 @@ function renderCard(
       onConfigureExtension={onConfigureExtension}
       onCheckExtension={vi.fn()}
       onInstallBrowser={onInstallBrowser}
-      outlookMailAuth={outlookMailAuth}
-      onRequestOutlookMailStatus={onRequestOutlookMailStatus}
-      onConfigureOutlookMail={vi.fn()}
-      onConnectOutlookMail={onConnectOutlookMail}
-      onCancelOutlookMail={vi.fn()}
-      onSignOutOutlookMail={vi.fn()}
+      mailProvider={mailProvider}
+      mailAuth={mailAuth}
+      onSetMailProvider={vi.fn()}
+      onRequestMailStatus={onRequestMailStatus}
+      onConfigureMail={vi.fn()}
+      onConnectMail={onConnectMail}
+      onCancelMail={vi.fn()}
+      onSignOutMail={vi.fn()}
     />,
   );
 }
@@ -83,6 +87,7 @@ describe("PageMCP: Outlook Mail", () => {
 
   it("shows the Microsoft device code and opens the system browser from the card", async () => {
     renderCard([], extensionStatus(), null, vi.fn(), vi.fn(), null, {
+      provider: MailProvider.Outlook,
       configured: true,
       phase: "device-code",
       verificationUrl: "https://microsoft.com/devicelogin",
@@ -105,7 +110,7 @@ describe("PageMCP: Outlook Mail", () => {
       vi.fn(),
       vi.fn(),
       null,
-      { configured: true, phase: "disconnected" },
+      { provider: MailProvider.Outlook, configured: true, phase: "disconnected" },
       connect,
     );
     fireEvent.click(screen.getByRole("button", { name: "Connect Microsoft account" }));
@@ -122,7 +127,7 @@ describe("PageMCP: Outlook Mail", () => {
       vi.fn(),
       vi.fn(),
       null,
-      { configured: true, phase: "connected", account: "ada@outlook.com" },
+      { provider: MailProvider.Outlook, configured: true, phase: "connected", account: "ada@outlook.com" },
       connect,
       testConnection,
     );
@@ -135,11 +140,82 @@ describe("PageMCP: Outlook Mail", () => {
 
   it("shows disabled progress while testing the connection", () => {
     renderCard([], extensionStatus(), null, vi.fn(), vi.fn(), null, {
+      provider: MailProvider.Outlook,
       configured: true,
       phase: "checking",
     });
     const button = screen.getByRole("button", { name: "Testing connection…" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("PageMCP: Gmail Mail", () => {
+  it("shows the Google OAuth credential form when Gmail is selected", () => {
+    renderCard(
+      [],
+      extensionStatus(),
+      null,
+      vi.fn(),
+      vi.fn(),
+      null,
+      null,
+      vi.fn(),
+      vi.fn(),
+      MailProvider.Gmail,
+    );
+    expect(screen.getByLabelText(/Google OAuth client ID/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save credentials" })).toBeTruthy();
+    expect(screen.getByText(/Register this redirect URI/)).toBeTruthy();
+  });
+
+  it("connects a configured Gmail account from the card", () => {
+    const connect = vi.fn();
+    renderCard(
+      [],
+      extensionStatus(),
+      null,
+      vi.fn(),
+      vi.fn(),
+      null,
+      {
+        provider: MailProvider.Gmail,
+        configured: true,
+        phase: "disconnected",
+        hasClientId: true,
+        hasClientSecret: true,
+      },
+      connect,
+      vi.fn(),
+      MailProvider.Gmail,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Connect Google account" }));
+    expect(connect).toHaveBeenCalledOnce();
+  });
+
+  it("opens the Google authorize URL during the browser phase", async () => {
+    renderCard(
+      [],
+      extensionStatus(),
+      null,
+      vi.fn(),
+      vi.fn(),
+      null,
+      {
+        provider: MailProvider.Gmail,
+        configured: true,
+        phase: "browser",
+        verificationUrl: "https://accounts.google.com/o/oauth2/v2/auth?x=1",
+        hasClientId: true,
+        hasClientSecret: true,
+      },
+      vi.fn(),
+      vi.fn(),
+      MailProvider.Gmail,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open Google sign-in" }));
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?x=1");
+    });
   });
 });
 

@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../App";
+import { MailProvider } from "../protocol";
 import { markVoiceModelDownloaded, setActiveVoiceModelId } from "../voice/models";
 import { speechTranscriber } from "../voice/transcriber";
 import { AudioInputDeviceSettings, SettingsModal, VoiceModelSettings } from "./settings";
@@ -80,12 +81,14 @@ describe("VoiceModelSettings", () => {
     onConfigureMcpExtension: vi.fn(),
     onCheckMcpExtension: vi.fn(),
     onInstallPlaywrightBrowser: vi.fn(),
-    outlookMailAuth: null,
-    onRequestOutlookMailStatus: vi.fn(),
-    onConfigureOutlookMail: vi.fn(),
-    onConnectOutlookMail: vi.fn(),
-    onCancelOutlookMail: vi.fn(),
-    onSignOutOutlookMail: vi.fn(),
+    mailProvider: MailProvider.Outlook,
+    mailAuth: null,
+    onSetMailProvider: vi.fn(),
+    onRequestMailStatus: vi.fn(),
+    onConfigureMail: vi.fn(),
+    onConnectMail: vi.fn(),
+    onCancelMail: vi.fn(),
+    onSignOutMail: vi.fn(),
     onReadMemory: vi.fn(),
     onWriteMemory: vi.fn(),
     onDeleteMemory: vi.fn(),

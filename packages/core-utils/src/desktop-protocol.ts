@@ -483,29 +483,39 @@ export interface McpExtensionCheckEvent {
   check: McpExtensionCheck;
 }
 
-export type OutlookMailAuthPhase =
+export enum MailProvider {
+  Outlook = "outlook",
+  Gmail = "gmail",
+}
+
+export type MailAuthPhase =
   | "unconfigured"
   | "disconnected"
   | "checking"
   | "starting"
   | "device-code"
+  | "browser"
   | "verifying"
   | "connected"
   | "error";
 
-/** Sanitized Microsoft auth state. OAuth tokens never cross the desktop wire protocol. */
-export interface OutlookMailAuthState {
+/** Sanitized mail auth state. OAuth credentials never cross the desktop wire protocol. */
+export interface MailAuthState {
+  provider: MailProvider;
   configured: boolean;
-  phase: OutlookMailAuthPhase;
+  phase: MailAuthPhase;
   account?: string;
   verificationUrl?: string;
   userCode?: string;
+  callbackUrl?: string;
+  hasClientId?: boolean;
+  hasClientSecret?: boolean;
   message?: string;
 }
 
-export interface OutlookMailAuthEvent {
-  type: "$outlook_mail_auth";
-  state: OutlookMailAuthState;
+export interface MailAuthEvent {
+  type: "$mail_auth";
+  state: MailAuthState;
 }
 
 export type PlaywrightBrowserInstall =
@@ -783,6 +793,8 @@ export interface SettingsEvent {
     /** Last OAuth flow failure (e.g. upstream invalid_client / timeout) — drives the status-bar auth chip until the next successful sign-in. */
     flowError?: string;
   };
+  /** Selected managed mail integration. */
+  mailProvider?: MailProvider;
   /** Google Antigravity OAuth state — powers gemini-* models on the Antigravity quota. */
   antigravityOAuth?: {
     signedIn: boolean;
@@ -1107,11 +1119,17 @@ export type OutgoingCommand = { tabId?: string } & (
       extensionBrowser?: PlaywrightExtensionBrowser;
     }
   | { cmd: "mcp_extension_check" }
-  | { cmd: "outlook_mail_status" }
-  | { cmd: "outlook_mail_configure" }
-  | { cmd: "outlook_mail_connect" }
-  | { cmd: "outlook_mail_cancel" }
-  | { cmd: "outlook_mail_signout" }
+  | { cmd: "mail_provider_set"; provider: MailProvider }
+  | { cmd: "mail_status"; provider: MailProvider }
+  | {
+      cmd: "mail_configure";
+      provider: MailProvider;
+      clientId?: string;
+      clientSecret?: string;
+    }
+  | { cmd: "mail_connect"; provider: MailProvider }
+  | { cmd: "mail_cancel"; provider: MailProvider }
+  | { cmd: "mail_signout"; provider: MailProvider }
   | { cmd: "playwright_browser_install"; browser: PlaywrightManagedBrowser }
   | { cmd: "rule_add"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "rule_remove"; ruleType: "shell" | "path"; pattern: string }

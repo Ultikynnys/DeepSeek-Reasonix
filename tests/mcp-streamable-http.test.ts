@@ -166,6 +166,30 @@ describe("StreamableHttpTransport: POST round-trip", () => {
     await transport.close();
   });
 
+  it("resolves expiring headers for every request and overrides static values", async () => {
+    fake = await startFakeServer({
+      reply: (req) => ({
+        jsonrpc: "2.0",
+        id: (req as { id: number }).id,
+        result: {},
+      }),
+    });
+    let generation = 0;
+    const transport = new StreamableHttpTransport({
+      url: fake.url,
+      headers: { authorization: "Bearer stale", "x-static": "kept" },
+      headersResolver: async () => ({ authorization: `Bearer fresh-${++generation}` }),
+    });
+    await transport.send({ jsonrpc: "2.0", id: 1, method: "first" });
+    await transport.send({ jsonrpc: "2.0", id: 2, method: "second" });
+    expect(fake.requests.map((request) => request.headers.authorization)).toEqual([
+      "Bearer fresh-1",
+      "Bearer fresh-2",
+    ]);
+    expect(fake.requests.every((request) => request.headers["x-static"] === "kept")).toBe(true);
+    await transport.close();
+  });
+
   it("treats 202 Accepted as a no-op (notification ack, no message yielded)", async () => {
     fake = await startFakeServer({
       reply: (req) => {

@@ -8,6 +8,7 @@ import {
   GEMINI_MODELS,
   GPT56_MODELS,
   KNOWN_MODELS,
+  MailProvider,
   OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
@@ -335,6 +336,16 @@ export interface AntigravityOAuthCreds {
   models?: string[];
 }
 
+/** User-owned Google OAuth client and tokens for the official Gmail MCP server. */
+export interface GmailOAuthCreds {
+  clientId: string;
+  clientSecret: string;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  account?: string;
+}
+
 /** A per-model provider declaration from the `models` config map. */
 export interface ModelProviderConfig {
   /** Which provider's endpoint family serves the model id. */
@@ -359,6 +370,10 @@ export interface ReasonixConfig {
   /** Google Antigravity OAuth tokens — set by the "Sign in with Google" flow;
    *  powers gemini-* models on the Antigravity quota. */
   antigravityOAuth?: AntigravityOAuthCreds;
+  /** Selected managed mail integration. Outlook remains the default for existing installs. */
+  mailProvider?: MailProvider;
+  /** User-owned Google OAuth client and tokens for the official Gmail MCP server. */
+  gmailOAuth?: GmailOAuthCreds;
   /** Persisted DeepSeek model id — `/model <id>` and the dashboard model picker write through this. */
   model?: string;
   /** Explicit per-model provider mapping — the authority when catalogs and discovery can't place an id.
@@ -997,6 +1012,10 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
       }
       sanitizeModelsField(cfg, path);
       sanitizeAntigravityOAuthField(cfg);
+      if (cfg.mailProvider !== MailProvider.Outlook && cfg.mailProvider !== MailProvider.Gmail) {
+        // undefined so JSON.stringify omits the persisted key entirely.
+        cfg.mailProvider = undefined;
+      }
       const result = cfg as ReasonixConfig;
       _configCache.set(path, { mtimeMs: st.mtimeMs, cfg: result });
       return result;
@@ -1746,6 +1765,25 @@ export function clearAntigravityOAuth(path: string = defaultConfigPath()): void 
   const cfg = readConfig(path);
   if (!cfg.antigravityOAuth) return;
   const { antigravityOAuth: _drop, ...rest } = cfg;
+  writeConfig(rest, path);
+}
+
+export function saveMailProvider(provider: MailProvider, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.mailProvider = provider;
+  writeConfig(cfg, path);
+}
+
+export function saveGmailOAuth(creds: GmailOAuthCreds, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.gmailOAuth = creds;
+  writeConfig(cfg, path);
+}
+
+export function clearGmailOAuth(path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  if (!cfg.gmailOAuth) return;
+  const { gmailOAuth: _drop, ...rest } = cfg;
   writeConfig(rest, path);
 }
 

@@ -10,6 +10,8 @@ export interface BuildTransportOptions {
   cwd?: string;
   /** SSE / Streamable-HTTP only. Ignored by stdio. */
   headers?: Record<string, string>;
+  /** Streamable-HTTP per-request headers for expiring credentials. */
+  headersResolver?: () => Promise<Record<string, string>>;
 }
 
 export function buildTransportFromSpec(
@@ -23,6 +25,7 @@ export function buildTransportFromSpec(
     return new StreamableHttpTransport({
       url: spec.url,
       headers: opts.headers ?? spec.headers,
+      headersResolver: opts.headersResolver,
     });
   }
   return new StdioTransport({

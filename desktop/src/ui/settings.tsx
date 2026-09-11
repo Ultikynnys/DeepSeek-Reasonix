@@ -11,7 +11,7 @@ import type {
   McpExtensionCheck,
   McpExtensionStatus,
   McpSpecInfo,
-  OutlookMailAuthState,
+  MailAuthState,
   PlaywrightBrowserInstall,
   PlaywrightManagedBrowser,
   PlaywrightMcpConnectionMode,
@@ -21,6 +21,7 @@ import type {
   SettingsPatch,
 } from "../protocol";
 import {
+  MailProvider,
   QUICK_SEND_SHORTHAND_MAX_LENGTH,
   allQuickSends,
   enforceQuickSendShorthand,
@@ -123,12 +124,14 @@ export function SettingsModal({
   onConfigureMcpExtension,
   onCheckMcpExtension,
   onInstallPlaywrightBrowser,
-  outlookMailAuth,
-  onRequestOutlookMailStatus,
-  onConfigureOutlookMail,
-  onConnectOutlookMail,
-  onCancelOutlookMail,
-  onSignOutOutlookMail,
+  mailProvider,
+  mailAuth,
+  onSetMailProvider,
+  onRequestMailStatus,
+  onConfigureMail,
+  onConnectMail,
+  onCancelMail,
+  onSignOutMail,
   onReadMemory,
   onWriteMemory,
   onDeleteMemory,
@@ -202,12 +205,14 @@ export function SettingsModal({
   ) => void;
   onCheckMcpExtension: () => void;
   onInstallPlaywrightBrowser: (browser: PlaywrightManagedBrowser) => void;
-  outlookMailAuth: OutlookMailAuthState | null;
-  onRequestOutlookMailStatus: () => void;
-  onConfigureOutlookMail: () => void;
-  onConnectOutlookMail: () => void;
-  onCancelOutlookMail: () => void;
-  onSignOutOutlookMail: () => void;
+  mailProvider: MailProvider;
+  mailAuth: MailAuthState | null;
+  onSetMailProvider: (provider: MailProvider) => void;
+  onRequestMailStatus: (provider: MailProvider) => void;
+  onConfigureMail: (provider: MailProvider, clientId?: string, clientSecret?: string) => void;
+  onConnectMail: (provider: MailProvider) => void;
+  onCancelMail: (provider: MailProvider) => void;
+  onSignOutMail: (provider: MailProvider) => void;
   onReadMemory: (path: string) => void;
   onWriteMemory: (
     scope: "global" | "project",
@@ -341,12 +346,14 @@ export function SettingsModal({
                 onConfigureExtension={onConfigureMcpExtension}
                 onCheckExtension={onCheckMcpExtension}
                 onInstallBrowser={onInstallPlaywrightBrowser}
-                outlookMailAuth={outlookMailAuth}
-                onRequestOutlookMailStatus={onRequestOutlookMailStatus}
-                onConfigureOutlookMail={onConfigureOutlookMail}
-                onConnectOutlookMail={onConnectOutlookMail}
-                onCancelOutlookMail={onCancelOutlookMail}
-                onSignOutOutlookMail={onSignOutOutlookMail}
+                mailProvider={mailProvider}
+                mailAuth={mailAuth}
+                onSetMailProvider={onSetMailProvider}
+                onRequestMailStatus={onRequestMailStatus}
+                onConfigureMail={onConfigureMail}
+                onConnectMail={onConnectMail}
+                onCancelMail={onCancelMail}
+                onSignOutMail={onSignOutMail}
               />
             )}
             {page === "memory" && (
@@ -1663,12 +1670,14 @@ export function PageMCP({
   onConfigureExtension,
   onCheckExtension,
   onInstallBrowser,
-  outlookMailAuth,
-  onRequestOutlookMailStatus,
-  onConfigureOutlookMail,
-  onConnectOutlookMail,
-  onCancelOutlookMail,
-  onSignOutOutlookMail,
+  mailProvider,
+  mailAuth,
+  onSetMailProvider,
+  onRequestMailStatus,
+  onConfigureMail,
+  onConnectMail,
+  onCancelMail,
+  onSignOutMail,
 }: {
   specs: McpSpecInfo[];
   bridged: boolean;
@@ -1688,12 +1697,14 @@ export function PageMCP({
   ) => void;
   onCheckExtension: () => void;
   onInstallBrowser: (browser: PlaywrightManagedBrowser) => void;
-  outlookMailAuth: OutlookMailAuthState | null;
-  onRequestOutlookMailStatus: () => void;
-  onConfigureOutlookMail: () => void;
-  onConnectOutlookMail: () => void;
-  onCancelOutlookMail: () => void;
-  onSignOutOutlookMail: () => void;
+  mailProvider: MailProvider;
+  mailAuth: MailAuthState | null;
+  onSetMailProvider: (provider: MailProvider) => void;
+  onRequestMailStatus: (provider: MailProvider) => void;
+  onConfigureMail: (provider: MailProvider, clientId?: string, clientSecret?: string) => void;
+  onConnectMail: (provider: MailProvider) => void;
+  onCancelMail: (provider: MailProvider) => void;
+  onSignOutMail: (provider: MailProvider) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
@@ -1701,10 +1712,23 @@ export function PageMCP({
   const [extensionBrowser, setExtensionBrowser] = useState<PlaywrightExtensionBrowser>("chrome");
   const [cdpEndpoint, setCdpEndpoint] = useState("");
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [gmailClientId, setGmailClientId] = useState("");
+  const [gmailClientSecret, setGmailClientSecret] = useState("");
+  const mail = mailAuth?.provider === mailProvider ? mailAuth : null;
+  const gmailBrowserUrl =
+    mailProvider === MailProvider.Gmail && mail?.phase === "browser"
+      ? mail.verificationUrl
+      : undefined;
+  const openedGmailUrl = useRef<string | null>(null);
+  useEffect(() => {
+    if (!gmailBrowserUrl || openedGmailUrl.current === gmailBrowserUrl) return;
+    openedGmailUrl.current = gmailBrowserUrl;
+    void openUrl(gmailBrowserUrl).catch(() => undefined);
+  }, [gmailBrowserUrl]);
   useEffect(() => {
     onRequestExtensionStatus();
-    onRequestOutlookMailStatus();
-  }, [onRequestExtensionStatus, onRequestOutlookMailStatus]);
+    onRequestMailStatus(mailProvider);
+  }, [onRequestExtensionStatus, onRequestMailStatus, mailProvider]);
   useEffect(() => {
     if (!extensionStatus) return;
     setMode(extensionStatus.server.mode);
@@ -1956,89 +1980,241 @@ export function PageMCP({
         </div>
       </section>
       <section className="section">
-        <div className="stitle">{t("settings.outlookMailTitle")}</div>
+        <div className="stitle">{t("settings.mailTitle")}</div>
         <div className="scard">
           <div className="desc" style={{ marginBottom: 10 }}>
-            {t("settings.outlookMailDesc")}
+            {t("settings.mailDesc")}
           </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            {!outlookMailAuth?.configured ? (
-              <button type="button" className="btn primary" onClick={onConfigureOutlookMail}>
-                {t("settings.outlookMailConfigure")}
-              </button>
-            ) : outlookMailAuth.phase === "connected" ? (
-              <button type="button" className="btn" onClick={onSignOutOutlookMail}>
-                {t("settings.outlookMailSignOut")}
-              </button>
-            ) : outlookMailAuth.phase === "checking" ? null : outlookMailAuth.phase === "starting" ||
-              outlookMailAuth.phase === "device-code" ||
-              outlookMailAuth.phase === "verifying" ? (
-              <button type="button" className="btn" onClick={onCancelOutlookMail}>
-                {t("settings.outlookMailCancel")}
-              </button>
-            ) : (
-              <button type="button" className="btn primary" onClick={onConnectOutlookMail}>
-                {outlookMailAuth.phase === "error"
-                  ? t("settings.outlookMailRetry")
-                  : t("settings.outlookMailConnect")}
-              </button>
-            )}
-            {outlookMailAuth?.configured &&
-            outlookMailAuth.phase !== "starting" &&
-            outlookMailAuth.phase !== "device-code" &&
-            outlookMailAuth.phase !== "verifying" ? (
-              <button
-                type="button"
-                className="btn"
-                disabled={outlookMailAuth.phase === "checking"}
-                onClick={onRequestOutlookMailStatus}
-              >
-                {outlookMailAuth.phase === "checking"
-                  ? t("settings.outlookMailTesting")
-                  : t("settings.outlookMailTest")}
-              </button>
-            ) : null}
-            {outlookMailAuth?.verificationUrl ? (
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => void openUrl(outlookMailAuth.verificationUrl!).catch(() => undefined)}
-              >
-                {t("settings.outlookMailOpenMicrosoft")}
-              </button>
-            ) : null}
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <button
+              type="button"
+              className={mailProvider === MailProvider.Outlook ? "btn primary" : "btn"}
+              onClick={() => onSetMailProvider(MailProvider.Outlook)}
+            >
+              {t("settings.mailProviderOutlook")}
+            </button>
+            <button
+              type="button"
+              className={mailProvider === MailProvider.Gmail ? "btn primary" : "btn"}
+              onClick={() => onSetMailProvider(MailProvider.Gmail)}
+            >
+              {t("settings.mailProviderGmail")}
+            </button>
           </div>
-          {outlookMailAuth?.userCode ? (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>
-                {t("settings.outlookMailCodeLabel")}
+          {mailProvider === MailProvider.Gmail ? (
+            <div>
+              <div className="desc" style={{ marginBottom: 10 }}>
+                {t("settings.gmailMailDesc")}
               </div>
-              <code style={{ fontSize: 18, userSelect: "all" }}>{outlookMailAuth.userCode}</code>
+              <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+                <label style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {t("settings.gmailClientIdLabel")}
+                  <input
+                    type="text"
+                    className="field mono"
+                    style={{ marginTop: 4 }}
+                    value={gmailClientId}
+                    placeholder={mail?.hasClientId ? t("settings.gmailSaved") : "…apps.googleusercontent.com"}
+                    onChange={(event) => setGmailClientId(event.target.value)}
+                  />
+                </label>
+                <label style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {t("settings.gmailClientSecretLabel")}
+                  <input
+                    type="password"
+                    className="field mono"
+                    style={{ marginTop: 4 }}
+                    value={gmailClientSecret}
+                    placeholder={mail?.hasClientSecret ? t("settings.gmailSaved") : ""}
+                    onChange={(event) => setGmailClientSecret(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!gmailClientId.trim() || !gmailClientSecret.trim()}
+                  onClick={() => {
+                    onConfigureMail(MailProvider.Gmail, gmailClientId, gmailClientSecret);
+                    setGmailClientSecret("");
+                  }}
+                >
+                  {t("settings.gmailSave")}
+                </button>
+                {mail?.phase === "connected" ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => onSignOutMail(MailProvider.Gmail)}
+                  >
+                    {t("settings.gmailSignOut")}
+                  </button>
+                ) : mail?.phase === "starting" ||
+                  mail?.phase === "browser" ||
+                  mail?.phase === "verifying" ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => onCancelMail(MailProvider.Gmail)}
+                  >
+                    {t("settings.outlookMailCancel")}
+                  </button>
+                ) : mail?.hasClientId && mail.hasClientSecret ? (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => onConnectMail(MailProvider.Gmail)}
+                  >
+                    {mail.phase === "error"
+                      ? t("settings.outlookMailRetry")
+                      : t("settings.gmailConnect")}
+                  </button>
+                ) : null}
+                {mail?.configured && mail.phase !== "starting" && mail.phase !== "browser" ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={mail.phase === "checking"}
+                    onClick={() => onRequestMailStatus(MailProvider.Gmail)}
+                  >
+                    {mail.phase === "checking"
+                      ? t("settings.outlookMailTesting")
+                      : t("settings.outlookMailTest")}
+                  </button>
+                ) : null}
+                {mail?.verificationUrl ? (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => void openUrl(mail.verificationUrl!).catch(() => undefined)}
+                  >
+                    {t("settings.gmailOpenGoogle")}
+                  </button>
+                ) : null}
+              </div>
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  color:
+                    mail?.phase === "error"
+                      ? "var(--danger)"
+                      : mail?.phase === "connected"
+                        ? "var(--accent)"
+                        : "var(--muted)",
+                }}
+              >
+                {mail?.phase === "checking"
+                  ? t("settings.outlookMailTesting")
+                  : mail?.phase === "connected"
+                    ? t("settings.outlookMailConnected", {
+                        account: mail.account ?? t("settings.gmailAccountUnknown"),
+                      })
+                    : mail?.message ?? t("settings.gmailStatusUnknown")}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+                {t("settings.gmailCallbackHint", { url: mail?.callbackUrl ?? "" })}
+              </div>
             </div>
-          ) : null}
-          <div
-            style={{
-              marginTop: 8,
-              fontSize: 11,
-              color:
-                outlookMailAuth?.phase === "error"
-                  ? "var(--danger)"
-                  : outlookMailAuth?.phase === "connected"
-                    ? "var(--accent)"
-                    : "var(--muted)",
-            }}
-          >
-            {outlookMailAuth?.phase === "checking"
-              ? t("settings.outlookMailTesting")
-              : outlookMailAuth?.phase === "connected"
-                ? t("settings.outlookMailConnected", {
-                    account: outlookMailAuth.account ?? t("settings.outlookMailAccountUnknown"),
-                  })
-                : outlookMailAuth?.message ?? t("settings.outlookMailStatusUnknown")}
-          </div>
-          <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
-            {t("settings.outlookMailPrivacy")}
-          </div>
+          ) : (
+            <div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                {!mail?.configured ? (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => onConfigureMail(MailProvider.Outlook)}
+                  >
+                    {t("settings.outlookMailConfigure")}
+                  </button>
+                ) : mail.phase === "connected" ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => onSignOutMail(MailProvider.Outlook)}
+                  >
+                    {t("settings.outlookMailSignOut")}
+                  </button>
+                ) : mail.phase === "checking" ? null : mail.phase === "starting" ||
+                  mail.phase === "device-code" ||
+                  mail.phase === "verifying" ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => onCancelMail(MailProvider.Outlook)}
+                  >
+                    {t("settings.outlookMailCancel")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => onConnectMail(MailProvider.Outlook)}
+                  >
+                    {mail.phase === "error"
+                      ? t("settings.outlookMailRetry")
+                      : t("settings.outlookMailConnect")}
+                  </button>
+                )}
+                {mail?.configured &&
+                mail.phase !== "starting" &&
+                mail.phase !== "device-code" &&
+                mail.phase !== "verifying" ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={mail.phase === "checking"}
+                    onClick={() => onRequestMailStatus(MailProvider.Outlook)}
+                  >
+                    {mail.phase === "checking"
+                      ? t("settings.outlookMailTesting")
+                      : t("settings.outlookMailTest")}
+                  </button>
+                ) : null}
+                {mail?.verificationUrl ? (
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => void openUrl(mail.verificationUrl!).catch(() => undefined)}
+                  >
+                    {t("settings.outlookMailOpenMicrosoft")}
+                  </button>
+                ) : null}
+              </div>
+              {mail?.userCode ? (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>
+                    {t("settings.outlookMailCodeLabel")}
+                  </div>
+                  <code style={{ fontSize: 18, userSelect: "all" }}>{mail.userCode}</code>
+                </div>
+              ) : null}
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  color:
+                    mail?.phase === "error"
+                      ? "var(--danger)"
+                      : mail?.phase === "connected"
+                        ? "var(--accent)"
+                        : "var(--muted)",
+                }}
+              >
+                {mail?.phase === "checking"
+                  ? t("settings.outlookMailTesting")
+                  : mail?.phase === "connected"
+                    ? t("settings.outlookMailConnected", {
+                        account: mail.account ?? t("settings.outlookMailAccountUnknown"),
+                      })
+                    : mail?.message ?? t("settings.outlookMailStatusUnknown")}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)" }}>
+                {t("settings.outlookMailPrivacy")}
+              </div>
+            </div>
+          )}
         </div>
       </section>
       <section className="section">

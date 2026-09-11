@@ -10,6 +10,8 @@ export interface StreamableHttpTransportOptions {
   url: string;
   /** Extra headers sent on every request (e.g. `Authorization`). */
   headers?: Record<string, string>;
+  /** Per-request headers for expiring credentials. Values override static headers. */
+  headersResolver?: () => Promise<Record<string, string>>;
 }
 
 const SESSION_HEADER = "mcp-session-id";
@@ -17,6 +19,7 @@ const SESSION_HEADER = "mcp-session-id";
 export class StreamableHttpTransport extends BaseMcpTransport implements McpTransport {
   private readonly url: string;
   private readonly extraHeaders: Record<string, string>;
+  private readonly headersResolver?: () => Promise<Record<string, string>>;
   /** Session id minted by server on (typically) the initialize response. */
   private sessionId: string | null = null;
   /** Background SSE read-loops kicked off by send(); awaited on close(). */
@@ -26,10 +29,12 @@ export class StreamableHttpTransport extends BaseMcpTransport implements McpTran
     super();
     this.url = opts.url;
     this.extraHeaders = opts.headers ?? {};
+    this.headersResolver = opts.headersResolver;
   }
 
   async send(message: JsonRpcMessage): Promise<void> {
     this.assertOpen("Streamable HTTP");
+    const resolvedHeaders = this.headersResolver ? await this.headersResolver() : {};
     const headers: Record<string, string> = {
       "content-type": "application/json",
       // Both accepted — server picks. application/json first signals a
@@ -37,6 +42,7 @@ export class StreamableHttpTransport extends BaseMcpTransport implements McpTran
       // single message.
       accept: "application/json, text/event-stream",
       ...this.extraHeaders,
+      ...resolvedHeaders,
     };
     if (this.sessionId !== null) headers["mcp-session-id"] = this.sessionId;
 

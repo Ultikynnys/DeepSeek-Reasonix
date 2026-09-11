@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import {
   ANTIGRAVITY_MODELS,
   MAX_IMAGE_BYTES,
+  MailProvider,
   flattenText,
   isUsableAntigravityModel,
   messageOf,
@@ -34,6 +35,8 @@ import type {
   JobsEvent,
   LoadedMessage,
   LoadedSegment,
+  MailAuthEvent,
+  MailAuthState,
   McpExtensionCheckEvent,
   McpExtensionStatus,
   McpExtensionStatusEvent,
@@ -51,8 +54,6 @@ import type {
   OllamaModelsEvent,
   OllamaQuotaEvent,
   OpencodeModelsEvent,
-  OutlookMailAuthEvent,
-  OutlookMailAuthState,
   PathAccessRequiredEvent,
   PlanClearedEvent,
   PlanRequiredEvent,
@@ -154,6 +155,8 @@ import {
   saveDisabledModels,
   saveEditMode,
   saveEnableSubagents,
+  saveGmailOAuth,
+  saveMailProvider,
   saveMaxIterPerTurn,
   saveModel,
   saveOllamaGenerationPatch,
@@ -219,6 +222,15 @@ import {
 } from "../../index.js";
 import { createLogger } from "../../logging.js";
 import { MCP_CATALOG, catalogStdioCommand } from "../../mcp/catalog.js";
+import {
+  GMAIL_MAIL_SERVER_NAME,
+  GMAIL_MCP_URL,
+  GMAIL_OAUTH_REDIRECT_URI,
+  beginGmailOAuthFlow,
+  isGmailMailSpec,
+  resolveGmailToken,
+  signOutGmail,
+} from "../../mcp/gmail-mail.js";
 import {
   OUTLOOK_MAIL_ARGS,
   OUTLOOK_MAIL_SERVER_NAME,
@@ -376,7 +388,7 @@ type EmittableEvent =
   | McpSpecsEvent
   | McpExtensionStatusEvent
   | McpExtensionCheckEvent
-  | OutlookMailAuthEvent
+  | MailAuthEvent
   | PlaywrightBrowserInstallEvent
   | SkillsEvent
   | CtxBreakdownEvent
@@ -1098,6 +1110,7 @@ function emitSettings(tab: Tab): void {
       webSearchEndpoint: readConfig().webSearchEndpoint,
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
       subagentModel: tab.currentSubagentModel,
+      mailProvider: config.mailProvider ?? MailProvider.Outlook,
       ollamaGeneration: loadOllamaGenerationSettings(),
       ollamaGenerationOverrides: loadOllamaGenerationOverrides(),
       ollamaModelDefaults:
@@ -2118,21 +2131,38 @@ function emitMcpExtensionStatus(tab: Tab): void {
   emit(ev, tab.id);
 }
 
-const outlookMailAuthGeneration = new Map<string, number>();
-const outlookMailAuthControllers = new Map<string, AbortController>();
+const mailAuthGeneration = new Map<string, number>();
+const mailAuthControllers = new Map<string, AbortController>();
 
-function nextOutlookMailAuthGeneration(tab: Tab): number {
-  const generation = (outlookMailAuthGeneration.get(tab.id) ?? 0) + 1;
-  outlookMailAuthGeneration.set(tab.id, generation);
+function mailAuthKey(tab: Tab, provider: MailProvider): string {
+  return `${tab.id}:${provider}`;
+}
+
+function nextMailAuthGeneration(tab: Tab, provider: MailProvider): number {
+  const key = mailAuthKey(tab, provider);
+  const generation = (mailAuthGeneration.get(key) ?? 0) + 1;
+  mailAuthGeneration.set(key, generation);
   return generation;
 }
 
-function emitOutlookMailAuth(tab: Tab, state: OutlookMailAuthState): void {
-  emit({ type: "$outlook_mail_auth", state }, tab.id);
+/** Abort any in-flight flow for a provider and invalidate its pending callbacks. */
+function cancelMailAuth(tab: Tab, provider: MailProvider): void {
+  const key = mailAuthKey(tab, provider);
+  nextMailAuthGeneration(tab, provider);
+  mailAuthControllers.get(key)?.abort();
+  mailAuthControllers.delete(key);
+}
+
+function emitMailAuth(
+  tab: Tab,
+  provider: MailProvider,
+  state: Omit<MailAuthState, "provider">,
+): void {
+  emit({ type: "$mail_auth", state: { provider, ...state } }, tab.id);
 }
 
 export function isManagedMcpSpec(spec: McpServerSpec): boolean {
-  return isPlaywrightSpec(spec) || isOutlookMailSpec(spec);
+  return isPlaywrightSpec(spec) || isOutlookMailSpec(spec) || isGmailMailSpec(spec);
 }
 
 function outlookMailConfigured(tab: Tab): boolean {
@@ -2159,13 +2189,33 @@ function configureOutlookMailServer(): void {
   writeConfig(cfg);
 }
 
-async function waitForOutlookMailRuntime(
-  tab: Tab,
-  bridge: (tab: Tab) => Promise<void>,
-): Promise<void> {
+function configureGmailMailServer(): void {
+  const cfg = readConfig();
+  mergeMcpServerEntry(cfg, GMAIL_MAIL_SERVER_NAME, {
+    transport: "streamable-http",
+    url: GMAIL_MCP_URL,
+  });
+  const stored = cfg.mcpServers?.[GMAIL_MAIL_SERVER_NAME];
+  if (!stored) throw new Error("failed to create the Gmail Mail server entry");
+  stored.transport = "streamable-http";
+  stored.url = GMAIL_MCP_URL;
+  writeConfig(cfg);
+}
+
+/** Drop the managed mail server for the provider that is NOT selected so exactly one
+ *  mail integration bridges. Gmail OAuth credentials live separately and survive. */
+function pruneUnselectedMailServer(provider: MailProvider): void {
+  const other = provider === MailProvider.Gmail ? OUTLOOK_MAIL_SERVER_NAME : GMAIL_MAIL_SERVER_NAME;
+  const cfg = readConfig();
+  if (!cfg.mcpServers || !(other in cfg.mcpServers)) return;
+  delete cfg.mcpServers[other];
+  writeConfig(cfg);
+}
+
+async function waitForMailRuntime(tab: Tab, bridge: (tab: Tab) => Promise<void>): Promise<void> {
   await bridge(tab);
   await tab.mcpBridgePromise;
-  if (!tab.mcpRuntime) throw new Error("Outlook Mail MCP runtime is unavailable");
+  if (!tab.mcpRuntime) throw new Error("Mail MCP runtime is unavailable");
 }
 
 async function refreshOutlookMailAuth(
@@ -2174,12 +2224,12 @@ async function refreshOutlookMailAuth(
 ): Promise<void> {
   const configured = outlookMailConfigured(tab);
   if (!configured) {
-    emitOutlookMailAuth(tab, { configured: false, phase: "unconfigured" });
+    emitMailAuth(tab, MailProvider.Outlook, { configured: false, phase: "unconfigured" });
     return;
   }
   try {
-    emitOutlookMailAuth(tab, { configured: true, phase: "checking" });
-    await waitForOutlookMailRuntime(tab, bridge);
+    emitMailAuth(tab, MailProvider.Outlook, { configured: true, phase: "checking" });
+    await waitForMailRuntime(tab, bridge);
     const raw = await tab.mcpRuntime!.callServerTool(
       OUTLOOK_MAIL_SERVER_NAME,
       "verify-login",
@@ -2187,14 +2237,14 @@ async function refreshOutlookMailAuth(
       AbortSignal.timeout(15_000),
     );
     const status = parseOutlookLoginStatus(raw);
-    emitOutlookMailAuth(tab, {
+    emitMailAuth(tab, MailProvider.Outlook, {
       configured: true,
       phase: status.success ? "connected" : "disconnected",
       ...(status.account ? { account: status.account } : {}),
       message: status.message,
     });
   } catch (error) {
-    emitOutlookMailAuth(tab, {
+    emitMailAuth(tab, MailProvider.Outlook, {
       configured: true,
       phase: "error",
       message: messageOf(error),
@@ -2202,27 +2252,74 @@ async function refreshOutlookMailAuth(
   }
 }
 
+/** Gmail auth is self-contained: credentials + tokens live in config, so status
+ *  needs no MCP round-trip. `resolveGmailToken` refreshes an expiring token. */
+async function refreshGmailMailAuth(tab: Tab): Promise<void> {
+  const creds = readConfig().gmailOAuth;
+  const hasClientId = Boolean(creds?.clientId);
+  const hasClientSecret = Boolean(creds?.clientSecret);
+  const base = { hasClientId, hasClientSecret, callbackUrl: GMAIL_OAUTH_REDIRECT_URI };
+  if (!hasClientId || !hasClientSecret) {
+    emitMailAuth(tab, MailProvider.Gmail, {
+      configured: false,
+      phase: "unconfigured",
+      ...base,
+      message: "Add a Google OAuth client ID and secret to connect Gmail.",
+    });
+    return;
+  }
+  if (!creds?.accessToken) {
+    emitMailAuth(tab, MailProvider.Gmail, {
+      configured: true,
+      phase: "disconnected",
+      ...base,
+      message: "Google OAuth credentials saved. Connect to sign in.",
+    });
+    return;
+  }
+  emitMailAuth(tab, MailProvider.Gmail, { configured: true, phase: "checking", ...base });
+  try {
+    await resolveGmailToken();
+    emitMailAuth(tab, MailProvider.Gmail, {
+      configured: true,
+      phase: "connected",
+      ...base,
+      ...(creds.account ? { account: creds.account } : {}),
+      message: "Signed in to Gmail.",
+    });
+  } catch (error) {
+    emitMailAuth(tab, MailProvider.Gmail, {
+      configured: true,
+      phase: "error",
+      ...base,
+      message: messageOf(error),
+    });
+  }
+}
+
 async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): Promise<void> {
-  const generation = nextOutlookMailAuthGeneration(tab);
-  outlookMailAuthControllers.get(tab.id)?.abort();
+  const provider = MailProvider.Outlook;
+  const key = mailAuthKey(tab, provider);
+  const generation = nextMailAuthGeneration(tab, provider);
+  mailAuthControllers.get(key)?.abort();
   const controller = new AbortController();
-  outlookMailAuthControllers.set(tab.id, controller);
+  mailAuthControllers.set(key, controller);
   try {
     configureOutlookMailServer();
     emitMcpSpecs(tab);
-    emitOutlookMailAuth(tab, { configured: true, phase: "starting" });
-    await waitForOutlookMailRuntime(tab, bridge);
-    if (outlookMailAuthGeneration.get(tab.id) !== generation) return;
+    emitMailAuth(tab, provider, { configured: true, phase: "starting" });
+    await waitForMailRuntime(tab, bridge);
+    if (mailAuthGeneration.get(key) !== generation) return;
     const raw = await tab.mcpRuntime!.callServerTool(
       OUTLOOK_MAIL_SERVER_NAME,
       "login",
       { force: true },
       AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]),
     );
-    if (outlookMailAuthGeneration.get(tab.id) !== generation) return;
+    if (mailAuthGeneration.get(key) !== generation) return;
     const immediate = parseOutlookLoginStatus(raw);
     if (immediate.success) {
-      emitOutlookMailAuth(tab, {
+      emitMailAuth(tab, provider, {
         configured: true,
         phase: "connected",
         ...(immediate.account ? { account: immediate.account } : {}),
@@ -2232,7 +2329,7 @@ async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>)
     }
     const deviceCode = parseOutlookDeviceCode(raw);
     if (!deviceCode) throw new Error(immediate.message);
-    emitOutlookMailAuth(tab, {
+    emitMailAuth(tab, provider, {
       configured: true,
       phase: "device-code",
       verificationUrl: deviceCode.verificationUrl,
@@ -2240,9 +2337,9 @@ async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>)
       message: deviceCode.message,
     });
     const deadline = Date.now() + 15 * 60_000;
-    while (Date.now() < deadline && outlookMailAuthGeneration.get(tab.id) === generation) {
+    while (Date.now() < deadline && mailAuthGeneration.get(key) === generation) {
       await sleep(2_000);
-      if (outlookMailAuthGeneration.get(tab.id) !== generation) return;
+      if (mailAuthGeneration.get(key) !== generation) return;
       const verifiedRaw = await tab.mcpRuntime!.callServerTool(
         OUTLOOK_MAIL_SERVER_NAME,
         "verify-login",
@@ -2251,7 +2348,7 @@ async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>)
       );
       const verified = parseOutlookLoginStatus(verifiedRaw);
       if (verified.success) {
-        emitOutlookMailAuth(tab, {
+        emitMailAuth(tab, provider, {
           configured: true,
           phase: "connected",
           ...(verified.account ? { account: verified.account } : {}),
@@ -2260,49 +2357,160 @@ async function connectOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>)
         return;
       }
     }
-    if (outlookMailAuthGeneration.get(tab.id) === generation) {
-      emitOutlookMailAuth(tab, {
+    if (mailAuthGeneration.get(key) === generation) {
+      emitMailAuth(tab, provider, {
         configured: true,
         phase: "error",
         message: "Microsoft sign-in timed out. Start the connection again for a new code.",
       });
     }
   } catch (error) {
-    if (outlookMailAuthGeneration.get(tab.id) !== generation) return;
-    emitOutlookMailAuth(tab, {
+    if (mailAuthGeneration.get(key) !== generation) return;
+    emitMailAuth(tab, provider, {
       configured: outlookMailConfigured(tab),
       phase: "error",
       message: messageOf(error),
     });
   } finally {
-    if (outlookMailAuthControllers.get(tab.id) === controller) {
-      outlookMailAuthControllers.delete(tab.id);
+    if (mailAuthControllers.get(key) === controller) {
+      mailAuthControllers.delete(key);
+    }
+  }
+}
+
+async function connectGmailMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): Promise<void> {
+  const provider = MailProvider.Gmail;
+  const key = mailAuthKey(tab, provider);
+  const generation = nextMailAuthGeneration(tab, provider);
+  mailAuthControllers.get(key)?.abort();
+  const controller = new AbortController();
+  mailAuthControllers.set(key, controller);
+  const gmailBase = {
+    hasClientId: true,
+    hasClientSecret: true,
+    callbackUrl: GMAIL_OAUTH_REDIRECT_URI,
+  };
+  try {
+    const configured = readConfig().gmailOAuth;
+    if (!configured?.clientId || !configured.clientSecret) {
+      throw new Error("Save a Gmail OAuth client ID and client secret before connecting");
+    }
+    configureGmailMailServer();
+    emitMcpSpecs(tab);
+    emitMailAuth(tab, provider, { configured: true, phase: "starting", ...gmailBase });
+    await waitForMailRuntime(tab, bridge);
+    if (mailAuthGeneration.get(key) !== generation) return;
+    const flow = await beginGmailOAuthFlow();
+    emitMailAuth(tab, provider, {
+      configured: true,
+      phase: "browser",
+      verificationUrl: flow.url,
+      ...gmailBase,
+      message: "Complete Google sign-in in your browser.",
+    });
+    const onAbort = () => flow.cancel();
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+    const finalCreds = await flow.done;
+    controller.signal.removeEventListener("abort", onAbort);
+    if (mailAuthGeneration.get(key) !== generation) return;
+    saveGmailOAuth(finalCreds);
+    emitMailAuth(tab, provider, {
+      configured: true,
+      phase: "connected",
+      ...gmailBase,
+      ...(finalCreds.account ? { account: finalCreds.account } : {}),
+      message: "Signed in to Gmail.",
+    });
+  } catch (error) {
+    if (mailAuthGeneration.get(key) !== generation) return;
+    const creds = readConfig().gmailOAuth;
+    emitMailAuth(tab, provider, {
+      configured: Boolean(creds?.clientId && creds?.clientSecret),
+      phase: "error",
+      hasClientId: Boolean(creds?.clientId),
+      hasClientSecret: Boolean(creds?.clientSecret),
+      callbackUrl: GMAIL_OAUTH_REDIRECT_URI,
+      message: messageOf(error),
+    });
+  } finally {
+    if (mailAuthControllers.get(key) === controller) {
+      mailAuthControllers.delete(key);
     }
   }
 }
 
 async function signOutOutlookMail(tab: Tab, bridge: (tab: Tab) => Promise<void>): Promise<void> {
-  nextOutlookMailAuthGeneration(tab);
+  cancelMailAuth(tab, MailProvider.Outlook);
   try {
-    await waitForOutlookMailRuntime(tab, bridge);
+    await waitForMailRuntime(tab, bridge);
     await tab.mcpRuntime!.callServerTool(
       OUTLOOK_MAIL_SERVER_NAME,
       "logout",
       {},
       AbortSignal.timeout(30_000),
     );
-    emitOutlookMailAuth(tab, {
+    emitMailAuth(tab, MailProvider.Outlook, {
       configured: true,
       phase: "disconnected",
       message: "Signed out of Microsoft.",
     });
   } catch (error) {
-    emitOutlookMailAuth(tab, {
+    emitMailAuth(tab, MailProvider.Outlook, {
       configured: outlookMailConfigured(tab),
       phase: "error",
       message: messageOf(error),
     });
   }
+}
+
+/** Gmail sign-out drops tokens but keeps the OAuth client credentials for re-connect. */
+function signOutGmailMail(tab: Tab): void {
+  cancelMailAuth(tab, MailProvider.Gmail);
+  try {
+    signOutGmail();
+    emitMailAuth(tab, MailProvider.Gmail, {
+      configured: true,
+      phase: "disconnected",
+      hasClientId: true,
+      hasClientSecret: true,
+      callbackUrl: GMAIL_OAUTH_REDIRECT_URI,
+      message: "Signed out of Google.",
+    });
+  } catch (error) {
+    emitMailAuth(tab, MailProvider.Gmail, {
+      configured: true,
+      phase: "error",
+      message: messageOf(error),
+    });
+  }
+}
+
+/** Route a provider-neutral auth action to the matching provider implementation. */
+async function refreshMailAuth(
+  tab: Tab,
+  provider: MailProvider,
+  bridge: (tab: Tab) => Promise<void>,
+): Promise<void> {
+  if (provider === MailProvider.Gmail) return refreshGmailMailAuth(tab);
+  return refreshOutlookMailAuth(tab, bridge);
+}
+
+async function connectMail(
+  tab: Tab,
+  provider: MailProvider,
+  bridge: (tab: Tab) => Promise<void>,
+): Promise<void> {
+  if (provider === MailProvider.Gmail) return connectGmailMail(tab, bridge);
+  return connectOutlookMail(tab, bridge);
+}
+
+async function signOutMail(
+  tab: Tab,
+  provider: MailProvider,
+  bridge: (tab: Tab) => Promise<void>,
+): Promise<void> {
+  if (provider === MailProvider.Gmail) return signOutGmailMail(tab);
+  return signOutOutlookMail(tab, bridge);
 }
 
 const playwrightBrowserInstalls = new Set<string>();
@@ -3643,9 +3851,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
   async function closeTab(tab: Tab): Promise<void> {
     emitTabDiagnostic(tab, "tab.close.started", undefined, "info");
-    nextOutlookMailAuthGeneration(tab);
-    outlookMailAuthControllers.get(tab.id)?.abort();
-    outlookMailAuthControllers.delete(tab.id);
+    cancelMailAuth(tab, MailProvider.Outlook);
+    cancelMailAuth(tab, MailProvider.Gmail);
     abortTurn(tab);
     try {
       await tab.toolset?.jobs.shutdown();
@@ -5088,18 +5295,40 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emitMcpExtensionStatus(tab);
       return;
     }
-    if (msg.cmd === "outlook_mail_status") {
-      void refreshOutlookMailAuth(tab, bridgeTabMcp);
+    if (msg.cmd === "mail_provider_set") {
+      try {
+        saveMailProvider(msg.provider);
+        pruneUnselectedMailServer(msg.provider);
+        emitSettings(tab);
+        emitMcpSpecs(tab);
+        void bridgeTabMcp(tab).then(() => refreshMailAuth(tab, msg.provider, bridgeTabMcp));
+      } catch (error) {
+        emit({ type: "$error", message: `mail_provider_set: ${messageOf(error)}` }, tab.id);
+      }
       return;
     }
-    if (msg.cmd === "outlook_mail_configure") {
+    if (msg.cmd === "mail_status") {
+      void refreshMailAuth(tab, msg.provider, bridgeTabMcp);
+      return;
+    }
+    if (msg.cmd === "mail_configure") {
       try {
-        configureOutlookMailServer();
+        if (msg.provider === MailProvider.Gmail) {
+          const clientId = msg.clientId?.trim() ?? "";
+          const clientSecret = msg.clientSecret?.trim() ?? "";
+          if (!clientId || !clientSecret) {
+            throw new Error("Enter both a Google OAuth client ID and client secret");
+          }
+          saveGmailOAuth({ clientId, clientSecret });
+          configureGmailMailServer();
+        } else {
+          configureOutlookMailServer();
+        }
         emitMcpSpecs(tab);
-        emitOutlookMailAuth(tab, { configured: true, phase: "disconnected" });
-        void bridgeTabMcp(tab).then(() => refreshOutlookMailAuth(tab, bridgeTabMcp));
+        emitMailAuth(tab, msg.provider, { configured: true, phase: "disconnected" });
+        void bridgeTabMcp(tab).then(() => refreshMailAuth(tab, msg.provider, bridgeTabMcp));
       } catch (error) {
-        emitOutlookMailAuth(tab, {
+        emitMailAuth(tab, msg.provider, {
           configured: false,
           phase: "error",
           message: messageOf(error),
@@ -5107,23 +5336,27 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       return;
     }
-    if (msg.cmd === "outlook_mail_connect") {
-      void connectOutlookMail(tab, bridgeTabMcp);
+    if (msg.cmd === "mail_connect") {
+      void connectMail(tab, msg.provider, bridgeTabMcp);
       return;
     }
-    if (msg.cmd === "outlook_mail_cancel") {
-      nextOutlookMailAuthGeneration(tab);
-      outlookMailAuthControllers.get(tab.id)?.abort();
-      outlookMailAuthControllers.delete(tab.id);
-      emitOutlookMailAuth(tab, {
-        configured: outlookMailConfigured(tab),
+    if (msg.cmd === "mail_cancel") {
+      cancelMailAuth(tab, msg.provider);
+      emitMailAuth(tab, msg.provider, {
+        configured:
+          msg.provider === MailProvider.Gmail
+            ? Boolean(readConfig().gmailOAuth?.clientId)
+            : outlookMailConfigured(tab),
         phase: "disconnected",
-        message: "Microsoft sign-in cancelled.",
+        message:
+          msg.provider === MailProvider.Gmail
+            ? "Google sign-in cancelled."
+            : "Microsoft sign-in cancelled.",
       });
       return;
     }
-    if (msg.cmd === "outlook_mail_signout") {
-      void signOutOutlookMail(tab, bridgeTabMcp);
+    if (msg.cmd === "mail_signout") {
+      void signOutMail(tab, msg.provider, bridgeTabMcp);
       return;
     }
     if (msg.cmd === "playwright_browser_install") {

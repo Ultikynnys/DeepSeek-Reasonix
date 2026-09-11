@@ -312,6 +312,23 @@ export const en = {
     outlookMailStatusUnknown: "Outlook Mail is not configured yet.",
     outlookMailPrivacy:
       "OAuth tokens stay in the local MCP server's credential cache and never enter the Reasonix UI or config. Sending email remains an explicit tool action.",
+    mailTitle: "Mail integration",
+    mailDesc:
+      "Connect a mail account so Reasonix can read and compose messages. Choose a provider below; each keeps its own authentication.",
+    mailProviderOutlook: "Outlook",
+    mailProviderGmail: "Gmail",
+    gmailMailDesc:
+      "Connect a personal Gmail account through your own Google OAuth client. Create a Desktop app OAuth client in Google Cloud Console, add the redirect URI below, then paste its client ID and secret here.",
+    gmailClientIdLabel: "Google OAuth client ID",
+    gmailClientSecretLabel: "Google OAuth client secret",
+    gmailSaved: "saved: enter a new value to replace",
+    gmailSave: "Save credentials",
+    gmailConnect: "Connect Google account",
+    gmailSignOut: "Sign out",
+    gmailOpenGoogle: "Open Google sign-in",
+    gmailAccountUnknown: "Google account",
+    gmailStatusUnknown: "Gmail is not configured yet.",
+    gmailCallbackHint: "Register this redirect URI in your Google OAuth client: {url}",
     parseError: "Parse failed: {error}",
     mcpAddSection: "Add server",
     mcpSpecLabel: "Spec string",

@@ -5,6 +5,7 @@ import { formatMcpSlowToast } from "../../desktop/mcp-toast.js";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
+import { isGmailMailSpec, resolveGmailToken } from "../../mcp/gmail-mail.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import {
   confirmOutlookSend,
@@ -196,7 +197,16 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       // touches the browser, and surface the maintenance duty to the agent
       // via the bridge's first-call notice + description pointers.
       const playwrightTooling = isPlaywrightSpec(spec) ? ensurePlaywrightTooling() : undefined;
-      const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
+      const transport = buildTransportFromSpec(spec, {
+        cwd: workspaceDir,
+        ...(isGmailMailSpec(spec)
+          ? {
+              headersResolver: async () => ({
+                authorization: `Bearer ${await resolveGmailToken()}`,
+              }),
+            }
+          : {}),
+      });
       mcp = new McpClient({ transport, workspaceDir });
       await mcp.initialize({ signal });
       const host: McpClientHost = { client: mcp };
