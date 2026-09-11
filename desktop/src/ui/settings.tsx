@@ -2,6 +2,7 @@ import { DEFAULT_MODEL, modelDisplayName } from "@reasonix/core-utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ChangeEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
+import { formatBytes } from "../format";
 import { t } from "../i18n";
 import { I } from "../icons";
 import { convertUsd, currencySymbol } from "../money";
@@ -1869,6 +1870,48 @@ export function PageMCP({
           {connection ? (
             <div style={{ marginTop: 4, fontSize: 11, color: connection.color }}>
               {connection.text}
+            </div>
+          ) : null}
+          {installRunning ? (
+            <div className="playwright-download-box">
+              <div className="playwright-download-meta">
+                <span>
+                  {browserInstall.downloadedBytes !== undefined &&
+                  browserInstall.totalBytes !== undefined
+                    ? t("settings.mcpBrowserDownloadProgress", {
+                        downloaded: formatBytes(browserInstall.downloadedBytes),
+                        total: formatBytes(browserInstall.totalBytes),
+                        percent: browserInstall.percent ?? 0,
+                      })
+                    : t("settings.mcpBrowserDownloadStarting")}
+                </span>
+                {browserInstall.bytesPerSecond !== undefined ? (
+                  <span>
+                    {t("settings.mcpBrowserDownloadSpeed", {
+                      speed: formatBytes(browserInstall.bytesPerSecond),
+                    })}
+                  </span>
+                ) : null}
+              </div>
+              <div
+                className="playwright-download-track"
+                role="progressbar"
+                aria-label={t("settings.mcpBrowserDownloadAria")}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={browserInstall.percent}
+              >
+                <div
+                  className={`playwright-download-bar${
+                    browserInstall.percent === undefined ? " indeterminate" : ""
+                  }`}
+                  style={
+                    browserInstall.percent === undefined
+                      ? undefined
+                      : { width: `${browserInstall.percent}%` }
+                  }
+                />
+              </div>
             </div>
           ) : null}
           {managedMode && browserInstall?.phase === "done" && browserInstall.browser === mode ? (

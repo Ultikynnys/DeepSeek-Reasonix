@@ -190,10 +190,12 @@ import {
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
   configurePlaywrightArgs,
+  createPlaywrightProgressParser,
   isPlaywrightManagedBrowser,
   normalizeExtensionToken,
   parsePlaywrightConnection,
   playwrightBrowserInstallArgs,
+  playwrightBrowserInstallEnv,
 } from "../../mcp/extension.js";
 import { quoteArg } from "../../mcp/stdio.js";
 
@@ -2335,7 +2337,29 @@ async function installPlaywrightBrowser(
     ? configuredPackage
     : undefined;
   const args = playwrightBrowserInstallArgs(browser, packageId);
+  const env = playwrightBrowserInstallEnv();
   let output = "";
+  let previousProgress: { downloadedBytes: number; at: number } | undefined;
+  const progressParser = createPlaywrightProgressParser((progress) => {
+    const at = Date.now();
+    const elapsedMs = previousProgress ? at - previousProgress.at : 0;
+    const bytesPerSecond =
+      previousProgress &&
+      elapsedMs > 0 &&
+      progress.downloadedBytes >= previousProgress.downloadedBytes
+        ? Math.round(
+            ((progress.downloadedBytes - previousProgress.downloadedBytes) * 1000) / elapsedMs,
+          )
+        : undefined;
+    previousProgress = { downloadedBytes: progress.downloadedBytes, at };
+    emit(
+      {
+        type: "$playwright_browser_install",
+        install: { phase: "running", browser, ...progress, bytesPerSecond },
+      } satisfies PlaywrightBrowserInstallEvent,
+      tab.id,
+    );
+  });
   try {
     const result = await new Promise<{ code: number | null; error?: string }>((resolveResult) => {
       // Windows wraps `npx` as `npx.cmd`, which Node 22+ refuses to spawn
@@ -2348,15 +2372,20 @@ async function installPlaywrightBrowser(
         ? spawn(["npx", ...args.map((arg) => quoteArg(arg, true))].join(" "), [], {
             windowsHide: true,
             shell: true,
+            env,
           })
-        : spawn("npx", args, { windowsHide: true });
+        : spawn("npx", args, { windowsHide: true, env });
       const append = (chunk: Buffer | string) => {
         output = `${output}${String(chunk)}`.slice(-8000);
+        progressParser.push(chunk);
       };
       child.stdout?.on("data", append);
       child.stderr?.on("data", append);
       child.once("error", (error) => resolveResult({ code: null, error: error.message }));
-      child.once("close", (code) => resolveResult({ code }));
+      child.once("close", (code) => {
+        progressParser.flush();
+        resolveResult({ code });
+      });
     });
     const ok = result.code === 0;
     const reason = ok

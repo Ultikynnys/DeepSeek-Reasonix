@@ -509,7 +509,14 @@ export interface OutlookMailAuthEvent {
 }
 
 export type PlaywrightBrowserInstall =
-  | { phase: "running"; browser: PlaywrightManagedBrowser }
+  | {
+      phase: "running";
+      browser: PlaywrightManagedBrowser;
+      downloadedBytes?: number;
+      totalBytes?: number;
+      percent?: number;
+      bytesPerSecond?: number;
+    }
   | {
       phase: "done";
       browser: PlaywrightManagedBrowser;

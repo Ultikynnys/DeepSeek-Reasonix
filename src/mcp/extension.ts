@@ -15,6 +15,8 @@ export const PLAYWRIGHT_EXTENSION_ARG = "--extension";
 /** Env var carrying the per-profile relay token — set it to skip the extension's
  *  per-connection approval dialog (the token is shown in that dialog). */
 export const PLAYWRIGHT_EXTENSION_TOKEN_ENV = "PLAYWRIGHT_MCP_EXTENSION_TOKEN";
+export const PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV = "PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT";
+export const DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS = 10 * 60 * 1000;
 const CONNECTION_VALUE_ARGS = new Set(["--browser", "--cdp-endpoint", "--profile-dir-name"]);
 export const PLAYWRIGHT_MANAGED_BROWSERS = ["chrome", "firefox", "webkit", "msedge"] as const;
 const MANAGED_MODES = new Set<PlaywrightMcpConnectionMode>(PLAYWRIGHT_MANAGED_BROWSERS);
@@ -31,6 +33,63 @@ export function playwrightBrowserInstallArgs(
 ): string[] {
   if (!isPlaywrightManagedBrowser(browser)) throw new Error("unsupported managed browser");
   return ["-y", packageId, "install-browser", browser];
+}
+
+export function playwrightBrowserInstallEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]:
+      env[PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV] ??
+      String(DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS),
+  };
+}
+
+export interface PlaywrightDownloadProgress {
+  downloadedBytes: number;
+  totalBytes: number;
+  percent: number;
+}
+
+const PLAYWRIGHT_PROGRESS_LINE = /\|[^\r\n]*\|\s*(\d{1,3})%\s+of\s+([\d.]+)\s+MiB/i;
+
+export function parsePlaywrightDownloadProgress(line: string): PlaywrightDownloadProgress | null {
+  const match = line.match(PLAYWRIGHT_PROGRESS_LINE);
+  if (!match) return null;
+  const percent = Number(match[1]);
+  const totalMiB = Number(match[2]);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100 || !Number.isFinite(totalMiB)) {
+    return null;
+  }
+  const totalBytes = Math.round(totalMiB * 1024 * 1024);
+  return {
+    downloadedBytes: Math.round((totalBytes * percent) / 100),
+    totalBytes,
+    percent,
+  };
+}
+
+export function createPlaywrightProgressParser(
+  onProgress: (progress: PlaywrightDownloadProgress) => void,
+): { push: (chunk: Buffer | string) => void; flush: () => void } {
+  let buffered = "";
+  const processLine = (line: string) => {
+    const progress = parsePlaywrightDownloadProgress(line);
+    if (progress) onProgress(progress);
+  };
+  return {
+    push(chunk) {
+      buffered += String(chunk);
+      const lines = buffered.split(/\r?\n/);
+      buffered = lines.pop() ?? "";
+      for (const line of lines) processLine(line);
+    },
+    flush() {
+      if (buffered) processLine(buffered);
+      buffered = "";
+    },
+  };
 }
 
 /** Read the `--browser`/`--browser=` value from a Playwright MCP argv, if any. */

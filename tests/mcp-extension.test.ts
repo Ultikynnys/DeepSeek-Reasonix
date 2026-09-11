@@ -4,12 +4,17 @@ import { describe, expect, it } from "vitest";
 import { computeMcpExtensionStatus, interpretExtensionCheck } from "../src/cli/commands/desktop.js";
 import { type ReasonixConfig, mergeMcpServerEntry, normalizeMcpConfig } from "../src/config.js";
 import {
+  DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS,
+  PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV,
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
   configurePlaywrightArgs,
+  createPlaywrightProgressParser,
   normalizeExtensionToken,
   parsePlaywrightConnection,
+  parsePlaywrightDownloadProgress,
   playwrightBrowserInstallArgs,
+  playwrightBrowserInstallEnv,
 } from "../src/mcp/extension.js";
 
 describe("Playwright extension store", () => {
@@ -125,6 +130,41 @@ describe("playwrightBrowserInstallArgs", () => {
     ]);
     expect(() => playwrightBrowserInstallArgs("extension")).toThrow(/unsupported/);
     expect(() => playwrightBrowserInstallArgs("firefox && calc")).toThrow(/unsupported/);
+  });
+});
+
+describe("Playwright browser download", () => {
+  it("uses a generous connection timeout while preserving explicit overrides", () => {
+    expect(playwrightBrowserInstallEnv({ OTHER_VAR: "x" })).toEqual({
+      OTHER_VAR: "x",
+      [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: String(
+        DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS,
+      ),
+    });
+    expect(
+      playwrightBrowserInstallEnv({ [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: "900000" }),
+    ).toEqual({ [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: "900000" });
+  });
+
+  it("parses Playwright non-TTY progress output", () => {
+    expect(parsePlaywrightDownloadProgress("|■■■■                    |  30% of 91.2 MiB")).toEqual({
+      downloadedBytes: Math.round((91.2 * 1024 * 1024 * 30) / 100),
+      totalBytes: Math.round(91.2 * 1024 * 1024),
+      percent: 30,
+    });
+    expect(parsePlaywrightDownloadProgress("Downloading Firefox")).toBeNull();
+  });
+
+  it("parses progress across arbitrary output chunks and flushes a final line", () => {
+    const progress: Array<{ downloadedBytes: number; totalBytes: number; percent: number }> = [];
+    const parser = createPlaywrightProgressParser((value) => progress.push(value));
+    parser.push("Downloading Firefox\n|■■■■");
+    parser.push("    |  50% of 2 MiB\nextracting\n|■■■■■■■■| 100% of 2 MiB");
+    parser.flush();
+    expect(progress).toEqual([
+      { downloadedBytes: 1024 * 1024, totalBytes: 2 * 1024 * 1024, percent: 50 },
+      { downloadedBytes: 2 * 1024 * 1024, totalBytes: 2 * 1024 * 1024, percent: 100 },
+    ]);
   });
 });
 

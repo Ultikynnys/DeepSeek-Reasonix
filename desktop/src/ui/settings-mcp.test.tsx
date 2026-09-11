@@ -209,6 +209,31 @@ describe("PageMCP — playwright connection status", () => {
     expect(
       (screen.getByRole("button", { name: "Installing browser…" }) as HTMLButtonElement).disabled,
     ).toBe(true);
+    expect(screen.getByText("Preparing browser download…")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Browser download progress" })).toBeTruthy();
+    cleanup();
+    renderCard(
+      [spec()],
+      status,
+      null,
+      vi.fn(),
+      vi.fn(),
+      {
+        phase: "running",
+        browser: "firefox",
+        downloadedBytes: 50 * 1024 * 1024,
+        totalBytes: 100 * 1024 * 1024,
+        percent: 50,
+        bytesPerSecond: 2 * 1024 * 1024,
+      },
+    );
+    expect(screen.getByText("50.0 MB / 100 MB · 50%")).toBeTruthy();
+    expect(screen.getByText("2.0 MB/s")).toBeTruthy();
+    expect(
+      screen.getByRole("progressbar", { name: "Browser download progress" }).getAttribute(
+        "aria-valuenow",
+      ),
+    ).toBe("50");
     cleanup();
     renderCard(
       [spec()],

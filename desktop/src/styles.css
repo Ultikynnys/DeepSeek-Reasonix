@@ -9193,11 +9193,51 @@ html[data-platform="macos"] .splash {
   flex: 1;
 }
 
+.playwright-download-box,
 .voice-download-box {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin-top: 4px;
+}
+
+.playwright-download-box {
+  margin-top: 8px;
+}
+
+.playwright-download-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.playwright-download-track {
+  height: 4px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.1));
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.playwright-download-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.playwright-download-bar.indeterminate {
+  width: 35%;
+  animation: playwright-download-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes playwright-download-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }
 
 .voice-progress-meta {
