@@ -38,6 +38,21 @@ export const OUTLOOK_MAIL_INTERNAL_TOOLS = new Set([
 
 export const OUTLOOK_MAIL_CONFIRMED_SEND_TOOL = "send-mail";
 
+/** Administrative folder, inbox-rule, and mailbox-configuration tools disabled by default.
+ *  Kept off the model surface unless the user explicitly enables them in Settings → MCP. */
+export const OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS: readonly string[] = [
+  "create-mail-child-folder",
+  "create-mail-folder",
+  "create-mail-rule",
+  "delete-mail-folder",
+  "delete-mail-rule",
+  "list-mail-child-folders",
+  "list-mail-rules",
+  "update-mail-folder",
+  "update-mail-rule",
+  "update-mailbox-settings",
+];
+
 /** Fail-safe classifier for current and future upstream tools that can transmit mail. */
 export function isOutlookSendCapableTool(toolName: string): boolean {
   return (

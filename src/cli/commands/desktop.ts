@@ -235,6 +235,7 @@ import {
 } from "../../mcp/gmail-mail.js";
 import {
   OUTLOOK_MAIL_ARGS,
+  OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS,
   OUTLOOK_MAIL_SERVER_NAME,
   isOutlookMailSpec,
   parseOutlookDeviceCode,
@@ -2215,6 +2216,9 @@ function configureOutlookMailServer(): void {
   // Managed auth owns the token cache. Drop legacy/custom auth env so no access token,
   // client secret, or alternate tenant silently survives migration into this integration.
   stored.env = { MS365_MCP_TENANT_ID: "consumers" };
+  if (!stored.disabledTools || stored.disabledTools.length === 0) {
+    stored.disabledTools = [...OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS];
+  }
   writeConfig(cfg);
 }
 

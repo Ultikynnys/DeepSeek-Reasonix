@@ -8,6 +8,7 @@ import { McpClient } from "../../mcp/client.js";
 import { isGmailMailSpec, resolveGmailToken } from "../../mcp/gmail-mail.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import {
+  OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS,
   confirmOutlookSend,
   isOutlookMailSpec,
   isOutlookSendCapableTool,
@@ -219,7 +220,9 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
           }
         }
       }
-      const disabledTools = new Set([...(spec.disabledTools ?? []), ...hiddenTools]);
+      const configuredDisabled =
+        spec.disabledTools ?? (isOutlookMailSpec(spec) ? OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS : []);
+      const disabledTools = new Set([...configuredDisabled, ...hiddenTools]);
       const bridge = await bridgeMcpTools(mcp, {
         registry: tools,
         namePrefix,
@@ -514,8 +517,10 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
             (name) => name !== "send-mail" && isOutlookSendCapableTool(name),
           )
         : [];
+      const nextConfiguredDisabled =
+        next.disabledTools ?? (isOutlookMailSpec(next) ? OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS : []);
       const nextTools = new Set([
-        ...(next.disabledTools ?? []),
+        ...nextConfiguredDisabled,
         ...managedMcpToolsHiddenFromModel(next),
         ...protectedSendTools,
       ]);

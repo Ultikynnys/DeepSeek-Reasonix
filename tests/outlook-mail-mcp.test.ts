@@ -3,6 +3,7 @@ import { isManagedMcpSpec } from "../src/cli/commands/desktop.js";
 import { PauseGate } from "../src/core/pause-gate.js";
 import {
   OUTLOOK_MAIL_ARGS,
+  OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS,
   OUTLOOK_MAIL_INTERNAL_TOOLS,
   confirmOutlookSend,
   isOutlookMailSpec,
@@ -258,5 +259,20 @@ describe("managed Outlook Mail MCP", () => {
 
   it("does not mistake unrelated text for a device-code response", () => {
     expect(parseOutlookDeviceCode(JSON.stringify({ error: "denied", message: "No" }))).toBeNull();
+  });
+
+  it("lists all folder and rule administrative tools in OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS", () => {
+    expect([...OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS].sort()).toEqual([
+      "create-mail-child-folder",
+      "create-mail-folder",
+      "create-mail-rule",
+      "delete-mail-folder",
+      "delete-mail-rule",
+      "list-mail-child-folders",
+      "list-mail-rules",
+      "update-mail-folder",
+      "update-mail-rule",
+      "update-mailbox-settings",
+    ]);
   });
 });
