@@ -555,6 +555,68 @@ describe("gemini payload", () => {
     });
   });
 
+  it("strips propertyNames and other draft-only keywords the Gemini Schema type rejects", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-2.5-flash",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "outlook_mail_tool",
+            description: "d",
+            parameters: {
+              type: "object",
+              propertyNames: { pattern: "^[a-z]+$" },
+              properties: {
+                headers: {
+                  type: "object",
+                  propertyNames: { type: "string" },
+                  const: { a: 1 },
+                  exclusiveMinimum: 0,
+                  examples: [{ a: 1 }],
+                  properties: { subject: { type: "string", description: "subj" } },
+                },
+                limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
+                kind: { type: "string", enum: ["a", "b"] },
+              },
+              required: ["headers"],
+            },
+          },
+        },
+      ],
+    });
+
+    const tools = (captured as { request: { tools: { functionDeclarations: unknown[] }[] } })
+      .request.tools;
+    expect(tools[0]?.functionDeclarations[0]).toEqual({
+      name: "outlook_mail_tool",
+      description: "d",
+      parameters: {
+        type: "object",
+        properties: {
+          headers: {
+            type: "object",
+            properties: { subject: { type: "string", description: "subj" } },
+          },
+          limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
+          kind: { type: "string", enum: ["a", "b"] },
+        },
+        required: ["headers"],
+      },
+    });
+  });
+
   it("surfaces daily endpoint failures without gateway fallback", async () => {
     const fetch = vi
       .fn()

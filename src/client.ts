@@ -193,20 +193,31 @@ function toolResultContent(content: ChatMessage["content"]): Record<string, unkn
   return { result };
 }
 
-/** JSON-Schema keywords Gemini's OpenAPI-3.0 function-declaration subset
- *  rejects. Bridged MCP schemas routinely carry these; forwarding them can
- *  trigger a 400 INVALID_ARGUMENT, so they are stripped before upload. */
-const GEMINI_UNSUPPORTED_SCHEMA_KEYS = new Set([
-  "$schema",
-  "$ref",
-  "$defs",
-  "definitions",
-  "additionalProperties",
-  "patternProperties",
-  "anyOf",
-  "oneOf",
-  "allOf",
-  "not",
+/** Fields the Gemini function-declaration `Schema` type accepts (an OpenAPI 3.0
+ *  subset). Google 400s on any other key ("Unknown name ..."), so bridged MCP
+ *  schemas are whitelisted down to this set; draft-only keys are dropped. */
+const GEMINI_SCHEMA_KEYS = new Set([
+  "type",
+  "format",
+  "title",
+  "description",
+  "nullable",
+  "default",
+  "items",
+  "minItems",
+  "maxItems",
+  "enum",
+  "properties",
+  "propertyOrdering",
+  "required",
+  "minProperties",
+  "maxProperties",
+  "minimum",
+  "maximum",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "example",
 ]);
 
 /** Recursively whitelist a tool `parameters` schema to the Gemini-safe subset,
@@ -216,7 +227,7 @@ function sanitizeGeminiSchema(params: unknown): unknown {
   if (Array.isArray(params)) return params;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
-    if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
+    if (!GEMINI_SCHEMA_KEYS.has(key)) continue;
     if (key === "properties" && value && typeof value === "object") {
       const props: Record<string, unknown> = {};
       for (const [pk, pv] of Object.entries(value as Record<string, unknown>)) {
