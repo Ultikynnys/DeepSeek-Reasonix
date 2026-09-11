@@ -220,6 +220,20 @@ const GEMINI_SCHEMA_KEYS = new Set([
   "example",
 ]);
 
+/** Collapse a JSON-Schema `type` union (e.g. `["string","null"]`) to the single
+ *  string Gemini's `Schema.type` proto accepts; `"null"` maps to `nullable: true`.
+ *  Gemini 400s on an array here ("Proto field is not repeating, cannot start list"). */
+function normalizeGeminiType(value: unknown): { type?: string; nullable?: boolean } {
+  if (typeof value === "string") return { type: value };
+  if (!Array.isArray(value)) return {};
+  const names = value.filter((v): v is string => typeof v === "string");
+  const concrete = names.filter((name) => name !== "null");
+  const normalized: { type?: string; nullable?: boolean } = {};
+  if (concrete.length > 0) normalized.type = concrete[0];
+  if (names.includes("null")) normalized.nullable = true;
+  return normalized;
+}
+
 /** Recursively whitelist a tool `parameters` schema to the Gemini-safe subset,
  *  preserving nesting structure while dropping unsupported keywords. */
 function sanitizeGeminiSchema(params: unknown): unknown {
@@ -228,6 +242,12 @@ function sanitizeGeminiSchema(params: unknown): unknown {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
     if (!GEMINI_SCHEMA_KEYS.has(key)) continue;
+    if (key === "type") {
+      const normalized = normalizeGeminiType(value);
+      if (normalized.type !== undefined) out.type = normalized.type;
+      if (normalized.nullable) out.nullable = true;
+      continue;
+    }
     if (key === "properties" && value && typeof value === "object") {
       const props: Record<string, unknown> = {};
       for (const [pk, pv] of Object.entries(value as Record<string, unknown>)) {

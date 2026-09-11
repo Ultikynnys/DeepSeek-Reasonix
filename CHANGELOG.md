@@ -9,6 +9,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Google's Gemini function-declaration `Schema` type accepts a fixed field set and rejects *any* other key with `Unknown name "..."`. Bridged MCP tool schemas carry the full JSON-Schema draft vocabulary, so one unsupported keyword failed the whole request — e.g. `Invalid JSON payload received. Unknown name "propertyNames" at 'request.tools[0].function_declarations[28].parameters.properties[0].value'`. `sanitizeGeminiSchema` (the upload gate for Antigravity function declarations) now *whitelists* each tool's `parameters` down to the Gemini-accepted fields instead of stripping a denylist, which could never be complete against a strict "unknown name" parser. Draft-only keys (`propertyNames`, `const`, `exclusiveMinimum`/`exclusiveMaximum`, `examples`, `$id`, `if`/`then`/`else`, …) are now dropped before upload, while `type`, `properties`, `items`, `required`, `enum`, `description`, `pattern`, `default`, and the rest of the supported subset survive unchanged.
 
+**Fixed: Antigravity tool requests no longer 400 on JSON-Schema `type` unions (`["string","null"]`).**
+
+- Bridged MCP tool schemas (Outlook Mail in particular) declare nullable fields as a JSON-Schema type union, e.g. `"type": ["string", "null"]`. Gemini's `Schema.type` proto is a single enum, so an array triggered `Invalid JSON payload received. Unknown name "type" at 'request.tools[0].function_declarations[26].parameters.properties[0].value': Proto field is not repeating, cannot start list` and failed the whole request. `sanitizeGeminiSchema` now collapses a `type` union to its first concrete member and surfaces a `"null"` member as `nullable: true`, so `["string", "null"]` uploads as `{ "type": "string", "nullable": true }` at every nesting level (object properties and array `items`).
+
 **Added: Outlook Mail is now a managed MCP integration with desktop authentication.**
 
 - Settings → MCP can configure a pinned, mail-only Microsoft 365 MCP server and complete personal Outlook/Hotmail device-code sign-in without using a terminal.

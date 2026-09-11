@@ -617,6 +617,84 @@ describe("gemini payload", () => {
     });
   });
 
+  it("collapses JSON-Schema type unions into a single Gemini type (+nullable)", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-2.5-flash",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "outlook_mail_send_mail",
+            description: "d",
+            parameters: {
+              type: "object",
+              properties: {
+                subject: { type: ["string", "null"], description: "s" },
+                count: { type: ["integer"] },
+                recipients: {
+                  type: "array",
+                  items: {
+                    type: ["object", "null"],
+                    properties: {
+                      emailAddress: {
+                        type: "object",
+                        properties: {
+                          address: { type: ["string", "null"] },
+                          name: { type: ["string", "null"] },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const tools = (captured as { request: { tools: { functionDeclarations: unknown[] }[] } })
+      .request.tools;
+    expect(tools[0]?.functionDeclarations[0]).toEqual({
+      name: "outlook_mail_send_mail",
+      description: "d",
+      parameters: {
+        type: "object",
+        properties: {
+          subject: { type: "string", nullable: true, description: "s" },
+          count: { type: "integer" },
+          recipients: {
+            type: "array",
+            items: {
+              type: "object",
+              nullable: true,
+              properties: {
+                emailAddress: {
+                  type: "object",
+                  properties: {
+                    address: { type: "string", nullable: true },
+                    name: { type: "string", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it("surfaces daily endpoint failures without gateway fallback", async () => {
     const fetch = vi
       .fn()
