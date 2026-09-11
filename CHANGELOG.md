@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: Outlook Mail no longer reports "Graph API access failed: 403" — and sending works again.**
+
+- Reasonix launched the pinned server as `--preset mail`, whose derived Graph scopes omit `User.Read`. The server's own `verify-login` (and Reasonix's send gate) call `GET /me`, which requires `User.Read`, so every login reported `Login successful but Graph API access failed: 403` and every send was blocked as `sender-unverified`. The managed server now launches with `--enabled-tools "mail|attachment|draft|get-current-user"` — the same mail surface plus `get-current-user`, which pulls `User.Read` into the token. `get-current-user` is hidden from the model so the surface stays mail-only.
+
 **Fixed: Antigravity tool requests no longer 400 on `propertyNames` and other JSON-Schema keywords.**
 
 - Google's Gemini function-declaration `Schema` type accepts a fixed field set and rejects *any* other key with `Unknown name "..."`. Bridged MCP tool schemas carry the full JSON-Schema draft vocabulary, so one unsupported keyword failed the whole request — e.g. `Invalid JSON payload received. Unknown name "propertyNames" at 'request.tools[0].function_declarations[28].parameters.properties[0].value'`. `sanitizeGeminiSchema` (the upload gate for Antigravity function declarations) now *whitelists* each tool's `parameters` down to the Gemini-accepted fields instead of stripping a denylist, which could never be complete against a strict "unknown name" parser. Draft-only keys (`propertyNames`, `const`, `exclusiveMinimum`/`exclusiveMaximum`, `examples`, `$id`, `if`/`then`/`else`, …) are now dropped before upload, while `type`, `properties`, `items`, `required`, `enum`, `description`, `pattern`, `default`, and the rest of the supported subset survive unchanged.

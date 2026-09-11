@@ -5,7 +5,15 @@ import type { CallToolResult, McpContentBlock } from "./types.js";
 
 export const OUTLOOK_MAIL_SERVER_NAME = "outlook_mail";
 export const OUTLOOK_MAIL_PACKAGE = "@softeria/ms-365-mcp-server@0.85.0";
-export const OUTLOOK_MAIL_ARGS = ["-y", OUTLOOK_MAIL_PACKAGE, "--preset", "mail"] as const;
+/** `--enabled-tools` (not `--preset mail`) also enables `get-current-user`, whose
+ *  `User.Read` scope the server's `verify-login` (GET /me) needs — without it every
+ *  login reports 403 and sends are blocked. */
+export const OUTLOOK_MAIL_ARGS = [
+  "-y",
+  OUTLOOK_MAIL_PACKAGE,
+  "--enabled-tools",
+  "mail|attachment|draft|get-current-user",
+] as const;
 
 /** Authentication and account mutation stay under explicit desktop-user control. */
 export const OUTLOOK_MAIL_INTERNAL_TOOLS = new Set([
@@ -15,6 +23,9 @@ export const OUTLOOK_MAIL_INTERNAL_TOOLS = new Set([
   "list-accounts",
   "select-account",
   "remove-account",
+  // Enabled only so the server requests the User.Read scope verify-login needs;
+  // not a mail operation, so keep it off the model surface.
+  "get-current-user",
   // These can send without carrying the complete final message in their arguments.
   // Keep them unavailable until Reasonix can fetch and bind an immutable preview.
   "send-draft-message",

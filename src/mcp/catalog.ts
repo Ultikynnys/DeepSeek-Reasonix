@@ -67,7 +67,7 @@ export const MCP_CATALOG: CatalogEntry[] = [
     name: "outlook_mail",
     summary: "Outlook and Hotmail mail with Microsoft device-code authentication",
     package: "@softeria/ms-365-mcp-server@0.85.0",
-    userArgs: "--preset mail",
+    userArgs: "--enabled-tools mail|attachment|draft|get-current-user",
     note: "Reasonix keeps authentication controls in the desktop UI and exposes only mail operations to the model",
   },
 ];

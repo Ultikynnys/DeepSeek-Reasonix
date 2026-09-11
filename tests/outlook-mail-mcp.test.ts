@@ -43,6 +43,7 @@ describe("managed Outlook Mail MCP", () => {
   it("keeps authentication and account mutation tools out of the model surface", () => {
     expect([...OUTLOOK_MAIL_INTERNAL_TOOLS].sort()).toEqual([
       "forward-mail-message",
+      "get-current-user",
       "graph-batch",
       "list-accounts",
       "login",
