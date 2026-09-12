@@ -16,11 +16,12 @@ export interface HeapCheckInputs {
   nodeOptions: string;
   execArgv: readonly string[];
   alreadyReexec: boolean;
+  isDesktop?: boolean;
 }
 
 /** Returns the heap target in MiB, or null when no raise is warranted. */
 export function decideHeapTargetMb(inputs: HeapCheckInputs): number | null {
-  if (inputs.alreadyReexec) return null;
+  if (inputs.alreadyReexec || inputs.isDesktop) return null;
   if (/--max[-_]old[-_]space[-_]size/.test(inputs.nodeOptions)) return null;
   if (inputs.execArgv.some((a) => /max[-_]old[-_]space[-_]size/.test(a))) return null;
   const halfSystem = Math.floor(inputs.totalMemMb / 2);

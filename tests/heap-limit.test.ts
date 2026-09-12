@@ -93,4 +93,15 @@ describe("decideHeapTargetMb (issue #1011)", () => {
       }),
     ).toBeNull();
   });
+
+  it("does NOT re-exec in desktop mode", () => {
+    expect(
+      decideHeapTargetMb({
+        ...base,
+        currentLimitMb: 2090,
+        totalMemMb: 16384,
+        isDesktop: true,
+      }),
+    ).toBeNull();
+  });
 });

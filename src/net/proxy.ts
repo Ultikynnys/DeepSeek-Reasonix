@@ -234,6 +234,21 @@ export function resolveNoProxy(
   };
 }
 
+/** Redact user:password credentials from proxy URLs before logging to stderr or diagnostics. */
+export function redactProxyUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.username || parsed.password) {
+      if (parsed.username) parsed.username = "REDACTED";
+      if (parsed.password) parsed.password = "REDACTED";
+      return parsed.toString();
+    }
+    return rawUrl;
+  } catch {
+    return rawUrl;
+  }
+}
+
 /** Sets the undici global dispatcher to a SelectiveProxyDispatcher (proxy for non-NO_PROXY hosts, direct for matches). `opts.url` (from `cfg.proxy.url`) wins over env detection; falls back to HTTPS_PROXY / HTTP_PROXY / ALL_PROXY. Returns the proxy URL + source + parsed NO_PROXY patterns, or null when nothing is configured, the value is unparseable, the ProxyAgent ctor throws, or opts.disabled is true. Idempotent. */
 export function installProxyIfConfigured(
   env: NodeJS.ProcessEnv = process.env,
@@ -266,7 +281,9 @@ export function installProxyIfConfigured(
     setGlobalDispatcher(new SelectiveProxyDispatcher(url, patterns) as unknown as Dispatcher);
     installed = true;
     const bypassList = patterns.map((p) => p.raw).join(",");
-    process.stderr.write(`[proxy] using ${url} (source: ${source}, NO_PROXY: ${bypassList})\n`);
+    process.stderr.write(
+      `[proxy] using ${redactProxyUrl(url)} (source: ${source}, NO_PROXY: ${bypassList})\n`,
+    );
     return { url, source, reinstalled, noProxy: patterns };
   } catch (err) {
     process.stderr.write(

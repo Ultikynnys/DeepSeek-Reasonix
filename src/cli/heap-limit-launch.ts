@@ -8,14 +8,19 @@ import { RX_HEAP_REEXEC_ENV, decideHeapTargetMb } from "./heap-limit.js";
 
 const runningUnderVitest =
   process.env.VITEST === "true" || process.env.VITEST_WORKER_ID !== undefined;
+const isDesktop = process.argv.includes("desktop");
 
-const target = decideHeapTargetMb({
-  currentLimitMb: Math.floor(getHeapStatistics().heap_size_limit / 1024 / 1024),
-  totalMemMb: Math.floor(totalmem() / 1024 / 1024),
-  nodeOptions: process.env.NODE_OPTIONS ?? "",
-  execArgv: process.execArgv,
-  alreadyReexec: process.env[RX_HEAP_REEXEC_ENV] === "1" || runningUnderVitest,
-});
+const target =
+  isDesktop || process.env[RX_HEAP_REEXEC_ENV] === "1" || runningUnderVitest
+    ? null
+    : decideHeapTargetMb({
+        currentLimitMb: Math.floor(getHeapStatistics().heap_size_limit / 1024 / 1024),
+        totalMemMb: Math.floor(totalmem() / 1024 / 1024),
+        nodeOptions: process.env.NODE_OPTIONS ?? "",
+        execArgv: process.execArgv,
+        alreadyReexec: false,
+        isDesktop,
+      });
 
 if (target !== null) {
   const existing = process.env.NODE_OPTIONS ?? "";

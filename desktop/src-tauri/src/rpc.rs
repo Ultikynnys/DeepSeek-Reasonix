@@ -70,7 +70,11 @@ fn resolve_cli(app: &AppHandle) -> Result<(String, Vec<String>)> {
         if is_real_node && cli_path.exists() {
             return Ok((
                 node_path.to_string_lossy().into_owned(),
-                vec![cli_path.to_string_lossy().into_owned(), "desktop".to_string()],
+                vec![
+                    "--max-old-space-size=4096".to_string(),
+                    cli_path.to_string_lossy().into_owned(),
+                    "desktop".to_string(),
+                ],
             ));
         }
     }
@@ -94,7 +98,11 @@ fn resolve_cli(app: &AppHandle) -> Result<(String, Vec<String>)> {
 
     Ok((
         node_path.to_string_lossy().into_owned(),
-        vec![entry.to_string_lossy().to_string(), "desktop".to_string()],
+        vec![
+            "--max-old-space-size=4096".to_string(),
+            entry.to_string_lossy().to_string(),
+            "desktop".to_string(),
+        ],
     ))
 }
 
@@ -154,6 +162,8 @@ pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), Strin
     let (program, args) = resolve_cli(&app).map_err(|e| e.to_string())?;
     let mut cmd = Command::new(program);
     cmd.args(args);
+    cmd.env("NODE_OPTIONS", "--max-old-space-size=4096");
+    cmd.env("REASONIX_HEAP_REEXEC", "1");
     if let Some(launch_id) = diagnostics::launch_id() {
         cmd.env("REASONIX_LAUNCH_ID", launch_id);
     }

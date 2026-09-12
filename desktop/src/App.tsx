@@ -5007,13 +5007,16 @@ export function App() {
             // (it depends on global config, not on the tab), so it updates
             // shared state here instead of any single tab's reducer.
             if (ev.type === "$ollama_models") {
-              setOllamaCatalog({
-                models: ev.models,
-                visionModels: new Set((ev.visionModels ?? []).map((id) => `ollama/${id}`)),
+              setOllamaCatalog((prev) => ({
+                models: ev.models.length > 0 ? ev.models : (ev.error && prev.models.length > 0 ? prev.models : []),
+                visionModels:
+                  ev.models.length > 0
+                    ? new Set((ev.visionModels ?? []).map((id) => `ollama/${id}`))
+                    : (ev.error && prev.visionModels.size > 0 ? prev.visionModels : new Set()),
                 error: ev.error ?? null,
-                plan: ev.plan ?? null,
-                hiddenCount: ev.hiddenCount ?? 0,
-              });
+                plan: ev.plan ?? (ev.error ? prev.plan : null),
+                hiddenCount: ev.hiddenCount ?? (ev.error ? prev.hiddenCount : 0),
+              }));
               return;
             }
 

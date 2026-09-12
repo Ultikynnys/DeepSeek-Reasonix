@@ -52,7 +52,10 @@ export interface CacheDiagnosticInput {
 }
 
 export function stableHash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
+  return createHash("sha256")
+    .update(JSON.stringify(value) ?? "")
+    .digest("hex")
+    .slice(0, 16);
 }
 
 export function prefixDiagnosticHashes(opts: {

@@ -8,6 +8,7 @@ import {
   matchesNoProxy,
   normalizeProxyUrl,
   parseNoProxy,
+  redactProxyUrl,
   resolveBypassDeepSeekDirect,
   resolveNoProxy,
 } from "../src/net/proxy.js";
@@ -291,6 +292,31 @@ describe("installProxyIfConfigured", () => {
     );
     expect(result?.url).toBe("http://env.example:8080/");
     expect(result?.source).toBe("env");
+  });
+
+  it("redacts credentials from stderr log when proxy includes auth", () => {
+    installProxyIfConfigured({ HTTPS_PROXY: "http://alice:secret_password@proxy.example:8080" });
+    const log = writes.join("");
+    expect(log).toContain("[proxy] using");
+    expect(log).toContain("REDACTED:REDACTED@proxy.example:8080");
+    expect(log).not.toContain("secret_password");
+    expect(log).not.toContain("alice");
+  });
+});
+
+describe("redactProxyUrl", () => {
+  it("masks username and password in proxy URL", () => {
+    expect(redactProxyUrl("http://user:pass@proxy.example:8080")).toBe(
+      "http://REDACTED:REDACTED@proxy.example:8080/",
+    );
+  });
+
+  it("leaves URL without credentials untouched", () => {
+    expect(redactProxyUrl("http://proxy.example:8080")).toBe("http://proxy.example:8080");
+  });
+
+  it("handles malformed URLs safely", () => {
+    expect(redactProxyUrl("not a url")).toBe("not a url");
   });
 });
 

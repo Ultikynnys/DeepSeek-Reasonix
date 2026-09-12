@@ -509,4 +509,24 @@ describe("refreshOllamaModels — app-global catalog cache", () => {
     expect(snap.visionModels).toEqual(["llava"]);
     expect(snap.models).toEqual(["llama3.1:latest", "llava"]);
   });
+
+  it("falls back to cached models on flaky internet failure", async () => {
+    // First fetch succeeds and populates cache
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({ data: [{ id: "deepseek-v4.1-flash" }, { id: "llama3.1:latest" }] }),
+      ),
+    );
+    const initial = await refreshOllamaModels(true);
+    expect(initial.models).toEqual(["deepseek-v4.1-flash", "llama3.1:latest"]);
+    expect(initial.error).toBeUndefined();
+
+    // Second fetch fails due to flaky internet / network disconnect
+    fetchMock.mockRejectedValue(new Error("fetch failed"));
+    const fallback = await refreshOllamaModels(true);
+
+    // Fallback returns cached models AND reports the error
+    expect(fallback.models).toEqual(["deepseek-v4.1-flash", "llama3.1:latest"]);
+    expect(fallback.error).toContain("fetch failed");
+  });
 });

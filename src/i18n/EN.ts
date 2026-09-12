@@ -669,6 +669,8 @@ export const EN: TranslationSchema = {
       "The model provider returned an error before producing a visible response — retrying automatically.",
     providerServerErrorRetry:
       "The model provider reported a temporary server error before producing a visible response: retrying automatically in 10 seconds.",
+    connectionLostWaiting: "Connection lost. Waiting for connection to be re-established...",
+    connectionRestoredResuming: "Connection re-established. Resuming conversation...",
     truncatedContinue:
       "The model hit its output-token limit mid-response — continuing generation from where it stopped.",
     truncatedGiveUp:

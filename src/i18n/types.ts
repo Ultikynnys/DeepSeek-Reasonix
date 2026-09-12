@@ -289,6 +289,8 @@ export interface TranslationSchema {
     thinkingOnlyGiveUp: string;
     providerErrorRetry: string;
     providerServerErrorRetry: string;
+    connectionLostWaiting: string;
+    connectionRestoredResuming: string;
     truncatedContinue: string;
     truncatedGiveUp: string;
     prematureStopNudge: string;

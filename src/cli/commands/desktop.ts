@@ -279,6 +279,7 @@ import {
   verdictFor,
   visionModelsFor,
 } from "../../ollama-model-map.js";
+import { loadOllamaModelsCache, saveOllamaModelsCache } from "../../ollama-models-cache.js";
 import { fetchOpencodeModels } from "../../opencode-models.js";
 import { registerSeeImageTool } from "../../tools/see-image.js";
 import type { SubagentEvent } from "../../tools/subagent.js";
@@ -1455,12 +1456,29 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
     if (!resp.ok) {
       const status = resp.status;
       diag("ollama.models_fetch.failed", { status });
+      const error =
+        status === 401 || status === 403
+          ? "Ollama API key rejected"
+          : `Ollama endpoint returned HTTP ${status}`;
+      process.stderr.write(
+        `reasonix: Ollama endpoint returned HTTP ${status}, checking cached models\n`,
+      );
+      const endpointKey = ep.apiKey ? scopeKeyFor(base, ep.apiKey) : base;
+      const diskCache = loadOllamaModelsCache(endpointKey);
+      const fallback = diskCache ?? (ollamaCatalogCache?.models.length ? ollamaCatalogCache : null);
+      if (status !== 401 && status !== 403 && fallback && fallback.models.length > 0) {
+        return {
+          models: fallback.models,
+          visionModels: fallback.visionModels,
+          plan: fallback.plan,
+          hiddenCount: fallback.hiddenCount,
+          error,
+          fetchedAt: fallback.fetchedAt,
+        };
+      }
       return {
         models: [],
-        error:
-          status === 401 || status === 403
-            ? "Ollama API key rejected"
-            : `Ollama endpoint returned HTTP ${status}`,
+        error,
         fetchedAt: Date.now(),
       };
     }
@@ -1561,16 +1579,45 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
       }
       diag("ollama.vision.done", { total: visible.length, vision: vision.size });
     }
-    return {
+    const snapshot: OllamaCatalogSnapshot = {
       models: visible,
       visionModels: vision.size > 0 ? [...vision].sort() : undefined,
       plan,
       hiddenCount: gated.size > 0 ? gated.size : undefined,
       fetchedAt: Date.now(),
     };
+    try {
+      const endpointKey = ep.apiKey ? scopeKeyFor(base, ep.apiKey) : base;
+      saveOllamaModelsCache(endpointKey, {
+        models: snapshot.models,
+        visionModels: snapshot.visionModels,
+        plan: snapshot.plan,
+        hiddenCount: snapshot.hiddenCount,
+        fetchedAt: snapshot.fetchedAt,
+      });
+    } catch (err) {
+      diag("ollama.cache.save_failed", { message: messageOf(err) }, "warn");
+    }
+    return snapshot;
   } catch (err) {
     const message = messageOf(err);
     diag("ollama.models_fetch.error", { message });
+    process.stderr.write(
+      `reasonix: failed to fetch Ollama models (${message}), falling back to cached models\n`,
+    );
+    const endpointKey = ep.apiKey ? scopeKeyFor(base, ep.apiKey) : base;
+    const diskCache = loadOllamaModelsCache(endpointKey);
+    const fallback = diskCache ?? (ollamaCatalogCache?.models.length ? ollamaCatalogCache : null);
+    if (fallback && fallback.models.length > 0) {
+      return {
+        models: fallback.models,
+        visionModels: fallback.visionModels,
+        plan: fallback.plan,
+        hiddenCount: fallback.hiddenCount,
+        error: `Ollama unreachable: ${message}`,
+        fetchedAt: fallback.fetchedAt,
+      };
+    }
     return { models: [], error: `Ollama unreachable: ${message}`, fetchedAt: Date.now() };
   }
 }
@@ -1583,6 +1630,21 @@ export async function refreshOllamaModels(
   tab?: Tab,
 ): Promise<OllamaCatalogSnapshot> {
   if (ollamaCatalogInflight) return ollamaCatalogInflight;
+  const ep = loadOllamaEndpoint();
+  const base = ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL;
+  const endpointKey = ep.apiKey ? scopeKeyFor(base, ep.apiKey) : base;
+  if (!ollamaCatalogCache) {
+    const diskCache = loadOllamaModelsCache(endpointKey);
+    if (diskCache && diskCache.models.length > 0) {
+      ollamaCatalogCache = {
+        models: diskCache.models,
+        visionModels: diskCache.visionModels,
+        plan: diskCache.plan,
+        hiddenCount: diskCache.hiddenCount,
+        fetchedAt: diskCache.fetchedAt,
+      };
+    }
+  }
   const cached = ollamaCatalogCache;
   if (!force && cached && !cached.error && Date.now() - cached.fetchedAt < OLLAMA_CATALOG_TTL_MS) {
     emitOllamaCatalog(cached);
@@ -1590,7 +1652,9 @@ export async function refreshOllamaModels(
   }
   const inflight = fetchOllamaCatalog(tab)
     .then((snap) => {
-      if (!snap.error) ollamaCatalogCache = snap;
+      if (!snap.error || snap.models.length > 0) {
+        ollamaCatalogCache = snap;
+      }
       emitOllamaCatalog(snap);
       return snap;
     })

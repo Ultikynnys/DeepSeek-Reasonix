@@ -17,7 +17,9 @@ import {
   is4xxError,
   is5xxError,
   isDeepSeekHost,
+  isNetworkConnectionError,
   probeDeepSeekReachable,
+  waitForReconnection,
 } from "./loop/errors.js";
 import {
   type ForceSummaryContext,
@@ -344,6 +346,8 @@ export class CacheFirstLoop {
   private _thinkingOnlyPartialAppended = false;
   /** Latched once per turn — replay one provider failure before any output reached the UI. */
   private _providerErrorRetried = false;
+  /** Count of network disconnect wait-and-reconnect attempts this turn. */
+  private _networkReconnects = 0;
   /** Count of output-token-truncation continuations this turn — caps the resume loop. */
   private _truncationContinuations = 0;
   /** Count of premature-stop nudges this turn — caps the finish-or-continue re-prompt loop. */
@@ -1032,6 +1036,7 @@ export class CacheFirstLoop {
     this._thinkingOnlyRetried = false;
     this._thinkingOnlyPartialAppended = false;
     this._providerErrorRetried = false;
+    this._networkReconnects = 0;
     this._truncationContinuations = 0;
     this._prematureStopNudges = 0;
     this._lastReasoningSig = null;
@@ -1390,6 +1395,39 @@ export class CacheFirstLoop {
           is5xxError(err) && dsHost ? await probeDeepSeekReachable(this.client) : undefined;
         const cause = err instanceof Error ? err : new Error(String(err));
         const { code, phase, partialDelivered, timedOut } = errorMeta(cause);
+        const isNetworkLoss =
+          !partialDelivered &&
+          !signal.aborted &&
+          cause.name !== "AbortError" &&
+          !is4xxError(cause) &&
+          this._networkReconnects < 10 &&
+          isNetworkConnectionError(cause);
+        if (isNetworkLoss) {
+          this._networkReconnects++;
+          yield {
+            turn: this._turn,
+            role: "warning",
+            severity: "high",
+            content: t("loop.connectionLostWaiting"),
+          };
+          const reconnected = await waitForReconnection({
+            targetUrl: upstreamHost,
+            signal,
+          });
+          if (reconnected) {
+            yield {
+              turn: this._turn,
+              role: "warning",
+              severity: "low",
+              content: t("loop.connectionRestoredResuming"),
+            };
+            continue;
+          }
+          if (signal.aborted) {
+            restoreModelIfNeeded();
+            return;
+          }
+        }
         const providerErrorRetryable =
           !this._providerErrorRetried &&
           !partialDelivered &&

@@ -1,6 +1,7 @@
+import { sleep } from "@reasonix/core-utils";
 import type { DeepSeekClient } from "../client.js";
 import type { ModelProvider } from "../config.js";
-import { PROVIDER_ERROR_BRANDS } from "../core/retry-shared.js";
+import { PROVIDER_ERROR_BRANDS, isAbortError } from "../core/retry-shared.js";
 import { t } from "../i18n/index.js";
 import type { TranslationSchema } from "../i18n/types.js";
 
@@ -78,6 +79,128 @@ export function is5xxError(err: unknown): boolean {
 export function is4xxError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return new RegExp(`^${PROVIDER_ERROR_PREFIX} 4\\d{2}:`).test(err.message ?? "");
+}
+
+const NETWORK_ERROR_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+
+export function isNetworkConnectionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (isAbortError(err)) return false;
+  if (is4xxError(err)) return false;
+
+  const code = ("code" in err && typeof err.code === "string" ? err.code : "").toUpperCase();
+  if (code === "UND_ERR_ABORTED") return false;
+
+  const msg = err.message ?? "";
+  if (
+    /fetch failed|network error|socket hang up|connection (?:reset|refused|closed|timeout)|econnreset|enotfound|eai_again|etimedout/i.test(
+      msg,
+    ) ||
+    /stream body read failed: (?:connection reset|socket hang up|econnreset)/i.test(msg) ||
+    /Ollama stream (?:body read failed: connection reset|terminated before the `done` completion frame)/i.test(
+      msg,
+    )
+  ) {
+    return true;
+  }
+
+  if (NETWORK_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  if ("cause" in err && err.cause instanceof Error) {
+    return isNetworkConnectionError(err.cause);
+  }
+
+  return false;
+}
+
+export interface WaitForReconnectionOptions {
+  targetUrl?: string;
+  signal?: AbortSignal;
+  maxWaitMs?: number;
+  initialDelayMs?: number;
+  probeIntervalMs?: number;
+  probeFn?: (url: string, signal?: AbortSignal) => Promise<boolean>;
+}
+
+export async function probeConnectivity(
+  url: string,
+  signal?: AbortSignal,
+  timeoutMs = 3000,
+): Promise<boolean> {
+  if (signal?.aborted) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const probeSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  try {
+    const resp = await fetch(url, { method: "HEAD", signal: probeSignal }).catch(async (err) => {
+      if (probeSignal.aborted) throw err;
+      return await fetch(url, { method: "GET", signal: probeSignal });
+    });
+    return resp !== undefined;
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function waitForReconnection(opts: WaitForReconnectionOptions): Promise<boolean> {
+  const isVitest = process.env.VITEST === "true";
+  const defaultMaxWait = isVitest ? 500 : 300_000;
+  const defaultInitialDelay = isVitest ? 10 : 1500;
+  const defaultProbeInterval = isVitest ? 50 : 3000;
+
+  const {
+    targetUrl,
+    signal,
+    maxWaitMs = defaultMaxWait,
+    initialDelayMs = defaultInitialDelay,
+    probeIntervalMs = defaultProbeInterval,
+    probeFn = probeConnectivity,
+  } = opts;
+
+  if (!targetUrl) return true;
+
+  if (initialDelayMs > 0) {
+    try {
+      await sleep(initialDelayMs, signal);
+    } catch {
+      if (signal?.aborted) return false;
+    }
+  }
+
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    if (signal?.aborted) return false;
+    try {
+      const connected = await probeFn(targetUrl, signal);
+      if (connected) return true;
+    } catch {
+      // probe failed, continue waiting
+    }
+    try {
+      await sleep(probeIntervalMs, signal);
+    } catch {
+      if (signal?.aborted) return false;
+    }
+  }
+
+  return false;
 }
 
 /** Read structured metadata off thrown errors without resorting to `as any`. */
