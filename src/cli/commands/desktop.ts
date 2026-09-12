@@ -191,6 +191,8 @@ import {
 import { recordDiagnostic } from "../../diagnostics.js";
 import { normalizeImageToDataUrls } from "../../image-format.js";
 import {
+  DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
+  PLAYWRIGHT_DOWNLOAD_HOST_ENV,
   PLAYWRIGHT_EXTENSION_ARG,
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
@@ -2566,7 +2568,8 @@ async function installPlaywrightBrowser(
     ? configuredPackage
     : undefined;
   const args = playwrightBrowserInstallArgs(browser, packageId);
-  const env = playwrightBrowserInstallEnv();
+  const configuredEnv = readConfig().mcpServers?.playwright?.env;
+  const env = playwrightBrowserInstallEnv({ ...process.env, ...(configuredEnv ?? {}) });
   let output = "";
   let previousProgress: { downloadedBytes: number; at: number } | undefined;
   const progressParser = createPlaywrightProgressParser((progress) => {
@@ -5381,7 +5384,28 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "playwright_browser_install") {
-      void installPlaywrightBrowser(tab, msg.browser, () => void bridgeTabMcp(tab));
+      void installPlaywrightBrowser(tab, msg.browser, () => {
+        const cfg = readConfig();
+        const entry = MCP_CATALOG.find((e) => e.name === "playwright");
+        if (entry) {
+          const { command, args } = catalogStdioCommand(entry);
+          mergeMcpServerEntry(cfg, entry.name, { transport: "stdio", command, args });
+          const stored = cfg.mcpServers?.[entry.name];
+          if (stored) {
+            stored.args = configurePlaywrightArgs(stored.args ?? args, msg.browser);
+            const env = { ...(stored.env ?? {}) };
+            delete env[PLAYWRIGHT_EXTENSION_TOKEN_ENV];
+            if (!env[PLAYWRIGHT_DOWNLOAD_HOST_ENV]) {
+              env[PLAYWRIGHT_DOWNLOAD_HOST_ENV] = DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST;
+            }
+            stored.env = Object.keys(env).length > 0 ? env : undefined;
+            writeConfig(cfg);
+            emitMcpSpecs(tab);
+            emitMcpExtensionStatus(tab);
+          }
+        }
+        void bridgeTabMcp(tab);
+      });
       return;
     }
     if (msg.cmd === "mcp_extension_configure") {
@@ -5406,6 +5430,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           env[PLAYWRIGHT_EXTENSION_TOKEN_ENV] = token;
         } else if (msg.mode !== "extension") {
           delete env[PLAYWRIGHT_EXTENSION_TOKEN_ENV];
+        }
+        if (msg.mode !== "extension" && msg.mode !== "cdp" && !env[PLAYWRIGHT_DOWNLOAD_HOST_ENV]) {
+          env[PLAYWRIGHT_DOWNLOAD_HOST_ENV] = DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST;
         }
         stored.env = Object.keys(env).length > 0 ? env : undefined;
         writeConfig(cfg);

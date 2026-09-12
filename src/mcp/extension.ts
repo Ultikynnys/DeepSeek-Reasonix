@@ -17,6 +17,11 @@ export const PLAYWRIGHT_EXTENSION_ARG = "--extension";
 export const PLAYWRIGHT_EXTENSION_TOKEN_ENV = "PLAYWRIGHT_MCP_EXTENSION_TOKEN";
 export const PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV = "PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT";
 export const DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS = 10 * 60 * 1000;
+export const PLAYWRIGHT_DOWNLOAD_HOST_ENV = "PLAYWRIGHT_DOWNLOAD_HOST";
+/** Official Microsoft Azure CDN mirror for Playwright browser builds.
+ *  Bypasses the flaky cdn.playwright.dev 307 redirect to playwright.download.prss.microsoft.com
+ *  (ESRP CDN), which hangs or fails in various ISPs and triggers Node client timeout issues. */
+export const DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST = "https://playwright.azureedge.net";
 const CONNECTION_VALUE_ARGS = new Set(["--browser", "--cdp-endpoint", "--profile-dir-name"]);
 export const PLAYWRIGHT_MANAGED_BROWSERS = ["chrome", "firefox", "webkit", "msedge"] as const;
 const MANAGED_MODES = new Set<PlaywrightMcpConnectionMode>(PLAYWRIGHT_MANAGED_BROWSERS);
@@ -43,6 +48,8 @@ export function playwrightBrowserInstallEnv(
     [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]:
       env[PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV] ??
       String(DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS),
+    [PLAYWRIGHT_DOWNLOAD_HOST_ENV]:
+      env[PLAYWRIGHT_DOWNLOAD_HOST_ENV] ?? DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
   };
 }
 

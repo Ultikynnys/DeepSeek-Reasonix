@@ -5,7 +5,9 @@ import { computeMcpExtensionStatus, interpretExtensionCheck } from "../src/cli/c
 import { type ReasonixConfig, mergeMcpServerEntry, normalizeMcpConfig } from "../src/config.js";
 import {
   DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS,
+  DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
   PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV,
+  PLAYWRIGHT_DOWNLOAD_HOST_ENV,
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
   configurePlaywrightArgs,
@@ -140,10 +142,17 @@ describe("Playwright browser download", () => {
       [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: String(
         DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS,
       ),
+      [PLAYWRIGHT_DOWNLOAD_HOST_ENV]: DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
     });
     expect(
-      playwrightBrowserInstallEnv({ [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: "900000" }),
-    ).toEqual({ [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: "900000" });
+      playwrightBrowserInstallEnv({
+        [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: "900000",
+        [PLAYWRIGHT_DOWNLOAD_HOST_ENV]: "https://custom-mirror.example.com",
+      }),
+    ).toEqual({
+      [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: "900000",
+      [PLAYWRIGHT_DOWNLOAD_HOST_ENV]: "https://custom-mirror.example.com",
+    });
   });
 
   it("parses Playwright non-TTY progress output", () => {
