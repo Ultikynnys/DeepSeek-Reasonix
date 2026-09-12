@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: Antigravity/Gemini 3 tool loops no longer 400 with "Function call is missing a thought_signature in functionCall parts."**
+
+- Gemini 3 requires every replayed `functionCall` part to carry the model's `thoughtSignature`. The signature occasionally arrives in a **separate trailing part** (`{ "text": "", "thoughtSignature": "…" }`, sibling to the `functionCall` part) rather than on the call itself. Reasonix only read the signature when it sat directly on the `functionCall` part, so the standalone form was dropped and the echoed-back continuation failed with `INVALID_ARGUMENT` at a call such as `default_api:todo_write`. Both the streaming and non-streaming Antigravity parsers now scan every part of a response for a signature and attach it to the calls that lack one, and the streaming assembler backfills a signature that arrives in a later SSE frame onto a call that already streamed.
+
 **Fixed: Playwright browser installation no longer remains stuck after reaching 100%.**
 
 - Reasonix now enforces a 12-minute deadline for each official/mirror attempt and a 2-minute finalization deadline after download progress reaches 100%. A stalled installer process tree is terminated and settled explicitly, so fallback or an actionable error appears instead of an hour-long spinner. Settings also provides a Cancel installation button that terminates the active attempt without starting another source.

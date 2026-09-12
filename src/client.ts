@@ -314,6 +314,9 @@ export interface StreamChunk {
   finishReason?: string;
   /** Model-generated image (Antigravity inlineData part) — data URL + mime. */
   image?: { dataUrl: string; mimeType: string };
+  /** Gemini 3.x thought signature seen in a part of its own, hoisted to chunk
+   *  level so the assembler can attach it to a function call streamed earlier. */
+  thoughtSignature?: string;
   raw: any;
 }
 
@@ -960,8 +963,17 @@ export class DeepSeekClient {
     let content = "";
     let image: { dataUrl: string; mimeType: string } | undefined;
     const toolCalls: ToolCall[] = [];
+    // Gemini 3 sometimes returns a function call's thought signature in a
+    // SEPARATE part (`{ text: "", thoughtSignature }`) rather than as a sibling
+    // of functionCall (cloudwego/eino-ext#756, continuedev/continue#8785).
+    // Collect it from any part and backfill calls that lack one, or the echoed
+    // back continuation 400s with "Function call is missing a thought_signature".
+    let partThoughtSignature: string | undefined;
     for (const part of parts) {
       if (typeof part.text === "string") content += part.text;
+      if (typeof part.thoughtSignature === "string" && part.thoughtSignature.length > 0) {
+        partThoughtSignature = part.thoughtSignature;
+      }
       if (part.inlineData?.data && part.inlineData?.mimeType) {
         image = {
           dataUrl: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
@@ -977,8 +989,15 @@ export class DeepSeekClient {
             arguments: JSON.stringify(part.functionCall.args ?? {}),
           },
           // Part.thought_signature is a SIBLING of functionCall, not nested.
-          thoughtSignature: part.thoughtSignature,
+          thoughtSignature: part.thoughtSignature ?? partThoughtSignature,
         });
+      }
+    }
+    // The signature part can trail the functionCall part in the same message;
+    // backfill any call built before the signature was seen.
+    if (partThoughtSignature) {
+      for (const tc of toolCalls) {
+        if (!tc.thoughtSignature) tc.thoughtSignature = partThoughtSignature;
       }
     }
     return {
@@ -1135,6 +1154,16 @@ export class DeepSeekClient {
     const candidate = inner.candidates?.[0];
     if (candidate?.finishReason) chunk.finishReason = candidate.finishReason;
     const parts = candidate?.content?.parts ?? [];
+    // The thought signature may arrive in a part of its own (`{ text: "",
+    // thoughtSignature }`) rather than on the functionCall part
+    // (cloudwego/eino-ext#756). Scan the whole envelope first so a call in the
+    // same frame still gets it when the signature part trails it.
+    let envelopeThoughtSignature: string | undefined;
+    for (const part of parts) {
+      if (typeof part.thoughtSignature === "string" && part.thoughtSignature.length > 0) {
+        envelopeThoughtSignature = part.thoughtSignature;
+      }
+    }
     for (const part of parts) {
       if (typeof part.text === "string" && part.text.length > 0) {
         chunk.contentDelta = (chunk.contentDelta ?? "") + part.text;
@@ -1155,16 +1184,20 @@ export class DeepSeekClient {
             argumentsDelta: JSON.stringify(part.functionCall.args ?? {}),
             // Gemini 3.x requires the model's thoughtSignature to be echoed back
             // unchanged on the next request, or the tool continuation 400s.
-            thoughtSignature: part.thoughtSignature,
+            thoughtSignature: part.thoughtSignature ?? envelopeThoughtSignature,
           },
         });
       }
     }
+    // Surface the envelope signature at chunk level so the assembler can
+    // backfill a call whose signature arrived in a later SSE frame.
+    if (envelopeThoughtSignature !== undefined) chunk.thoughtSignature = envelopeThoughtSignature;
     if (
       chunk.contentDelta !== undefined ||
       chunk.usage !== undefined ||
       chunk.finishReason !== undefined ||
-      chunk.image !== undefined
+      chunk.image !== undefined ||
+      chunk.thoughtSignature !== undefined
     ) {
       chunks.unshift(chunk);
     }

@@ -110,3 +110,43 @@ describe("streamModelResponse — repetition stall false positives", () => {
     expect(result.reasoningContent).toBe(reasoning);
   });
 });
+
+describe("streamModelResponse — Gemini thought signature", () => {
+  it("backfills a signature that arrives in a later frame onto an earlier call", async () => {
+    const chunks: StreamChunk[] = [
+      {
+        toolCallDelta: {
+          index: 0,
+          id: "call_1",
+          name: "todo_write",
+          argumentsDelta: '{"text":"x"}',
+        },
+      },
+      { thoughtSignature: "sig-late" },
+    ];
+
+    const result = await run(chunks);
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]!.thoughtSignature).toBe("sig-late");
+  });
+
+  it("leaves a call's own signature untouched when one is already present", async () => {
+    const chunks: StreamChunk[] = [
+      {
+        toolCallDelta: {
+          index: 0,
+          id: "call_1",
+          name: "todo_write",
+          argumentsDelta: '{"text":"x"}',
+          thoughtSignature: "sig-own",
+        },
+      },
+      { thoughtSignature: "sig-late" },
+    ];
+
+    const result = await run(chunks);
+
+    expect(result.toolCalls[0]!.thoughtSignature).toBe("sig-own");
+  });
+});

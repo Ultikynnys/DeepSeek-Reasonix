@@ -47,6 +47,10 @@ export async function* streamModelResponse(
   let finishReason: string | undefined;
   let image: { dataUrl: string; mimeType: string } | undefined;
   let repetitionStall: StreamModelResult["repetitionStall"];
+  // Gemini 3 can deliver a function call's thought signature in a dedicated
+  // trailing part rather than on the call itself (cloudwego/eino-ext#756).
+  // Track the last one seen so a call streamed earlier can be backfilled.
+  let streamThoughtSignature: string | undefined;
   const contentRepetition = new StreamRepetitionDetector();
   const reasoningRepetition = new StreamRepetitionDetector();
   const toolNameRepetitions = new Map<number, StreamRepetitionDetector>();
@@ -204,6 +208,7 @@ export async function* streamModelResponse(
       if (chunk.usage) usage = chunk.usage;
       if (chunk.finishReason) finishReason = chunk.finishReason;
       if (chunk.image) image = chunk.image;
+      if (chunk.thoughtSignature) streamThoughtSignature = chunk.thoughtSignature;
     }
   } catch (err) {
     // If we deliberately aborted the stream due to repetition stall or an intervention tool ready,
@@ -219,10 +224,19 @@ export async function* streamModelResponse(
     }
   }
 
+  const toolCalls = [...callBuf.values()];
+  // Backfill any function call the stream left without a thought signature so
+  // the echoed-back continuation carries it; omitting it 400s with
+  // "Function call is missing a thought_signature in functionCall parts".
+  if (streamThoughtSignature) {
+    for (const tc of toolCalls) {
+      if (!tc.thoughtSignature) tc.thoughtSignature = streamThoughtSignature;
+    }
+  }
   return {
     assistantContent,
     reasoningContent,
-    toolCalls: [...callBuf.values()],
+    toolCalls,
     usage,
     finishReason,
     image,

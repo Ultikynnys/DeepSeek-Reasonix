@@ -778,6 +778,27 @@ describe("gemini payload", () => {
     expect(res.toolCalls[0]?.thoughtSignature).toBe("sig-xyz");
   });
 
+  it("captures a thoughtSignature returned in a separate trailing part", async () => {
+    const fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify(
+          wrappedResponse([
+            { functionCall: { name: "read", args: { path: "/a" } } },
+            { text: "", thoughtSignature: "sig-separate" },
+          ]),
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const res = await client.chat({
+      model: "gemini-3.1-pro-high",
+      messages: [{ role: "user", content: "read /a" }],
+    });
+    expect(res.toolCalls[0]?.thoughtSignature).toBe("sig-separate");
+  });
+
   it("serializes image_url parts to inlineData for the vision API", async () => {
     let captured: { body: unknown } | null = null;
     const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
@@ -1027,6 +1048,42 @@ describe("gemini streaming", () => {
       { index: 1, id: "call-b", name: "b" },
       { index: 2, id: "call-c", name: "c" },
     ]);
+  });
+
+  it("attaches a thoughtSignature delivered in a separate part of the same frame", async () => {
+    const envelope = (parts: unknown[]) => ({
+      response: { candidates: [{ content: { parts } }] },
+    });
+    const sse = [
+      `data: ${JSON.stringify(
+        envelope([
+          { functionCall: { id: "call-a", name: "todo_write", args: { text: "x" } } },
+          { text: "", thoughtSignature: "sig-frame" },
+        ]),
+      )}`,
+      "data: [DONE]",
+    ].join("\n\n");
+
+    const fetch = vi.fn(async () => {
+      return new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const callDeltas = [];
+    const chunkSignatures: string[] = [];
+    for await (const chunk of client.stream({
+      model: "gemini-3.1-pro-high",
+      messages: [{ role: "user", content: "run" }],
+    })) {
+      if (chunk.toolCallDelta) callDeltas.push(chunk.toolCallDelta);
+      if (chunk.thoughtSignature) chunkSignatures.push(chunk.thoughtSignature);
+    }
+
+    expect(callDeltas[0]?.thoughtSignature).toBe("sig-frame");
+    expect(chunkSignatures).toContain("sig-frame");
   });
 
   it("captures an inlineData image part as StreamChunk.image", async () => {
