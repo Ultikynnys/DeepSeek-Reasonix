@@ -6,12 +6,15 @@ import { type ReasonixConfig, mergeMcpServerEntry, normalizeMcpConfig } from "..
 import {
   DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS,
   DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
+  PLAYWRIGHT_BACKUP_DOWNLOAD_HOST,
   PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV,
   PLAYWRIGHT_DOWNLOAD_HOST_ENV,
+  PLAYWRIGHT_DOWNLOAD_SOURCES,
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
   configurePlaywrightArgs,
   createPlaywrightProgressParser,
+  installFromPlaywrightDownloadSources,
   normalizeExtensionToken,
   parsePlaywrightConnection,
   parsePlaywrightDownloadProgress,
@@ -136,22 +139,52 @@ describe("playwrightBrowserInstallArgs", () => {
 });
 
 describe("Playwright browser download", () => {
-  it("uses a generous connection timeout while preserving explicit overrides", () => {
-    expect(playwrightBrowserInstallEnv({ OTHER_VAR: "x" })).toEqual({
+  it("hardcodes timeout and source instead of trusting user environment overrides", () => {
+    expect(PLAYWRIGHT_DOWNLOAD_SOURCES).toEqual([
+      { source: "official", host: DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST },
+      { source: "backup", host: PLAYWRIGHT_BACKUP_DOWNLOAD_HOST },
+    ]);
+    expect(
+      playwrightBrowserInstallEnv(
+        {
+          OTHER_VAR: "x",
+          [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: "60000",
+          [PLAYWRIGHT_DOWNLOAD_HOST_ENV]: "https://user-source.example.com",
+        },
+        PLAYWRIGHT_BACKUP_DOWNLOAD_HOST,
+      ),
+    ).toEqual({
       OTHER_VAR: "x",
       [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: String(
         DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS,
       ),
-      [PLAYWRIGHT_DOWNLOAD_HOST_ENV]: DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
+      [PLAYWRIGHT_DOWNLOAD_HOST_ENV]: PLAYWRIGHT_BACKUP_DOWNLOAD_HOST,
     });
-    expect(
-      playwrightBrowserInstallEnv({
-        [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: "900000",
-        [PLAYWRIGHT_DOWNLOAD_HOST_ENV]: "https://custom-mirror.example.com",
-      }),
-    ).toEqual({
-      [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: "900000",
-      [PLAYWRIGHT_DOWNLOAD_HOST_ENV]: "https://custom-mirror.example.com",
+  });
+
+  it("tries the official source first and exposes the backup retry", async () => {
+    const attempted: string[] = [];
+    const result = await installFromPlaywrightDownloadSources(async ({ source, host }) => {
+      attempted.push(source);
+      return source === "official" ? "network timeout" : null;
+    });
+    expect(attempted).toEqual(["official", "backup"]);
+    expect(result).toEqual({
+      ok: true,
+      failures: [`official source (${DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST}): network timeout`],
+    });
+  });
+
+  it("retains diagnostics from both sources when neither succeeds", async () => {
+    const result = await installFromPlaywrightDownloadSources(async ({ source }) => {
+      return `${source} failed`;
+    });
+    expect(result).toEqual({
+      ok: false,
+      failures: [
+        `official source (${DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST}): official failed`,
+        `backup source (${PLAYWRIGHT_BACKUP_DOWNLOAD_HOST}): backup failed`,
+      ],
     });
   });
 

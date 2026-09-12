@@ -18,10 +18,28 @@ export const PLAYWRIGHT_EXTENSION_TOKEN_ENV = "PLAYWRIGHT_MCP_EXTENSION_TOKEN";
 export const PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV = "PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT";
 export const DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS = 10 * 60 * 1000;
 export const PLAYWRIGHT_DOWNLOAD_HOST_ENV = "PLAYWRIGHT_DOWNLOAD_HOST";
-/** Official Microsoft Azure CDN mirror for Playwright browser builds.
- *  Bypasses the flaky cdn.playwright.dev 307 redirect to playwright.download.prss.microsoft.com
- *  (ESRP CDN), which hangs or fails in various ISPs and triggers Node client timeout issues. */
-export const DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST = "https://playwright.azureedge.net";
+/** Official Playwright browser-build endpoint. */
+export const DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST = "https://cdn.playwright.dev";
+/** Reasonix-operated caching mirror used only after the official endpoint fails. */
+export const PLAYWRIGHT_BACKUP_DOWNLOAD_HOST = "https://tf2stats.r60d.xyz/playwright";
+export const PLAYWRIGHT_DOWNLOAD_SOURCES = [
+  { source: "official", host: DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST },
+  { source: "backup", host: PLAYWRIGHT_BACKUP_DOWNLOAD_HOST },
+] as const;
+export type PlaywrightDownloadSource = (typeof PLAYWRIGHT_DOWNLOAD_SOURCES)[number];
+
+export async function installFromPlaywrightDownloadSources(
+  install: (download: PlaywrightDownloadSource) => Promise<string | null>,
+): Promise<{ ok: boolean; failures: string[] }> {
+  const failures: string[] = [];
+  for (const download of PLAYWRIGHT_DOWNLOAD_SOURCES) {
+    const failure = await install(download);
+    if (failure === null) return { ok: true, failures };
+    failures.push(`${download.source} source (${download.host}): ${failure}`);
+  }
+  return { ok: false, failures };
+}
+
 const CONNECTION_VALUE_ARGS = new Set(["--browser", "--cdp-endpoint", "--profile-dir-name"]);
 export const PLAYWRIGHT_MANAGED_BROWSERS = ["chrome", "firefox", "webkit", "msedge"] as const;
 const MANAGED_MODES = new Set<PlaywrightMcpConnectionMode>(PLAYWRIGHT_MANAGED_BROWSERS);
@@ -42,14 +60,14 @@ export function playwrightBrowserInstallArgs(
 
 export function playwrightBrowserInstallEnv(
   env: NodeJS.ProcessEnv = process.env,
+  downloadHost = DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
 ): NodeJS.ProcessEnv {
   return {
     ...env,
-    [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]:
-      env[PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV] ??
-      String(DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS),
-    [PLAYWRIGHT_DOWNLOAD_HOST_ENV]:
-      env[PLAYWRIGHT_DOWNLOAD_HOST_ENV] ?? DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
+    [PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_ENV]: String(
+      DEFAULT_PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT_MS,
+    ),
+    [PLAYWRIGHT_DOWNLOAD_HOST_ENV]: downloadHost,
   };
 }
 

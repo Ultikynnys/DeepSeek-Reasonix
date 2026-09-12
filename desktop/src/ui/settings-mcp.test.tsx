@@ -280,12 +280,13 @@ describe("PageMCP — playwright connection status", () => {
       null,
       vi.fn(),
       vi.fn(),
-      { phase: "running", browser: "firefox" },
+      { phase: "running", browser: "firefox", source: "official" },
     );
     expect(
       (screen.getByRole("button", { name: "Installing browser…" }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(screen.getByText("Preparing browser download…")).toBeTruthy();
+    expect(screen.getByText("Downloading from Playwright's official source")).toBeTruthy();
     expect(screen.getByRole("progressbar", { name: "Browser download progress" })).toBeTruthy();
     cleanup();
     renderCard(
@@ -297,6 +298,7 @@ describe("PageMCP — playwright connection status", () => {
       {
         phase: "running",
         browser: "firefox",
+        source: "backup",
         downloadedBytes: 50 * 1024 * 1024,
         totalBytes: 100 * 1024 * 1024,
         percent: 50,
@@ -304,6 +306,7 @@ describe("PageMCP — playwright connection status", () => {
       },
     );
     expect(screen.getByText("50.0 MB / 100 MB · 50%")).toBeTruthy();
+    expect(screen.getByText("Official source failed: retrying from the Reasonix mirror")).toBeTruthy();
     expect(screen.getByText("2.0 MB/s")).toBeTruthy();
     expect(
       screen.getByRole("progressbar", { name: "Browser download progress" }).getAttribute(

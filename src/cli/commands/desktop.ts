@@ -191,13 +191,13 @@ import {
 import { recordDiagnostic } from "../../diagnostics.js";
 import { normalizeImageToDataUrls } from "../../image-format.js";
 import {
-  DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
   PLAYWRIGHT_DOWNLOAD_HOST_ENV,
   PLAYWRIGHT_EXTENSION_ARG,
   PLAYWRIGHT_EXTENSION_STORE_URL,
   PLAYWRIGHT_EXTENSION_TOKEN_ENV,
   configurePlaywrightArgs,
   createPlaywrightProgressParser,
+  installFromPlaywrightDownloadSources,
   isPlaywrightManagedBrowser,
   normalizeExtensionToken,
   parsePlaywrightConnection,
@@ -2561,7 +2561,6 @@ async function installPlaywrightBrowser(
     return;
   }
   playwrightBrowserInstalls.add(browser);
-  emit({ type: "$playwright_browser_install", install: { phase: "running", browser } }, tab.id);
   const configuredArgs = readConfig().mcpServers?.playwright?.args ?? [];
   const configuredPackage = configuredArgs.find((arg) => /^@playwright\/mcp(?:@|$)/.test(arg));
   const packageId = /^@playwright\/mcp(?:@[A-Za-z0-9._-]+)?$/.test(configuredPackage ?? "")
@@ -2569,65 +2568,80 @@ async function installPlaywrightBrowser(
     : undefined;
   const args = playwrightBrowserInstallArgs(browser, packageId);
   const configuredEnv = readConfig().mcpServers?.playwright?.env;
-  const env = playwrightBrowserInstallEnv({ ...process.env, ...(configuredEnv ?? {}) });
-  let output = "";
-  let previousProgress: { downloadedBytes: number; at: number } | undefined;
-  const progressParser = createPlaywrightProgressParser((progress) => {
-    const at = Date.now();
-    const elapsedMs = previousProgress ? at - previousProgress.at : 0;
-    const bytesPerSecond =
-      previousProgress &&
-      elapsedMs > 0 &&
-      progress.downloadedBytes >= previousProgress.downloadedBytes
-        ? Math.round(
-            ((progress.downloadedBytes - previousProgress.downloadedBytes) * 1000) / elapsedMs,
-          )
-        : undefined;
-    previousProgress = { downloadedBytes: progress.downloadedBytes, at };
+  const baseEnv = { ...process.env, ...(configuredEnv ?? {}) };
+  try {
+    const installResult = await installFromPlaywrightDownloadSources(async ({ source, host }) => {
+      emit(
+        { type: "$playwright_browser_install", install: { phase: "running", browser, source } },
+        tab.id,
+      );
+      const env = playwrightBrowserInstallEnv(baseEnv, host);
+      let output = "";
+      let previousProgress: { downloadedBytes: number; at: number } | undefined;
+      const progressParser = createPlaywrightProgressParser((progress) => {
+        const at = Date.now();
+        const elapsedMs = previousProgress ? at - previousProgress.at : 0;
+        const bytesPerSecond =
+          previousProgress &&
+          elapsedMs > 0 &&
+          progress.downloadedBytes >= previousProgress.downloadedBytes
+            ? Math.round(
+                ((progress.downloadedBytes - previousProgress.downloadedBytes) * 1000) / elapsedMs,
+              )
+            : undefined;
+        previousProgress = { downloadedBytes: progress.downloadedBytes, at };
+        emit(
+          {
+            type: "$playwright_browser_install",
+            install: { phase: "running", browser, source, ...progress, bytesPerSecond },
+          } satisfies PlaywrightBrowserInstallEvent,
+          tab.id,
+        );
+      });
+      const result = await new Promise<{ code: number | null; error?: string }>((resolveResult) => {
+        // Windows wraps `npx` as `npx.cmd`, which Node 22+ refuses to spawn
+        // without a shell (throws EINVAL). Mirror the stdio transport: on
+        // win32 build one quoted command line and run it through the shell;
+        // elsewhere spawn the bare binary. Args are already allowlisted
+        // (browser) and shape-checked (package pin), so no injection surface.
+        const shell = process.platform === "win32";
+        const child = shell
+          ? spawn(["npx", ...args.map((arg) => quoteArg(arg, true))].join(" "), [], {
+              windowsHide: true,
+              shell: true,
+              env,
+            })
+          : spawn("npx", args, { windowsHide: true, env });
+        const append = (chunk: Buffer | string) => {
+          output = `${output}${String(chunk)}`.slice(-8000);
+          progressParser.push(chunk);
+        };
+        child.stdout?.on("data", append);
+        child.stderr?.on("data", append);
+        child.once("error", (error) => resolveResult({ code: null, error: error.message }));
+        child.once("close", (code) => {
+          progressParser.flush();
+          resolveResult({ code });
+        });
+      });
+      if (result.code === 0) return null;
+      return (
+        (result.error ?? output.trim().slice(-1000)) || `installer exited with code ${result.code}`
+      );
+    });
     emit(
       {
         type: "$playwright_browser_install",
-        install: { phase: "running", browser, ...progress, bytesPerSecond },
-      } satisfies PlaywrightBrowserInstallEvent,
+        install: {
+          phase: "done",
+          browser,
+          ok: installResult.ok,
+          reason: installResult.ok ? null : installResult.failures.join("\n\n"),
+        },
+      },
       tab.id,
     );
-  });
-  try {
-    const result = await new Promise<{ code: number | null; error?: string }>((resolveResult) => {
-      // Windows wraps `npx` as `npx.cmd`, which Node 22+ refuses to spawn
-      // without a shell (throws EINVAL). Mirror the stdio transport: on
-      // win32 build one quoted command line and run it through the shell;
-      // elsewhere spawn the bare binary. Args are already allowlisted
-      // (browser) and shape-checked (package pin), so no injection surface.
-      const shell = process.platform === "win32";
-      const child = shell
-        ? spawn(["npx", ...args.map((arg) => quoteArg(arg, true))].join(" "), [], {
-            windowsHide: true,
-            shell: true,
-            env,
-          })
-        : spawn("npx", args, { windowsHide: true, env });
-      const append = (chunk: Buffer | string) => {
-        output = `${output}${String(chunk)}`.slice(-8000);
-        progressParser.push(chunk);
-      };
-      child.stdout?.on("data", append);
-      child.stderr?.on("data", append);
-      child.once("error", (error) => resolveResult({ code: null, error: error.message }));
-      child.once("close", (code) => {
-        progressParser.flush();
-        resolveResult({ code });
-      });
-    });
-    const ok = result.code === 0;
-    const reason = ok
-      ? null
-      : (result.error ?? output.trim().slice(-1000)) || `installer exited with code ${result.code}`;
-    emit(
-      { type: "$playwright_browser_install", install: { phase: "done", browser, ok, reason } },
-      tab.id,
-    );
-    if (ok) onInstalled();
+    if (installResult.ok) onInstalled();
   } catch (error) {
     emit(
       {
@@ -5395,9 +5409,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             stored.args = configurePlaywrightArgs(stored.args ?? args, msg.browser);
             const env = { ...(stored.env ?? {}) };
             delete env[PLAYWRIGHT_EXTENSION_TOKEN_ENV];
-            if (!env[PLAYWRIGHT_DOWNLOAD_HOST_ENV]) {
-              env[PLAYWRIGHT_DOWNLOAD_HOST_ENV] = DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST;
-            }
+            delete env[PLAYWRIGHT_DOWNLOAD_HOST_ENV];
             stored.env = Object.keys(env).length > 0 ? env : undefined;
             writeConfig(cfg);
             emitMcpSpecs(tab);
@@ -5431,9 +5443,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         } else if (msg.mode !== "extension") {
           delete env[PLAYWRIGHT_EXTENSION_TOKEN_ENV];
         }
-        if (msg.mode !== "extension" && msg.mode !== "cdp" && !env[PLAYWRIGHT_DOWNLOAD_HOST_ENV]) {
-          env[PLAYWRIGHT_DOWNLOAD_HOST_ENV] = DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST;
-        }
+        delete env[PLAYWRIGHT_DOWNLOAD_HOST_ENV];
         stored.env = Object.keys(env).length > 0 ? env : undefined;
         writeConfig(cfg);
         emitMcpSpecs(tab);

@@ -2045,6 +2045,11 @@ export function PageMCP({
           ) : null}
           {installRunning ? (
             <div className="playwright-download-box">
+              <output style={{ marginBottom: 4, fontSize: 11, color: "var(--muted)" }}>
+                {browserInstall.source === "backup"
+                  ? t("settings.mcpBrowserDownloadBackup")
+                  : t("settings.mcpBrowserDownloadOfficial")}
+              </output>
               <div className="playwright-download-meta">
                 <span>
                   {browserInstall.downloadedBytes !== undefined &&
@@ -2071,6 +2076,7 @@ export function PageMCP({
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={browserInstall.percent}
+                tabIndex={0}
               >
                 <div
                   className={`playwright-download-bar${

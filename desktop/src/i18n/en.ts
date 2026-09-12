@@ -280,6 +280,8 @@ export const en = {
     mcpBrowserInstall: "Install {browser}",
     mcpBrowserInstalling: "Installing browser…",
     mcpBrowserDownloadStarting: "Preparing browser download…",
+    mcpBrowserDownloadOfficial: "Downloading from Playwright's official source",
+    mcpBrowserDownloadBackup: "Official source failed: retrying from the Reasonix mirror",
     mcpBrowserDownloadProgress: "{downloaded} / {total} · {percent}%",
     mcpBrowserDownloadSpeed: "{speed}/s",
     mcpBrowserDownloadAria: "Browser download progress",

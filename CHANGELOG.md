@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: Playwright managed-browser installs now survive regional CDN failures.**
+
+- The browser-download connection timeout is now a Reasonix-controlled 10 minutes and cannot be shortened by inherited or stored user environment values. Installations try Playwright's official CDN first; if it fails, Settings visibly reports the retry and the same version-pinned installer uses the Reasonix caching mirror. If both sources fail, the final error retains diagnostics from each source instead of silently hiding the fallback.
+
 **Fixed: Outlook Mail no longer reports "Graph API access failed: 403" — and sending works again.**
 
 - Reasonix launched the pinned server as `--preset mail`, whose derived Graph scopes omit `User.Read`. The server's own `verify-login` (and Reasonix's send gate) call `GET /me`, which requires `User.Read`, so every login reported `Login successful but Graph API access failed: 403` and every send was blocked as `sender-unverified`. The managed server now launches with `--enabled-tools "mail|attachment|draft|get-current-user"` — the same mail surface plus `get-current-user`, which pulls `User.Read` into the token. `get-current-user` is hidden from the model so the surface stays mail-only.

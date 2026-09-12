@@ -522,6 +522,7 @@ export type PlaywrightBrowserInstall =
   | {
       phase: "running";
       browser: PlaywrightManagedBrowser;
+      source: "official" | "backup";
       downloadedBytes?: number;
       totalBytes?: number;
       percent?: number;
