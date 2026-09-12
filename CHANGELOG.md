@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: Windows release verification no longer overloads Vitest's worker RPC during coverage.**
+
+- CI coverage now uses four isolated test forks instead of eight, while local runs retain eight. This preserves per-file process isolation but reduces Windows runner contention that could end an otherwise-passing suite with `Timeout calling "onTaskUpdate"`.
+
 **Fixed: Playwright managed-browser installs now survive regional CDN failures.**
 
 - The browser-download connection timeout is now a Reasonix-controlled 10 minutes and cannot be shortened by inherited or stored user environment values. Installations try Playwright's official CDN first; if it fails, Settings visibly reports the retry and the same version-pinned installer uses the Reasonix caching mirror. If both sources fail, the final error retains diagnostics from each source instead of silently hiding the fallback.

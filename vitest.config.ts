@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
+const maxForks = process.env.CI ? 4 : 8;
 
 export default defineConfig({
   resolve: {
@@ -34,13 +35,13 @@ export default defineConfig({
     setupFiles: [],
     environment: "node",
     globals: false,
-    // Forks pool — per-file process isolation, so tokenizer BPE / tree-sitter
-    // wasms / sqlite native handles can't accumulate in a single shared heap.
-    // Threads default OOMs on 16-core boxes where 15 workers × ~300MB blows
-    // past Node's 4GB heap cap.
+    // Forks pool: per-file process isolation keeps tokenizer BPE, tree-sitter
+    // WASMs, and sqlite native handles from accumulating in one shared heap.
+    // Keep CI lower than local runs: Windows coverage at eight forks can starve
+    // Vitest's worker RPC and time out onTaskUpdate even after tests pass.
     pool: "forks",
     poolOptions: {
-      forks: { maxForks: 8, minForks: 1 },
+      forks: { maxForks, minForks: 1 },
     },
     // One retry absorbs Windows scheduler hiccups in jobs.test.ts / loop.test.ts /
     // bundle-smoke (real spawns + tokenizer cold load). A real failure still re-fails.
