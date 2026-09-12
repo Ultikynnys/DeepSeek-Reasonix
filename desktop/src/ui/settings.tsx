@@ -125,6 +125,7 @@ export function SettingsModal({
   onConfigureMcpExtension,
   onCheckMcpExtension,
   onInstallPlaywrightBrowser,
+  onCancelPlaywrightBrowserInstall,
   mailProvider,
   mailAuth,
   onSetMailProvider,
@@ -206,6 +207,7 @@ export function SettingsModal({
   ) => void;
   onCheckMcpExtension: () => void;
   onInstallPlaywrightBrowser: (browser: PlaywrightManagedBrowser) => void;
+  onCancelPlaywrightBrowserInstall: (browser: PlaywrightManagedBrowser) => void;
   mailProvider: MailProvider;
   mailAuth: MailAuthState | null;
   onSetMailProvider: (provider: MailProvider) => void;
@@ -347,6 +349,7 @@ export function SettingsModal({
                 onConfigureExtension={onConfigureMcpExtension}
                 onCheckExtension={onCheckMcpExtension}
                 onInstallBrowser={onInstallPlaywrightBrowser}
+                onCancelBrowserInstall={onCancelPlaywrightBrowserInstall}
                 mailProvider={mailProvider}
                 mailAuth={mailAuth}
                 onSetMailProvider={onSetMailProvider}
@@ -1817,6 +1820,7 @@ export function PageMCP({
   onConfigureExtension,
   onCheckExtension,
   onInstallBrowser,
+  onCancelBrowserInstall,
   mailProvider,
   mailAuth,
   onSetMailProvider,
@@ -1844,6 +1848,7 @@ export function PageMCP({
   ) => void;
   onCheckExtension: () => void;
   onInstallBrowser: (browser: PlaywrightManagedBrowser) => void;
+  onCancelBrowserInstall: (browser: PlaywrightManagedBrowser) => void;
   mailProvider: MailProvider;
   mailAuth: MailAuthState | null;
   onSetMailProvider: (provider: MailProvider) => void;
@@ -2015,16 +2020,23 @@ export function PageMCP({
               </button>
             ) : null}
             {managedMode ? (
-              <button
-                type="button"
-                className="btn primary"
-                disabled={installRunning}
-                onClick={() => onInstallBrowser(mode)}
-              >
-                {installRunning
-                  ? t("settings.mcpBrowserInstalling")
-                  : t("settings.mcpBrowserInstall", { browser: mode })}
-              </button>
+              installRunning ? (
+                <button
+                  type="button"
+                  className="btn danger"
+                  onClick={() => onCancelBrowserInstall(mode)}
+                >
+                  {t("settings.mcpBrowserInstallCancel")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => onInstallBrowser(mode)}
+                >
+                  {t("settings.mcpBrowserInstall", { browser: mode })}
+                </button>
+              )
             ) : null}
           </div>
           <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted)" }}>

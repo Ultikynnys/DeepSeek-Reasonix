@@ -2476,6 +2476,11 @@ function TabRuntime({
     (browser: PlaywrightManagedBrowser) => sendRpc({ cmd: "playwright_browser_install", browser }),
     [sendRpc],
   );
+  const cancelPlaywrightBrowserInstall = useCallback(
+    (browser: PlaywrightManagedBrowser) =>
+      sendRpc({ cmd: "playwright_browser_install_cancel", browser }),
+    [sendRpc],
+  );
   const setMailProvider = useCallback(
     (provider: MailProvider) => sendRpc({ cmd: "mail_provider_set", provider }),
     [sendRpc],
@@ -3615,6 +3620,7 @@ function TabRuntime({
             onConfigureMcpExtension={configureMcpExtension}
             onCheckMcpExtension={checkMcpExtension}
             onInstallPlaywrightBrowser={installPlaywrightBrowser}
+            onCancelPlaywrightBrowserInstall={cancelPlaywrightBrowserInstall}
             mailProvider={state.settings?.mailProvider ?? MailProvider.Outlook}
             mailAuth={state.mailAuth}
             onSetMailProvider={setMailProvider}

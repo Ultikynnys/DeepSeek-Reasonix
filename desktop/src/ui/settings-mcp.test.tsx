@@ -50,6 +50,7 @@ function renderCard(
   onConnectMail = vi.fn(),
   onRequestMailStatus = vi.fn(),
   mailProvider: Parameters<typeof PageMCP>[0]["mailProvider"] = MailProvider.Outlook,
+  onCancelBrowserInstall = vi.fn(),
 ) {
   return render(
     <PageMCP
@@ -66,6 +67,7 @@ function renderCard(
       onConfigureExtension={onConfigureExtension}
       onCheckExtension={vi.fn()}
       onInstallBrowser={onInstallBrowser}
+      onCancelBrowserInstall={onCancelBrowserInstall}
       mailProvider={mailProvider}
       mailAuth={mailAuth}
       onSetMailProvider={vi.fn()}
@@ -270,6 +272,28 @@ describe("PageMCP — playwright connection status", () => {
     expect(onInstall).toHaveBeenCalledWith("firefox");
   });
 
+  it("dispatches managed-browser installation cancellation", () => {
+    const status = extensionStatus();
+    status.server.mode = "firefox";
+    status.server.hasExtensionArg = false;
+    const onCancel = vi.fn();
+    renderCard(
+      [spec()],
+      status,
+      null,
+      vi.fn(),
+      vi.fn(),
+      { phase: "running", browser: "firefox", source: "official" },
+      null,
+      vi.fn(),
+      vi.fn(),
+      MailProvider.Outlook,
+      onCancel,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel installation" }));
+    expect(onCancel).toHaveBeenCalledWith("firefox");
+  });
+
   it("shows managed-browser installation progress and results", () => {
     const status = extensionStatus();
     status.server.mode = "firefox";
@@ -282,9 +306,8 @@ describe("PageMCP — playwright connection status", () => {
       vi.fn(),
       { phase: "running", browser: "firefox", source: "official" },
     );
-    expect(
-      (screen.getByRole("button", { name: "Installing browser…" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    expect(screen.queryByRole("button", { name: "Install firefox" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel installation" })).toBeTruthy();
     expect(screen.getByText("Preparing browser download…")).toBeTruthy();
     expect(screen.getByText("Downloading from Playwright's official source")).toBeTruthy();
     expect(screen.getByRole("progressbar", { name: "Browser download progress" })).toBeTruthy();

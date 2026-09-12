@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: Playwright browser installation no longer remains stuck after reaching 100%.**
+
+- Reasonix now enforces a 12-minute deadline for each official/mirror attempt and a 2-minute finalization deadline after download progress reaches 100%. A stalled installer process tree is terminated and settled explicitly, so fallback or an actionable error appears instead of an hour-long spinner. Settings also provides a Cancel installation button that terminates the active attempt without starting another source.
+
 **Fixed: Windows release verification no longer overloads Vitest's worker RPC during coverage.**
 
 - CI coverage now uses four isolated test forks instead of eight, while local runs retain eight. This preserves per-file process isolation but reduces Windows runner contention that could end an otherwise-passing suite with `Timeout calling "onTaskUpdate"`.

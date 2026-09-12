@@ -1136,6 +1136,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mail_cancel"; provider: MailProvider }
   | { cmd: "mail_signout"; provider: MailProvider }
   | { cmd: "playwright_browser_install"; browser: PlaywrightManagedBrowser }
+  | { cmd: "playwright_browser_install_cancel"; browser: PlaywrightManagedBrowser }
   | { cmd: "rule_add"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "rule_remove"; ruleType: "shell" | "path"; pattern: string }
   | { cmd: "skills_get" }

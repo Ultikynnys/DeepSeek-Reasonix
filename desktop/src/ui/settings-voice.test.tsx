@@ -81,6 +81,7 @@ describe("VoiceModelSettings", () => {
     onConfigureMcpExtension: vi.fn(),
     onCheckMcpExtension: vi.fn(),
     onInstallPlaywrightBrowser: vi.fn(),
+    onCancelPlaywrightBrowserInstall: vi.fn(),
     mailProvider: MailProvider.Outlook,
     mailAuth: null,
     onSetMailProvider: vi.fn(),
@@ -125,7 +126,9 @@ describe("VoiceModelSettings", () => {
 
     render(<VoiceModelSettings />);
 
-    const baseCard = screen.getByText("Whisper Base (English)").closest(".voice-card") as HTMLElement;
+    const baseCard = screen
+      .getByText("Whisper Base (English)")
+      .closest(".voice-card") as HTMLElement;
     const baseDownloadBtn = within(baseCard).getByRole("button", { name: "Download" });
 
     await act(async () => {
@@ -146,7 +149,9 @@ describe("VoiceModelSettings", () => {
 
     render(<VoiceModelSettings />);
 
-    const baseCard = screen.getByText("Whisper Base (English)").closest(".voice-card") as HTMLElement;
+    const baseCard = screen
+      .getByText("Whisper Base (English)")
+      .closest(".voice-card") as HTMLElement;
     const baseDownloadBtn = within(baseCard).getByRole("button", { name: "Download" });
 
     await act(async () => {

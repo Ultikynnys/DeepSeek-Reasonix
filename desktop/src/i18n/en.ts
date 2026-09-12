@@ -279,6 +279,7 @@ export const en = {
       "For Brave, Vivaldi, Opera, Chromium, and similar browsers started with a remote debugging endpoint.",
     mcpBrowserInstall: "Install {browser}",
     mcpBrowserInstalling: "Installing browser…",
+    mcpBrowserInstallCancel: "Cancel installation",
     mcpBrowserDownloadStarting: "Preparing browser download…",
     mcpBrowserDownloadOfficial: "Downloading from Playwright's official source",
     mcpBrowserDownloadBackup: "Official source failed: retrying from the Reasonix mirror",

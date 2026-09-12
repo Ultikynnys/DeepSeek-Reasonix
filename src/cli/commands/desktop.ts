@@ -190,6 +190,7 @@ import {
 } from "../../desktop/memory-browser.js";
 import { recordDiagnostic } from "../../diagnostics.js";
 import { normalizeImageToDataUrls } from "../../image-format.js";
+import { supervisePlaywrightInstaller } from "../../mcp/browser-installer.js";
 import {
   PLAYWRIGHT_DOWNLOAD_HOST_ENV,
   PLAYWRIGHT_EXTENSION_ARG,
@@ -2536,7 +2537,7 @@ async function signOutMail(
   return signOutOutlookMail(tab, bridge);
 }
 
-const playwrightBrowserInstalls = new Set<string>();
+const playwrightBrowserInstalls = new Map<string, AbortController>();
 
 async function installPlaywrightBrowser(
   tab: Tab,
@@ -2560,7 +2561,8 @@ async function installPlaywrightBrowser(
     );
     return;
   }
-  playwrightBrowserInstalls.add(browser);
+  const installController = new AbortController();
+  playwrightBrowserInstalls.set(browser, installController);
   const configuredArgs = readConfig().mcpServers?.playwright?.args ?? [];
   const configuredPackage = configuredArgs.find((arg) => /^@playwright\/mcp(?:@|$)/.test(arg));
   const packageId = /^@playwright\/mcp(?:@[A-Za-z0-9._-]+)?$/.test(configuredPackage ?? "")
@@ -2578,7 +2580,9 @@ async function installPlaywrightBrowser(
       const env = playwrightBrowserInstallEnv(baseEnv, host);
       let output = "";
       let previousProgress: { downloadedBytes: number; at: number } | undefined;
+      let markDownloadComplete = () => {};
       const progressParser = createPlaywrightProgressParser((progress) => {
+        if (progress.percent === 100) markDownloadComplete();
         const at = Date.now();
         const elapsedMs = previousProgress ? at - previousProgress.at : 0;
         const bytesPerSecond =
@@ -2598,7 +2602,11 @@ async function installPlaywrightBrowser(
           tab.id,
         );
       });
-      const result = await new Promise<{ code: number | null; error?: string }>((resolveResult) => {
+      const result = await new Promise<{
+        code: number | null;
+        error?: string;
+        cancelled?: boolean;
+      }>((resolveResult) => {
         // Windows wraps `npx` as `npx.cmd`, which Node 22+ refuses to spawn
         // without a shell (throws EINVAL). Mirror the stdio transport: on
         // win32 build one quoted command line and run it through the shell;
@@ -2618,12 +2626,16 @@ async function installPlaywrightBrowser(
         };
         child.stdout?.on("data", append);
         child.stderr?.on("data", append);
-        child.once("error", (error) => resolveResult({ code: null, error: error.message }));
-        child.once("close", (code) => {
+        const supervisor = supervisePlaywrightInstaller(child, {
+          signal: installController.signal,
+        });
+        markDownloadComplete = supervisor.markDownloadComplete;
+        void supervisor.result.then((result) => {
           progressParser.flush();
-          resolveResult({ code });
+          resolveResult(result);
         });
       });
+      if (result.cancelled) throw new Error("installation cancelled");
       if (result.code === 0) return null;
       return (
         (result.error ?? output.trim().slice(-1000)) || `installer exited with code ${result.code}`
@@ -2651,6 +2663,7 @@ async function installPlaywrightBrowser(
       tab.id,
     );
   } finally {
+    installController.abort();
     playwrightBrowserInstalls.delete(browser);
   }
 }
@@ -5395,6 +5408,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "mail_signout") {
       void signOutMail(tab, msg.provider, bridgeTabMcp);
+      return;
+    }
+    if (msg.cmd === "playwright_browser_install_cancel") {
+      const controller = playwrightBrowserInstalls.get(msg.browser);
+      if (controller) controller.abort();
       return;
     }
     if (msg.cmd === "playwright_browser_install") {
