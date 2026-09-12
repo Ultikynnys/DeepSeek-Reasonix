@@ -14,10 +14,18 @@ export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
   "deepseek-v4-flash-vision-exp",
 ];
 
-/** GPT-5.6 models accepted by the OpenAI endpoint. The bare `gpt-5.6` alias
+/** OpenAI models accepted by the official OpenAI endpoint. The bare `gpt-5.6` alias
  *  is intentionally absent — it was retired; stale configs clamp to the default
  *  model (see tests/config.test.ts "stale configs clamp"). */
-export const GPT56_MODELS: readonly string[] = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+export const OPENAI_MODELS: readonly string[] = [
+  "gpt-6-astra",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+];
+
+/** Alias for backwards compatibility with consumers expecting the GPT-5.6 list. */
+export const GPT56_MODELS: readonly string[] = OPENAI_MODELS;
 
 /** Models accepted by Z.AI's general API endpoint. */
 export const ZAI_MODELS: readonly string[] = [

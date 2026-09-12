@@ -36,8 +36,9 @@ export const DEEPSEEK_PRICING: Record<string, ModelPricing> = {
   // Legacy aliases discontinued 2026-07-24; kept for stale configs, priced as the Flash line.
   "deepseek-chat": { inputCacheHit: 0.003, inputCacheMiss: 0.15, output: 0.6 },
   "deepseek-reasoner": { inputCacheHit: 0.003, inputCacheMiss: 0.15, output: 0.6 },
-  // GPT-5.6 family (Sol/Terra/Luna) — official pricing (2026-07 GA). Cache
+  // GPT-6 Astra & GPT-5.6 family (Sol/Terra/Luna) — official pricing. Cache
   // reads bill at 10% of input (90% discount). Override via `pricingOverride`.
+  "gpt-6-astra": { inputCacheHit: 1.0, inputCacheMiss: 10, output: 50 },
   "gpt-5.6": { inputCacheHit: 0.5, inputCacheMiss: 5, output: 30 },
   "gpt-5.6-sol": { inputCacheHit: 0.5, inputCacheMiss: 5, output: 30 },
   "gpt-5.6-terra": { inputCacheHit: 0.2, inputCacheMiss: 2, output: 12 },
@@ -65,7 +66,13 @@ const DEEPSEEK_PRICED_MODELS = new Set([
   "deepseek-chat",
   "deepseek-reasoner",
 ]);
-const OPENAI_PRICED_MODELS = new Set(["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+const OPENAI_PRICED_MODELS = new Set([
+  "gpt-6-astra",
+  "gpt-5.6",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+]);
 
 function ollamaPricingModel(model: string): string {
   return normalizeOllamaModelId(model);
@@ -130,6 +137,8 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
   "deepseek-v4-pro": 300_000,
   "deepseek-chat": 300_000,
   "deepseek-reasoner": 300_000,
+  // GPT-6 Astra (1M token window)
+  "gpt-6-astra": 1_000_000,
   // GPT-5.6 advertises a 1.05M window but is held to a 300K quality cap here
   // (compaction thresholds are fractions of this cap).
   "gpt-5.6": 300_000,

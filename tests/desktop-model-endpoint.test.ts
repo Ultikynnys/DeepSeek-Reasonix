@@ -61,6 +61,12 @@ describe("desktop modelEndpointFor (#1529)", () => {
   });
 
   it("gpt model with nothing configured reports the OpenAI endpoint and no auth", () => {
+    expect(modelEndpointFor("gpt-6-astra", path)).toEqual({
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      billingKind: "usd",
+      openaiAuth: "none",
+    });
     expect(modelEndpointFor("gpt-5.6-sol", path)).toEqual({
       provider: "openai",
       baseUrl: "https://api.openai.com/v1",

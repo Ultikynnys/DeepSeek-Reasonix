@@ -176,7 +176,7 @@ export const en = {
     voiceDelete: "Delete",
     voiceDownloadError: "Voice model download failed: {error}",
     apiSection: "DeepSeek API",
-    openaiSection: "OpenAI (GPT-5.6)",
+    openaiSection: "OpenAI (Astra / GPT-5.6)",
     ollamaSection: "Ollama",
     openaiSignInTitle: "Website sign-in",
     openaiSignIn: "Sign in with OpenAI",
@@ -534,7 +534,7 @@ export const en = {
       description:
         "Choose a provider to get started — DeepSeek, ChatGPT (OpenAI), or a local/cloud Ollama. Credentials are stored locally only.",
       descriptionGpt:
-        "You picked a GPT-5.6 (ChatGPT) model — add an OpenAI API key or sign in with your ChatGPT account. DeepSeek keys are not accepted for gpt models.",
+        "You picked an OpenAI (ChatGPT) model — add an OpenAI API key or sign in with your ChatGPT account. DeepSeek keys are not accepted for gpt models.",
       descriptionOllama:
         "Point at your Ollama endpoint (local daemon or cloud) and pick a model. Local Ollama is keyless.",
       providerDeepSeek: "DeepSeek",

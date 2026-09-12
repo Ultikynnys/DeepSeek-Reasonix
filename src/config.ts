@@ -9,6 +9,7 @@ import {
   GPT56_MODELS,
   KNOWN_MODELS,
   MailProvider,
+  OPENAI_MODELS,
   OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
@@ -41,6 +42,7 @@ export {
   DEFAULT_MODEL,
   GEMINI_MODELS,
   GPT56_MODELS,
+  OPENAI_MODELS,
   OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
@@ -71,7 +73,7 @@ export function isModelProvider(value: unknown): value is ModelProvider {
 /** Catalog membership sets — exact-id matching, never prefix inference. */
 const CATALOG_PROVIDERS: ReadonlyArray<{ ids: ReadonlySet<string>; provider: ModelProvider }> = [
   { ids: new Set(SUPPORTED_OFFICIAL_MODELS), provider: "deepseek" },
-  { ids: new Set(GPT56_MODELS), provider: "openai" },
+  { ids: new Set(OPENAI_MODELS), provider: "openai" },
   { ids: new Set(ZAI_MODELS), provider: "zai" },
   { ids: new Set(OPENCODE_MODELS), provider: "opencode" },
   { ids: new Set(ANTIGRAVITY_MODELS), provider: "gemini" },

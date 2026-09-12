@@ -1,6 +1,6 @@
 import {
   ANTIGRAVITY_MODELS,
-  GPT56_MODELS,
+  OPENAI_MODELS,
   OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
@@ -63,7 +63,7 @@ export function deriveModelCatalog(options: ModelCatalogOptions): ModelCatalogVi
       : OPENCODE_MODELS;
   const knownModelIds = new Set([
     ...SUPPORTED_OFFICIAL_MODELS,
-    ...GPT56_MODELS,
+    ...OPENAI_MODELS,
     ...ZAI_MODELS,
     ...opencodeModels,
     ...antigravityModelIds,
@@ -74,7 +74,7 @@ export function deriveModelCatalog(options: ModelCatalogOptions): ModelCatalogVi
     (options.customModels ?? []).some((id) => ANTIGRAVITY_MODELS.includes(id));
   const groups: ModelCatalogGroup[] = [
     { key: "deepseek", models: SUPPORTED_OFFICIAL_MODELS },
-    { key: "openai", models: GPT56_MODELS },
+    { key: "openai", models: OPENAI_MODELS },
     { key: "zai", models: ZAI_MODELS },
     { key: "opencode", models: opencodeModels },
     ...(customModelIds.length > 0 ? [{ key: "custom" as const, models: customModelIds }] : []),

@@ -448,6 +448,10 @@ describe("billingContextForModel", () => {
         kind: "usd",
         provider: "openai",
       });
+      expect(billingContextForModel("gpt-6-astra", path)).toEqual({
+        kind: "usd",
+        provider: "openai",
+      });
       writeConfig(
         {
           openaiOAuth: {
@@ -459,6 +463,10 @@ describe("billingContextForModel", () => {
         path,
       );
       expect(billingContextForModel("gpt-5.6-sol", path)).toEqual({
+        kind: "quota",
+        provider: "openai",
+      });
+      expect(billingContextForModel("gpt-6-astra", path)).toEqual({
         kind: "quota",
         provider: "openai",
       });

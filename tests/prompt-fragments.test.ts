@@ -34,8 +34,8 @@ describe("escalationContract (#582)", () => {
     expect(out).toContain("<<<NEEDS_PRO");
   });
 
-  it("gpt-5.6-sol and the gpt-5.6 alias are top tiers — no-op escalation note", () => {
-    for (const id of ["gpt-5.6", "gpt-5.6-sol"]) {
+  it("gpt-6-astra, gpt-5.6-sol and the gpt-5.6 alias are top tiers — no-op escalation note", () => {
+    for (const id of ["gpt-6-astra", "gpt-5.6", "gpt-5.6-sol"]) {
       const out = escalationContract(id);
       expect(out).toContain(`\`${id}\``);
       expect(out).toContain("flagship tier");

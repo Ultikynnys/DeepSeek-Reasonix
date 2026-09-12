@@ -15,7 +15,7 @@ export function escalationContract(modelId: string): string {
   if (modelId === "deepseek-v4-pro") {
     return `Cost-aware escalation note: you are running on \`${modelId}\` — the escalation tier. There is no higher tier to escalate to, so the \`<<<NEEDS_PRO>>>\` marker is a no-op for you; deliver the strongest answer you can directly. If asked which model you are, answer \`${modelId}\`.`;
   }
-  if (modelId === "gpt-5.6" || modelId === "gpt-5.6-sol") {
+  if (modelId === "gpt-6-astra" || modelId === "gpt-5.6" || modelId === "gpt-5.6-sol") {
     return `Cost-aware escalation note: you are running on \`${modelId}\` — the flagship tier. There is no higher tier to escalate to, so the \`<<<NEEDS_PRO>>>\` marker is a no-op for you; deliver the strongest answer you can directly. If asked which model you are, answer \`${modelId}\`.`;
   }
   if (modelId.startsWith("gpt-")) {

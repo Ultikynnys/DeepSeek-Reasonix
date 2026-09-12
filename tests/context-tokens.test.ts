@@ -30,6 +30,7 @@ describe("resolveContextTokens", () => {
     expect(resolveContextTokens("deepseek-v4-flash")).toBe(
       DEEPSEEK_CONTEXT_TOKENS["deepseek-v4-flash"],
     );
+    expect(resolveContextTokens("gpt-6-astra")).toBe(1_000_000);
     expect(resolveContextTokens("gpt-5.6-sol")).toBe(300_000);
     expect(resolveContextTokens("gemini-3.8-flash-tiered")).toBe(1_000_000);
     expect(resolveContextTokens("gemini-3.7-flash")).toBe(1_000_000);

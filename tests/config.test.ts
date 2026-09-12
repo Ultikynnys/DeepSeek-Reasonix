@@ -375,6 +375,7 @@ describe("config", () => {
     });
 
     it("providerForModel keeps OpenAI GPT ids separate from unified Antigravity ids", () => {
+      expect(providerForModel("gpt-6-astra")).toBe("openai");
       expect(providerForModel("gpt-5.6-sol")).toBe("openai");
       // The retired bare alias matches no catalog → the default endpoint family,
       // consistent with loadModel's stale-config clamp.
@@ -524,7 +525,9 @@ describe("config", () => {
       expect(ep).toEqual(loadEndpoint(path));
     });
 
-    it("saveModel accepts the GPT-5.6 family on the official endpoints", () => {
+    it("saveModel accepts OpenAI models on the official endpoints", () => {
+      saveModel("gpt-6-astra", path);
+      expect(loadModel(path)).toBe("gpt-6-astra");
       saveModel("gpt-5.6-sol", path);
       saveModel("gpt-5.6-terra", path);
       saveModel("gpt-5.6-luna", path);

@@ -5,6 +5,7 @@ import {
   GPT56_MODELS,
   KNOWN_MODELS,
   MODEL_DISPLAY_NAMES,
+  OPENAI_MODELS,
   OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
@@ -13,7 +14,8 @@ import {
 } from "../src/models.js";
 
 describe("modelAcceptsImages", () => {
-  it("accepts the GPT-5.6 family", () => {
+  it("accepts OpenAI models including GPT-6 Astra and GPT-5.6 family", () => {
+    expect(modelAcceptsImages("gpt-6-astra")).toBe(true);
     expect(modelAcceptsImages("gpt-5.6-sol")).toBe(true);
     expect(modelAcceptsImages("gpt-5.6-terra")).toBe(true);
     expect(modelAcceptsImages("gpt-5.6-luna")).toBe(true);
@@ -92,10 +94,12 @@ describe("KNOWN_MODELS", () => {
     expect(KNOWN_MODELS).toContain("deepseek-v4-flash-vision-exp");
   });
 
-  it("offers the GPT-5.6 family", () => {
+  it("offers the OpenAI models including GPT-6 Astra and the GPT-5.6 family", () => {
+    expect(KNOWN_MODELS).toContain("gpt-6-astra");
     expect(KNOWN_MODELS).toContain("gpt-5.6-sol");
     expect(KNOWN_MODELS).toContain("gpt-5.6-terra");
     expect(KNOWN_MODELS).toContain("gpt-5.6-luna");
+    expect(OPENAI_MODELS).toContain("gpt-6-astra");
   });
 
   it("offers every Gemini model available through Antigravity", () => {
