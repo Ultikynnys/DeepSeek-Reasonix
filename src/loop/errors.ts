@@ -95,6 +95,9 @@ const NETWORK_ERROR_CODES = new Set([
   "UND_ERR_BODY_TIMEOUT",
 ]);
 
+const NETWORK_ERROR_MESSAGE_RE =
+  /fetch failed|network error|socket hang up|connection (?:reset|refused|closed|timeout)|econnreset|enotfound|eai_again|etimedout|terminated before the `done` completion frame/i;
+
 export function isNetworkConnectionError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   if (isAbortError(err)) return false;
@@ -104,19 +107,7 @@ export function isNetworkConnectionError(err: unknown): boolean {
   if (code === "UND_ERR_ABORTED") return false;
 
   const msg = err.message ?? "";
-  if (
-    /fetch failed|network error|socket hang up|connection (?:reset|refused|closed|timeout)|econnreset|enotfound|eai_again|etimedout/i.test(
-      msg,
-    ) ||
-    /stream body read failed: (?:connection reset|socket hang up|econnreset)/i.test(msg) ||
-    /Ollama stream (?:body read failed: connection reset|terminated before the `done` completion frame)/i.test(
-      msg,
-    )
-  ) {
-    return true;
-  }
-
-  if (NETWORK_ERROR_CODES.has(code)) {
+  if (NETWORK_ERROR_MESSAGE_RE.test(msg) || NETWORK_ERROR_CODES.has(code)) {
     return true;
   }
 

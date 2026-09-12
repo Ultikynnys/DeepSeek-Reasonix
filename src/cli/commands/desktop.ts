@@ -1430,12 +1430,31 @@ export async function refreshOpencodeModels(force = false, tab?: Tab): Promise<v
   }
 }
 
+function ollamaScopeKey(ep: { apiKey?: string }, base: string): string {
+  return ep.apiKey ? scopeKeyFor(base, ep.apiKey) : base;
+}
+
+function ollamaFallbackSnapshot(endpointKey: string, error: string): OllamaCatalogSnapshot | null {
+  const diskCache = loadOllamaModelsCache(endpointKey);
+  const fallback = diskCache ?? (ollamaCatalogCache?.models.length ? ollamaCatalogCache : null);
+  if (!fallback || fallback.models.length === 0) return null;
+  return {
+    models: fallback.models,
+    visionModels: fallback.visionModels,
+    plan: fallback.plan,
+    hiddenCount: fallback.hiddenCount,
+    error,
+    fetchedAt: fallback.fetchedAt,
+  };
+}
+
 /** Fetch the Ollama catalog — `GET {base}/models` on the resolved endpoint;
  *  cloud keys' plan (POST /api/me) gates probing; errors ship as `error`.
  *  The optional `tab` only feeds diagnostics — the result is tab-independent. */
 async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
   const ep = loadOllamaEndpoint();
   const base = ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL;
+  const endpointKey = ollamaScopeKey(ep, base);
   const diag = (
     event: string,
     details?: Record<string, unknown>,
@@ -1463,18 +1482,9 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
       process.stderr.write(
         `reasonix: Ollama endpoint returned HTTP ${status}, checking cached models\n`,
       );
-      const endpointKey = ep.apiKey ? scopeKeyFor(base, ep.apiKey) : base;
-      const diskCache = loadOllamaModelsCache(endpointKey);
-      const fallback = diskCache ?? (ollamaCatalogCache?.models.length ? ollamaCatalogCache : null);
-      if (status !== 401 && status !== 403 && fallback && fallback.models.length > 0) {
-        return {
-          models: fallback.models,
-          visionModels: fallback.visionModels,
-          plan: fallback.plan,
-          hiddenCount: fallback.hiddenCount,
-          error,
-          fetchedAt: fallback.fetchedAt,
-        };
+      if (status !== 401 && status !== 403) {
+        const fallback = ollamaFallbackSnapshot(endpointKey, error);
+        if (fallback) return fallback;
       }
       return {
         models: [],
@@ -1605,19 +1615,8 @@ async function fetchOllamaCatalog(tab?: Tab): Promise<OllamaCatalogSnapshot> {
     process.stderr.write(
       `reasonix: failed to fetch Ollama models (${message}), falling back to cached models\n`,
     );
-    const endpointKey = ep.apiKey ? scopeKeyFor(base, ep.apiKey) : base;
-    const diskCache = loadOllamaModelsCache(endpointKey);
-    const fallback = diskCache ?? (ollamaCatalogCache?.models.length ? ollamaCatalogCache : null);
-    if (fallback && fallback.models.length > 0) {
-      return {
-        models: fallback.models,
-        visionModels: fallback.visionModels,
-        plan: fallback.plan,
-        hiddenCount: fallback.hiddenCount,
-        error: `Ollama unreachable: ${message}`,
-        fetchedAt: fallback.fetchedAt,
-      };
-    }
+    const fallback = ollamaFallbackSnapshot(endpointKey, `Ollama unreachable: ${message}`);
+    if (fallback) return fallback;
     return { models: [], error: `Ollama unreachable: ${message}`, fetchedAt: Date.now() };
   }
 }
@@ -1632,7 +1631,7 @@ export async function refreshOllamaModels(
   if (ollamaCatalogInflight) return ollamaCatalogInflight;
   const ep = loadOllamaEndpoint();
   const base = ep.baseUrl ?? DEFAULT_OLLAMA_CHAT_URL;
-  const endpointKey = ep.apiKey ? scopeKeyFor(base, ep.apiKey) : base;
+  const endpointKey = ollamaScopeKey(ep, base);
   if (!ollamaCatalogCache) {
     const diskCache = loadOllamaModelsCache(endpointKey);
     if (diskCache && diskCache.models.length > 0) {
