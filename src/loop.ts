@@ -1194,7 +1194,7 @@ export class CacheFirstLoop {
             severity: "high",
             content: t("loop.iterLimitReached", { max: this.maxIterPerTurn }),
           };
-          yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
+          yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
           restoreModelIfNeeded();
           this._steerQueue.length = 0;
           return;
@@ -1301,6 +1301,7 @@ export class CacheFirstLoop {
       let toolCalls: ToolCall[] = [];
       let usage: TurnStats["usage"] | null = null;
       let finishReason: string | undefined;
+      let stopReason: string | undefined;
       let image: { dataUrl: string; mimeType: string } | undefined;
       let repetitionStall:
         | { channel: "content" | "reasoning" | "tool_call"; period: number; repeatedChars: number }
@@ -1329,6 +1330,7 @@ export class CacheFirstLoop {
           toolCalls = result.toolCalls;
           usage = result.usage;
           finishReason = result.finishReason;
+          stopReason = result.stopReason;
           image = result.image;
           repetitionStall = result.repetitionStall;
         } else {
@@ -1347,6 +1349,7 @@ export class CacheFirstLoop {
           usage = resp.usage;
           image = resp.image;
           finishReason = chatFinishReason(resp.raw);
+          stopReason = resp.stopReason;
         }
       } catch (err) {
         // An aborted signal here is almost always our own doing —
@@ -1692,7 +1695,9 @@ export class CacheFirstLoop {
           turn: this._turn,
           role: "warning",
           severity: "high",
-          content: t("loop.emptyResponseGiveUp"),
+          content: stopReason
+            ? t("loop.emptyResponseGiveUpReason", { reason: stopReason })
+            : t("loop.emptyResponseGiveUp"),
         };
         if (this._thinkingOnlyPartialAppended) {
           this._thinkingOnlyPartialAppended = false;
@@ -2154,38 +2159,25 @@ export class CacheFirstLoop {
     reason: ForceSummaryReason,
   ): AsyncGenerator<LoopEvent, FoldResult, void> {
     const beforeMessages = this.log.length;
-    let summary = "";
-    let failure: string | undefined;
     try {
       this.context.trimTrailingToolCalls();
-      summary = yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason });
-    } catch (err) {
-      // The helper normally converts provider failures into error + done
-      // events. Keep the outer compaction contract safe even if trimming,
-      // stats, or another unexpected boundary throws before that helper can.
-      failure = `forced summary failed — ${messageOf(err)}`;
-      yield {
-        turn: this._turn,
-        role: "error",
-        content: "",
-        error: failure,
-        errorDetail: {
-          name: "ForceSummaryFailed",
-          message: failure,
-          retryable: false,
-          recoverable: false,
-        },
+      const summary = yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason });
+      return {
+        folded: true,
+        beforeMessages,
+        afterMessages: this.log.length,
+        summaryChars: summary.length,
+        summary,
       };
-      yield { turn: this._turn, role: "done", content: "" };
+    } catch (err) {
+      return {
+        folded: false,
+        beforeMessages,
+        afterMessages: this.log.length,
+        summaryChars: 0,
+        error: `forced summary failed — ${messageOf(err)}`,
+      };
     }
-    return {
-      folded: summary.length > 0,
-      beforeMessages,
-      afterMessages: this.log.length,
-      summaryChars: summary.length,
-      ...(summary.length > 0 ? { summary } : {}),
-      ...(summary.length === 0 ? { error: failure ?? "forced summary failed" } : {}),
-    };
   }
 
   private summaryContext(): ForceSummaryContext {

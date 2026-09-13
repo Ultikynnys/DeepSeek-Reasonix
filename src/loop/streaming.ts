@@ -27,6 +27,8 @@ export interface StreamModelResult {
   usage: Usage | null;
   /** Last non-empty finish reason from the stream (e.g. ollama `done_reason`). */
   finishReason?: string;
+  /** Normalized refusal / safety / filter reason, when the provider signalled one. */
+  stopReason?: string;
   /** Model-generated image (Antigravity inlineData part) — data URL + mime. */
   image?: { dataUrl: string; mimeType: string };
   /** Exact-periodic output detected while the provider was still streaming. */
@@ -45,6 +47,7 @@ export async function* streamModelResponse(
   let reasoningContent = "";
   let usage: Usage | null = null;
   let finishReason: string | undefined;
+  let stopReason: string | undefined;
   let image: { dataUrl: string; mimeType: string } | undefined;
   let repetitionStall: StreamModelResult["repetitionStall"];
   // Gemini 3 can deliver a function call's thought signature in a dedicated
@@ -207,6 +210,7 @@ export async function* streamModelResponse(
       }
       if (chunk.usage) usage = chunk.usage;
       if (chunk.finishReason) finishReason = chunk.finishReason;
+      if (chunk.stopReason) stopReason = chunk.stopReason;
       if (chunk.image) image = chunk.image;
       if (chunk.thoughtSignature) streamThoughtSignature = chunk.thoughtSignature;
     }
@@ -239,6 +243,7 @@ export async function* streamModelResponse(
     toolCalls,
     usage,
     finishReason,
+    stopReason,
     image,
     repetitionStall,
   };

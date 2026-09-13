@@ -109,6 +109,7 @@ import type {
   TabOpenedEvent,
   TabsSnapshotEvent,
   TurnCompleteEvent,
+  TurnOutcome,
   UserImageAttachment,
   WebSearchEngineName,
 } from "@reasonix/core-utils";
@@ -211,6 +212,7 @@ export type {
   TabClosedEvent,
   TabOpenedEvent,
   TurnCompleteEvent,
+  TurnOutcome,
   UserImageAttachment,
   QuickSend,
   WebSearchEngineName,

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
 import {
+  HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS,
   HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS,
   HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS,
   HISTORY_FOLD_SUMMARY_TIMEOUT_MS,
@@ -51,7 +52,11 @@ describe("ContextManager fold timeout", () => {
     const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
     // The deadline is scaled by head size; advancing past the ceiling is
     // guaranteed to fire the fold timeout regardless of how large the head is.
-    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS + 1_000);
+    await vi.advanceTimersByTimeAsync(
+      HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS * HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS +
+        HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS * (HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS - 1) +
+        1_000,
+    );
 
     const result = await Promise.race([resultPromise, Promise.resolve("still-pending" as const)]);
     expect(result).not.toBe("still-pending");
@@ -91,7 +96,10 @@ describe("ContextManager fold timeout", () => {
     );
 
     // Once the scaled deadline elapses the fold still fails open.
-    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(
+      HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS * HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS +
+        HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS * (HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS - 1),
+    );
     const result = await Promise.race([resultPromise, Promise.resolve("still-pending" as const)]);
     expect(result).not.toBe("still-pending");
     expect(result).toMatchObject({
@@ -103,7 +111,7 @@ describe("ContextManager fold timeout", () => {
     });
   });
 
-  it("retries a retryable 503 once and folds successfully when the service recovers", async () => {
+  it("retries a retryable 503 and folds successfully when the service recovers", async () => {
     vi.useFakeTimers();
     let calls = 0;
     const client = new DeepSeekClient({
@@ -148,6 +156,42 @@ describe("ContextManager fold timeout", () => {
     expect(calls).toBe(5);
   });
 
+  it("retries three empty fold summaries and succeeds on the fourth attempt", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () => {
+        calls++;
+        return okJsonResponse({
+          choices: [
+            {
+              message: {
+                content: calls < 4 ? "" : "SUMMARY recovered on the fourth compaction attempt",
+              },
+            },
+          ],
+        });
+      }),
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    seedTurns(loop, 6);
+
+    const resultPromise = loop.compactHistory({ keepRecentTokens: 40 });
+    await vi.advanceTimersByTimeAsync(
+      HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS * (HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS - 1),
+    );
+    const result = await resultPromise;
+
+    expect(result.folded).toBe(true);
+    expect(result.summary).toBe("SUMMARY recovered on the fourth compaction attempt");
+    expect(calls).toBe(4);
+  });
+
   it("retries a response-body drop after the provider returns headers", async () => {
     vi.useFakeTimers();
     let calls = 0;
@@ -187,7 +231,7 @@ describe("ContextManager fold timeout", () => {
     expect(calls).toBe(2);
   });
 
-  it("gives up with the 503 error after the automatic retry when the outage persists", async () => {
+  it("gives up with the 503 error after all three retries when the outage persists", async () => {
     vi.useFakeTimers();
     let calls = 0;
     const client = new DeepSeekClient({
@@ -212,8 +256,10 @@ describe("ContextManager fold timeout", () => {
     expect(await Promise.race([resultPromise, Promise.resolve("still-pending" as const)])).toBe(
       "still-pending",
     );
-    // Pause elapses and attempt 2 also exhausts the client's retries.
-    await vi.advanceTimersByTimeAsync(HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS);
+    // All three retry pauses elapse and all four fold attempts exhaust client retries.
+    await vi.advanceTimersByTimeAsync(
+      HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS * (HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS - 1),
+    );
     const result = await Promise.race([resultPromise, Promise.resolve("still-pending" as const)]);
     expect(result).not.toBe("still-pending");
     expect(result).toMatchObject({
@@ -223,6 +269,6 @@ describe("ContextManager fold timeout", () => {
       summaryChars: 0,
     });
     expect((result as { error?: string }).error).toMatch(/503/);
-    expect(calls).toBe(8);
+    expect(calls).toBe(4 * HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS);
   });
 });

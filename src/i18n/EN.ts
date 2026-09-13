@@ -661,6 +661,10 @@ export const EN: TranslationSchema = {
       "The model returned an empty response (no text, no reasoning, no tool calls) — retrying once.",
     emptyResponseGiveUp:
       "The model returned an empty response twice in a row — ending the turn without an answer. Try again or /retry.",
+    emptyResponseGiveUpReason:
+      "The model did not produce an answer — {reason}. Try again, switch models, or /retry.",
+    stoppedNoAnswer:
+      "The turn ended without producing an answer. Try again, switch models, or /retry.",
     thinkingOnlyRetry:
       "The model returned thinking without an answer or tool call: retrying once so it can finish.",
     thinkingOnlyGiveUp:

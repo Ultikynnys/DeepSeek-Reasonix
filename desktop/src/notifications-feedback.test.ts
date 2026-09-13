@@ -23,4 +23,18 @@ describe("desktop completion feedback", () => {
       }),
     ).toBe(false);
   });
+
+  it("does not append success feedback when the turn was stopped, failed, or aborted", () => {
+    for (const outcome of ["stopped", "failed", "aborted"] as const) {
+      expect(
+        shouldAppendCompletionNotice({
+          wasBusy: true,
+          isBusy: false,
+          busyDurationMs: COMPLETION_NOTIFY_MIN_MS,
+          focused: true,
+          outcome,
+        }),
+      ).toBe(false);
+    }
+  });
 });

@@ -101,6 +101,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     memoryExport: null,
     jobs: [],
     activeSkill: null,
+    lastTurnOutcome: null,
     queuedSends: [],
     retryNonce: 0,
     oauthWaiting: false,
@@ -487,6 +488,76 @@ describe("Desktop App reducer — usage", () => {
       result: "Tool call cancelled because the conversation stopped. No result was produced.",
       ok: false,
     });
+  });
+
+  it("adds a terminal stop card when a turn ends without an answer", () => {
+    const started = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "model.turn.started",
+        id: 1,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        model: "m",
+        reasoningEffort: "medium",
+        prefixHash: "h",
+      },
+    });
+    const next = reduce(started, {
+      t: "incoming",
+      event: {
+        type: "$turn_complete",
+        outcome: "stopped",
+        turn: 1,
+        reason: "The model refused to continue.",
+      },
+    });
+    expect(next.lastTurnOutcome).toBe("stopped");
+    const notices = next.messages.filter((m) => m.kind === "notice");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.kind === "notice" ? notices[0].text : "").toBe(
+      "The model refused to continue.",
+    );
+  });
+
+  it("does not add a second stop card when the loop already explained the stop", () => {
+    const started = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "model.turn.started",
+        id: 1,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        model: "m",
+        reasoningEffort: "medium",
+        prefixHash: "h",
+      },
+    });
+    const warned = reduce(started, {
+      t: "incoming",
+      event: {
+        type: "warning",
+        id: 2,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        text: "The model returned an empty response twice in a row.",
+        severity: "high",
+      },
+    });
+    const next = reduce(warned, {
+      t: "incoming",
+      event: {
+        type: "$turn_complete",
+        outcome: "stopped",
+        turn: 1,
+        reason: "The model returned an empty response twice in a row.",
+      },
+    });
+    expect(next.messages.filter((m) => m.kind === "notice")).toHaveLength(0);
+    const assistant = next.messages.find((m) => m.kind === "assistant");
+    expect(
+      assistant?.kind === "assistant" && assistant.segments.some((s) => s.kind === "warning"),
+    ).toBe(true);
   });
 
   it("keeps cumulative usage when live context breakdown refreshes", () => {

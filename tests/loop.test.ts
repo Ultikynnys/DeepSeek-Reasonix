@@ -15,6 +15,7 @@ import {
   PROVIDER_SERVER_ERROR_RETRY_DELAY_MS,
   resumeTurnBaseline,
 } from "../src/loop.js";
+import { COMPACTION_RETRY_DELAY_MS } from "../src/loop/compaction-retry.js";
 import type { LoopEvent } from "../src/loop/types.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
@@ -105,6 +106,7 @@ describe("retryLastUser with synthetic records", () => {
 
 describe("CacheFirstLoop (non-streaming)", () => {
   afterEach(() => {
+    vi.useRealTimers();
     delete DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL];
   });
 
@@ -875,6 +877,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
   });
 
   it("second all-suppressed storm in same turn falls back to forced summary", async () => {
+    vi.useFakeTimers();
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -893,7 +896,9 @@ describe("CacheFirstLoop (non-streaming)", () => {
       { content: "", tool_calls: [{ ...dupCall, id: "c3" }] },
       { content: "", tool_calls: [{ ...dupCall, id: "c4" }] },
       { content: "", tool_calls: [{ ...dupCall, id: "c5" }] },
-      { content: "i would summarize but the harness should override me." },
+      ...Array.from({ length: 4 }, () => ({
+        content: "Compacted summary after the repeated tool-call storm.",
+      })),
     ];
     const client = makeClient(responses);
     const loop = new CacheFirstLoop({
@@ -905,9 +910,13 @@ describe("CacheFirstLoop (non-streaming)", () => {
     });
 
     const events: { role: string; forcedSummary?: boolean; content?: string }[] = [];
-    for await (const ev of loop.step("explore")) {
-      events.push({ role: ev.role, forcedSummary: ev.forcedSummary, content: ev.content });
-    }
+    const pending = (async () => {
+      for await (const ev of loop.step("explore")) {
+        events.push({ role: ev.role, forcedSummary: ev.forcedSummary, content: ev.content });
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(COMPACTION_RETRY_DELAY_MS);
+    await pending;
 
     expect(
       events.some((e) => e.role === "warning" && /stuck retry loop/i.test(e.content ?? "")),
@@ -917,9 +926,12 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const summary = finals[finals.length - 1];
     expect(summary?.forcedSummary).toBe(true);
     expect(summary?.content).toMatch(/stuck on a repeated tool call/);
+    expect(events.filter((e) => e.role === "compaction_start")).toHaveLength(1);
+    expect(events.filter((e) => e.role === "compaction_end")).toHaveLength(1);
   });
 
   it("collapses a reasoning loop (identical thoughts, drifting tool args) to a forced summary", async () => {
+    vi.useFakeTimers();
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -942,7 +954,9 @@ describe("CacheFirstLoop (non-streaming)", () => {
           },
         ],
       })),
-      { content: "done." },
+      ...Array.from({ length: 4 }, () => ({
+        content: "Completed summary of the repeated reasoning loop.",
+      })),
     ];
     const client = makeClient(responses);
     const loop = new CacheFirstLoop({
@@ -954,9 +968,13 @@ describe("CacheFirstLoop (non-streaming)", () => {
     });
 
     const events: { role: string; forcedSummary?: boolean; content?: string }[] = [];
-    for await (const ev of loop.step("explore")) {
-      events.push({ role: ev.role, forcedSummary: ev.forcedSummary, content: ev.content });
-    }
+    const pending = (async () => {
+      for await (const ev of loop.step("explore")) {
+        events.push({ role: ev.role, forcedSummary: ev.forcedSummary, content: ev.content });
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(COMPACTION_RETRY_DELAY_MS);
+    await pending;
 
     expect(
       events.some(
@@ -965,6 +983,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
     ).toBe(true);
     const finals = events.filter((e) => e.role === "assistant_final");
     expect(finals[finals.length - 1]?.forcedSummary).toBe(true);
+    expect(events.filter((e) => e.role === "compaction_start")).toHaveLength(1);
+    expect(events.filter((e) => e.role === "compaction_end")).toHaveLength(1);
   });
 
   it("does not collapse on only a couple of repeated thoughts (below the limit)", async () => {
@@ -1307,7 +1327,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
       foldError: "compaction failed — tokenizer unavailable",
     });
     expect(events.find((ev) => ev.role === "assistant_final")).toBeUndefined();
-    expect(events.find((ev) => ev.role === "error")?.errorDetail?.message).toContain(
+    const terminal = events.filter((ev) => ev.role === "compaction_end").at(-1);
+    expect(terminal?.foldError).toContain(
       "forced-summary request exceeds the model context budget",
     );
   });
@@ -1339,7 +1360,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
       folded: false,
       foldError: "compaction failed — fold unavailable",
     });
-    expect(events.find((ev) => ev.role === "error")?.errorDetail?.message).toContain(
+    const terminal = events.filter((ev) => ev.role === "compaction_end").at(-1);
+    expect(terminal?.foldError).toContain(
       "forced-summary request exceeds the model context budget",
     );
     expect(events.find((ev) => ev.role === "assistant_final")).toBeUndefined();
@@ -1404,11 +1426,13 @@ describe("CacheFirstLoop (non-streaming)", () => {
     for await (const ev of loop.step("analyze the repo")) events.push(ev);
 
     expect(calls).toBe(2);
-    expect(events.some((ev) => ev.role === "error")).toBe(true);
+    expect(events.some((ev) => ev.role === "error")).toBe(false);
+    expect(events.filter((ev) => ev.role === "compaction_start")).toHaveLength(1);
+    expect(events.filter((ev) => ev.role === "compaction_end")).toHaveLength(1);
     expect(events.find((ev) => ev.role === "compaction_end")).toMatchObject({
       compactionKind: "force-summary",
       folded: false,
-      foldError: "forced summary failed",
+      foldError: expect.stringContaining("summary provider unavailable"),
     });
     expect(events[events.length - 1]?.role).toBe("compaction_end");
   });
@@ -1427,7 +1451,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
           prompt_cache_miss_tokens: 900_000,
         },
       },
-      { content: "summary text" },
+      { content: "Summary text from the active model." },
     ];
     let i = 0;
     const captureFetch: typeof fetch = vi.fn(async (_url: any, init: any) => {

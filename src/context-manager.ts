@@ -19,6 +19,8 @@ import { buildFoldSummaryInstruction, extractPinnedConstraints } from "./loop/co
 import {
   COMPACTION_MAX_ATTEMPTS,
   COMPACTION_RETRY_DELAY_MS,
+  compactionRetryBudgetMs,
+  validateCompactionSummary,
   withCompactionRetry,
 } from "./loop/compaction-retry.js";
 import { buildAssistantMessage } from "./loop/messages.js";
@@ -771,7 +773,11 @@ export class ContextManager {
       return await withCompactionRetry({
         maxAttempts: HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS,
         retryDelayMs: HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS,
-        maxElapsedMs: deadlineMs + HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS,
+        maxElapsedMs: compactionRetryBudgetMs(
+          deadlineMs,
+          HISTORY_FOLD_SUMMARY_MAX_ATTEMPTS,
+          HISTORY_FOLD_SUMMARY_RETRY_DELAY_MS,
+        ),
         timeoutMessage: "fold-timeout",
         attempt: async (attemptSignal) => {
           const resp = await withDeadline(
@@ -793,8 +799,12 @@ export class ContextManager {
             resp.usage ?? new Usage(),
             this.deps.billingContextFor(summaryModel),
           );
+          const content = validateCompactionSummary(
+            stripHallucinatedToolMarkup((resp.content ?? "").trim()),
+            HISTORY_FOLD_SUMMARY_MIN_CHARS,
+          );
           return {
-            content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
+            content,
             reasoningContent: resp.reasoningContent ?? "",
           };
         },

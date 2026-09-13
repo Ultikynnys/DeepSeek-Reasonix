@@ -66,22 +66,18 @@ describe("compaction model-call deadlines", () => {
     expect((await gen.next()).value).toMatchObject({ role: "status" });
 
     const next = gen.next();
-    // Tiny context → base deadline (45s); advance past it.
+    const rejection = expect(next).rejects.toThrow("summary request timed out");
+    // Tiny context uses the base per-attempt deadline. Advance past all four
+    // attempts and the three retry delays before expecting the final error.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await vi.advanceTimersByTimeAsync(FORCE_SUMMARY_TIMEOUT_MS + 1_000);
+      await vi.advanceTimersByTimeAsync(COMPACTION_RETRY_DELAY_MS);
+    }
     await vi.advanceTimersByTimeAsync(FORCE_SUMMARY_TIMEOUT_MS + 1_000);
-    const errorEv = await next;
-    expect(errorEv.done).toBe(false);
-    const ev = errorEv.value as LoopEvent & { error?: string; errorDetail?: { name?: string } };
-    expect(ev.role).toBe("error");
-    expect(ev.errorDetail?.name).toBe("ForceSummaryFailed");
-    expect(ev.error).toContain("timed out");
+    await rejection;
 
-    // The loop gets its done event and the turn can continue instead of
-    // freezing until the client's 11-minute socket cap.
-    const doneEv = await gen.next();
-    expect((doneEv.value as LoopEvent).role).toBe("done");
-    const ret = await gen.next();
-    expect(ret.value).toBe("");
-    expect(ret.done).toBe(true);
+    // The helper reports exhaustion to the canonical compaction lifecycle.
+    // That owner emits the one terminal compaction_end event for the UI card.
   });
 
   it("retries a forced summary after a transient provider body drop", async () => {
@@ -127,6 +123,39 @@ describe("compaction model-call deadlines", () => {
     });
     expect(calls).toBe(2);
     expect((await gen.next()).value).toMatchObject({ role: "done" });
+  });
+
+  it("retries three empty forced summaries and succeeds on the fourth attempt", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async () => {
+        calls++;
+        return summaryJsonResponse(calls < 4 ? "" : "summary recovered on fourth attempt");
+      }),
+    });
+    const ctx: ForceSummaryContext = {
+      client,
+      buildMessages: () => [{ role: "user", content: "do the thing" }],
+      replaceLog: vi.fn(),
+      recordStats: (() => ({})) as unknown as ForceSummaryContext["recordStats"],
+      turn: 1,
+      model: "deepseek-v4-flash",
+      getSystemPrompt: () => "system",
+    };
+
+    const gen = forceSummaryAfterIterLimit(ctx, { reason: "context-guard" });
+    expect((await gen.next()).value).toMatchObject({ role: "status" });
+    const pending = gen.next();
+    await vi.advanceTimersByTimeAsync(COMPACTION_RETRY_DELAY_MS * 3);
+    const final = await pending;
+
+    expect(final.value).toMatchObject({
+      role: "assistant_final",
+      content: expect.stringContaining("summary recovered on fourth attempt"),
+    });
+    expect(calls).toBe(4);
   });
 
   it("forceSummaryAfterIterLimit full-folds: replaceLog carries the marker, summary, and pinned constraints", async () => {

@@ -285,6 +285,8 @@ export interface TranslationSchema {
     stormSuppressed: string;
     emptyResponseRetry: string;
     emptyResponseGiveUp: string;
+    emptyResponseGiveUpReason: string;
+    stoppedNoAnswer: string;
     thinkingOnlyRetry: string;
     thinkingOnlyGiveUp: string;
     providerErrorRetry: string;

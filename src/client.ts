@@ -297,6 +297,37 @@ export interface ChatResponse {
   raw: unknown;
   /** Model-generated image (Antigravity inlineData part) — data URL + mime. */
   image?: { dataUrl: string; mimeType: string };
+  /** Normalized reason the provider stopped without answering (refusal / safety /
+   *  content filter). Undefined when the response shows no such signal. */
+  stopReason?: string;
+}
+
+/** Normalize a provider's refusal / safety / filter signal into a short readable
+ *  phrase, or undefined when the response shows none. Keyed off the response
+ *  fields only — never the model name. */
+export function normalizeStopReason(args: {
+  refusal?: unknown;
+  finishReason?: unknown;
+}): string | undefined {
+  const refusal = typeof args.refusal === "string" ? args.refusal.trim() : "";
+  if (refusal) return `the model refused: ${refusal}`;
+  const reason =
+    typeof args.finishReason === "string" ? args.finishReason.trim().toLowerCase() : "";
+  switch (reason) {
+    case "content_filter":
+      return "the provider blocked the response with its content filter";
+    case "safety":
+    case "prohibited_content":
+      return "the provider blocked the response for safety reasons";
+    case "recitation":
+      return "the provider blocked the response for recitation reasons";
+    case "blocklist":
+      return "the provider blocked the response (blocked term)";
+    case "spii":
+      return "the provider blocked the response (sensitive personal data)";
+    default:
+      return undefined;
+  }
 }
 
 export interface StreamChunk {
@@ -312,6 +343,8 @@ export interface StreamChunk {
   };
   usage?: Usage;
   finishReason?: string;
+  /** Normalized refusal / safety / filter reason, set once when the provider signals one. */
+  stopReason?: string;
   /** Model-generated image (Antigravity inlineData part) — data URL + mime. */
   image?: { dataUrl: string; mimeType: string };
   /** Gemini 3.x thought signature seen in a part of its own, hoisted to chunk
@@ -897,6 +930,10 @@ export class DeepSeekClient {
         toolCalls,
         usage: Usage.fromApi(data.usage ?? data),
         raw: data,
+        stopReason: normalizeStopReason({
+          refusal: choice.refusal,
+          finishReason: data.choices?.[0]?.finish_reason,
+        }),
       };
     } finally {
       clearTimeout(timer);
@@ -1007,6 +1044,9 @@ export class DeepSeekClient {
       image,
       usage: this.usageForAntigravity(inner.usageMetadata),
       raw: data,
+      stopReason: normalizeStopReason({
+        finishReason: candidate?.finishReason ?? inner.promptFeedback?.blockReason,
+      }),
     };
   }
 
@@ -1153,6 +1193,8 @@ export class DeepSeekClient {
     }
     const candidate = inner.candidates?.[0];
     if (candidate?.finishReason) chunk.finishReason = candidate.finishReason;
+    const streamStopReason = normalizeStopReason({ finishReason: candidate?.finishReason });
+    if (streamStopReason) chunk.stopReason = streamStopReason;
     const parts = candidate?.content?.parts ?? [];
     // The thought signature may arrive in a part of its own (`{ text: "",
     // thoughtSignature }`) rather than on the functionCall part
@@ -1196,6 +1238,7 @@ export class DeepSeekClient {
       chunk.contentDelta !== undefined ||
       chunk.usage !== undefined ||
       chunk.finishReason !== undefined ||
+      chunk.stopReason !== undefined ||
       chunk.image !== undefined ||
       chunk.thoughtSignature !== undefined
     ) {
@@ -1682,6 +1725,11 @@ export class DeepSeekClient {
               case "response.incomplete":
                 chunk.finishReason = "incomplete";
                 break;
+              case "response.refusal.delta":
+                if (typeof json.delta === "string" && json.delta.length > 0) {
+                  chunk.stopReason = `the model refused: ${json.delta}`;
+                }
+                break;
               case "response.failed": {
                 const failure = responsesFailure(json);
                 streamError = Object.assign(
@@ -1701,7 +1749,8 @@ export class DeepSeekClient {
               chunk.reasoningDelta !== undefined ||
               chunk.toolCallDelta !== undefined ||
               chunk.usage !== undefined ||
-              chunk.finishReason !== undefined
+              chunk.finishReason !== undefined ||
+              chunk.stopReason !== undefined
             ) {
               queue.push(chunk);
             }
@@ -1735,6 +1784,8 @@ export class DeepSeekClient {
           const delta = json.choices?.[0]?.delta ?? {};
           const finishReason = json.choices?.[0]?.finish_reason ?? undefined;
           const chunk: StreamChunk = { raw: json, finishReason };
+          const streamRefusal = normalizeStopReason({ refusal: delta.refusal, finishReason });
+          if (streamRefusal) chunk.stopReason = streamRefusal;
           if (typeof delta.content === "string" && delta.content.length > 0) {
             chunk.contentDelta = delta.content;
           }

@@ -90,7 +90,7 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     const captured: CapturedRequest[] = [];
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      fetch: fakeFetch(captured, "summary."),
+      fetch: fakeFetch(captured, "summary of the prior conversation."),
     });
     const loop = new CacheFirstLoop({
       client,
@@ -112,7 +112,7 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     const captured: CapturedRequest[] = [];
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      fetch: fakeFetch(captured, "summary."),
+      fetch: fakeFetch(captured, "summary of the prior conversation."),
     });
     const loop = new CacheFirstLoop({
       client,
@@ -153,7 +153,7 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     const captured: CapturedRequest[] = [];
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      fetch: fakeFetch(captured, "summary."),
+      fetch: fakeFetch(captured, "summary of the prior conversation."),
     });
     const loop = new CacheFirstLoop({
       client,
@@ -173,7 +173,7 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     const captured: CapturedRequest[] = [];
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      fetch: fakeFetch(captured, "summary."),
+      fetch: fakeFetch(captured, "summary of the prior conversation."),
     });
     const loop = new CacheFirstLoop({
       client,
@@ -231,7 +231,7 @@ describe("ContextManager fold sends cache-aligned summary request", () => {
     const captured: CapturedRequest[] = [];
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      fetch: fakeFetch(captured, "summary."),
+      fetch: fakeFetch(captured, "summary of the prior conversation."),
     });
     const loop = new CacheFirstLoop({
       client,

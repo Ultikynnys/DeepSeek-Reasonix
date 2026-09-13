@@ -106,7 +106,18 @@ export type OllamaGenerationPatch = {
 export type ConnectedEvent = { type: "$connected" };
 export type ReadyEvent = { type: "$ready" };
 export type ProtocolErrorEvent = { type: "$error"; message: string };
-export type TurnCompleteEvent = { type: "$turn_complete" };
+/** Terminal outcome of a turn. Drives whether the desktop shows success feedback
+ *  or an explanatory stop card. */
+export type TurnOutcome = "success" | "stopped" | "failed" | "aborted";
+export type TurnCompleteEvent = {
+  type: "$turn_complete";
+  /** Absent on older sidecars — the desktop treats an absent outcome as success. */
+  outcome?: TurnOutcome;
+  /** Turn the outcome describes, when the daemon knows it. */
+  turn?: number;
+  /** Human-readable reason a non-success turn ended without an answer. */
+  reason?: string;
+};
 
 /** Common envelope for kernel events forwarded directly to desktop clients. */
 export interface KernelWireEventBase {

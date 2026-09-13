@@ -2,6 +2,7 @@ import { COMPACTION_SUMMARY_MARKER, messageOf } from "@reasonix/core-utils";
 import { type DeepSeekClient, Usage } from "../client.js";
 import {
   HISTORY_FOLD_SUMMARY_HEAD_FRACTION,
+  HISTORY_FOLD_SUMMARY_MIN_CHARS,
   HISTORY_FOLD_SUMMARY_MIN_HEAD_TOKENS,
   trimMessageWindow,
 } from "../context-manager.js";
@@ -12,7 +13,11 @@ import { type TurnStats, resolveContextTokens } from "../telemetry/stats.js";
 import { countTokensBounded } from "../tokenizer.js";
 import type { ChatMessage } from "../types.js";
 import { buildFoldSummaryInstruction, extractPinnedConstraints } from "./compaction-prompt.js";
-import { COMPACTION_RETRY_DELAY_MS, withCompactionRetry } from "./compaction-retry.js";
+import {
+  compactionRetryBudgetMs,
+  validateCompactionSummary,
+  withCompactionRetry,
+} from "./compaction-retry.js";
 import { errorLabelFor, reasonPrefixFor } from "./errors.js";
 import { buildAssistantMessage } from "./messages.js";
 import { stripHallucinatedToolMarkup } from "./thinking.js";
@@ -133,10 +138,10 @@ export async function* forceSummaryAfterIterLimit(
     // context-manager.ts). Esc/Stop during the summary is deferred to the next
     // iteration boundary; the request is bounded only by the scaled deadline.
     const resp = await withCompactionRetry({
-      maxElapsedMs: deadlineMs + COMPACTION_RETRY_DELAY_MS,
+      maxElapsedMs: compactionRetryBudgetMs(deadlineMs),
       timeoutMessage: "forced-summary-timeout",
       attempt: async (attemptSignal) => {
-        return withDeadline(
+        const response = await withDeadline(
           (signal) =>
             ctx.client.chat({
               model: ctx.model,
@@ -149,11 +154,16 @@ export async function* forceSummaryAfterIterLimit(
           "forced-summary-timeout",
           attemptSignal,
         );
+        validateCompactionSummary(
+          stripHallucinatedToolMarkup(response.content?.trim() ?? ""),
+          HISTORY_FOLD_SUMMARY_MIN_CHARS,
+        );
+        return response;
       },
     });
     const rawContent = resp.content?.trim() ?? "";
     const cleaned = stripHallucinatedToolMarkup(rawContent);
-    const summary = cleaned || t("summary.hallucinatedFallback");
+    const summary = cleaned;
     const reasonPrefix = reasonPrefixFor(opts.reason);
     const annotated = `${reasonPrefix}\n\n${summary}`;
     const summaryStats = ctx.recordStats(ctx.model, resp.usage ?? new Usage());
@@ -189,19 +199,6 @@ export async function* forceSummaryAfterIterLimit(
       label,
       message: raw === "forced-summary-timeout" ? "summary request timed out" : raw,
     });
-    yield {
-      turn: ctx.turn,
-      role: "error",
-      content: "",
-      error: message,
-      errorDetail: {
-        name: "ForceSummaryFailed",
-        message,
-        retryable: false,
-        recoverable: true,
-      },
-    };
-    yield { turn: ctx.turn, role: "done", content: "" };
-    return "";
+    throw new Error(message);
   }
 }

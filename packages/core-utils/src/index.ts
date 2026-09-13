@@ -117,6 +117,7 @@ export type {
   ReadyEvent,
   ProtocolErrorEvent,
   TurnCompleteEvent,
+  TurnOutcome,
   DesktopDiagnosticLevel,
   DesktopDiagnosticEvent,
   ConfirmRequiredEvent,

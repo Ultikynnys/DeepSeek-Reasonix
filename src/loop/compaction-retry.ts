@@ -1,10 +1,30 @@
 import { abortReason, messageOf, sleep } from "@reasonix/core-utils";
 import { isRetryableProviderFailure } from "../core/retry-shared.js";
 
+/** Compaction always gets three retries after its initial model call. */
+export const COMPACTION_RETRY_COUNT = 3;
 /** Maximum attempts for a compaction model call, including the first call. */
-export const COMPACTION_MAX_ATTEMPTS = 2;
+export const COMPACTION_MAX_ATTEMPTS = COMPACTION_RETRY_COUNT + 1;
 /** Backoff between compaction attempts so a short provider outage can clear. */
 export const COMPACTION_RETRY_DELAY_MS = 30_000;
+
+/** Total bounded wall-clock budget for every attempt and every intervening retry delay. */
+export function compactionRetryBudgetMs(
+  attemptTimeoutMs: number,
+  maxAttempts = COMPACTION_MAX_ATTEMPTS,
+  retryDelayMs = COMPACTION_RETRY_DELAY_MS,
+): number {
+  const attempts = Math.max(1, maxAttempts);
+  return attemptTimeoutMs * attempts + retryDelayMs * (attempts - 1);
+}
+
+export function validateCompactionSummary(content: string, minChars: number): string {
+  if (!content) throw new Error("summarizer returned empty content");
+  if (content.length < minChars) {
+    throw new Error(`summarizer returned a degenerate summary (${content.length} chars)`);
+  }
+  return content;
+}
 
 export interface CompactionRetryOptions<T> {
   /** One provider call. A fresh signal is supplied for every attempt. */
@@ -91,15 +111,24 @@ export async function withCompactionRetry<T>(opts: CompactionRetryOptions<T>): P
 export function isRetryableCompactionError(message: string): boolean {
   const trimmed = message.trim();
   if (
-    trimmed === "fold-timeout" ||
     trimmed === "fold-aborted" ||
-    trimmed === "forced-summary-timeout" ||
     trimmed === "forced-summary-aborted" ||
     trimmed === "file-triage-timeout" ||
     trimmed === "aborted" ||
     /\bAbortError\b|aborted by user|operation was aborted/i.test(trimmed)
   ) {
     return false;
+  }
+
+  // Each compaction attempt has its own bounded deadline. A timeout, empty response,
+  // or degenerate response can be transient and is safe to replay up to the fixed cap.
+  if (
+    trimmed === "fold-timeout" ||
+    trimmed === "forced-summary-timeout" ||
+    trimmed === "summarizer returned empty content" ||
+    /^summarizer returned a degenerate summary \(\d+ chars\)$/.test(trimmed)
+  ) {
+    return true;
   }
 
   // Any provider brand: a retryable status under "OpenCode 500: ..." counts the

@@ -72,6 +72,8 @@ import type {
   TabClosedEvent,
   TabOpenedEvent,
   TabsSnapshotEvent,
+  TurnCompleteEvent,
+  TurnOutcome,
   UserImageAttachment,
 } from "@reasonix/core-utils";
 import {
@@ -227,6 +229,7 @@ import {
 } from "../../antigravity-oauth.js";
 import { loadDotenv } from "../../env.js";
 import { type ResolvedHook, formatHookOutcomeMessage, loadHooks, runHooks } from "../../hooks.js";
+import { t } from "../../i18n/index.js";
 import {
   CacheFirstLoop,
   ImmutablePrefix,
@@ -370,7 +373,7 @@ type EmittableEvent =
   | { type: "$connected" }
   | { type: "$ready" }
   | { type: "$error"; message: string }
-  | { type: "$turn_complete" }
+  | TurnCompleteEvent
   | DesktopDiagnosticEvent
   | { type: "oauth_begin_result"; url: string }
   | { type: "gemini_oauth_begin_result"; url: string }
@@ -4132,7 +4135,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // events to suppress, so clear it like a finished turn would.
       tab.switching = false;
       tab.aborter = null;
-      emit({ type: "$turn_complete" }, tab.id);
+      emit({ type: "$turn_complete", outcome: "aborted" }, tab.id);
       return;
     }
     emitTabDiagnostic(
@@ -4172,7 +4175,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       if (report.blocked) {
         tab.aborter = null;
-        emit({ type: "$turn_complete" }, tab.id);
+        emit({ type: "$turn_complete", outcome: "failed" }, tab.id);
         return;
       }
     }
@@ -4189,6 +4192,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       let lastTurn = -1;
       let sawAssistantFinal = false;
       let openCompactionId: string | undefined;
+      // Terminal-outcome tracking: `producedAnswer` distinguishes a real reply from
+      // a model that stopped silently, so the UI never shows false success.
+      let producedAnswer = false;
+      let sawError = false;
+      let lastStopReason = "";
       try {
         let emittedTurnContext = false;
         while (true) {
@@ -4216,7 +4224,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           if (ev.role === "assistant_final") {
             sawAssistantFinal = true;
+            if (ev.content?.trim()) producedAnswer = true;
             if (ev.content) lastAssistantText = ev.content;
+          }
+          if (ev.role === "done" && ev.content?.trim()) producedAnswer = true;
+          if (ev.role === "error") {
+            sawError = true;
+            if (ev.error) lastStopReason = ev.error;
+          }
+          if (ev.role === "warning" && ev.severity === "high" && ev.content) {
+            lastStopReason = ev.content;
           }
           for (const kev of rt.eventizer.consume(ev, rt.ctx)) emitKernelEvent(kev, tab.id);
           if (ev.role === "assistant_final" || ev.role === "tool") {
@@ -4282,7 +4299,23 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               tab.id,
             );
           }
-          emit({ type: "$turn_complete" }, tab.id);
+          const outcome: TurnOutcome = aborted
+            ? "aborted"
+            : producedAnswer
+              ? "success"
+              : sawError
+                ? "failed"
+                : "stopped";
+          const reason = producedAnswer ? undefined : lastStopReason || t("loop.stoppedNoAnswer");
+          emit(
+            {
+              type: "$turn_complete",
+              outcome,
+              ...(lastTurn >= 0 ? { turn: lastTurn } : {}),
+              ...(reason ? { reason } : {}),
+            },
+            tab.id,
+          );
           emitTabDiagnostic(
             tab,
             "turn.complete.emitted",

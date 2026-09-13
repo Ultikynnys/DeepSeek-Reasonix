@@ -68,6 +68,7 @@ import {
   type SettingsPayload,
   type SkillInfo,
   type SubagentProgressEvent,
+  type TurnOutcome,
   type UserImageAttachment,
   MailProvider,
   resolveActiveQuickSend,
@@ -461,6 +462,8 @@ type State = {
   jobs: JobInfo[];
   /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
   activeSkill: SkillOrigin | null;
+  /** Terminal outcome of the most recent turn — gates success feedback and stop cards. */
+  lastTurnOutcome: TurnOutcome | null;
   /** Messages typed while busy=true — auto-sent FIFO once the current turn completes. Cleared on `clear`, `rpc_exit`, `session_loaded`. */
   queuedSends: QueuedSend[];
   /** Populated by $retry_result — component useEffect reads and sets composer draft. */
@@ -1222,6 +1225,19 @@ function insertNotice(
   );
 }
 
+/** True when the given turn already carries a user-visible explanation (a warning
+ *  segment or a notice). Prevents $turn_complete from adding a duplicate stop card
+ *  when the loop already surfaced the reason. */
+function turnHasTerminalExplanation(messages: ChatMessage[], turn: number | undefined): boolean {
+  return messages.some(
+    (m) =>
+      (m.kind === "notice" && (turn === undefined || m.turn === turn)) ||
+      (m.kind === "assistant" &&
+        (turn === undefined || m.turn === turn) &&
+        m.segments.some((s) => s.kind === "warning")),
+  );
+}
+
 function appendAssistantSegment(
   messages: ChatMessage[],
   segment: AssistantSegment,
@@ -1375,7 +1391,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, ready: true, needsSetup: false };
     case "$needs_setup":
       return { ...state, needsSetup: true, ready: false };
-    case "$turn_complete":
+    case "$turn_complete": {
       // Clear pause-gate-tied modals too. By the time the loop emits
       // $turn_complete, anything still in these arrays is orphaned — the
       // tool call that opened it has either resolved (so it's gone already)
@@ -1383,26 +1399,35 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       // Without this, an Esc/abort during plan approval leaves the plan
       // card rendered AFTER state.messages forever; the queued user input
       // that drains next then appears above the zombie card (#1456).
+      const settled = state.messages.map((message) =>
+        message.kind === "assistant"
+          ? {
+              ...message,
+              segments: message.segments.map((segment) =>
+                segment.kind === "tool" && segment.result === undefined
+                  ? {
+                      ...segment,
+                      result:
+                        "Tool call cancelled because the conversation stopped. No result was produced.",
+                      ok: false,
+                    }
+                  : segment,
+              ),
+            }
+          : message,
+      );
+      const outcome = ev.outcome ?? "success";
+      // Never end a turn silently: when the model stopped without an answer and
+      // the loop did not already surface an explanation, add a terminal card.
+      const messages =
+        outcome === "stopped" && ev.reason && !turnHasTerminalExplanation(settled, ev.turn)
+          ? insertNotice(settled, ev.reason, "warning", ev.turn)
+          : settled;
       return {
         ...state,
         busy: false,
-        messages: state.messages.map((message) =>
-          message.kind === "assistant"
-            ? {
-                ...message,
-                segments: message.segments.map((segment) =>
-                  segment.kind === "tool" && segment.result === undefined
-                    ? {
-                        ...segment,
-                        result:
-                          "Tool call cancelled because the conversation stopped. No result was produced.",
-                        ok: false,
-                      }
-                    : segment,
-                ),
-              }
-            : message,
-        ),
+        lastTurnOutcome: outcome,
+        messages,
         activeSkill: null,
         turnStatus: null,
         turnStatusTool: null,
@@ -1413,6 +1438,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingCheckpoints: [],
         pendingRevisions: [],
       };
+    }
     case "$confirm_required":
       return {
         ...state,
@@ -2317,6 +2343,7 @@ function TabRuntime({
     memoryExport: null,
     jobs: [],
     activeSkill: null,
+    lastTurnOutcome: null,
     queuedSends: [],
     retryNonce: 0,
     oauthWaiting: false,
@@ -2862,6 +2889,7 @@ function TabRuntime({
             isBusy: state.busy,
             busyDurationMs,
             focused,
+            outcome: state.lastTurnOutcome,
           })
         ) {
           appendNotice(t("app.toast.taskComplete"), "success");
@@ -2873,6 +2901,7 @@ function TabRuntime({
           isBusy: state.busy,
           busyDurationMs,
           focused,
+          outcome: state.lastTurnOutcome,
         });
         void dispatchDesktopNotifications(notifications, {
           isFocused: async () => focused,
@@ -2884,6 +2913,7 @@ function TabRuntime({
   }, [
     appendNotice,
     state.busy,
+    state.lastTurnOutcome,
     state.pendingChoices,
     state.pendingCheckpoints,
     state.pendingConfirms,

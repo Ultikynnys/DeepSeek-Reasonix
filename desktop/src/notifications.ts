@@ -1,4 +1,11 @@
 import { t } from "./i18n";
+import type { TurnOutcome } from "./protocol";
+
+/** Only success (or an absent outcome from an older sidecar) warrants completion
+ *  feedback; stopped/failed/aborted turns surface an explanatory stop card instead. */
+function isSuccessfulOutcome(outcome: TurnOutcome | null | undefined): boolean {
+  return outcome === undefined || outcome === null || outcome === "success";
+}
 
 export type ApprovalSnapshot = {
   confirms: { id: number; command: string }[];
@@ -88,6 +95,8 @@ export function deriveDesktopNotifications(args: {
   isBusy: boolean;
   busyDurationMs: number;
   focused: boolean;
+  /** Terminal outcome of the finished turn — non-success suppresses completion noise. */
+  outcome?: TurnOutcome | null;
 }): DesktopNotification[] {
   const notifications: DesktopNotification[] = [];
   if (args.focused) return notifications;
@@ -97,7 +106,12 @@ export function deriveDesktopNotifications(args: {
     if (approval) notifications.push(approval);
   }
 
-  if (args.wasBusy && !args.isBusy && args.busyDurationMs >= COMPLETION_NOTIFY_MIN_MS) {
+  if (
+    isSuccessfulOutcome(args.outcome) &&
+    args.wasBusy &&
+    !args.isBusy &&
+    args.busyDurationMs >= COMPLETION_NOTIFY_MIN_MS
+  ) {
     notifications.push({
       kind: "turn_complete",
       title: t("notifications.turnCompleteTitle"),
@@ -113,9 +127,15 @@ export function shouldAppendCompletionNotice(args: {
   isBusy: boolean;
   busyDurationMs: number;
   focused: boolean;
+  /** Terminal outcome of the finished turn — non-success suppresses the success notice. */
+  outcome?: TurnOutcome | null;
 }): boolean {
   return (
-    args.focused && args.wasBusy && !args.isBusy && args.busyDurationMs >= COMPLETION_NOTIFY_MIN_MS
+    isSuccessfulOutcome(args.outcome) &&
+    args.focused &&
+    args.wasBusy &&
+    !args.isBusy &&
+    args.busyDurationMs >= COMPLETION_NOTIFY_MIN_MS
   );
 }
 

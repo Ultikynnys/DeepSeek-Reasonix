@@ -86,4 +86,18 @@ describe("desktop notifications", () => {
 
     expect(notifications).toEqual([]);
   });
+
+  it("does not notify completion for a stopped turn", () => {
+    const notifications = deriveDesktopNotifications({
+      previous: emptySnapshot(),
+      current: emptySnapshot(),
+      wasBusy: true,
+      isBusy: false,
+      busyDurationMs: COMPLETION_NOTIFY_MIN_MS,
+      focused: false,
+      outcome: "stopped",
+    });
+
+    expect(notifications).toEqual([]);
+  });
 });
