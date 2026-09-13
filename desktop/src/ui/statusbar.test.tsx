@@ -144,6 +144,22 @@ describe("StatusBar quota display", () => {
     expect(screen.queryByText("saved")).toBeNull();
   });
 
+  it("shows the cache-hit chip with a decimal, never a rounded-up 100%", () => {
+    // 999,838 / (999,838 + 162) = 99.984% real. A whole-percent round renders
+    // the mathematically impossible "100%" (some miss always remains).
+    renderBar({
+      usage: {
+        totalCostUsd: 0,
+        lastCallCostUsd: 0,
+        cacheHitTokens: 999_838,
+        cacheMissTokens: 162,
+      } as unknown as UsageStats,
+    });
+    expect(screen.getByText("cache")).toBeTruthy();
+    expect(screen.getByText("99.9%")).toBeTruthy();
+    expect(screen.queryByText("100%")).toBeNull();
+  });
+
   it("scales the tokens chip unit with magnitude (k below a million, m above)", () => {
     // Regression: the label used to pin to kilo, so 66,851,100 tokens rendered
     // as the unreadable "66851.1k".

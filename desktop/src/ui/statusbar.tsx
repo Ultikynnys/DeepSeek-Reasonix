@@ -11,7 +11,7 @@ import { I } from "../icons";
 import { isOffPeak, minutesUntilRateChange } from "../peak-hours";
 import type { AntigravityQuota, CodexQuota, JobInfo, OllamaQuota } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
-import { tokenLabel } from "./format";
+import { hitPercent, tokenLabel } from "./format";
 import { formatMoney } from "../money";
 import { activationHandler } from "./keyboard";
 import { localizeShortcutText } from "./shortcut";
@@ -95,8 +95,7 @@ export function StatusBar({
     usage.totalPromptTokens || usage.cacheHitTokens + usage.cacheMissTokens;
   const liveContextTokens = usage.reservedTokens + usage.liveLogTokens;
   const totalTokens = Math.max(sessionPromptTokens, liveContextTokens);
-  const cacheDenom = usage.cacheHitTokens + usage.cacheMissTokens;
-  const cacheHitPct = cacheDenom > 0 ? Math.round((usage.cacheHitTokens / cacheDenom) * 100) : 0;
+  const cacheHitPct = hitPercent(usage.cacheHitTokens, usage.cacheMissTokens);
   // Shell-output filtering savings — current-session totals from the
   // $ctx_breakdown event. Undefined = this session has no shell telemetry yet,
   // so no chip at all (never a fake 0%).

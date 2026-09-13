@@ -42,6 +42,7 @@ import {
   isVoiceModelDownloaded,
 } from "../voice/models";
 import { speechTranscriber } from "../voice/transcriber";
+import { hitPercent } from "./format";
 import { activationHandler, escapeHandler } from "./keyboard";
 import { Shortcut, type ShortcutKey } from "./shortcut";
 
@@ -2748,8 +2749,7 @@ function PageBilling({
   usage: UsageStats;
   currency: "CNY" | "USD";
 }) {
-  const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
-  const hitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
+  const hitPct = hitPercent(usage.cacheHitTokens, usage.cacheMissTokens);
   // Per-provider native-unit costs: USD-kind providers show a dollar figure,
   // quota-kind providers show the accumulated plan-window %. Never converted
   // between the two.

@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: the statusbar cache-hit chip shows a decimal instead of rounding a near-total hit rate up to an impossible 100%.**
+
+- The `cache N%` chip (and the Settings → Billing "Cache hit rate" card) rounded the hit ratio to a whole percent, so a healthy session where cached context dwarfs the new miss (e.g. 999,838 hit / 162 miss = 99.98%) rendered the mathematically impossible `100%`. Both surfaces now use one shared `hitPercent` formatter that keeps one decimal and truncates rather than rounds, so a near-total hit rate reads `99.9%` and `100.0%` appears only when the miss count is exactly zero.
+
 **Fixed: MCP tool names that violate provider function-name rules no longer 400 the whole request.**
 
 - A bridged MCP server or tool whose name carries a character outside `[a-zA-Z0-9_-]` (a server registered as `my.db`, a tool named `users.get` or `GET /pets`, or any name longer than 64 chars) used to reach the provider verbatim, and OpenAI rejected the turn with `Invalid 'input[N].name': string does not match pattern '^[a-zA-Z0-9_-]+…'`. Bridged names are now sanitized at the registry boundary (`sanitizeWireToolName`): deterministic, so the cache-stable tool-list hash is unchanged for already-valid names, and dispatch is untouched because the tool closure still calls the real MCP name. Distinct tools that sanitize to the same string are kept apart with a short deterministic suffix, and the real bare name is retained on the bridge (`BridgeEnv.bareNames`) so per-tool toggles and the settings list keep working. The Responses payload builder also normalizes tool/function names defensively, healing history that was persisted before this fix.
