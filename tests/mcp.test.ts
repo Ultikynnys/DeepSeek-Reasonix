@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { McpClient } from "../src/mcp/client.js";
 import { bridgeMcpTools, flattenMcpResult } from "../src/mcp/registry.js";
-import type { McpTransport } from "../src/mcp/stdio.js";
+import { type McpTransport, formatServerExitReason } from "../src/mcp/stdio.js";
 import {
   type CallToolResult,
   type GetPromptResult,
@@ -1021,5 +1021,30 @@ describe("McpClient: prompts", () => {
     const getReq = received.find((r) => r.method === "prompts/get")!;
     expect(getReq.params).toEqual({ name: "hello" });
     await client.close();
+  });
+});
+
+describe("formatServerExitReason", () => {
+  it("formats friendly error when Playwright fails on Node < 18.18 with getDefaultAutoSelectFamilyAttemptTimeout", () => {
+    const rawStderr = `TypeError: import_net.default.getDefaultAutoSelectFamilyAttemptTimeout is not a function
+at packages/utils/network.ts (C:\\Users\\foo\\playwright-core\\lib\\coreBundle.js:8947:72)
+Node.js v18.16.0`;
+    const reason = formatServerExitReason(1, rawStderr);
+    expect(reason).toContain("Node.js is outdated (detected v18.16.0)");
+    expect(reason).toContain("Playwright requires Node.js >= 18.18");
+    expect(reason).toContain("https://nodejs.org");
+  });
+
+  it("handles engine mismatch errors clearly", () => {
+    const rawStderr =
+      "npm error code EBADENGINE\nnpm error unsupported engine for package: requires node >=20.0.0";
+    const reason = formatServerExitReason(1, rawStderr);
+    expect(reason).toContain("Node.js is outdated");
+    expect(reason).toContain("requires a newer Node.js runtime");
+  });
+
+  it("falls back to standard message for other errors", () => {
+    const reason = formatServerExitReason(127, "command not found: foobar");
+    expect(reason).toBe("server process exited with code 127: command not found: foobar");
   });
 });

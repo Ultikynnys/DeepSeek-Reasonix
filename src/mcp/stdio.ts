@@ -142,13 +142,35 @@ export class StdioTransport extends BaseMcpTransport implements McpTransport {
     const finalCode = code ?? this.child.exitCode;
     if (!this.closed && finalCode !== null && finalCode !== 0) {
       const detail = this.stderrTail.trim();
-      const reason = detail
-        ? `server process exited with code ${finalCode}: ${detail}`
-        : `server process exited with code ${finalCode}`;
+      const reason = formatServerExitReason(finalCode, detail);
       this.incoming.push(syntheticRpcError(reason));
     }
     this.markClosed();
   }
+}
+
+export function formatServerExitReason(finalCode: number, detail: string): string {
+  if (!detail) return `server process exited with code ${finalCode}`;
+
+  const nodeVerMatch = detail.match(/Node\.js\s+(v\d+\.\d+\.\d+)/i);
+  const detectedVer = nodeVerMatch ? nodeVerMatch[1] : undefined;
+
+  // Playwright requires Node.js >= 18.18; net.getDefaultAutoSelectFamilyAttemptTimeout is missing in older Node
+  if (detail.includes("getDefaultAutoSelectFamilyAttemptTimeout")) {
+    const verText = detectedVer ? ` (detected ${detectedVer})` : "";
+    return `Node.js is outdated${verText}. Playwright requires Node.js >= 18.18 (Node.js 20 or 22 LTS recommended). Please update Node.js at https://nodejs.org or via your version manager (nvm/fnm).`;
+  }
+
+  // Engine requirement or version incompatibility
+  if (
+    /unsupported.*engine.*node/i.test(detail) ||
+    /requires node(?:\.js)? (?:>=|\^|v)?\d+/i.test(detail)
+  ) {
+    const verText = detectedVer ? ` (detected ${detectedVer})` : "";
+    return `Node.js is outdated${verText}. This server requires a newer Node.js runtime (Node.js 20 or 22 LTS recommended). Please update Node.js at https://nodejs.org.`;
+  }
+
+  return `server process exited with code ${finalCode}: ${detail}`;
 }
 
 export function quoteArg(s: string, windows: boolean): string {

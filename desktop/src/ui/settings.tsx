@@ -2053,6 +2053,18 @@ export function PageMCP({
           {connection ? (
             <div style={{ marginTop: 4, fontSize: 11, color: connection.color }}>
               {connection.text}
+              {playwrightSpec?.status === "failed" &&
+              /Node\.js is outdated/i.test(playwrightSpec.statusReason ?? "") ? (
+                <div style={{ marginTop: 6 }}>
+                  <button
+                    type="button"
+                    className="btn secondary sm"
+                    onClick={() => void openUrl("https://nodejs.org").catch(() => undefined)}
+                  >
+                    {t("settings.mcpOutdatedNodeUpdateBtn")}
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {installRunning ? (

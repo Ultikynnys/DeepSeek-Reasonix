@@ -292,6 +292,7 @@ export const en = {
     mcpConnConnected: "server connected · {count} tools live",
     mcpConnHandshake: "server connecting…",
     mcpConnFailed: "server failed — {reason}",
+    mcpOutdatedNodeUpdateBtn: "Download Node.js LTS",
     mcpConnDisabled: "server disabled — enable it to bridge",
     mcpConnIdle: "configured but not bridged yet — connects when a session starts",
     mcpTestConn: "Test connection",
