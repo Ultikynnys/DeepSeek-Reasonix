@@ -1,6 +1,7 @@
 /** OpenAI Responses API (v1/responses) conversion for chatgpt.com's codex
  *  backend, which 400-rejects chat-completions payloads. */
 
+import { sanitizeWireToolName } from "./tool-name.js";
 import type { ChatMessage, ChatRequestOptions } from "./types.js";
 
 export interface ResponsesInputItem {
@@ -75,7 +76,7 @@ function splitMessages(messages: ChatMessage[]): {
           items.push({
             type: "function_call",
             call_id: tc.id ?? "",
-            name: tc.function.name,
+            name: sanitizeWireToolName(tc.function.name ?? ""),
             arguments: tc.function.arguments ?? "",
           });
         }
@@ -113,7 +114,7 @@ export function buildResponsesPayload(
   if (opts.tools?.length) {
     payload.tools = opts.tools.map((t) => ({
       type: "function",
-      name: t.function.name,
+      name: sanitizeWireToolName(t.function.name),
       description: t.function.description,
       parameters: t.function.parameters,
       // ChatGPT models default to parallel tool-call bursts; disable so the

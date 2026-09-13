@@ -23,7 +23,12 @@ import {
   playwrightToolingNotice,
 } from "../../mcp/playwright-tooling.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
-import { type McpClientHost, bridgeMcpTools, registerSingleMcpTool } from "../../mcp/registry.js";
+import {
+  type BridgeEnv,
+  type McpClientHost,
+  bridgeMcpTools,
+  registerSingleMcpTool,
+} from "../../mcp/registry.js";
 import type { McpServerSpec } from "../../mcp/spec.js";
 import {
   getMcpServerEnv,
@@ -139,6 +144,17 @@ function runtimeFingerprint(spec: McpServerSpec): string {
           .map((k) => [k, rec[k]!])
       : null;
   return JSON.stringify([stable(getMcpServerEnv(spec)), stable(getMcpServerHeaders(spec))]);
+}
+
+/** Registered (wire) name → real bare MCP tool name. Prefers the mapping the
+ *  bridge recorded; falls back to stripping the `server_` namespace prefix. */
+function bareToolName(env: BridgeEnv, registeredName: string): string {
+  const mapped = env.bareNames?.get(registeredName);
+  if (mapped !== undefined) return mapped;
+  const { prefix } = env;
+  return prefix && registeredName.startsWith(prefix)
+    ? registeredName.slice(prefix.length)
+    : registeredName;
 }
 
 export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
@@ -388,14 +404,6 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     return true;
   }
 
-  /** Registered name → bare config name — strips the `server_` namespace prefix. */
-  function mcpBareToolName(prefix: string): (registeredName: string) => string {
-    return (registeredName) =>
-      prefix && registeredName.startsWith(prefix)
-        ? registeredName.slice(prefix.length)
-        : registeredName;
-  }
-
   /** Apply a new per-tool disable set to a LIVE server record — unregister
    *  newly-disabled tools and re-register newly-enabled ones from the live
    *  server listing, without closing/reopening the server process. */
@@ -407,14 +415,13 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     const record = records.get(raw);
     if (!record) return;
     const env = record.summary.bridgeEnv;
-    const bareOf = mcpBareToolName(env.prefix);
 
     // 1. Disable — unregister tools that entered the disable set.
     const stillEnabled: string[] = [];
     const stillEnabledSpecs: ToolSpec[] = [];
     for (let i = 0; i < record.registeredNames.length; i++) {
       const name = record.registeredNames[i]!;
-      if (nextDisabled.has(bareOf(name))) {
+      if (nextDisabled.has(bareToolName(env, name))) {
         env.registry.unregister(name);
         loop?.prefix.removeTool(name);
         continue;
@@ -566,12 +573,12 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       .map((raw) => {
         const rec = records.get(raw);
         if (!rec) return undefined;
-        const bare = mcpBareToolName(rec.summary.bridgeEnv.prefix);
+        const env = rec.summary.bridgeEnv;
         const parsed = parseMcpSpec(raw);
         const hidden = managedMcpToolsHiddenFromModel(parsed);
         return {
           spec: raw,
-          enabled: rec.registeredNames.map(bare),
+          enabled: rec.registeredNames.map((name) => bareToolName(env, name)),
           disabled: rec.disabledTools.filter((name) => !hidden.has(name)),
         };
       })

@@ -2,6 +2,7 @@ import { messageOf } from "@reasonix/core-utils";
 import { withDeadline } from "../core/with-deadline.js";
 import { recordDiagnostic } from "../diagnostics.js";
 import { countTokens, countTokensBounded } from "../tokenizer.js";
+import { WIRE_TOOL_NAME_MAX, sanitizeWireToolName, toolNameDisambiguator } from "../tool-name.js";
 import { ToolRegistry } from "../tools.js";
 import type { ToolCallContext } from "../tools.js";
 import type { JSONSchema } from "../types.js";
@@ -97,6 +98,9 @@ export interface BridgeEnv {
   toolingNoticeSeen?: boolean;
   descriptionSuffix?: string;
   beforeCall?: BridgeOptions["beforeCall"];
+  /** Registered (wire) name → real MCP tool name, for the per-tool toggle list
+   *  once the wire name is sanitized (`sanitizeWireToolName`). In-process only. */
+  bareNames?: Map<string, string>;
 }
 
 /** Register one MCP tool's bridged closure into the registry. Returns the registered name (or "" if skipped). */
@@ -106,7 +110,19 @@ export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string 
   // server would otherwise churn the prefix and cost a cache miss every turn.
   const stableTool = canonicalizeMcpToolForCache(mcpTool);
   if (!stableTool.name) return "";
-  const registeredName = `${env.prefix}${stableTool.name}`;
+  // The model-facing wire name must satisfy the provider's function-name
+  // grammar (OpenAI 400s the whole request otherwise). Dispatch is unaffected:
+  // the closure below always calls `stableTool.name`, the real MCP tool name.
+  const rawName = `${env.prefix}${stableTool.name}`;
+  let registeredName = sanitizeWireToolName(rawName);
+  const clash = env.bareNames?.get(registeredName);
+  if (clash !== undefined && clash !== stableTool.name) {
+    // A different tool already sanitized onto this name (e.g. `users.get` vs
+    // `users_get`). Disambiguate deterministically so neither clobbers the other.
+    const suffix = toolNameDisambiguator(rawName);
+    registeredName = `${registeredName.slice(0, WIRE_TOOL_NAME_MAX - suffix.length - 1)}-${suffix}`;
+  }
+  env.bareNames?.set(registeredName, stableTool.name);
   env.registry.register({
     name: registeredName,
     description: stableTool.description
@@ -232,6 +248,7 @@ export async function bridgeMcpTools(
     toolingNotice: opts.toolingNotice,
     descriptionSuffix: opts.descriptionSuffix,
     beforeCall: opts.beforeCall,
+    bareNames: new Map(),
   };
   const listed = await client.listTools();
   // Canonicalize + sort so the bridged tool list is byte-stable across

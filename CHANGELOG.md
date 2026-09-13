@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: MCP tool names that violate provider function-name rules no longer 400 the whole request.**
+
+- A bridged MCP server or tool whose name carries a character outside `[a-zA-Z0-9_-]` (a server registered as `my.db`, a tool named `users.get` or `GET /pets`, or any name longer than 64 chars) used to reach the provider verbatim, and OpenAI rejected the turn with `Invalid 'input[N].name': string does not match pattern '^[a-zA-Z0-9_-]+…'`. Bridged names are now sanitized at the registry boundary (`sanitizeWireToolName`): deterministic, so the cache-stable tool-list hash is unchanged for already-valid names, and dispatch is untouched because the tool closure still calls the real MCP name. Distinct tools that sanitize to the same string are kept apart with a short deterministic suffix, and the real bare name is retained on the bridge (`BridgeEnv.bareNames`) so per-tool toggles and the settings list keep working. The Responses payload builder also normalizes tool/function names defensively, healing history that was persisted before this fix.
+
 **Fixed: Antigravity/Gemini 3 tool loops no longer 400 with "Function call is missing a thought_signature in functionCall parts."**
 
 - Gemini 3 requires every replayed `functionCall` part to carry the model's `thoughtSignature`. The signature occasionally arrives in a **separate trailing part** (`{ "text": "", "thoughtSignature": "…" }`, sibling to the `functionCall` part) rather than on the call itself. Reasonix only read the signature when it sat directly on the `functionCall` part, so the standalone form was dropped and the echoed-back continuation failed with `INVALID_ARGUMENT` at a call such as `default_api:todo_write`. Both the streaming and non-streaming Antigravity parsers now scan every part of a response for a signature and attach it to the calls that lack one, and the streaming assembler backfills a signature that arrives in a later SSE frame onto a call that already streamed.
