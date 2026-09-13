@@ -525,6 +525,10 @@ export interface ReasonixConfig {
   };
   /** Preferred display currency for costs (e.g. "USD" or "CNY"). When unset, defaults to USD. */
   costCurrency?: string;
+  /** Global auto-approved shell command patterns (e.g. "git *", "npm test"). */
+  shellAllowed?: string[];
+  /** Global auto-approved outside-sandbox directory prefixes. */
+  pathAllowed?: string[];
   projects?: {
     [absoluteRootDir: string]: {
       shellAllowed?: string[];
@@ -1947,6 +1951,103 @@ export function clearProjectPathAllowed(
   cfg.projects[key].pathAllowed = [];
   writeConfig(cfg, path);
   return existing.length;
+}
+
+export function loadGlobalShellAllowed(path: string = defaultConfigPath()): string[] {
+  const cfg = readConfig(path);
+  return cfg.shellAllowed ?? [];
+}
+
+export function addGlobalShellAllowed(prefix: string, path: string = defaultConfigPath()): void {
+  const trimmed = prefix.trim();
+  if (!trimmed) return;
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowed ?? [];
+  if (existing.includes(trimmed)) return;
+  cfg.shellAllowed = [...existing, trimmed];
+  writeConfig(cfg, path);
+}
+
+export function removeGlobalShellAllowed(
+  prefix: string,
+  path: string = defaultConfigPath(),
+): boolean {
+  const trimmed = prefix.trim();
+  if (!trimmed) return false;
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowed ?? [];
+  if (!existing.includes(trimmed)) return false;
+  cfg.shellAllowed = existing.filter((p) => p !== trimmed);
+  writeConfig(cfg, path);
+  return true;
+}
+
+export function clearGlobalShellAllowed(path: string = defaultConfigPath()): number {
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowed ?? [];
+  if (existing.length === 0) return 0;
+  cfg.shellAllowed = [];
+  writeConfig(cfg, path);
+  return existing.length;
+}
+
+export function loadGlobalPathAllowed(path: string = defaultConfigPath()): string[] {
+  const cfg = readConfig(path);
+  return cfg.pathAllowed ?? [];
+}
+
+export function addGlobalPathAllowed(prefix: string, path: string = defaultConfigPath()): void {
+  const trimmed = prefix.trim();
+  if (!trimmed) return;
+  const cfg = readConfig(path);
+  const existing = cfg.pathAllowed ?? [];
+  if (existing.includes(trimmed)) return;
+  cfg.pathAllowed = [...existing, trimmed];
+  writeConfig(cfg, path);
+}
+
+export function removeGlobalPathAllowed(
+  prefix: string,
+  path: string = defaultConfigPath(),
+): boolean {
+  const trimmed = prefix.trim();
+  if (!trimmed) return false;
+  const cfg = readConfig(path);
+  const existing = cfg.pathAllowed ?? [];
+  if (!existing.includes(trimmed)) return false;
+  cfg.pathAllowed = existing.filter((p) => p !== trimmed);
+  writeConfig(cfg, path);
+  return true;
+}
+
+export function clearGlobalPathAllowed(path: string = defaultConfigPath()): number {
+  const cfg = readConfig(path);
+  const existing = cfg.pathAllowed ?? [];
+  if (existing.length === 0) return 0;
+  cfg.pathAllowed = [];
+  writeConfig(cfg, path);
+  return existing.length;
+}
+
+/** Merged view of global and project-specific auto-approved shell command patterns. */
+export function loadAllShellAllowed(
+  rootDir?: string,
+  path: string = defaultConfigPath(),
+): string[] {
+  const globalRules = loadGlobalShellAllowed(path);
+  if (!rootDir) return globalRules;
+  const projectRules = loadProjectShellAllowed(rootDir, path);
+  const set = new Set([...globalRules, ...projectRules]);
+  return Array.from(set);
+}
+
+/** Merged view of global and project-specific auto-approved outside-sandbox directory prefixes. */
+export function loadAllPathAllowed(rootDir?: string, path: string = defaultConfigPath()): string[] {
+  const globalRules = loadGlobalPathAllowed(path);
+  if (!rootDir) return globalRules;
+  const projectRules = loadProjectPathAllowed(rootDir, path);
+  const set = new Set([...globalRules, ...projectRules]);
+  return Array.from(set);
 }
 
 /** Unknown values fall back to "review" so hand-edited bad config gets the safe default. */

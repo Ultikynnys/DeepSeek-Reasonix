@@ -236,6 +236,98 @@ export function redirectsEscapeSandbox(chain: CommandChain, projectRoot: string)
   return false;
 }
 
+function globToCommandRegex(pattern: string): RegExp {
+  let p = pattern.trim();
+  let trailingStar = false;
+  if (p.endsWith(" *")) {
+    p = p.slice(0, -2).trim();
+    trailingStar = true;
+  }
+  const escaped = p
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s+")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  if (trailingStar) {
+    return new RegExp(`^${escaped}(?:\\s+.*)?$`, "i");
+  }
+  return new RegExp(`^${escaped}$`, "i");
+}
+
+function matchesCommandPattern(
+  pattern: string,
+  argv: readonly string[],
+  cmd: string,
+): { matched: boolean; matchedTokenCount: number } {
+  const trimmed = pattern.trim();
+  if (!trimmed) return { matched: false, matchedTokenCount: 0 };
+  if (trimmed === "*") return { matched: true, matchedTokenCount: argv.length };
+
+  const patternTokens = trimmed.split(/\s+/);
+
+  // If pattern does not contain wildcards, perform standard leading token match
+  if (!trimmed.includes("*") && !trimmed.includes("?")) {
+    if (argv.length < patternTokens.length) return { matched: false, matchedTokenCount: 0 };
+    for (let i = 0; i < patternTokens.length; i++) {
+      if (argv[i] !== patternTokens[i]) return { matched: false, matchedTokenCount: 0 };
+    }
+    return { matched: true, matchedTokenCount: patternTokens.length };
+  }
+
+  // Trailing wildcard token, e.g. "git *", "npm run *"
+  if (patternTokens[patternTokens.length - 1] === "*") {
+    const baseTokens = patternTokens.slice(0, -1);
+    if (argv.length >= baseTokens.length) {
+      let match = true;
+      for (let i = 0; i < baseTokens.length; i++) {
+        const baseTok = baseTokens[i]!;
+        const argTok = argv[i]!;
+        if (baseTok.includes("*") || baseTok.includes("?")) {
+          if (!matchesGlob(argTok, baseTok)) {
+            match = false;
+            break;
+          }
+        } else if (argTok !== baseTok) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        return { matched: true, matchedTokenCount: baseTokens.length };
+      }
+    }
+  }
+
+  // General glob matching on argv tokens
+  if (argv.length >= patternTokens.length) {
+    let match = true;
+    for (let i = 0; i < patternTokens.length; i++) {
+      const patTok = patternTokens[i]!;
+      const argTok = argv[i]!;
+      if (patTok.includes("*") || patTok.includes("?")) {
+        if (!matchesGlob(argTok, patTok)) {
+          match = false;
+          break;
+        }
+      } else if (argTok !== patTok) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      return { matched: true, matchedTokenCount: patternTokens.length };
+    }
+  }
+
+  // Full command string glob regex fallback
+  const cmdGlobRegex = globToCommandRegex(trimmed);
+  if (cmdGlobRegex.test(cmd.trim()) || cmdGlobRegex.test(argv.join(" "))) {
+    return { matched: true, matchedTokenCount: patternTokens.length };
+  }
+
+  return { matched: false, matchedTokenCount: 0 };
+}
+
 /** Allowlist match on leading argv tokens; demoted by `RISKY_ARGS` when a destructive flag appears in the tail,
  *  or by `SENSITIVE_PATHS` when a path argument targets a sensitive location (#259). */
 export function isAllowed(
@@ -254,19 +346,11 @@ export function isAllowed(
 
   const allowlist = [...BUILTIN_ALLOWLIST, ...extra];
   for (const prefix of allowlist) {
-    const prefixTokens = prefix.split(" ");
-    if (argv.length < prefixTokens.length) continue;
-    let match = true;
-    for (let i = 0; i < prefixTokens.length; i++) {
-      if (argv[i] !== prefixTokens[i]) {
-        match = false;
-        break;
-      }
-    }
-    if (!match) continue;
+    const matchInfo = matchesCommandPattern(prefix, argv, cmd);
+    if (!matchInfo.matched) continue;
 
     const risky = RISKY_ARGS[prefix];
-    if (risky && tailHasRisky(argv.slice(prefixTokens.length), risky)) return false;
+    if (risky && tailHasRisky(argv.slice(matchInfo.matchedTokenCount), risky)) return false;
     if (
       projectRoot &&
       hasSensitivePathArgs(

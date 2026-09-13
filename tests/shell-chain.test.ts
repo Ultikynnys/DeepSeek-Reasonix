@@ -153,6 +153,36 @@ describe("isCommandAllowed", () => {
     expect(isCommandAllowed("git status | npm install")).toBe(false);
   });
 
+  it("supports wildcard rules like `git *` for any git commands", () => {
+    const extra = ["git *"];
+    expect(isCommandAllowed("git status", extra)).toBe(true);
+    expect(isCommandAllowed('git commit -m "initial commit"', extra)).toBe(true);
+    expect(isCommandAllowed("git push origin main", extra)).toBe(true);
+    expect(isCommandAllowed("git checkout -b feature/test", extra)).toBe(true);
+    expect(isCommandAllowed("git diff HEAD~1", extra)).toBe(true);
+    expect(isCommandAllowed("git", extra)).toBe(true);
+    expect(isCommandAllowed("git log --oneline -n 10", extra)).toBe(true);
+    // Does not match non-git commands or prefixes that merely start with "git" without boundary
+    expect(isCommandAllowed("gitter run", extra)).toBe(false);
+    expect(isCommandAllowed("npm install", extra)).toBe(false);
+    expect(isCommandAllowed("curl https://example.com", extra)).toBe(false);
+  });
+
+  it("supports specific wildcard rules like `git checkout *` and `npm run test*`", () => {
+    expect(isCommandAllowed("git checkout main", ["git checkout *"])).toBe(true);
+    expect(isCommandAllowed("git checkout -b feature", ["git checkout *"])).toBe(true);
+    expect(isCommandAllowed("git commit -m foo", ["git checkout *"])).toBe(false);
+
+    expect(isCommandAllowed("npm run test", ["npm run test*"])).toBe(true);
+    expect(isCommandAllowed("npm run test:unit", ["npm run test*"])).toBe(true);
+    expect(isCommandAllowed("npm run test:watch --bail", ["npm run test*"])).toBe(true);
+    expect(isCommandAllowed("npm run build", ["npm run test*"])).toBe(false);
+  });
+
+  it("supports catch-all `*` wildcard", () => {
+    expect(isCommandAllowed("anything at all --foo", ["*"])).toBe(true);
+  });
+
   it("returns false for unsupported syntax (rather than throwing)", () => {
     expect(isCommandAllowed("echo hi > out.txt")).toBe(false);
     expect(isCommandAllowed("echo hi &")).toBe(false);

@@ -1,7 +1,7 @@
 /** cwd pinned to root; non-allowlisted commands throw to a UI confirm gate; spawn is `shell: false`, tokenized argv only. */
 
 import * as pathMod from "node:path";
-import { addProjectShellAllowed } from "../config.js";
+import { addGlobalShellAllowed, addProjectShellAllowed } from "../config.js";
 import { type PauseAskOpts, type PauseGate, pauseGate } from "../core/pause-gate.js";
 import { appendCommandOutputMetric, estimateOutputTokens } from "../telemetry/command-output.js";
 import type { ToolRegistry } from "../tools.js";
@@ -203,7 +203,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
             ...(elevate ? { elevated: true } : {}),
           },
         },
-        onAlwaysAllow: (prefix) => addProjectShellAllowed(rootDir, prefix),
+        onAlwaysAllow: (prefix) => addGlobalShellAllowed(prefix),
       });
 
       if (elevate) {
@@ -314,7 +314,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
           kind: "run_background",
           payload: { command: cmd, cwd, waitSec: args.waitSec },
         },
-        onAlwaysAllow: (prefix) => addProjectShellAllowed(rootDir, prefix),
+        onAlwaysAllow: (prefix) => addGlobalShellAllowed(prefix),
       });
       const result = await jobs.start(cmd, {
         cwd,

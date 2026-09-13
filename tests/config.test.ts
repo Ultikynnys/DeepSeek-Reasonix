@@ -7,16 +7,22 @@ import {
   type DesktopOpenTab,
   GEMINI_MODELS,
   SUPPORTED_MODELS,
+  addGlobalPathAllowed,
+  addGlobalShellAllowed,
   addProjectPathAllowed,
   addProjectShellAllowed,
   anyProviderConfigured,
   clearAntigravityOAuth,
+  clearGlobalPathAllowed,
+  clearGlobalShellAllowed,
   clearOpenAIOAuth,
   clearProjectPathAllowed,
   clearProjectShellAllowed,
   editModeHintShown,
   isKnownModelId,
   isPlausibleKey,
+  loadAllPathAllowed,
+  loadAllShellAllowed,
   loadApiKey,
   loadBaiduApiKey,
   loadBaseUrl,
@@ -29,6 +35,8 @@ import {
   loadEndpointForModel,
   loadEngineeringLifecycleMode,
   loadFilesystemOutlineThresholdBytes,
+  loadGlobalPathAllowed,
+  loadGlobalShellAllowed,
   loadIndexConfig,
   loadIndexUserConfig,
   loadMaxIterPerTurn,
@@ -56,6 +64,8 @@ import {
   readConfig,
   redactKey,
   redactSemanticEmbeddingConfig,
+  removeGlobalPathAllowed,
+  removeGlobalShellAllowed,
   removeProjectPathAllowed,
   removeProjectShellAllowed,
   removeRecentWorkspace,
@@ -1009,6 +1019,45 @@ describe("config", () => {
     addProjectPathAllowed("/proj", "/Users/foo", path);
     expect(loadProjectShellAllowed("/proj", path)).toEqual(["npm install"]);
     expect(loadProjectPathAllowed("/proj", path)).toEqual(["/Users/foo"]);
+  });
+
+  it("global shellAllowed CRUD and loadAllShellAllowed merging", () => {
+    expect(loadGlobalShellAllowed(path)).toEqual([]);
+    addGlobalShellAllowed("git *", path);
+    addGlobalShellAllowed("npm test", path);
+    addGlobalShellAllowed("git *", path); // dedup
+    expect(loadGlobalShellAllowed(path)).toEqual(["git *", "npm test"]);
+
+    // project-specific rule added
+    addProjectShellAllowed("/my-project", "cargo build", path);
+
+    // loadAllShellAllowed merges global + project
+    expect(loadAllShellAllowed("/my-project", path)).toEqual(["git *", "npm test", "cargo build"]);
+    expect(loadAllShellAllowed("/other-project", path)).toEqual(["git *", "npm test"]);
+    expect(loadAllShellAllowed(undefined, path)).toEqual(["git *", "npm test"]);
+
+    // removal
+    expect(removeGlobalShellAllowed("npm test", path)).toBe(true);
+    expect(removeGlobalShellAllowed("non-existent", path)).toBe(false);
+    expect(loadGlobalShellAllowed(path)).toEqual(["git *"]);
+
+    // clear
+    expect(clearGlobalShellAllowed(path)).toBe(1);
+    expect(loadGlobalShellAllowed(path)).toEqual([]);
+  });
+
+  it("global pathAllowed CRUD and loadAllPathAllowed merging", () => {
+    expect(loadGlobalPathAllowed(path)).toEqual([]);
+    addGlobalPathAllowed("/global/tools", path);
+    addGlobalPathAllowed("/global/tools", path); // dedup
+    expect(loadGlobalPathAllowed(path)).toEqual(["/global/tools"]);
+
+    addProjectPathAllowed("/proj", "/local/dir", path);
+    expect(loadAllPathAllowed("/proj", path)).toEqual(["/global/tools", "/local/dir"]);
+
+    expect(removeGlobalPathAllowed("/global/tools", path)).toBe(true);
+    expect(loadGlobalPathAllowed(path)).toEqual([]);
+    expect(clearGlobalPathAllowed(path)).toBe(0);
   });
 
   it("matches project keys case-insensitively on Windows so cross-shell rootDir casing doesn't lose entries (#402)", () => {

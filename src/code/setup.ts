@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL,
   type EditMode,
   type ModelProvider,
+  loadAllShellAllowed,
   loadEditMode,
   loadElevationEnabled,
   loadEnableSubagents,
@@ -112,7 +113,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     const cfg = readConfig();
     registerShellTools(tools, {
       rootDir: root,
-      extraAllowed: () => loadProjectShellAllowed(root),
+      extraAllowed: () => loadAllShellAllowed(root),
       allowAll: () => loadEditMode() === "yolo",
       elevationEnabled: () => loadElevationEnabled(),
       jobs,

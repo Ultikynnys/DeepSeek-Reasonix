@@ -8,7 +8,12 @@ import picomatch from "picomatch";
 import { grammarForPath } from "../code-query/grammar-map.js";
 import type { SymbolKind } from "../code-query/symbols.js";
 import { decodeFileBuffer, encodeFile } from "../code/file-encoding.js";
-import { addProjectPathAllowed, loadProjectPathAllowed } from "../config.js";
+import {
+  addGlobalPathAllowed,
+  addProjectPathAllowed,
+  loadAllPathAllowed,
+  loadProjectPathAllowed,
+} from "../config.js";
 import { type ConfirmationChoice, pauseGate as defaultPauseGate } from "../core/pause-gate.js";
 import { DEFAULT_INDEX_EXCLUDES } from "../index/config.js";
 import { memoryEnabled } from "../memory/project.js";
@@ -160,7 +165,7 @@ export function registerFilesystemTools(
     toolName: string,
     ctx: ToolCallContext | undefined,
   ): Promise<void> {
-    for (const dir of loadProjectPathAllowed(rootDir)) {
+    for (const dir of loadAllPathAllowed(rootDir)) {
       if (pathIsUnder(abs, dir)) return;
     }
     for (const dir of sessionApproved) {
@@ -185,7 +190,7 @@ export function registerFilesystemTools(
       );
     }
     if (choice.type === "always_allow") {
-      addProjectPathAllowed(rootDir, choice.prefix);
+      addGlobalPathAllowed(choice.prefix);
     } else {
       sessionApproved.add(allowPrefix);
     }

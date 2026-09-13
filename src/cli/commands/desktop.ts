@@ -94,6 +94,8 @@ import {
   OPENCODE_MODELS,
   type ReasonixConfig,
   SUPPORTED_MODELS,
+  addGlobalPathAllowed,
+  addGlobalShellAllowed,
   addProjectPathAllowed,
   addProjectShellAllowed,
   anyProviderConfigured,
@@ -103,6 +105,8 @@ import {
   isOpenAIStandardEndpoint,
   isPlausibleKey,
   isReasoningEffort,
+  loadAllPathAllowed,
+  loadAllShellAllowed,
   loadApiKey,
   loadBraveApiKey,
   loadContextTokens,
@@ -143,6 +147,8 @@ import {
   pushRecentWorkspace,
   readConfig,
   webSearchEngine as readWebSearchEngine,
+  removeGlobalPathAllowed,
+  removeGlobalShellAllowed,
   removeProjectPathAllowed,
   removeProjectShellAllowed,
   removeRecentWorkspace,
@@ -1163,8 +1169,8 @@ function emitSettings(tab: Tab): void {
             ? "Google authentication changed. Sign in again to enable Gemini free-tier quota."
             : undefined),
       },
-      shellAllowed: loadProjectShellAllowed(tab.rootDir),
-      pathAllowed: loadProjectPathAllowed(tab.rootDir),
+      shellAllowed: loadAllShellAllowed(tab.rootDir),
+      pathAllowed: loadAllPathAllowed(tab.rootDir),
       version: VERSION,
     },
     tab.id,
@@ -5579,9 +5585,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       try {
         if (msg.ruleType === "shell") {
-          addProjectShellAllowed(tab.rootDir, pattern);
+          addGlobalShellAllowed(pattern);
         } else if (msg.ruleType === "path") {
-          addProjectPathAllowed(tab.rootDir, pattern);
+          addGlobalPathAllowed(pattern);
         }
         emitSettings(tab);
       } catch (err) {
@@ -5597,8 +5603,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       try {
         if (msg.ruleType === "shell") {
+          removeGlobalShellAllowed(pattern);
           removeProjectShellAllowed(tab.rootDir, pattern);
         } else if (msg.ruleType === "path") {
+          removeGlobalPathAllowed(pattern);
           removeProjectPathAllowed(tab.rootDir, pattern);
         }
         emitSettings(tab);
