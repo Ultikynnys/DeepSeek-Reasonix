@@ -95,8 +95,12 @@ export class ToolCallRepair {
     });
     const seenSignatures = new Set(declaredCalls.map(signature));
     const merged = [...declaredCalls];
+    const turnThoughtSig = declaredCalls.find((c) => c.thoughtSignature)?.thoughtSignature;
     for (const sc of scavenged.calls) {
       if (!seenSignatures.has(signature(sc))) {
+        if (turnThoughtSig && !sc.thoughtSignature) {
+          sc.thoughtSignature = turnThoughtSig;
+        }
         merged.push(sc);
         report.scavenged++;
         seenSignatures.add(signature(sc));
@@ -145,6 +149,7 @@ export class ToolCallRepair {
           };
           if (call.type !== undefined) clone.type = call.type;
           if (call.id) clone.id = `${call.id}-split${k + 1}`;
+          if (call.thoughtSignature) clone.thoughtSignature = call.thoughtSignature;
           expanded.push(clone);
         }
         report.argsSplitCalls += split.parts.length - 1;

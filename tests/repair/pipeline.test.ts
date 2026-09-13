@@ -177,4 +177,26 @@ describe("ToolCallRepair pipeline", () => {
     expect(report.argsSplitCalls).toBe(0);
     expect(report.truncationsFixed).toBe(0);
   });
+
+  it("preserves thoughtSignature on split concatenated argument calls", () => {
+    const repair = new ToolCallRepair({ allowedToolNames: new Set(["explore"]) });
+    const args = '{"task":"one"}{"task":"two"}';
+    const c = { ...call("c1", "explore", args), thoughtSignature: "sig-split-test" };
+    const { calls } = repair.process([c], null, null);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.thoughtSignature).toBe("sig-split-test");
+    expect(calls[1]!.thoughtSignature).toBe("sig-split-test");
+  });
+
+  it("attaches turn thoughtSignature to scavenged tool calls", () => {
+    const repair = new ToolCallRepair({ allowedToolNames: new Set(["search"]) });
+    const declared = [
+      { ...call("c1", "search", '{"q":"a"}'), thoughtSignature: "sig-turn-scavenge" },
+    ];
+    const reasoning = `I should also run {"name": "search", "arguments": {"q": "b"}}`;
+    const { calls } = repair.process(declared, reasoning);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.thoughtSignature).toBe("sig-turn-scavenge");
+    expect(calls[1]!.thoughtSignature).toBe("sig-turn-scavenge");
+  });
 });

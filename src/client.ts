@@ -234,6 +234,30 @@ function normalizeGeminiType(value: unknown): { type?: string; nullable?: boolea
   return normalized;
 }
 
+/** Extract Gemini thoughtSignature from any known shape: camelCase or snake_case,
+ *  on the part directly, nested inside functionCall, or as a standalone part. */
+function extractAntigravityThoughtSignature(part: any): string | undefined {
+  if (!part || typeof part !== "object") return undefined;
+  const sig =
+    part.thoughtSignature ??
+    part.thought_signature ??
+    part.functionCall?.thoughtSignature ??
+    part.functionCall?.thought_signature ??
+    part.function_call?.thoughtSignature ??
+    part.function_call?.thought_signature;
+  return typeof sig === "string" && sig.length > 0 ? sig : undefined;
+}
+
+/** Extract Gemini thoughtSignature from candidate or envelope level. */
+function extractEnvelopeThoughtSignature(inner: any, candidate: any): string | undefined {
+  const sig =
+    candidate?.thoughtSignature ??
+    candidate?.thought_signature ??
+    inner?.thoughtSignature ??
+    inner?.thought_signature;
+  return typeof sig === "string" && sig.length > 0 ? sig : undefined;
+}
+
 /** Recursively whitelist a tool `parameters` schema to the Gemini-safe subset,
  *  preserving nesting structure while dropping unsupported keywords. */
 function sanitizeGeminiSchema(params: unknown): unknown {
@@ -1000,33 +1024,37 @@ export class DeepSeekClient {
     let content = "";
     let image: { dataUrl: string; mimeType: string } | undefined;
     const toolCalls: ToolCall[] = [];
-    // Gemini 3 sometimes returns a function call's thought signature in a
-    // SEPARATE part (`{ text: "", thoughtSignature }`) rather than as a sibling
-    // of functionCall (cloudwego/eino-ext#756, continuedev/continue#8785).
-    // Collect it from any part and backfill calls that lack one, or the echoed
+    // Gemini 3 can return a thought signature as a sibling of functionCall,
+    // inside functionCall, in a separate part, or in snake_case (thought_signature).
+    // Collect it from any location and backfill calls that lack one, or the echoed
     // back continuation 400s with "Function call is missing a thought_signature".
-    let partThoughtSignature: string | undefined;
+    let partThoughtSignature: string | undefined = extractEnvelopeThoughtSignature(
+      inner,
+      candidate,
+    );
     for (const part of parts) {
       if (typeof part.text === "string") content += part.text;
-      if (typeof part.thoughtSignature === "string" && part.thoughtSignature.length > 0) {
-        partThoughtSignature = part.thoughtSignature;
-      }
-      if (part.inlineData?.data && part.inlineData?.mimeType) {
+      const sig = extractAntigravityThoughtSignature(part);
+      if (sig) partThoughtSignature = sig;
+      const inline = part.inlineData ?? part.inline_data;
+      if (inline?.data && inline?.mimeType) {
         image = {
-          dataUrl: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
-          mimeType: part.inlineData.mimeType,
+          dataUrl: `data:${inline.mimeType};base64,${inline.data}`,
+          mimeType: inline.mimeType,
         };
       }
-      if (part.functionCall) {
+      const fc = part.functionCall ?? part.function_call;
+      if (fc) {
+        const callSig = sig ?? partThoughtSignature;
         toolCalls.push({
-          id: part.functionCall.id ?? globalThis.crypto.randomUUID(),
+          id: fc.id ?? globalThis.crypto.randomUUID(),
           type: "function" as const,
           function: {
-            name: part.functionCall.name ?? "",
-            arguments: JSON.stringify(part.functionCall.args ?? {}),
+            name: fc.name ?? "",
+            arguments: JSON.stringify(fc.args ?? {}),
           },
           // Part.thought_signature is a SIBLING of functionCall, not nested.
-          thoughtSignature: part.thoughtSignature ?? partThoughtSignature,
+          ...(callSig ? { thoughtSignature: callSig } : {}),
         });
       }
     }
@@ -1197,36 +1225,41 @@ export class DeepSeekClient {
     if (streamStopReason) chunk.stopReason = streamStopReason;
     const parts = candidate?.content?.parts ?? [];
     // The thought signature may arrive in a part of its own (`{ text: "",
-    // thoughtSignature }`) rather than on the functionCall part
-    // (cloudwego/eino-ext#756). Scan the whole envelope first so a call in the
+    // thoughtSignature }`), on the functionCall part itself, or in snake_case
+    // (`thought_signature`). Scan the whole envelope first so a call in the
     // same frame still gets it when the signature part trails it.
-    let envelopeThoughtSignature: string | undefined;
+    let envelopeThoughtSignature: string | undefined = extractEnvelopeThoughtSignature(
+      inner,
+      candidate,
+    );
     for (const part of parts) {
-      if (typeof part.thoughtSignature === "string" && part.thoughtSignature.length > 0) {
-        envelopeThoughtSignature = part.thoughtSignature;
-      }
+      const sig = extractAntigravityThoughtSignature(part);
+      if (sig) envelopeThoughtSignature = sig;
     }
     for (const part of parts) {
       if (typeof part.text === "string" && part.text.length > 0) {
         chunk.contentDelta = (chunk.contentDelta ?? "") + part.text;
       }
-      if (part.inlineData?.data && part.inlineData?.mimeType) {
+      const inline = part.inlineData ?? part.inline_data;
+      if (inline?.data && inline?.mimeType) {
         chunk.image = {
-          dataUrl: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
-          mimeType: part.inlineData.mimeType,
+          dataUrl: `data:${inline.mimeType};base64,${inline.data}`,
+          mimeType: inline.mimeType,
         };
       }
-      if (part.functionCall) {
+      const fc = part.functionCall ?? part.function_call;
+      if (fc) {
+        const callSig = extractAntigravityThoughtSignature(part) ?? envelopeThoughtSignature;
         chunks.push({
           raw: json,
           toolCallDelta: {
             index: nextToolCallIndex(),
-            id: part.functionCall.id ?? globalThis.crypto.randomUUID(),
-            name: part.functionCall.name,
-            argumentsDelta: JSON.stringify(part.functionCall.args ?? {}),
+            id: fc.id ?? globalThis.crypto.randomUUID(),
+            name: fc.name,
+            argumentsDelta: JSON.stringify(fc.args ?? {}),
             // Gemini 3.x requires the model's thoughtSignature to be echoed back
             // unchanged on the next request, or the tool continuation 400s.
-            thoughtSignature: part.thoughtSignature ?? envelopeThoughtSignature,
+            ...(callSig ? { thoughtSignature: callSig } : {}),
           },
         });
       }
@@ -1280,6 +1313,24 @@ export class DeepSeekClient {
       pushContent("user", pendingFunctionResponses);
       pendingFunctionResponses = [];
     };
+
+    // Pre-scan conversation for any thought signature so earlier calls that lost
+    // theirs (e.g. from session deserialization or cross-provider transitions) can
+    // still carry a valid signature instead of triggering a fatal HTTP 400.
+    let lastKnownThoughtSignature: string | undefined;
+    for (const msg of opts.messages) {
+      if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          const sig = tc.thoughtSignature ?? (tc as any).thought_signature;
+          if (typeof sig === "string" && sig.length > 0) {
+            lastKnownThoughtSignature = sig;
+            break;
+          }
+        }
+        if (lastKnownThoughtSignature) break;
+      }
+    }
+
     for (const msg of opts.messages) {
       switch (msg.role) {
         case "system": {
@@ -1315,6 +1366,13 @@ export class DeepSeekClient {
               if (part.type === "text" && part.text.length > 0) parts.push({ text: part.text });
             }
           }
+          const msgThoughtSig = msg.tool_calls?.find((c) => {
+            const s = c.thoughtSignature ?? (c as any).thought_signature;
+            return typeof s === "string" && s.length > 0;
+          });
+          const activeMsgSig =
+            msgThoughtSig?.thoughtSignature ?? (msgThoughtSig as any)?.thought_signature;
+
           for (const tc of msg.tool_calls ?? []) {
             const id = tc.id ?? globalThis.crypto.randomUUID();
             const call: Record<string, unknown> = {
@@ -1330,7 +1388,15 @@ export class DeepSeekClient {
             // nested functionCall field. Nesting it 400s (INVALID_ARGUMENT:
             // "Function call is missing a thought_signature").
             const part: Record<string, unknown> = { functionCall: call };
-            if (tc.thoughtSignature) part.thoughtSignature = tc.thoughtSignature;
+            const sig =
+              tc.thoughtSignature ??
+              (tc as any).thought_signature ??
+              activeMsgSig ??
+              lastKnownThoughtSignature;
+            if (sig) {
+              part.thoughtSignature = sig;
+              lastKnownThoughtSignature = sig;
+            }
             parts.push(part);
           }
           pushContent("model", parts);
@@ -1408,23 +1474,34 @@ export class DeepSeekClient {
   private async chatViaStream(opts: ChatRequestOptions): Promise<ChatResponse> {
     let content = "";
     let reasoning = "";
-    const toolCallBuilders = new Map<number, { id?: string; name?: string; args: string }>();
+    const toolCallBuilders = new Map<
+      number,
+      { id?: string; name?: string; args: string; thoughtSignature?: string }
+    >();
     let usage = new Usage();
     let raw: unknown;
+    let streamThoughtSignature: string | undefined;
 
     for await (const chunk of this.stream(opts)) {
       if (chunk.contentDelta) content += chunk.contentDelta;
       if (chunk.reasoningDelta) reasoning += chunk.reasoningDelta;
+      if (chunk.thoughtSignature) streamThoughtSignature = chunk.thoughtSignature;
       if (chunk.toolCallDelta) {
         const tc = chunk.toolCallDelta;
         let builder = toolCallBuilders.get(tc.index);
         if (!builder) {
-          builder = { id: tc.id, name: tc.name, args: "" };
+          builder = {
+            id: tc.id,
+            name: tc.name,
+            args: "",
+            thoughtSignature: tc.thoughtSignature,
+          };
           toolCallBuilders.set(tc.index, builder);
         }
         if (tc.id) builder.id = tc.id;
         if (tc.name) builder.name = tc.name;
         if (tc.argumentsDelta) builder.args += tc.argumentsDelta;
+        if (tc.thoughtSignature) builder.thoughtSignature = tc.thoughtSignature;
       }
       if (chunk.usage) usage = chunk.usage;
       if (chunk.raw !== undefined) raw = chunk.raw;
@@ -1436,6 +1513,9 @@ export class DeepSeekClient {
         id: b.id,
         type: "function" as const,
         function: { name: b.name ?? "", arguments: b.args },
+        ...((b.thoughtSignature ?? streamThoughtSignature)
+          ? { thoughtSignature: b.thoughtSignature ?? streamThoughtSignature }
+          : {}),
       });
     }
 

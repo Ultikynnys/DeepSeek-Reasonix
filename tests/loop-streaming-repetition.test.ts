@@ -149,4 +149,33 @@ describe("streamModelResponse — Gemini thought signature", () => {
 
     expect(result.toolCalls[0]!.thoughtSignature).toBe("sig-own");
   });
+
+  it("backfills a signature from a sibling tool call when one tool call lacks it", async () => {
+    const chunks: StreamChunk[] = [
+      {
+        toolCallDelta: {
+          index: 0,
+          id: "call_1",
+          name: "web_search",
+          argumentsDelta: '{"query":"a"}',
+          thoughtSignature: "sig-call-1",
+        },
+      },
+      {
+        toolCallDelta: {
+          index: 1,
+          id: "call_2",
+          name: "read_file",
+          argumentsDelta: '{"path":"b"}',
+          // Lacks thoughtSignature
+        },
+      },
+    ];
+
+    const result = await run(chunks);
+
+    expect(result.toolCalls).toHaveLength(2);
+    expect(result.toolCalls[0]!.thoughtSignature).toBe("sig-call-1");
+    expect(result.toolCalls[1]!.thoughtSignature).toBe("sig-call-1");
+  });
 });

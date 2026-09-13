@@ -220,6 +220,139 @@ describe("gemini payload", () => {
     });
   });
 
+  it("backfills thoughtSignature to sibling parallel calls that lack one", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-3.1-flash-high",
+      messages: [
+        { role: "user", content: "search web and read file" },
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call-1",
+              function: { name: "web_search", arguments: '{"query":"reasonix"}' },
+              thoughtSignature: "sig-parallel-1",
+            },
+            {
+              id: "call-2",
+              function: { name: "read_file", arguments: '{"path":"README.md"}' },
+              // Missing thoughtSignature (e.g. Gemini 3 Flash parallel calls bug)
+            },
+          ],
+        },
+      ],
+    });
+
+    const contents = (
+      captured as { request: { contents: Array<{ role: string; parts: unknown[] }> } }
+    ).request.contents;
+    expect(contents[1]?.parts).toEqual([
+      {
+        functionCall: { id: "call-1", name: "web_search", args: { query: "reasonix" } },
+        thoughtSignature: "sig-parallel-1",
+      },
+      {
+        functionCall: { id: "call-2", name: "read_file", args: { path: "README.md" } },
+        thoughtSignature: "sig-parallel-1",
+      },
+    ]);
+  });
+
+  it("backfills thoughtSignature from conversation history when a prior call lacks one", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-3.1-flash-high",
+      messages: [
+        { role: "user", content: "search first" },
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call-search",
+              function: { name: "web_search", arguments: '{"query":"q"}' },
+              // Lacks signature
+            },
+          ],
+        },
+        { role: "tool", name: "web_search", tool_call_id: "call-search", content: "res" },
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call-read",
+              function: { name: "read_file", arguments: '{"path":"a"}' },
+              thoughtSignature: "sig-turn-2",
+            },
+          ],
+        },
+      ],
+    });
+
+    const contents = (
+      captured as {
+        request: { contents: Array<{ role: string; parts: Array<{ thoughtSignature?: string }> }> };
+      }
+    ).request.contents;
+    // Both assistant turns carry a thoughtSignature now so the API never 400s
+    expect(contents[1]?.parts[0]?.thoughtSignature).toBe("sig-turn-2");
+    expect(contents[3]?.parts[0]?.thoughtSignature).toBe("sig-turn-2");
+  });
+
+  it("accepts thought_signature snake_case on tool_calls", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-3.1-flash-high",
+      messages: [
+        { role: "user", content: "go" },
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call-1",
+              function: { name: "web_search", arguments: "{}" },
+              thought_signature: "sig-snake",
+            } as any,
+          ],
+        },
+      ],
+    });
+
+    const contents = (
+      captured as {
+        request: { contents: Array<{ role: string; parts: Array<{ thoughtSignature?: string }> }> };
+      }
+    ).request.contents;
+    expect(contents[1]?.parts[0]?.thoughtSignature).toBe("sig-snake");
+  });
+
   it("coalesces parallel tool responses into one user turn", async () => {
     let captured: unknown = null;
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
@@ -799,6 +932,76 @@ describe("gemini payload", () => {
     expect(res.toolCalls[0]?.thoughtSignature).toBe("sig-separate");
   });
 
+  it("captures a snake_case thought_signature on a functionCall part", async () => {
+    const fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify(
+          wrappedResponse([
+            {
+              functionCall: { name: "web_search", args: { query: "q" } },
+              thought_signature: "sig-snake-part",
+            },
+          ]),
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const res = await client.chat({
+      model: "gemini-3.1-flash-high",
+      messages: [{ role: "user", content: "search" }],
+    });
+    expect(res.toolCalls[0]?.thoughtSignature).toBe("sig-snake-part");
+  });
+
+  it("captures thought_signature nested inside functionCall", async () => {
+    const fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify(
+          wrappedResponse([
+            {
+              functionCall: {
+                name: "web_search",
+                args: { query: "q" },
+                thought_signature: "sig-nested",
+              },
+            },
+          ]),
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const res = await client.chat({
+      model: "gemini-3.1-flash-high",
+      messages: [{ role: "user", content: "search" }],
+    });
+    expect(res.toolCalls[0]?.thoughtSignature).toBe("sig-nested");
+  });
+
+  it("captures snake_case thought_signature returned in a separate trailing part", async () => {
+    const fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify(
+          wrappedResponse([
+            { functionCall: { name: "web_search", args: { query: "q" } } },
+            { thought_signature: "sig-trailing-snake" },
+          ]),
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const res = await client.chat({
+      model: "gemini-3.1-pro-high",
+      messages: [{ role: "user", content: "search" }],
+    });
+    expect(res.toolCalls[0]?.thoughtSignature).toBe("sig-trailing-snake");
+  });
+
   it("serializes image_url parts to inlineData for the vision API", async () => {
     let captured: { body: unknown } | null = null;
     const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
@@ -1084,6 +1287,74 @@ describe("gemini streaming", () => {
 
     expect(callDeltas[0]?.thoughtSignature).toBe("sig-frame");
     expect(chunkSignatures).toContain("sig-frame");
+  });
+
+  it("attaches snake_case thought_signature in streaming SSE", async () => {
+    const envelope = (parts: unknown[]) => ({
+      response: { candidates: [{ content: { parts } }] },
+    });
+    const sse = [
+      `data: ${JSON.stringify(
+        envelope([
+          {
+            functionCall: { id: "call-ws", name: "web_search", args: { query: "reasonix" } },
+            thought_signature: "sig-sse-snake",
+          },
+        ]),
+      )}`,
+      "data: [DONE]",
+    ].join("\n\n");
+
+    const fetch = vi.fn(async () => {
+      return new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const callDeltas = [];
+    for await (const chunk of client.stream({
+      model: "gemini-3.1-pro-high",
+      messages: [{ role: "user", content: "search" }],
+    })) {
+      if (chunk.toolCallDelta) callDeltas.push(chunk.toolCallDelta);
+    }
+
+    expect(callDeltas[0]?.thoughtSignature).toBe("sig-sse-snake");
+  });
+
+  it("attaches snake_case thought_signature from trailing SSE frame", async () => {
+    const envelope = (parts: unknown[]) => ({
+      response: { candidates: [{ content: { parts } }] },
+    });
+    const sse = [
+      `data: ${JSON.stringify(
+        envelope([
+          { functionCall: { id: "call-ws", name: "web_search", args: { query: "reasonix" } } },
+        ]),
+      )}`,
+      `data: ${JSON.stringify(envelope([{ thought_signature: "sig-trailing-frame-snake" }]))}`,
+      "data: [DONE]",
+    ].join("\n\n");
+
+    const fetch = vi.fn(async () => {
+      return new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as unknown as typeof fetch;
+
+    const client = geminiClient(fetch);
+    const chunkSignatures: string[] = [];
+    for await (const chunk of client.stream({
+      model: "gemini-3.1-pro-high",
+      messages: [{ role: "user", content: "search" }],
+    })) {
+      if (chunk.thoughtSignature) chunkSignatures.push(chunk.thoughtSignature);
+    }
+
+    expect(chunkSignatures).toContain("sig-trailing-frame-snake");
   });
 
   it("captures an inlineData image part as StreamChunk.image", async () => {

@@ -232,9 +232,13 @@ export async function* streamModelResponse(
   // Backfill any function call the stream left without a thought signature so
   // the echoed-back continuation carries it; omitting it 400s with
   // "Function call is missing a thought_signature in functionCall parts".
-  if (streamThoughtSignature) {
+  // If streamThoughtSignature was not delivered in a separate part, check whether
+  // any streamed call carried a thought signature and reuse it.
+  const anyCallSig = toolCalls.find((c) => c.thoughtSignature)?.thoughtSignature;
+  const effectiveSig = streamThoughtSignature ?? anyCallSig;
+  if (effectiveSig) {
     for (const tc of toolCalls) {
-      if (!tc.thoughtSignature) tc.thoughtSignature = streamThoughtSignature;
+      if (!tc.thoughtSignature) tc.thoughtSignature = effectiveSig;
     }
   }
   return {
