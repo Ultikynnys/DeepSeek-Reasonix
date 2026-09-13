@@ -199,12 +199,14 @@ import {
   configurePlaywrightArgs,
   createPlaywrightProgressParser,
   installFromPlaywrightDownloadSources,
+  isPlaywrightBrowserInstalled,
   isPlaywrightManagedBrowser,
   normalizeExtensionToken,
   parsePlaywrightConnection,
   playwrightBrowserInstallArgs,
   playwrightBrowserInstallEnv,
 } from "../../mcp/extension.js";
+import { ensureNpxAvailable } from "../../mcp/node-runtime.js";
 import { quoteArg } from "../../mcp/stdio.js";
 
 import {
@@ -2626,11 +2628,17 @@ async function installPlaywrightBrowser(
   }
   const installController = new AbortController();
   playwrightBrowserInstalls.set(browser, installController);
+  tab.mcpStatuses.delete("playwright");
+  for (const key of [...tab.mcpStatuses.keys()]) {
+    if (key.startsWith("playwright=")) tab.mcpStatuses.delete(key);
+  }
+  emitMcpSpecs(tab);
   const configuredArgs = readConfig().mcpServers?.playwright?.args ?? [];
   const configuredPackage = configuredArgs.find((arg) => /^@playwright\/mcp(?:@|$)/.test(arg));
   const packageId = /^@playwright\/mcp(?:@[A-Za-z0-9._-]+)?$/.test(configuredPackage ?? "")
     ? configuredPackage
     : undefined;
+  await ensureNpxAvailable().catch(() => undefined);
   const args = playwrightBrowserInstallArgs(browser, packageId);
   const configuredEnv = readConfig().mcpServers?.playwright?.env;
   const baseEnv = { ...process.env, ...(configuredEnv ?? {}) };
@@ -3806,7 +3814,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
   }
 
-  function bridgeTabMcp(tab: Tab): Promise<void> {
+  async function bridgeTabMcp(tab: Tab): Promise<void> {
     if (!tab.runtime || !tab.toolset) {
       emitTabDiagnostic(tab, "mcp.bridge.skipped", { reason: "runtime-or-toolset-not-ready" });
       tab.mcpBridgePromise = null;
@@ -3816,6 +3824,24 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emitTabDiagnostic(tab, "mcp.bridge.started", {
       configured: configured.length,
     });
+    const playwrightSpec = configured.find((s) => s.name === "playwright");
+    if (playwrightSpec && playwrightSpec.transport === "stdio" && !playwrightSpec.disabled) {
+      await ensureNpxAvailable().catch(() => undefined);
+      const { mode } = parsePlaywrightConnection(playwrightSpec.args);
+      if (
+        isPlaywrightManagedBrowser(mode) &&
+        !isPlaywrightBrowserInstalled(mode) &&
+        !playwrightBrowserInstalls.has(mode)
+      ) {
+        tab.mcpStatuses.set("playwright", { kind: "handshake" });
+        emitMcpSpecs(tab);
+        void installPlaywrightBrowser(tab, mode, () => {
+          void bridgeTabMcp(tab);
+        });
+        tab.mcpBridgePromise = null;
+        return Promise.resolve();
+      }
+    }
     if (tab.mcpRuntime) {
       // Already constructed — reload so new/removed specs settle without restart.
       const p = tab.mcpRuntime

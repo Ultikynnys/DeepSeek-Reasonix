@@ -130,4 +130,16 @@ describe("MCP integration — real subprocess against bundled demo server", () =
       await b.close();
     }
   }, 30_000);
+
+  it("rejects immediately on non-zero subprocess exit with captured stderr", async () => {
+    const transport = new StdioTransport({
+      command: NODE_CMD,
+      args: ["-e", "process.stderr.write('fatal boom!\\n'); process.exit(17)"],
+      shell: false,
+    });
+    client = new McpClient({ transport, requestTimeoutMs: 15_000 });
+    const t0 = Date.now();
+    await expect(client.initialize()).rejects.toThrow(/exited with code 17.*fatal boom!/);
+    expect(Date.now() - t0).toBeLessThan(5_000);
+  });
 });

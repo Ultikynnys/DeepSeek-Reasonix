@@ -31,6 +31,7 @@ export interface StdioTransportOptions {
 export class StdioTransport extends BaseMcpTransport implements McpTransport {
   private readonly child: ChildProcess;
   private stdoutBuffer = "";
+  private stderrTail = "";
 
   constructor(opts: StdioTransportOptions) {
     super();
@@ -68,7 +69,7 @@ export class StdioTransport extends BaseMcpTransport implements McpTransport {
     this.child.stdout!.on("data", (chunk: string) => this.onStdout(chunk));
     this.child.stderr!.setEncoding("utf8");
     this.child.stderr!.on("data", (chunk: string) => this.onStderr(chunk));
-    this.child.on("close", () => this.onClose());
+    this.child.on("close", (code) => this.onClose(code));
     this.child.on("error", (err) => {
       // Surface spawn errors as a synthetic JsonRpcError so callers don't
       // hang on a stream that never emits anything.
@@ -131,12 +132,21 @@ export class StdioTransport extends BaseMcpTransport implements McpTransport {
   // Python MCP SDK writes info logs (`server.py:534 ListPromptsRequest`)
   // to stderr — letting those through would corrupt the TUI render.
   private onStderr(chunk: string): void {
+    this.stderrTail = `${this.stderrTail}${chunk}`.slice(-4000);
     if (process.env.REASONIX_DEBUG_MCP === "1") {
       process.stderr.write(chunk);
     }
   }
 
-  private onClose(): void {
+  private onClose(code?: number | null): void {
+    const finalCode = code ?? this.child.exitCode;
+    if (!this.closed && finalCode !== null && finalCode !== 0) {
+      const detail = this.stderrTail.trim();
+      const reason = detail
+        ? `server process exited with code ${finalCode}: ${detail}`
+        : `server process exited with code ${finalCode}`;
+      this.incoming.push(syntheticRpcError(reason));
+    }
     this.markClosed();
   }
 }

@@ -1,6 +1,9 @@
 /** Configures Playwright MCP browser connections. The extension comes from the
  *  Chrome Web Store; no bundled copy ships, so the base install stays lightweight. */
 
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
   PlaywrightExtensionBrowser,
   PlaywrightMcpConnectionMode,
@@ -48,6 +51,46 @@ export function isPlaywrightManagedBrowser(
   value: unknown,
 ): value is (typeof PLAYWRIGHT_MANAGED_BROWSERS)[number] {
   return typeof value === "string" && MANAGED_MODES.has(value as PlaywrightMcpConnectionMode);
+}
+
+/** Compute the base directory where Playwright downloads and caches browser builds. */
+export function resolvePlaywrightBrowsersDir(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.PLAYWRIGHT_BROWSERS_PATH) {
+    return env.PLAYWRIGHT_BROWSERS_PATH;
+  }
+  if (process.platform === "win32") {
+    const localAppData = env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
+    return join(localAppData, "ms-playwright");
+  }
+  if (process.platform === "darwin") {
+    return join(homedir(), "Library", "Caches", "ms-playwright");
+  }
+  const xdgCache = env.XDG_CACHE_HOME ?? join(homedir(), ".cache");
+  return join(xdgCache, "ms-playwright");
+}
+
+/** Check whether the required browser binary exists in Playwright's local store. */
+export function isPlaywrightBrowserInstalled(
+  browser: unknown,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!isPlaywrightManagedBrowser(browser)) return false;
+  // Chrome and Edge use system channels; no local Playwright build download required.
+  if (browser === "chrome" || browser === "msedge") return true;
+
+  const baseDir = resolvePlaywrightBrowsersDir(env);
+  if (!existsSync(baseDir)) return false;
+  try {
+    const entries = readdirSync(baseDir);
+    const prefix = `${browser}-`;
+    return entries.some((entry) => {
+      if (!entry.startsWith(prefix)) return false;
+      const full = join(baseDir, entry);
+      return existsSync(full);
+    });
+  } catch {
+    return false;
+  }
 }
 
 export function playwrightBrowserInstallArgs(

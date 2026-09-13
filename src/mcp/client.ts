@@ -297,15 +297,36 @@ export class McpClient {
         pending.reject(err as Error);
       }
       this.pending.clear();
+      return;
+    }
+    // Stream closed cleanly or child process exited. If there are still
+    // pending requests, reject them immediately rather than waiting for
+    // the requestTimeoutMs to fire.
+    if (this.pending.size > 0) {
+      const err = new Error("MCP transport closed before request completed");
+      for (const [, pending] of this.pending) {
+        clearTimeout(pending.timeout);
+        pending.reject(err);
+      }
+      this.pending.clear();
     }
   }
 
   private dispatch(msg: JsonRpcMessage): void {
-    // Notifications (no `id`): route by method. Progress notifications
-    // go to the per-call handler if one was registered; everything
-    // else is dropped silently (we don't yet handle tools/list_changed
+    // Notifications (no `id`): route by method or handle transport error.
+    // Progress notifications go to the per-call handler if one was registered;
+    // everything else is dropped silently (we don't yet handle tools/list_changed
     // or resources/list_changed).
     if (!("id" in msg) || msg.id === null || msg.id === undefined) {
+      if ("error" in msg && msg.error) {
+        const err = new Error((msg as { error: { message: string } }).error.message);
+        for (const [, pending] of this.pending) {
+          clearTimeout(pending.timeout);
+          pending.reject(err);
+        }
+        this.pending.clear();
+        return;
+      }
       if ("method" in msg && msg.method === "notifications/progress") {
         const p = msg.params as ProgressNotificationParams | undefined;
         if (!p || p.progressToken === undefined) return;

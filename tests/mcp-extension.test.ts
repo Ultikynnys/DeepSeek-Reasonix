@@ -15,11 +15,13 @@ import {
   configurePlaywrightArgs,
   createPlaywrightProgressParser,
   installFromPlaywrightDownloadSources,
+  isPlaywrightBrowserInstalled,
   normalizeExtensionToken,
   parsePlaywrightConnection,
   parsePlaywrightDownloadProgress,
   playwrightBrowserInstallArgs,
   playwrightBrowserInstallEnv,
+  resolvePlaywrightBrowsersDir,
 } from "../src/mcp/extension.js";
 
 describe("Playwright extension store", () => {
@@ -430,5 +432,24 @@ describe("interpretExtensionCheck", () => {
   it("treats an empty probe result as a failure", () => {
     expect(interpretExtensionCheck(null, 0).ok).toBe(false);
     expect(interpretExtensionCheck("   ", 0).ok).toBe(false);
+  });
+});
+
+describe("isPlaywrightBrowserInstalled", () => {
+  it("treats system channel browsers as installed", () => {
+    expect(isPlaywrightBrowserInstalled("chrome")).toBe(true);
+    expect(isPlaywrightBrowserInstalled("msedge")).toBe(true);
+  });
+
+  it("returns false for unsupported browsers", () => {
+    expect(isPlaywrightBrowserInstalled("opera")).toBe(false);
+    expect(isPlaywrightBrowserInstalled(null)).toBe(false);
+  });
+
+  it("respects PLAYWRIGHT_BROWSERS_PATH when inspecting managed browsers", () => {
+    const emptyDir = "C:/path/does/not/exist/for/playwright/test";
+    expect(isPlaywrightBrowserInstalled("firefox", { PLAYWRIGHT_BROWSERS_PATH: emptyDir })).toBe(
+      false,
+    );
   });
 });
