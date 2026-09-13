@@ -1,4 +1,4 @@
-/** StdioTransport.close() must swallow child.kill() errors (e.g. EINVAL on Windows). */
+/** StdioTransport.close() must terminate server trees and remain safe on kill errors. */
 
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "vitest";
@@ -37,7 +37,7 @@ describe("StdioTransport.close()", () => {
     await expect(t.close()).resolves.toBeUndefined();
   });
 
-  it("swallows kill() EINVAL via monkey-patch", async () => {
+  it("terminates through the process-tree path before the direct-child fallback", async () => {
     const t = new StdioTransport({
       command: "node",
       args: ["-e", "setTimeout(() => {}, 5000)"],
@@ -45,21 +45,15 @@ describe("StdioTransport.close()", () => {
     });
     const child = (t as unknown as { child: ChildProcess }).child;
     const originalKill = child.kill.bind(child);
-    let killCalled = false;
-    // Force EINVAL to verify the catch path works.
+    let directKillCalled = false;
     child.kill = (signal?: NodeJS.Signals | number) => {
-      killCalled = true;
-      if (signal === "SIGTERM") {
-        const err = new Error("kill EINVAL");
-        (err as NodeJS.ErrnoException).code = "EINVAL";
-        throw err;
-      }
+      directKillCalled = true;
       return originalKill(signal);
     };
     await expect(t.close()).resolves.toBeUndefined();
-    expect(killCalled).toBe(true);
+    expect(directKillCalled).toBe(false);
     try {
-      if (!child.killed) child.kill();
+      originalKill();
     } catch {
       /* already dead */
     }

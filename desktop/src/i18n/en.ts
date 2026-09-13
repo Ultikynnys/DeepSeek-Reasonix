@@ -253,7 +253,7 @@ export const en = {
     mcpToolToggleHint: "Disabled tools stay unregistered until re-enabled",
     mcpBrowserTitle: "Playwright browser integration",
     mcpBrowserDesc:
-      "Choose a Playwright-managed browser, reuse existing Chrome/Edge tabs through the extension, or connect another Chromium browser through CDP.",
+      "Choose a workspace-persistent managed browser, attach to an already-running Chrome/Edge browser through the extension, or connect another Chromium browser through CDP.",
     mcpModeLabel: "Browser connection",
     mcpModeChrome: "Managed Chrome",
     mcpModeFirefox: "Managed Firefox",
@@ -272,9 +272,9 @@ export const en = {
     mcpConfiguredNo: "playwright server not configured yet — choose a mode and configure it",
     mcpTokenPlaceholder: "PLAYWRIGHT_MCP_EXTENSION_TOKEN",
     mcpTokenHint:
-      "Chrome/Edge only. Pick the browser where you installed the extension. The optional relay token skips the per-connection approval prompt; the listing opens in the browser you selected.",
+      "Chrome/Edge only. Attaches to the browser if it is already running and reuses its tabs, logins, settings, and installed extensions. The optional relay token skips the per-connection approval prompt.",
     mcpManagedHint:
-      "Playwright launches and maintains a persistent profile for this browser. Firefox and WebKit do not use the extension relay.",
+      "Playwright keeps cookies, logins, settings, and installed extensions in this workspace under .reasonix/playwright/profiles, so signing in once survives Reasonix restarts. Firefox and WebKit do not use the extension relay.",
     mcpCdpHint:
       "For Brave, Vivaldi, Opera, Chromium, and similar browsers started with a remote debugging endpoint.",
     mcpBrowserInstall: "Install {browser}",

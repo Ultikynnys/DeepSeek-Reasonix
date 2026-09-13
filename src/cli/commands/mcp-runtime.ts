@@ -5,6 +5,7 @@ import { formatMcpSlowToast } from "../../desktop/mcp-toast.js";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
+import { withPlaywrightWorkspaceProfile } from "../../mcp/extension.js";
 import { isGmailMailSpec, resolveGmailToken } from "../../mcp/gmail-mail.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import {
@@ -194,7 +195,10 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       const parsed = parseMcpSpec(raw);
       label = parsed.name ?? "anon";
       const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
-      const spec = overlayMatchedSpec(parsed, matched);
+      const configuredSpec = overlayMatchedSpec(parsed, matched);
+      const spec = isPlaywrightSpec(configuredSpec)
+        ? withPlaywrightWorkspaceProfile(configuredSpec)
+        : configuredSpec;
       if (spec.disabled) {
         sink({ state: "disabled", name: label });
         rejectReady(new Error(`MCP server "${label}" is disabled`));

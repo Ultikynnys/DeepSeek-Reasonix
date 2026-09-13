@@ -21,7 +21,9 @@ import {
   parsePlaywrightDownloadProgress,
   playwrightBrowserInstallArgs,
   playwrightBrowserInstallEnv,
+  playwrightWorkspaceProfileDir,
   resolvePlaywrightBrowsersDir,
+  withPlaywrightWorkspaceProfile,
 } from "../src/mcp/extension.js";
 
 describe("Playwright extension store", () => {
@@ -217,7 +219,13 @@ describe("Playwright connection configuration", () => {
     "configures and parses managed %s mode",
     (mode) => {
       const args = configurePlaywrightArgs(["-y", "@playwright/mcp@0.0.80", "--caps=vision"], mode);
-      expect(args).toEqual(["-y", "@playwright/mcp@0.0.80", "--caps=vision", `--browser=${mode}`]);
+      expect(args).toEqual([
+        "-y",
+        "@playwright/mcp@0.0.80",
+        "--caps=vision",
+        `--browser=${mode}`,
+        `--user-data-dir=.reasonix/playwright/profiles/${mode}`,
+      ]);
       expect(parsePlaywrightConnection(args)).toEqual({ mode });
     },
   );
@@ -233,17 +241,32 @@ describe("Playwright connection configuration", () => {
           "--extension",
           "--cdp-endpoint=http://localhost:9222",
           "--profile-dir-name=Profile 1",
+          "--user-data-dir",
+          "old-profile",
           "--caps=vision",
         ],
         "msedge",
       ),
-    ).toEqual(["-y", "@playwright/mcp@0.0.80", "--caps=vision", "--browser=msedge"]);
+    ).toEqual([
+      "-y",
+      "@playwright/mcp@0.0.80",
+      "--caps=vision",
+      "--browser=msedge",
+      "--user-data-dir=.reasonix/playwright/profiles/msedge",
+    ]);
   });
 
-  it("configures extension mode without pinning a browser or profile", () => {
+  it("configures extension mode to attach without pinning a managed profile", () => {
     expect(
       configurePlaywrightArgs(
-        ["-y", "@playwright/mcp", "--browser=chrome", "--profile-dir-name", "Profile 2"],
+        [
+          "-y",
+          "@playwright/mcp",
+          "--browser=chrome",
+          "--profile-dir-name",
+          "Profile 2",
+          "--user-data-dir=.reasonix/playwright/profiles/chrome",
+        ],
         "extension",
       ),
     ).toEqual(["-y", "@playwright/mcp", "--extension"]);
@@ -283,6 +306,60 @@ describe("Playwright connection configuration", () => {
     });
     expect(() => configurePlaywrightArgs(args, "cdp", "")).toThrow(/endpoint is required/);
     expect(() => configurePlaywrightArgs(args, "cdp", "localhost:9222")).toThrow(/must use/);
+  });
+
+  it("uses one stable, browser-specific profile path under the workspace", () => {
+    expect(playwrightWorkspaceProfileDir("chrome")).toBe(".reasonix/playwright/profiles/chrome");
+    expect(playwrightWorkspaceProfileDir("firefox")).toBe(".reasonix/playwright/profiles/firefox");
+    const configured = configurePlaywrightArgs(
+      configurePlaywrightArgs(["-y", "@playwright/mcp"], "chrome"),
+      "chrome",
+    );
+    expect(configured.filter((arg) => arg.startsWith("--user-data-dir="))).toEqual([
+      "--user-data-dir=.reasonix/playwright/profiles/chrome",
+    ]);
+  });
+
+  it("adds the persistent cookie profile to legacy managed specs at runtime", () => {
+    expect(
+      withPlaywrightWorkspaceProfile({
+        transport: "stdio",
+        name: "playwright",
+        command: "npx",
+        args: ["-y", "@playwright/mcp"],
+      }),
+    ).toEqual({
+      transport: "stdio",
+      name: "playwright",
+      command: "npx",
+      args: [
+        "-y",
+        "@playwright/mcp",
+        "--browser=chrome",
+        "--user-data-dir=.reasonix/playwright/profiles/chrome",
+      ],
+    });
+  });
+
+  it("does not rewrite extension, CDP, or remote Playwright specs", () => {
+    const extension = {
+      transport: "stdio" as const,
+      name: "playwright",
+      command: "npx",
+      args: ["-y", "@playwright/mcp", "--extension"],
+    };
+    const cdp = {
+      ...extension,
+      args: ["-y", "@playwright/mcp", "--cdp-endpoint=http://localhost:9222"],
+    };
+    const remote = {
+      transport: "sse" as const,
+      name: "playwright",
+      url: "https://browser.example.com/sse",
+    };
+    expect(withPlaywrightWorkspaceProfile(extension)).toBe(extension);
+    expect(withPlaywrightWorkspaceProfile(cdp)).toBe(cdp);
+    expect(withPlaywrightWorkspaceProfile(remote)).toBe(remote);
   });
 
   it("treats an unqualified Playwright server as managed Chrome", () => {

@@ -1,6 +1,7 @@
 /** MCP stdio = newline-delimited JSON-RPC; transport iface lets tests fake it without spawning. */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { killProcessTree } from "../tools/process-tree.js";
 import { BaseMcpTransport } from "./base-transport.js";
 import { syntheticRpcError } from "./transport-utils.js";
 import type { JsonRpcMessage } from "./types.js";
@@ -96,12 +97,24 @@ export class StdioTransport extends BaseMcpTransport implements McpTransport {
       /* already ended */
     }
     if (this.child.exitCode === null && !this.child.killed) {
-      // child.kill("SIGTERM") throws EINVAL on Windows; plain kill()
-      // can also throw on failed spawns. Swallow both.
-      try {
-        this.child.kill(process.platform === "win32" ? undefined : "SIGTERM");
-      } catch {
-        /* already exited or unsignallable */
+      // With shell:true (the win32 default) the direct child is the `cmd.exe`
+      // wrapper, so a plain child.kill() terminates the shell but ORPHANS the
+      // real server it launched (e.g. `uv` -> `python`) - those survive and leak
+      // across sessions. Kill the whole tree instead; fall back to the direct
+      // child if we have no pid.
+      // child.kill("SIGTERM") throws EINVAL on Windows; plain kill() can also
+      // throw on failed spawns - swallow both.
+      const directKill = () => {
+        try {
+          this.child.kill(process.platform === "win32" ? undefined : "SIGTERM");
+        } catch {
+          /* already exited or unsignallable */
+        }
+      };
+      if (this.child.pid) {
+        killProcessTree(this.child.pid, "SIGKILL", { fallback: directKill });
+      } else {
+        directKill();
       }
     }
   }

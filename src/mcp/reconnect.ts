@@ -2,6 +2,8 @@
 
 import { McpClient } from "./client.js";
 import { classifyToolListDrift } from "./drift.js";
+import { withPlaywrightWorkspaceProfile } from "./extension.js";
+import { isPlaywrightSpec } from "./playwright-tooling.js";
 import type { McpClientHost } from "./registry.js";
 import { type McpSpec, parseMcpSpec } from "./spec.js";
 import { buildTransportFromSpec } from "./transport-from-spec.js";
@@ -59,7 +61,8 @@ export async function reconnectMcpServer(args: ReconnectArgs): Promise<Reconnect
     };
   }
   const workspaceDir = args.host.client.workspaceRootDir;
-  const transport = buildTransportFromSpec(parsed, {
+  const runtimeSpec = isPlaywrightSpec(parsed) ? withPlaywrightWorkspaceProfile(parsed) : parsed;
+  const transport = buildTransportFromSpec(runtimeSpec, {
     env: args.env,
     headers: args.headers,
     cwd: workspaceDir,

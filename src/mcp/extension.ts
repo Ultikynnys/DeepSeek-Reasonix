@@ -8,6 +8,7 @@ import type {
   PlaywrightExtensionBrowser,
   PlaywrightMcpConnectionMode,
 } from "@reasonix/core-utils/desktop-protocol";
+import type { McpServerSpec } from "./spec.js";
 
 /** Official Chrome Web Store listing — "Playwright Extension" (Microsoft, Apache-2.0). */
 export const PLAYWRIGHT_EXTENSION_STORE_URL =
@@ -43,9 +44,21 @@ export async function installFromPlaywrightDownloadSources(
   return { ok: false, failures };
 }
 
-const CONNECTION_VALUE_ARGS = new Set(["--browser", "--cdp-endpoint", "--profile-dir-name"]);
+const CONNECTION_VALUE_ARGS = new Set([
+  "--browser",
+  "--cdp-endpoint",
+  "--profile-dir-name",
+  "--user-data-dir",
+]);
 export const PLAYWRIGHT_MANAGED_BROWSERS = ["chrome", "firefox", "webkit", "msedge"] as const;
 const MANAGED_MODES = new Set<PlaywrightMcpConnectionMode>(PLAYWRIGHT_MANAGED_BROWSERS);
+
+/** Relative to the MCP server cwd, which Reasonix pins to the active workspace. */
+export function playwrightWorkspaceProfileDir(
+  browser: (typeof PLAYWRIGHT_MANAGED_BROWSERS)[number],
+): string {
+  return `.reasonix/playwright/profiles/${browser}`;
+}
 
 export function isPlaywrightManagedBrowser(
   value: unknown,
@@ -210,7 +223,7 @@ export function configurePlaywrightArgs(
       index += 1;
       continue;
     }
-    if (/^--(?:browser|cdp-endpoint|profile-dir-name)=/.test(arg)) continue;
+    if (/^--(?:browser|cdp-endpoint|profile-dir-name|user-data-dir)=/.test(arg)) continue;
     result.push(arg);
   }
   if (mode === "extension") {
@@ -227,7 +240,19 @@ export function configurePlaywrightArgs(
     }
     return [...result, `--cdp-endpoint=${endpoint}`];
   }
-  return [...result, `--browser=${mode}`];
+  return [...result, `--browser=${mode}`, `--user-data-dir=${playwrightWorkspaceProfileDir(mode)}`];
+}
+
+/** Ensure every managed launch uses the workspace-local persistent browser profile.
+ *  Extension/CDP connections already own their profile, so leave those specs unchanged. */
+export function withPlaywrightWorkspaceProfile(spec: McpServerSpec): McpServerSpec {
+  if (spec.transport !== "stdio") return spec;
+  const connection = parsePlaywrightConnection(spec.args);
+  if (!isPlaywrightManagedBrowser(connection.mode)) return spec;
+  return {
+    ...spec,
+    args: configurePlaywrightArgs(spec.args, connection.mode),
+  };
 }
 
 /** Normalize a user-pasted relay token. The extension's connection dialog copies
