@@ -2182,10 +2182,6 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   flex-direction: column;
   gap: 28px;
 }
-.thread-inner > div[data-turn] {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 100px;
-}
 
 /* ---------- JUMP BAR (message navigation dock) ---------- */
 
