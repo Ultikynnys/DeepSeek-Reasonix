@@ -39,6 +39,7 @@ describe("buildCodeToolset", () => {
     const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });
 
     expect(toolset.tools.has("see_image")).toBe(true);
+    expect(toolset.tools.has("screen_capture")).toBe(true);
     const out = await toolset.tools.dispatch("see_image", "{}");
     expect(out).toContain("no image available");
     expect(out).not.toContain("Unknown tool");
