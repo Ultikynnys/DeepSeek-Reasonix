@@ -6,7 +6,7 @@ type BuildLoadedMessages = (records: ChatMessage[]) => Array<{
   kind: "assistant" | "user";
   text?: string;
   images?: string[];
-  segments?: Array<{ kind: string; text?: string; args?: string; result?: string }>;
+  segments?: Array<{ kind: string; text?: string; args?: string; result?: string; ok?: boolean }>;
 }>;
 
 describe("desktop session loading", () => {
@@ -110,6 +110,51 @@ describe("desktop session loading", () => {
     expect(toolSeg.result).toBe("file body");
     const users = loaded.filter((m) => m.kind === "user");
     expect(users).toHaveLength(2);
+  });
+
+  it("settles a tool call interrupted before its result was persisted", () => {
+    const loaded = buildLoadedMessages!([
+      { role: "user", content: "run it" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "interrupted-call",
+            type: "function",
+            function: { name: "run_command", arguments: '{"command":"long task"}' },
+          },
+        ],
+      },
+    ]);
+
+    const assistant = loaded.find((message) => message.kind === "assistant");
+    const tool = assistant?.segments?.find((segment) => segment.kind === "tool");
+    expect(tool).toMatchObject({
+      result: "Tool call interrupted before a result was recorded.",
+      ok: false,
+    });
+  });
+
+  it("keeps a completed tool call settled with its persisted result", () => {
+    const loaded = buildLoadedMessages!([
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "completed-call",
+            type: "function",
+            function: { name: "run_command", arguments: '{"command":"quick task"}' },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: "completed-call", content: "finished" },
+    ]);
+
+    const assistant = loaded.find((message) => message.kind === "assistant");
+    const tool = assistant?.segments?.find((segment) => segment.kind === "tool");
+    expect(tool).toMatchObject({ result: "finished", ok: true });
   });
 
   it("drops synthetic user records — steers and nudges never start a turn or render", () => {

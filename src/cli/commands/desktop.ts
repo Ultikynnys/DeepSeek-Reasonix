@@ -992,6 +992,19 @@ export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
       }
     }
   }
+  // Loaded history is a closed snapshot, not a live turn. If the process or
+  // session ended after persisting an assistant tool call but before its tool
+  // result, leaving `result` undefined would make the desktop render that old
+  // call as running forever after restart. Settle only those unmatched calls;
+  // completed calls already carry their persisted result from the loop above.
+  for (const message of out) {
+    if (message.kind !== "assistant") continue;
+    for (const segment of message.segments) {
+      if (segment.kind !== "tool" || segment.result !== undefined) continue;
+      segment.result = "Tool call interrupted before a result was recorded.";
+      segment.ok = false;
+    }
+  }
   return elideLoadedMessages(out);
 }
 
