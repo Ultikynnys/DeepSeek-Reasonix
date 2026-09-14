@@ -439,7 +439,7 @@ export function ShellCard({
               {t("cards.shellRunning")} — {t("cards.shellStopHint")}
             </div>
             <div className="actions">
-              <button type="button" className="btn danger" onClick={onStop}>
+              <button type="button" className="btn stop" onClick={onStop}>
                 {t("cards.shellStop")}
               </button>
             </div>

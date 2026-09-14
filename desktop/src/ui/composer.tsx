@@ -765,7 +765,7 @@ export function Composer({
             {busy ? (
               <button
                 type="button"
-                className="send-btn danger"
+                className="send-btn stop"
                 onClick={onAbort}
                 title={t("composer.interrupt")}
               >
