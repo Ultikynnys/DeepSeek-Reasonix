@@ -168,11 +168,12 @@ describe("codeSystemPrompt", () => {
       expect(out).toContain("If asked which model you are, answer `deepseek-v4-flash`");
     });
 
-    it("interpolates the supplied modelId into the escalation contract", () => {
+    it("interpolates the supplied modelId without adding self-escalation controls", () => {
       const out = codeSystemPrompt(root, { modelId: "deepseek-v4-pro" });
       expect(out).toContain("`deepseek-v4-pro`");
-      expect(out).toContain("escalation tier");
+      expect(out).toContain("Deliver the strongest answer you can directly");
       expect(out).toContain("If asked which model you are, answer `deepseek-v4-pro`");
+      expect(out).not.toContain("NEEDS_PRO");
       expect(out).not.toMatch(/running on `?deepseek-v4-flash`?/);
     });
   });

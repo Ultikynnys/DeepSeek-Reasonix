@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Removed: model-authored self-escalation can no longer terminate a response or silently switch models.**
+
+- System prompts no longer instruct models to emit `<<<NEEDS_PRO>>>` instead of completing difficult work. The loop no longer parses that marker or retries the turn on another model, so model selection remains explicit and marker-shaped output has no hidden routing effect.
+
 **Fixed: the statusbar cache-hit chip shows a decimal instead of rounding a near-total hit rate up to an impossible 100%.**
 
 - The `cache N%` chip (and the Settings → Billing "Cache hit rate" card) rounded the hit ratio to a whole percent, so a healthy session where cached context dwarfs the new miss (e.g. 999,838 hit / 162 miss = 99.98%) rendered the mathematically impossible `100%`. Both surfaces now use one shared `hitPercent` formatter that keeps one decimal and truncates rather than rounds, so a near-total hit rate reads `99.9%` and `100.0%` appears only when the miss count is exactly zero.

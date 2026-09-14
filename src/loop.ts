@@ -97,10 +97,6 @@ function chatFinishReason(raw: unknown): string | undefined {
   return typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined;
 }
 
-function parseNeedsProEscalation(content: string): boolean {
-  return /^\s*<<<NEEDS_PRO(?::\s*[^>\n]{1,150})?>>>/.test(content);
-}
-
 /** Coerce caller-supplied images (plain data URLs or richer descriptors) into
  *  TurnImage descriptors. */
 function toTurnImages(images?: ReadonlyArray<string | TurnImage>): TurnImage[] {
@@ -1008,13 +1004,7 @@ export class CacheFirstLoop {
     this._turnImages = toTurnImages(images);
 
     this._turn++;
-    const baseModelForTurn = this.model;
-    let restoreModelAfterTurn = false;
-    const restoreModelIfNeeded = () => {
-      if (restoreModelAfterTurn && this.model === "deepseek-v4-pro") {
-        this.model = baseModelForTurn;
-      }
-    };
+    const restoreModelIfNeeded = () => undefined;
 
     this._userTurnCount++;
     this.scratch.reset();
@@ -1556,14 +1546,7 @@ export class CacheFirstLoop {
         }
       }
 
-      if (parseNeedsProEscalation(assistantContent) && callModel !== "deepseek-v4-pro") {
-        restoreModelAfterTurn = true;
-        this.model = "deepseek-v4-pro";
-        continue;
-      }
-
-      // Attribute under the actual model used (escalated → pro, else
-      // callModel) so cost/usage logs reflect reality.
+      // Attribute usage to the model that handled this request.
       const cacheShape = this.cacheShapeForRequest(prefixEvidence, toolSpecs);
       const cacheDiagnostics = this.cacheDiagnosticsForUsage(cacheShape, usage);
       this._lastCacheShape = cacheShape;

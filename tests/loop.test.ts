@@ -129,15 +129,9 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.log.length).toBe(2); // user + assistant
   });
 
-  it("restores the base model after a headless NEEDS_PRO one-shot retry", async () => {
-    const fake = makeFakeClient(
-      [
-        { content: "<<<NEEDS_PRO: subtle invariant>>>" },
-        { content: "pro answer" },
-        { content: "flash answer" },
-      ],
-      { echoMessages: true },
-    );
+  it("does not treat marker-shaped assistant text as a model-routing control", async () => {
+    const marker = "<<<NEEDS_PRO: subtle invariant>>>";
+    const fake = makeFakeClient([{ content: marker }], { echoMessages: true });
     const loop = new CacheFirstLoop({
       client: fake.client,
       prefix: new ImmutablePrefix({ system: "s" }),
@@ -145,27 +139,15 @@ describe("CacheFirstLoop (non-streaming)", () => {
       model: "deepseek-v4-flash",
     });
 
-    const runTurn = async (text: string): Promise<string> => {
-      let done = "";
-      for await (const ev of loop.step(text)) {
-        if (ev.role === "done") done = ev.content;
-      }
-      return done;
-    };
+    let done = "";
+    for await (const ev of loop.step("hard")) {
+      if (ev.role === "done") done = ev.content;
+    }
 
-    await expect(runTurn("hard")).resolves.toBe("pro answer");
+    expect(done).toBe(marker);
     expect(loop.model).toBe("deepseek-v4-flash");
-    await expect(runTurn("simple")).resolves.toBe("flash answer");
-
-    // One-shot: flash → pro (for the marker turn) → back to flash.
-    expect(fake.captured.map((r) => r.model)).toEqual([
-      "deepseek-v4-flash",
-      "deepseek-v4-pro",
-      "deepseek-v4-flash",
-    ]);
-    expect(loop.stats.turns.map((t) => t.model)).toEqual(["deepseek-v4-pro", "deepseek-v4-flash"]);
-    // The marker itself never lands in the conversation log.
-    expect(JSON.stringify(loop.log.entries)).not.toContain("NEEDS_PRO");
+    expect(fake.captured.map((request) => request.model)).toEqual(["deepseek-v4-flash"]);
+    expect(loop.stats.turns.map((turn) => turn.model)).toEqual(["deepseek-v4-flash"]);
   });
 
   it("retries once when the model returns a fully empty completion, then recovers", async () => {

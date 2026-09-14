@@ -1,63 +1,26 @@
-/** escalationContract — model-aware contract so the system prompt names the actual tier (#582). */
+/** escalationContract: model-aware identity without model-authored routing controls. */
 
 import { describe, expect, it } from "vitest";
 import { ESCALATION_CONTRACT, escalationContract } from "../src/prompt-fragments.js";
 
-describe("escalationContract (#582)", () => {
-  it("interpolates the actual model id for non-pro tiers", () => {
+describe("escalationContract", () => {
+  it("identifies the active model and requires a direct answer", () => {
     const out = escalationContract("deepseek-v4-flash");
     expect(out).toContain("`deepseek-v4-flash`");
+    expect(out).toContain("Deliver the strongest answer you can directly");
     expect(out).toContain("If asked which model you are, answer `deepseek-v4-flash`");
-    expect(out).toContain("<<<NEEDS_PRO");
   });
 
-  it("returns the no-escalation note for the pro tier instead of the full ladder", () => {
-    const out = escalationContract("deepseek-v4-pro");
-    expect(out).toContain("`deepseek-v4-pro`");
-    expect(out).toContain("escalation tier");
-    expect(out).toContain("If asked which model you are, answer `deepseek-v4-pro`");
-    expect(out).not.toContain("<<<NEEDS_PRO: <one-sentence reason>>>>");
+  it("never teaches any model to emit a self-escalation marker", () => {
+    for (const id of ["deepseek-v4-flash", "deepseek-v4-pro", "gpt-5.6-terra", "future-model"]) {
+      const out = escalationContract(id);
+      expect(out).not.toContain("NEEDS_PRO");
+      expect(out).not.toContain("retries this turn");
+      expect(out).not.toContain("requested escalation");
+    }
   });
 
-  it("never tells a pro session it is running on flash (regression for #582)", () => {
-    const out = escalationContract("deepseek-v4-pro");
-    expect(out).not.toMatch(/running on `?deepseek-v4-flash`?/);
-  });
-
-  it("backward-compat const matches the historical flash phrasing", () => {
+  it("keeps the compatibility export aligned with the default model note", () => {
     expect(ESCALATION_CONTRACT).toBe(escalationContract("deepseek-v4-flash"));
-  });
-
-  it("treats unknown future tiers as non-pro (full contract, name themselves)", () => {
-    const out = escalationContract("deepseek-v5-experimental");
-    expect(out).toContain("`deepseek-v5-experimental`");
-    expect(out).toContain("<<<NEEDS_PRO");
-  });
-
-  it("gpt-6-astra, gpt-5.6-sol and the gpt-5.6 alias are top tiers — no-op escalation note", () => {
-    for (const id of ["gpt-6-astra", "gpt-5.6", "gpt-5.6-sol"]) {
-      const out = escalationContract(id);
-      expect(out).toContain(`\`${id}\``);
-      expect(out).toContain("flagship tier");
-      expect(out).not.toContain("<<<NEEDS_PRO: <one-sentence reason>>>>");
-      expect(out).not.toContain("deepseek-v4-pro");
-    }
-  });
-
-  it("gpt-5.6-terra/luna ladder targets gpt-5.6-sol, never deepseek-v4-pro", () => {
-    for (const id of ["gpt-5.6-terra", "gpt-5.6-luna"]) {
-      const out = escalationContract(id);
-      expect(out).toContain(`\`${id}\``);
-      expect(out).toContain("retries this turn on `gpt-5.6-sol`");
-      expect(out).not.toContain("deepseek-v4-pro");
-      expect(out).not.toContain("flash requested escalation");
-    }
-  });
-
-  it("deepseek contract text stays byte-stable (cache prefix)", () => {
-    expect(escalationContract("deepseek-v4-flash")).toContain(
-      "Cost-aware escalation (you are running on `deepseek-v4-flash`):",
-    );
-    expect(escalationContract("deepseek-v4-flash")).not.toContain("gpt-5.6");
   });
 });

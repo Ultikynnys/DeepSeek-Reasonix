@@ -141,22 +141,6 @@ arming; no forgotten revert risk when switching is explicit and sticky.
 > the next turn ran on v4-pro then auto-disarmed. Removed in 0.50.0
 > (#1657, #1630) when presets were collapsed into direct model selection.
 
-#### 4.4 Model self-report escalation (`<<<NEEDS_PRO>>>`)
-
-The model itself decides when a task exceeds its current tier. If a task
-clearly needs stronger reasoning, the model emits a `<<<NEEDS_PRO>>>`
-marker as the first line of its response. The system aborts the current
-flash call and retries the turn on pro. Two forms:
-
-- `<<<NEEDS_PRO>>>` — bare marker, no rationale.
-- `<<<NEEDS_PRO: <reason>>>>` — includes a one-sentence rationale the
-  user sees in a warning row.
-
-On the pro tier, the marker is a no-op — pro is the top, so the contract
-tells the model it can't escalate further. This is purely self-report:
-there is no failure-counter threshold, no scavenge/storm counting, no
-automatic escalation based on tool errors.
-
 #### Cost transparency
 
 Per-turn and session cost are colored in the StatsPanel:
