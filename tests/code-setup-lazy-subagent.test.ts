@@ -35,6 +35,16 @@ describe("buildCodeToolset", () => {
     await toolset.jobs.shutdown();
   });
 
+  it("keeps see_image dispatchable independently of model capability changes", async () => {
+    const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });
+
+    expect(toolset.tools.has("see_image")).toBe(true);
+    const out = await toolset.tools.dispatch("see_image", "{}");
+    expect(out).toContain("no image available");
+    expect(out).not.toContain("Unknown tool");
+    await toolset.jobs.shutdown();
+  });
+
   it("editMode=plan flips the registry's plan-mode gate so write tools refuse to dispatch", async () => {
     writeFileSync(cfgPath, JSON.stringify({ editMode: "plan" }), "utf8");
     const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });

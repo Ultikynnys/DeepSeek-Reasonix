@@ -292,7 +292,6 @@ import {
 } from "../../ollama-model-map.js";
 import { loadOllamaModelsCache, saveOllamaModelsCache } from "../../ollama-models-cache.js";
 import { fetchOpencodeModels } from "../../opencode-models.js";
-import { registerSeeImageTool } from "../../tools/see-image.js";
 import type { SubagentEvent } from "../../tools/subagent.js";
 
 import { SkillStore } from "../../skills.js";
@@ -3263,29 +3262,15 @@ function restoreSessionModelPrefs(tab: Tab, meta: SessionMeta): void {
         hasSemanticSearch: tab.toolset.semantic.enabled,
         modelId: tab.currentModel,
       });
-      syncVisionTool(tab);
     }
   }
   tab.currentReasoningEffort = prefs.reasoningEffort;
   tab.currentSubagentModel = prefs.subagentModel;
 }
 
-/** The toolset is built once per tab — keep `see_image` registered iff the
- *  current model accepts images (vision models only; the schema is dead
- *  weight for text models). Model switches and session restores must sync. */
-function syncVisionTool(tab: Tab): void {
-  if (!tab.toolset) return;
-  const tools = tab.toolset.tools;
-  if (modelAcceptsImages(tab.currentModel, ollamaVisionModelIds())) {
-    if (!tools.has("see_image")) registerSeeImageTool(tools, { rootDir: tab.rootDir });
-  } else {
-    tools.unregister("see_image");
-  }
-}
-
-/** Knowledge-level refresh after an enableSubagents toggle — the toolset-level twin of
- *  syncVisionTool: sync the dedicated spawn tools on the live registry, recompute the
- *  system prompt (skills index + section), rebuild the runtime like a model switch. */
+/** Knowledge-level refresh after an enableSubagents toggle: sync the dedicated
+ *  spawn tools on the live registry, recompute the system prompt (skills index +
+ *  section), and rebuild the runtime like a model switch. */
 function refreshSubagentKnowledge(tab: Tab, enabled: boolean): void {
   const toolset = tab.toolset;
   if (!toolset) return;
@@ -3738,7 +3723,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           subagentSink: subagentSinkFor(tab),
           subagentBilling: (m) => subagentBillingFor(m),
           subagentModel: () => tab.currentSubagentModel ?? tab.currentModel,
-          visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
           onPhase: (phase) => {
             const now = performance.now();
             emitTabDiagnostic(tab, "tab.bootstrap.phase", {
@@ -4417,7 +4401,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       subagentSink: subagentSinkFor(tab),
       subagentBilling: (m) => subagentBillingFor(m),
       subagentModel: () => tab.currentSubagentModel ?? tab.currentModel,
-      visionEnabled: modelAcceptsImages(tab.currentModel, ollamaVisionModelIds()),
     });
     tab.toolset = toolset;
     tab.system = codeSystemPrompt(target, {
@@ -6200,7 +6183,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
                   hasSemanticSearch: tab.toolset.semantic.enabled,
                   modelId: tab.currentModel,
                 });
-                syncVisionTool(tab);
                 // Build even when the tab had no runtime (e.g. a gated welcome
                 // tab that just picked an Ollama model) — only if the new model
                 // is actually usable, else drop a stale runtime.
@@ -6221,13 +6203,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               persistSessionModelPrefs(tab);
               if (tab.toolset) {
                 tab.system = prevSystem;
-                try {
-                  syncVisionTool(tab);
-                } catch (syncErr) {
-                  process.stderr.write(
-                    `reasonix: vision-sync rollback failed — ${messageOf(syncErr)}\n`,
-                  );
-                }
                 try {
                   if (tabCurrentModelUsable(tab)) tab.runtime = buildRuntimeFor(tab);
                   else tab.runtime = null;

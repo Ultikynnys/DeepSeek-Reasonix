@@ -72,8 +72,6 @@ export interface CodeToolsetOpts {
   onShellOutput?: (ev: import("../tools/shell.js").ShellOutputEvent) => void;
   /** Shared `{current: callback}` sink the TUI populates after mount. Setup forwards it into every `spawnSubagent` so live progress events reach the rich subagent row even though setup runs before the UI does. */
   subagentSink?: SubagentSink;
-  /** True when the tab's model accepts image content parts (gpt-*, the DeepSeek Flash line, Gemini, confirmed Ollama vision models). Registers the `see_image` tool so the model's toolset matches its vision capability. */
-  visionEnabled?: boolean;
   /** Declares how a subagent model bills, per resolved model id. Omitted → "usd"
    *  (token-priced cost). Desktop supplies this so plan-based providers show a
    *  quota % instead of an invented dollar figure. */
@@ -145,9 +143,10 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   registerPlanTool(tools);
   registerChoiceTool(tools);
   registerTodoTool(tools);
-  if (opts.visionEnabled) {
-    registerSeeImageTool(tools, { rootDir: opts.rootDir });
-  }
+  // Keep the handler stable for the tab's lifetime. A model switch can happen
+  // after a model has emitted a see_image call but before dispatch starts, so
+  // capability changes must never unregister an in-flight call's target.
+  registerSeeImageTool(tools, { rootDir: opts.rootDir });
   registerScaffoldTools(tools, { projectRoot: opts.rootDir });
   if (searchEnabled()) {
     registerWebTools(tools);
