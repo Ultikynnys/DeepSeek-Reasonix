@@ -360,6 +360,28 @@ export async function waitForCompactionIdle(
   }
 }
 
+/** Manual compaction is a priority barrier: stop the active conversation, wait
+ * for its desktop consumer to release the busy state, then either accept the
+ * fold that was already in flight or run exactly one user fold. */
+export async function runPriorityManualCompaction(options: {
+  abortActive: () => void;
+  isTurnBusy: () => boolean;
+  isCompacting: () => boolean;
+  compact: () => Promise<void>;
+}): Promise<"compacted" | "existing-compaction"> {
+  let sawExistingCompaction = options.isCompacting();
+  options.abortActive();
+  while (options.isTurnBusy()) {
+    sawExistingCompaction ||= options.isCompacting();
+    await sleep(10);
+  }
+  sawExistingCompaction ||= options.isCompacting();
+  while (options.isCompacting()) await sleep(50);
+  if (sawExistingCompaction) return "existing-compaction";
+  await options.compact();
+  return "compacted";
+}
+
 type InMessage = import("@reasonix/core-utils").OutgoingCommand;
 
 /** Direct fd write — bypasses Node's stream layer (and its piped-output
@@ -3072,6 +3094,9 @@ interface Tab {
   system: string;
   runtime: RuntimeState | null;
   aborter: AbortController | null;
+  /** Priority barrier owned by a user-requested compaction. New turns wait on
+   *  this promise so queued sends cannot race ahead of the fold. */
+  manualCompaction: Promise<void> | null;
   fileIndex: FileWithStats[] | null;
   fileIndexBuilding: Promise<FileWithStats[]> | null;
   fileIndexBuiltAt: number;
@@ -3644,6 +3669,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       system: "",
       runtime: null,
       aborter: null,
+      manualCompaction: null,
       fileIndex: null,
       fileIndexBuilding: null,
       fileIndexBuiltAt: 0,
@@ -4039,6 +4065,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (tab.mcpBridgePromise) {
       await tab.mcpBridgePromise.catch(() => undefined);
     }
+    // A manual compact is a user priority command, not ordinary queued work.
+    // Never let a queued send claim the turn until that fold has settled.
+    const manualCompaction = tab.manualCompaction;
+    if (manualCompaction) await manualCompaction;
     emitTabDiagnostic(
       tab,
       "turn.start.requested",
@@ -6312,55 +6342,30 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "compact_history") {
-      if (!tab.runtime) return;
-      // Folding while a turn is mid-flight races the tool dispatch: the fold's
-      // wholesale log replacement can clobber a tool result that lands while
-      // the summary call runs, orphaning it so the model never sees the read —
-      // and the UI's "task complete" toast fires while the loop is still
-      // working. Refuse while busy (same gate as prompt injection below).
-      if (tab.aborter) {
-        emit(
-          {
-            type: "$error",
-            message: "Session is busy — wait for the current turn to finish before compacting.",
-          },
-          tab.id,
-        );
-        return;
-      }
-      // A cancelled turn's fold can still be running in the background even
-      // though no turn is in flight (its summary is non-interruptible, and the
-      // host closes the generator fire-and-forget). That fold owns the loop's
-      // _compacting lock — starting a /compact now would overlap it and one of
-      // the two finallys would prematurely release the shared lock mid-rewrite.
-      // Refuse rather than race; the in-flight fold clears the lock itself.
+      if (!tab.runtime || tab.manualCompaction) return;
       const rt = tab.runtime;
-      if (rt.loop.isCompacting) {
-        emit(
-          {
-            type: "$error",
-            message:
-              "A compaction is already running — wait for it to finish before compacting again.",
-          },
-          tab.id,
-        );
-        return;
-      }
-      // Compaction card lifecycle — routed through the SAME LoopEvent stream as
-      // tool / reasoning / shell actions: the loop yields compaction_start →
-      // compaction_end (plus session.compacted when the fold commits) and the
-      // eventizer converts them, so user /compact renders the identical card
-      // shape and records the identical kernel events as auto folds.
-      void (async () => {
-        try {
+      const task = runPriorityManualCompaction({
+        abortActive: () => cancelConversation(tab, desktopUserAbortLoopOptions()),
+        isTurnBusy: () => tab.aborter !== null,
+        isCompacting: () => rt.loop.isCompacting,
+        compact: async () => {
+          // Compaction card lifecycle is routed through the same LoopEvent
+          // stream as automatic folds and all other loop activity.
           for await (const ev of rt.loop.compactHistoryWithEvents()) {
             for (const kev of rt.eventizer.consume(ev, rt.ctx)) emitKernelEvent(kev, tab.id);
           }
-          emitCtxBreakdown(tab);
-        } catch (err) {
+        },
+      })
+        .then(() => emitCtxBreakdown(tab))
+        .catch((err) => {
           emit({ type: "$error", message: `/compact failed: ${(err as Error).message}` }, tab.id);
-        }
-      })();
+        })
+        .finally(() => {
+          if (tab.manualCompaction === task) tab.manualCompaction = null;
+        });
+      // Claim priority synchronously before the abort completion can drain a
+      // queued send. Repeated clicks coalesce on this one operation.
+      tab.manualCompaction = task;
       return;
     }
     if (msg.cmd === "retry") {

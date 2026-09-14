@@ -12,7 +12,11 @@
 // generator close).
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { raceLoopStep, waitForCompactionIdle } from "../src/cli/commands/desktop.js";
+import {
+  raceLoopStep,
+  runPriorityManualCompaction,
+  waitForCompactionIdle,
+} from "../src/cli/commands/desktop.js";
 import { DeepSeekClient } from "../src/client.js";
 import { HISTORY_FOLD_SUMMARY_MAX_TIMEOUT_MS } from "../src/context-manager.js";
 import { CacheFirstLoop } from "../src/loop.js";
@@ -223,5 +227,64 @@ describe("desktop runTurn abort race (Send now during a non-interruptible fold)"
       }),
     ]);
     expect(result).toBe("resolved");
+  });
+
+  it("manual compaction aborts a busy turn before starting the fold", async () => {
+    vi.useFakeTimers();
+    let busy = true;
+    const compacting = false;
+    const order: string[] = [];
+    const resultP = runPriorityManualCompaction({
+      abortActive: () => {
+        order.push("abort");
+        setTimeout(() => {
+          busy = false;
+          order.push("turn-settled");
+        }, 20);
+      },
+      isTurnBusy: () => busy,
+      isCompacting: () => compacting,
+      compact: async () => {
+        order.push("compact");
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(19);
+    expect(order).toEqual(["abort"]);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(resultP).resolves.toBe("compacted");
+    expect(order).toEqual(["abort", "turn-settled", "compact"]);
+  });
+
+  it("waits for an existing fold and does not start a competing fold", async () => {
+    vi.useFakeTimers();
+    let compacting = true;
+    const compact = vi.fn(async () => undefined);
+    const resultP = runPriorityManualCompaction({
+      abortActive: vi.fn(),
+      isTurnBusy: () => false,
+      isCompacting: () => compacting,
+      compact,
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(compact).not.toHaveBeenCalled();
+    compacting = false;
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(resultP).resolves.toBe("existing-compaction");
+    expect(compact).not.toHaveBeenCalled();
+  });
+
+  it("propagates compaction failure so the caller can release its barrier in finally", async () => {
+    await expect(
+      runPriorityManualCompaction({
+        abortActive: vi.fn(),
+        isTurnBusy: () => false,
+        isCompacting: () => false,
+        compact: async () => {
+          throw new Error("fold failed");
+        },
+      }),
+    ).rejects.toThrow("fold failed");
   });
 });
