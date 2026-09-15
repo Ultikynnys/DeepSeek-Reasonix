@@ -437,6 +437,9 @@ describe("screen_capture", () => {
       const parts = result as UserContentPart[];
       expect(parts.some((p) => p.type === "image_url")).toBe(true);
     },
+    // Real PowerShell capture (monitor query + Add-Type C# compile + screen
+    // copy) can exceed the 5s default on a cold CI runner.
+    30000,
   );
 
   it.runIf(process.platform === "win32")(
