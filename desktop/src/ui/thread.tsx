@@ -15,6 +15,7 @@ import type {
 } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
+import type { JobInfo } from "../protocol";
 import { useAutoApproveCountdown } from "./auto-countdown";
 import {
   AssistantText,
@@ -146,6 +147,9 @@ export const AssistantMsg = memo(function AssistantMsg({
   onStopTool,
   pendingConfirms,
   activePlan,
+  jobs,
+  tabId,
+  onStopJob,
   isInterventionPending,
 }: {
   segments: AssistantSegment[];
@@ -158,6 +162,14 @@ export const AssistantMsg = memo(function AssistantMsg({
   onStopTool: () => void;
   pendingConfirms: PendingConfirm[];
   activePlan?: ActivePlan;
+  /** Live background-job snapshots (all tabs). A `run_background` shell card
+   *  renders from its own job's status here so it never reads as finished while
+   *  the process is still alive. */
+  jobs?: JobInfo[];
+  /** Id of the tab this transcript belongs to — scopes the job lookup, since
+   *  per-tab registries restart their job ids at 1 (collision-prone). */
+  tabId?: string;
+  onStopJob?: (jobId: number) => void;
   isInterventionPending?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
@@ -289,23 +301,40 @@ export const AssistantMsg = memo(function AssistantMsg({
           }
           if (s.name === "run_command" || s.name === "run_background") {
             const cmd = extractCommand(s.args) ?? s.args;
+            // A `run_background` call returns as soon as its startup wait
+            // elapses — long before the process ends. Resolve the card from the
+            // job's LIVE status so a still-downloading curl never reads "done".
+            const job =
+              s.name === "run_background" && s.result !== undefined
+                ? findBackgroundJob(jobs, tabId, parseBackgroundJobId(s.result))
+                : undefined;
             const state: "await" | "running" | "done" | "failed" =
               s.result === undefined
                 ? pendingConfirm
                   ? "await"
                   : "running"
-                : s.ok === false
-                  ? "failed"
-                  : "done";
+                : job !== undefined
+                  ? job.running
+                    ? "running"
+                    : job.exitCode === 0
+                      ? "done"
+                      : "failed"
+                  : s.ok === false
+                    ? "failed"
+                    : "done";
+            const jobRunning = state === "running" && job !== undefined;
             return (
               <ShellCard
                 // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
                 key={i}
                 command={cmd}
-                output={s.result}
-                liveOutput={s.liveOutput}
+                // While the job runs, the live tail is the source of truth — the
+                // tool result only holds the (already stale) startup banner.
+                output={jobRunning ? undefined : s.result}
+                liveOutput={jobRunning ? job?.outputTail : s.liveOutput}
                 state={state}
-                durationMs={s.durationMs}
+                background={jobRunning}
+                durationMs={jobRunning ? undefined : s.durationMs}
                 onApprove={pendingConfirm ? () => onApproveConfirm(pendingConfirm.id) : undefined}
                 onReject={pendingConfirm ? () => onRejectConfirm(pendingConfirm.id) : undefined}
                 onAlwaysAllow={
@@ -315,7 +344,11 @@ export const AssistantMsg = memo(function AssistantMsg({
                       }
                     : undefined
                 }
-                onStop={onStopTool}
+                onStop={
+                  jobRunning && job !== undefined && onStopJob
+                    ? () => onStopJob(job.id)
+                    : onStopTool
+                }
               />
             );
           }
@@ -402,6 +435,26 @@ function extractCommand(args: string): string | undefined {
     // ignore
   }
   return undefined;
+}
+
+/** Parse the job id out of a `run_background` tool result header, e.g.
+ *  `[job 7 started · pid 12168 · running (no ready signal yet)]`. Mirrors the
+ *  header emitted by `formatJobStart` (src/tools/shell.ts). */
+export function parseBackgroundJobId(result: string): number | undefined {
+  const m = /^\[job (\d+) (?:started|exited|failed)/.exec(result);
+  return m ? Number(m[1]) : undefined;
+}
+
+/** Resolve the live job record a `run_background` card points at, scoped to the
+ *  owning tab — per-tab registries restart job ids at 1, so id alone collides
+ *  across tabs. */
+export function findBackgroundJob(
+  jobs: JobInfo[] | undefined,
+  tabId: string | undefined,
+  jobId: number | undefined,
+): JobInfo | undefined {
+  if (!jobs || jobId === undefined) return undefined;
+  return jobs.find((j) => j.id === jobId && (tabId === undefined || j.tabId === tabId));
 }
 
 // ---- Approval bindings ----

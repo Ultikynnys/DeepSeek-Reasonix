@@ -610,4 +610,24 @@ describe("ShellCard — live output rows while running", () => {
     expect(container.querySelector(".shell-live")).toBeNull();
     expect(container.querySelector(".shell")).toBeNull();
   });
+
+  it("labels a live background job and streams its tail instead of reading as finished", () => {
+    const { container } = render(
+      wrap(
+        <ShellCard
+          command="curl -o out.bin https://example.com/big.bin"
+          liveOutput={"% Total    % Received\n0 685M    0  2403k  0  1610k"}
+          state="running"
+          background
+          onStop={() => {}}
+        />,
+      ),
+    );
+    // A detached job is not a finished command: the header shows the background
+    // running label, never a done checkmark with a duration.
+    expect(screen.getByRole("img", { name: "Running in background" })).toBeTruthy();
+    const rows = [...container.querySelectorAll(".shell-live .line")].map((el) => el.textContent);
+    expect(rows).toEqual(["% Total    % Received", "0 685M    0  2403k  0  1610k"]);
+    expect(container.querySelector(".meta-dur")).toBeNull();
+  });
 });

@@ -11,7 +11,12 @@ vi.mock("./cards", () => ({
   ReasoningCard: () => null,
 }));
 
-import { ConfirmApprovalCard, PathAccessApprovalCard } from "./thread";
+import {
+  ConfirmApprovalCard,
+  PathAccessApprovalCard,
+  findBackgroundJob,
+  parseBackgroundJobId,
+} from "./thread";
 
 function makeShellPrompt(command: string): import("@reasonix/core-utils").ApprovalPrompt {
   return {
@@ -198,5 +203,42 @@ describe("PathAccessApprovalCard — ApprovalPrompt rendering", () => {
     fireEvent.click(screen.getByRole("button", { name: /Always allow/ }));
     expect(onAlwaysAllow).toHaveBeenCalledTimes(1);
     expect(onAlwaysAllow).toHaveBeenCalledWith("/workspace");
+  });
+});
+
+describe("background job card correlation", () => {
+  function job(over: Partial<import("../protocol").JobInfo>): import("../protocol").JobInfo {
+    return {
+      id: 1,
+      tabId: "t1",
+      sessionLabel: "session",
+      command: "curl -o out.bin https://example.com/big.bin",
+      pid: 100,
+      running: true,
+      exitCode: null,
+      startedAt: 0,
+      outputTail: "",
+      ...over,
+    };
+  }
+
+  it("parses the job id from a run_background result header", () => {
+    expect(
+      parseBackgroundJobId("[job 7 started · pid 12168 · running (no ready signal yet)]"),
+    ).toBe(7);
+    expect(parseBackgroundJobId("[job 12 exited during startup · exit 1]")).toBe(12);
+    expect(parseBackgroundJobId("[job 3 failed to start]")).toBe(3);
+    expect(parseBackgroundJobId("no header here")).toBeUndefined();
+  });
+
+  it("scopes the lookup to the owning tab so ids don't collide across tabs", () => {
+    const running = job({ id: 7, tabId: "t1", running: true });
+    const exited = job({ id: 7, tabId: "t2", running: false, exitCode: 0 });
+    expect(findBackgroundJob([running, exited], "t1", 7)).toBe(running);
+    expect(findBackgroundJob([running, exited], "t2", 7)).toBe(exited);
+    expect(findBackgroundJob([running, exited], undefined, 7)).toBe(running);
+    expect(findBackgroundJob([running], "t1", 99)).toBeUndefined();
+    expect(findBackgroundJob(undefined, "t1", 7)).toBeUndefined();
+    expect(findBackgroundJob([running], "t1", undefined)).toBeUndefined();
   });
 });

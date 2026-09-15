@@ -600,6 +600,33 @@ function turnStatusAfterResolve(
   return currentBusy ? "calling_tool" : null;
 }
 
+/** True when two $jobs snapshots are identical, so the reducer can keep the
+ *  prior array reference and avoid re-rendering every assistant row on each
+ *  poll tick. Background-job shell cards read this array, so a stable identity
+ *  when nothing changed is load-bearing. */
+function sameJobInfos(a: JobInfo[], b: JobInfo[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      x.id !== y.id ||
+      x.tabId !== y.tabId ||
+      x.command !== y.command ||
+      x.pid !== y.pid ||
+      x.running !== y.running ||
+      x.exitCode !== y.exitCode ||
+      x.startedAt !== y.startedAt ||
+      x.outputTail !== y.outputTail ||
+      x.spawnError !== y.spawnError
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function reduce(state: State, action: Action): State {
   switch (action.t) {
     case "send_user": {
@@ -962,6 +989,9 @@ const AssistantRow = memo(function AssistantRow({
   onRejectConfirm,
   onAlwaysAllowConfirm,
   onStopTool,
+  jobs,
+  tabId,
+  onStopJob,
   isInterventionPending,
 }: {
   m: Extract<ChatMessage, { kind: "assistant" }>;
@@ -972,6 +1002,11 @@ const AssistantRow = memo(function AssistantRow({
   onRejectConfirm: (id: number) => void;
   onAlwaysAllowConfirm: (id: number, prefix: string) => void;
   onStopTool: () => void;
+  /** Live background-job snapshots — background shell cards read their job's
+   *  status from here so a running job never renders as finished. */
+  jobs?: JobInfo[];
+  tabId?: string;
+  onStopJob?: (jobId: number) => void;
   isInterventionPending?: boolean;
 }) {
   const stats = !m.pending ? countFileStats(m.segments) : null;
@@ -987,6 +1022,9 @@ const AssistantRow = memo(function AssistantRow({
         onStopTool={onStopTool}
         pendingConfirms={pendingConfirms}
         activePlan={activePlan}
+        jobs={jobs}
+        tabId={tabId}
+        onStopJob={onStopJob}
         isInterventionPending={isInterventionPending}
       />
       {stats ? <DiffStats stats={stats} /> : null}
@@ -1628,8 +1666,12 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, memoryResult: { ok: ev.ok, message: ev.message } };
     case "$memory_export":
       return { ...state, memoryExport: ev.text };
-    case "$jobs":
+    case "$jobs": {
+      // Keep the prior array when the snapshot is unchanged so memoized rows
+      // (and their background-job shell cards) don't re-render on every poll.
+      if (sameJobInfos(state.jobs, ev.items)) return state;
       return { ...state, jobs: ev.items };
+    }
     case "$balance":
       return {
         ...state,
@@ -2945,6 +2987,10 @@ function TabRuntime({
   /** Stable identity — passed to memoized AssistantMsg; an inline arrow would
    *  defeat the memo and re-render the whole transcript on every frame. */
   const onStopTool = useCallback(() => sendRpc({ cmd: "cancel_tool" }), [sendRpc]);
+  /** Stop a background job from its transcript shell card — distinct from
+   *  `cancel_tool` because the tool call has already returned; the process is
+   *  still alive and must be killed via `jobs_stop`. Stable for memoization. */
+  const onStopJob = useCallback((jobId: number) => sendRpc({ cmd: "jobs_stop", jobId }), [sendRpc]);
   const resolvePathAccess = useCallback(
     (id: number, response: ConfirmationChoice) => {
       sendRpc({ cmd: "confirm_response", id, response });
@@ -3023,13 +3069,18 @@ function TabRuntime({
     };
   }, [state.currentSession]);
 
+  // A background job can exit on its own (a download finishing) with no push
+  // notification, so the transcript's background-job shell cards would stay
+  // stuck on "running". Poll while any job is alive — not only while the ⌘J
+  // popover is open — so a natural exit reaches the UI and the card settles.
+  const hasRunningJobs = useMemo(() => state.jobs.some((j) => j.running), [state.jobs]);
   useEffect(() => {
     if (!active) return;
-    if (!jobsOpen) return;
+    if (!jobsOpen && !hasRunningJobs) return;
     sendRpc({ cmd: "jobs_list" });
     const id = window.setInterval(() => sendRpc({ cmd: "jobs_list" }), 1500);
     return () => window.clearInterval(id);
-  }, [active, jobsOpen, sendRpc]);
+  }, [active, jobsOpen, hasRunningJobs, sendRpc]);
 
   useEffect(() => {
     if (!active) return;
@@ -3307,6 +3358,9 @@ function TabRuntime({
                                 onRejectConfirm={onRejectConfirm}
                                 onAlwaysAllowConfirm={onAlwaysAllowConfirm}
                                 onStopTool={onStopTool}
+                                jobs={state.jobs}
+                                tabId={tabId}
+                                onStopJob={onStopJob}
                                 isInterventionPending={hasPendingIntervention(state)}
                               />
                             </div>

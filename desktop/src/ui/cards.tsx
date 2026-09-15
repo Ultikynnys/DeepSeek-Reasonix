@@ -338,6 +338,7 @@ export function ShellCard({
   output,
   liveOutput,
   state,
+  background,
   durationMs,
   onApprove,
   onReject,
@@ -350,6 +351,9 @@ export function ShellCard({
    *  a rolling three-line tail (the subagent card's live activity rows). */
   liveOutput?: string;
   state: "await" | "running" | "done" | "failed";
+  /** True when this is a detached `run_background` job still alive — the card
+   *  labels it "Running in background" so it never reads as a finished command. */
+  background?: boolean;
   durationMs?: number;
   onApprove?: () => void;
   onReject?: () => void;
@@ -358,6 +362,7 @@ export function ShellCard({
 }) {
   useLang();
   const tone: Tone = state === "failed" ? "danger" : state === "done" ? "success" : "warning";
+  const runningLabel = background ? t("cards.shellBackgroundRunning") : t("cards.shellRunning");
   return (
     <Card
       tone={tone}
@@ -371,7 +376,7 @@ export function ShellCard({
           {state === "await" ? (
             <StatusIcon state="waiting" label={t("cards.shellAwaiting")} />
           ) : state === "running" ? (
-            <StatusIcon state="running" label={t("cards.shellRunning")} />
+            <StatusIcon state="running" label={runningLabel} />
           ) : state === "failed" ? (
             <StatusIcon state="failed" label={t("cards.failed")} />
           ) : (
@@ -436,7 +441,7 @@ export function ShellCard({
         {state === "running" && onStop ? (
           <div className="approve-row">
             <div className="why">
-              {t("cards.shellRunning")} — {t("cards.shellStopHint")}
+              {runningLabel} — {t("cards.shellStopHint")}
             </div>
             <div className="actions">
               <button type="button" className="btn stop" onClick={onStop}>
