@@ -259,6 +259,7 @@ import { isPlaywrightSpec } from "../../mcp/playwright-tooling.js";
 import { type McpServerSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
   type ModelPrefs,
+  type SessionInfo,
   type SessionMeta,
   chmodPrivate,
   deleteSession,
@@ -3204,6 +3205,12 @@ function nextTabId(): string {
   return `t${tabCounter}`;
 }
 
+/** The workspace's newest session to implicitly resume on a switch (callers pass
+ *  a newest-first list), or null when it has none. Pure so the rule is testable. */
+export function pickResumeSession(sessions: readonly SessionInfo[]): SessionInfo | null {
+  return sessions[0] ?? null;
+}
+
 function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
   // Seconds precision repeats when `new_chat` fires twice within one second —
   // reuse the collision loop so the second mint takes `-1`, `-2`, … instead
@@ -4435,7 +4442,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         });
       }
     }
-    tab.currentSession = mintSessionFor(target);
+    // Switch the UI to the new workspace BEFORE loading its conversation: the
+    // frontend clears transcript state on a workspaceDir change, so emitting
+    // settings now keeps a later $session_loaded (with the resumed messages)
+    // from being wiped by that clear.
+    emitSettings(tab);
     const toolset = await buildCodeToolset({
       rootDir: target,
       onSkillInstalled: () => emitSkills(tab),
@@ -4450,7 +4461,27 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       hasSemanticSearch: toolset.semantic.enabled,
       modelId: tab.currentModel,
     });
-    tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+    // Implicitly select the workspace's most recent session (newest-first) so a
+    // workspace switch lands where you left off; mint a fresh conversation only
+    // when the workspace has no sessions yet. loadSessionIntoTab restores the
+    // stored model/effort and rebuilds the runtime + system prompt for it.
+    const { value: workspaceSessions } = listSessionsForWorkspaceAsync(target);
+    const resume = pickResumeSession(await workspaceSessions);
+    if (resume) {
+      loadSessionIntoTab(tab, resume.name, { abortTurn, cancelPendingGates, persistOpenTabs });
+    } else {
+      tab.currentSession = mintSessionFor(target);
+      tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+      emit(
+        {
+          type: "$session_loaded",
+          name: tab.currentSession,
+          messages: [],
+          carryover: emptySessionCarryover(),
+        },
+        tab.id,
+      );
+    }
     if (tab.mcpRuntime) {
       await tab.mcpRuntime.closeAll().catch(() => undefined);
       tab.mcpRuntime = null;
@@ -4459,15 +4490,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       void bridgeTabMcp(tab);
     }
     void settleTabSemantic(tab, target, toolset);
-    emit(
-      {
-        type: "$session_loaded",
-        name: tab.currentSession,
-        messages: [],
-        carryover: emptySessionCarryover(),
-      },
-      tab.id,
-    );
     void emitSessions(tab);
     emitSettings(tab);
     emitSkills(tab);
