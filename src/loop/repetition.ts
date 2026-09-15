@@ -26,6 +26,19 @@ const LONG_RUN_CHARS = 1024;
 /** Minimum run length before a dominant periodic tail may abort the stream. */
 const MIN_DOMINANT_RUN_CHARS = 256;
 
+/** Any letter or digit marks real content. A periodic unit without one is pure
+ *  layout, not degeneration. */
+const CONTENT_CHAR = /[\p{L}\p{N}]/u;
+/** Absolute cap on an alphanumeric-free run: past it a run is a runaway character
+ *  flood rather than a divider, so detection is never silently disabled. */
+const STRUCTURAL_RUN_CEILING = 4096;
+
+/** True when a periodic run is pure layout (comment rules, table separators,
+ *  banner boxes); those lack the letters/digits that mark real degeneration. */
+function isStructuralRun(unit: string, runChars: number): boolean {
+  return runChars <= STRUCTURAL_RUN_CEILING && !CONTENT_CHAR.test(unit);
+}
+
 /** Default adaptive threshold biased towards detecting repeating words and short periods early. */
 function defaultRequiredChars(period: number, minRepeatsOverride?: number): number {
   if (minRepeatsOverride !== undefined) {
@@ -109,6 +122,13 @@ export class StreamRepetitionDetector {
     return defaultRequiredChars(period, this.minRepeats);
   }
 
+  /** Length of the trailing run of non-alphanumeric characters in the normalized buffer. */
+  private trailingNonAlnumRunLength(): number {
+    let i = this.buffer.length;
+    while (i > 0 && !CONTENT_CHAR.test(this.buffer[i - 1]!)) i--;
+    return this.buffer.length - i;
+  }
+
   append(delta: string): RepetitionDetection | null {
     if (delta.length === 0) return null;
     const deltaStart = this.totalChars;
@@ -121,9 +141,15 @@ export class StreamRepetitionDetector {
     }
 
     const maxPeriod = Math.min(this.maxPeriod, Math.floor(this.buffer.length / 2));
+    // A short trailing run of pure decoration is layout (see isStructuralRun); a
+    // window that sits wholly inside it can only ever be structural, so the scan
+    // below is skippable. Without this, a long uniform divider makes every period
+    // match and forces a full O(periods x required) sweep per delta.
+    const nonAlnumRun = this.trailingNonAlnumRunLength();
     for (let period = 1; period <= maxPeriod; period++) {
       const required = this.requiredChars(period);
       if (this.buffer.length < required) continue;
+      if (required <= nonAlnumRun && nonAlnumRun <= STRUCTURAL_RUN_CEILING) continue;
 
       const checkStart = this.buffer.length - required;
       let periodic = true;
@@ -152,6 +178,11 @@ export class StreamRepetitionDetector {
       ) {
         runStart--;
       }
+      // Layout exemption: a periodic run built purely from decoration characters
+      // (comment rules, table separators, banner boxes) is formatting, not a
+      // stuck model. Genuine degeneration repeats words/identifiers, so any run
+      // whose unit carries a letter or digit is still flagged.
+      if (isStructuralRun(unit, this.buffer.length - runStart)) continue;
       const rawRunStart = this.rawOffsets[runStart];
       if (rawRunStart === undefined) continue;
 
@@ -204,6 +235,12 @@ export class StreamRepetitionDetector {
       const period = anchorStart - match;
       const repeatedLength = period * LONG_MIN_REPEATS;
       const runStart = this.buffer.length - repeatedLength;
+      // Layout exemption ahead of the exact-cycle scan: a block whose repeating
+      // unit is pure decoration (and short enough) is formatting, not a stall.
+      if (isStructuralRun(this.buffer.slice(match, anchorStart), repeatedLength)) {
+        searchFrom = match - 1;
+        continue;
+      }
       let exactCycles = runStart >= 0;
       for (let repeat = 1; exactCycles && repeat < LONG_MIN_REPEATS; repeat++) {
         const offset = runStart + repeat * period;

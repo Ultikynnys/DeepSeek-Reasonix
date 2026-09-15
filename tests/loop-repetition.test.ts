@@ -110,6 +110,41 @@ describe("StreamRepetitionDetector", () => {
     expect(detect([largeUniqueProse])).toBeNull();
   });
 
+  it("does not flag comment-separator rules and banner boxes", () => {
+    // Regression: generated source routinely repeats short rules ('----', '###',
+    // '====', box-drawing). These carry no letters or digits, so they are layout,
+    // not the repeated words/identifiers that mark a degenerating model.
+    const rule = "-".repeat(40);
+    expect(detect([Array.from({ length: 8 }, () => rule).join("\n")])).toBeNull();
+    expect(detect([Array.from({ length: 6 }, () => `// ${rule}`).join("\n")])).toBeNull();
+    expect(detect([Array.from({ length: 6 }, () => `# ${rule}`).join("\n")])).toBeNull();
+    expect(detect(["=".repeat(200)])).toBeNull();
+    expect(detect(["#".repeat(200)])).toBeNull();
+    expect(detect(["─".repeat(200)])).toBeNull();
+  });
+
+  it("does not flag a wide markdown table separator row", () => {
+    // Regression: the whitespace-stripped separator row ('|------|------|…')
+    // is a long small-period run of pipes and dashes — layout, not a stall.
+    const separator = `|${"------|".repeat(12)}`;
+    expect(detect([separator])).toBeNull();
+    expect(detect([`| Col A | Col B |\n${separator}`])).toBeNull();
+    expect(detect(["|-----|-----|".repeat(30)])).toBeNull();
+  });
+
+  it("still flags repeating content even when wrapped in decoration", () => {
+    // The layout exemption keys on the repeating unit carrying a letter/digit,
+    // so decorated but genuine repetition is still caught.
+    expect(detect(["## Notice ##".repeat(40)])).toMatchObject({ period: 10, safeLength: 0 });
+  });
+
+  it("still aborts an unbounded character flood despite the layout exemption", () => {
+    // The exemption has a hard ceiling: a run past it is a runaway flood, not a
+    // divider, so detection is never silently disabled.
+    expect(detect(["-".repeat(6000)])).toMatchObject({ period: 1, safeLength: 0 });
+    expect(detect(["../".repeat(2000)])).toMatchObject({ period: 3, safeLength: 0 });
+  });
+
   it("detects long repeating cycles", () => {
     expect(detect(["ha".repeat(400)])).toMatchObject({ period: 2, safeLength: 0 });
     expect(detect(["0123456789abcdef".repeat(60)])).toMatchObject({ period: 16, safeLength: 0 });

@@ -110,6 +110,25 @@ describe("streamModelResponse — repetition stall false positives", () => {
     expect(result.repetitionStall).toBeUndefined();
     expect(result.reasoningContent).toBe(reasoning);
   });
+
+  it("does not stall reasoning that emits comment rules and a markdown table", async () => {
+    // Regression: the whitespace-stripped stream turns a divider banner and a
+    // separator row into long pipe/dash runs. While each is the stream tail it
+    // used to look like degeneration and aborted the channel.
+    const rule = "-".repeat(60);
+    const banner = Array.from({ length: 6 }, () => rule).join("\n");
+    const table = ["| Name | Value |", "|------|-------|", "| a | 1 |", "| b | 2 |"].join("\n");
+    const reasoning = `Findings:\n\n${banner}\n\n${table}\n\nDone.`;
+    const chunks: StreamChunk[] = [];
+    for (let i = 0; i < reasoning.length; i += 17) {
+      chunks.push({ reasoningDelta: reasoning.slice(i, i + 17) });
+    }
+
+    const result = await run(chunks);
+
+    expect(result.repetitionStall).toBeUndefined();
+    expect(result.reasoningContent).toBe(reasoning);
+  });
 });
 
 describe("streamModelResponse — Gemini thought signature", () => {
