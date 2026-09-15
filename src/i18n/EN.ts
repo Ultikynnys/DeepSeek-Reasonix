@@ -692,9 +692,11 @@ export const EN: TranslationSchema = {
     reasoningLoop:
       "The model is stuck re-thinking the same point without making progress — collapsing to a summary so you can redirect from a fresh recap.",
     reasoningLoopRepeatStall:
-      "The model is stuck re-thinking the same point without making progress. Its reasoning stalled on a repeating pattern (period {period}, {repeatedChars} chars); the turn was collapsed to a summary so you can redirect from a fresh recap.",
+      "The model is stuck re-thinking the same point without making progress: its reasoning stalled on a repeating pattern (period {period}, {repeatedChars} chars).",
     reasoningLoopRepeated:
-      "The model is stuck re-thinking the same point without making progress. It repeated the same reasoning across {count} consecutive iterations; the turn was collapsed to a summary so you can redirect from a fresh recap.",
+      "The model is stuck re-thinking the same point without making progress: it repeated the same reasoning across {count} consecutive iterations.",
+    reasoningLoopResuming: "Collapsed to a summary and resuming automatically from the recap.",
+    reasoningLoopStopping: "Stopping this turn so you can redirect from a fresh recap.",
     repeatedPatternLabel: "Repeated pattern:",
     forcingSummary:
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",

@@ -303,6 +303,8 @@ export interface TranslationSchema {
     reasoningLoop: string;
     reasoningLoopRepeatStall: string;
     reasoningLoopRepeated: string;
+    reasoningLoopResuming: string;
+    reasoningLoopStopping: string;
     repeatedPatternLabel: string;
     forcingSummary: string;
     iterLimitReached: string;

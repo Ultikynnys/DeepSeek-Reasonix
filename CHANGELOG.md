@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: a reasoning-loop collapse now resumes the conversation automatically instead of ending the turn.**
+
+- When the reasoning-loop / repetition guard fired, the turn collapsed to a forced summary and then stopped, forcing the user to re-prompt to "redirect from a fresh recap". With auto-compaction on it now resumes the turn from that recap immediately (bounded to a couple of resumes per turn so a model that keeps looping still terminates). With auto-compaction off it still stops, and the warning states which path it took.
+
 **Fixed: the repetition and "stuck re-thinking" warnings now name the exact pattern that tripped them.**
 
 - The reasoning-loop and stream-repetition warnings read the same no matter what degenerated, so there was no way to see what the model was looping on. Each warning now appends a `Repeated pattern:` excerpt of the offending text: the run boundary for a within-stream repetition stall, or the repeated thought for a cross-iteration reasoning loop, capped at 240 characters.

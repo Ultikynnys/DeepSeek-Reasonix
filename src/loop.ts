@@ -242,6 +242,10 @@ export class CacheFirstLoop {
   /** Consecutive identical-reasoning iterations before the reasoning-loop guard
    *  collapses the turn to a forced summary. */
   static readonly REASONING_LOOP_LIMIT = 3;
+  /** Degeneration force-summaries that may auto-resume the turn. After a
+   *  reasoning-loop collapse the turn continues from the recap instead of
+   *  stopping; this caps how many times so a model that keeps looping ends. */
+  static readonly MAX_DEGENERATION_RESUMES = 2;
   /** Premature-stop nudges per turn — a model that always answers in
    *  fragments can't loop forever. */
   static readonly MAX_PREMATURE_STOP_NUDGES = 2;
@@ -354,6 +358,9 @@ export class CacheFirstLoop {
   private _lastReasoningSig: string | null = null;
   /** Consecutive iterations with the same reasoning sig and no content. */
   private _reasoningLoopCount = 0;
+  /** Degeneration force-summaries already resumed this turn: bounds the
+   *  summarize-then-continue loop so a model that keeps looping still ends. */
+  private _degenerationResumes = 0;
   private context!: ContextManager;
   /** Prefix-shape snapshot of the last sent request — next turn's churn is attributed against it. */
   private _lastCacheShape: CacheShapeSnapshot | null = null;
@@ -1031,6 +1038,7 @@ export class CacheFirstLoop {
     this._prematureStopNudges = 0;
     this._lastReasoningSig = null;
     this._reasoningLoopCount = 0;
+    this._degenerationResumes = 0;
     // Fresh controller for this turn: the prior step's signal has
     // already fired (or stayed clean); either way we don't want its
     // state to bleed into the new turn.
@@ -1490,7 +1498,7 @@ export class CacheFirstLoop {
 
       if (repetitionStall?.channel === "reasoning") {
         this.appendAndPersist(buildAssistantMessage("", [], callModel, reasoningContent));
-        yield* this.reasoningLoopEvents(
+        const folded = yield* this.reasoningLoopEvents(
           assistantContent,
           withRepeatedPattern(
             t("loop.reasoningLoopRepeatStall", {
@@ -1502,6 +1510,9 @@ export class CacheFirstLoop {
         );
         restoreModelIfNeeded();
         this._steerQueue.length = 0;
+        // Resume from the fresh recap instead of ending the turn: the user
+        // shouldn't have to re-prompt just because the model lost the thread.
+        if (this.resumeAfterDegeneration(folded)) continue;
         return;
       }
 
@@ -1650,7 +1661,7 @@ export class CacheFirstLoop {
       }
       this._lastReasoningSig = reasoningSig || null;
       if (this._reasoningLoopCount >= CacheFirstLoop.REASONING_LOOP_LIMIT) {
-        yield* this.reasoningLoopEvents(
+        const folded = yield* this.reasoningLoopEvents(
           assistantContent,
           withRepeatedPattern(
             t("loop.reasoningLoopRepeated", { count: this._reasoningLoopCount }),
@@ -1659,6 +1670,9 @@ export class CacheFirstLoop {
         );
         restoreModelIfNeeded();
         this._steerQueue.length = 0;
+        // Resume from the fresh recap instead of ending the turn: the user
+        // shouldn't have to re-prompt just because the model lost the thread.
+        if (this.resumeAfterDegeneration(folded)) continue;
         return;
       }
 
@@ -2114,23 +2128,46 @@ export class CacheFirstLoop {
    *  compaction lifecycle provides the single persistent UI card. */
   private async *reasoningLoopEvents(
     assistantContent: string,
-    warningContent: string = t("loop.reasoningLoop"),
-  ): AsyncGenerator<LoopEvent, void, void> {
+    warningContent: string,
+  ): AsyncGenerator<LoopEvent, FoldResult | null, void> {
+    // The warning states what happens next: with auto-compaction on the turn
+    // resumes from the recap, so it must not tell the user to redirect manually.
+    const resolving = t(
+      this._disableAutoCompaction ? "loop.reasoningLoopStopping" : "loop.reasoningLoopResuming",
+    );
     yield {
       turn: this._turn,
       role: "warning",
       severity: "high",
-      content: warningContent,
+      content: `${warningContent}\n\n${resolving}`,
     };
     if (!this._disableAutoCompaction) {
-      yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
-      return;
+      const result = yield* this.forcedSummaryEvents(
+        `compaction-${++this._compactionSeq}`,
+        "stuck",
+      );
+      return result;
     }
     yield {
       turn: this._turn,
       role: "done",
       content: assistantContent || t("loop.reasoningLoop"),
     };
+    return null;
+  }
+
+  /** Resume the turn from a degeneration recap instead of ending it. Bounded
+   *  per turn so a model that keeps looping still terminates. Returns false
+   *  when the fold failed or the resume budget is spent. */
+  private resumeAfterDegeneration(folded: FoldResult | null): boolean {
+    if (!folded?.folded || this._degenerationResumes >= CacheFirstLoop.MAX_DEGENERATION_RESUMES) {
+      return false;
+    }
+    this._degenerationResumes++;
+    this._foldedThisTurn = true;
+    this._reasoningLoopCount = 0;
+    this._lastReasoningSig = null;
+    return true;
   }
 
   /** Force-summary card lifecycle — trims the trailing in-flight tool call and

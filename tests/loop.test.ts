@@ -912,7 +912,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(events.filter((e) => e.role === "compaction_end")).toHaveLength(1);
   });
 
-  it("collapses a reasoning loop (identical thoughts, drifting tool args) to a forced summary", async () => {
+  it("collapses a reasoning loop (identical thoughts, drifting tool args), summarizes, then resumes", async () => {
     vi.useFakeTimers();
     const reg = new ToolRegistry();
     reg.register({
@@ -969,8 +969,13 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(reasoningWarning?.content).toContain("Repeated pattern:");
     expect(reasoningWarning?.content).toContain("I wonder whether the answer is right");
 
+    expect(reasoningWarning?.content).toContain("resuming");
+
     const finals = events.filter((e) => e.role === "assistant_final");
-    expect(finals[finals.length - 1]?.forcedSummary).toBe(true);
+    // Collapse to a forced summary, then RESUME from the recap and finish
+    // normally — the turn must not stop at the summary.
+    expect(finals.some((f) => f.forcedSummary)).toBe(true);
+    expect(finals[finals.length - 1]?.forcedSummary).toBeFalsy();
     expect(events.filter((e) => e.role === "compaction_start")).toHaveLength(1);
     expect(events.filter((e) => e.role === "compaction_end")).toHaveLength(1);
   });
@@ -4361,6 +4366,19 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
           { status: 200, headers: { "Content-Type": "application/x-ndjson" } },
         );
       }
+      if (chatCalls >= 3) {
+        // Resumed turn — a healthy completion that closes the turn.
+        return new Response(
+          new TextEncoder().encode(
+            `${JSON.stringify({
+              model: "qwen3:32b",
+              message: { role: "assistant", content: "Finished after the recap." },
+              done: true,
+            })}\n`,
+          ),
+          { status: 200, headers: { "Content-Type": "application/x-ndjson" } },
+        );
+      }
       // Stream chunks that contain a repeating reasoning loop
       const lines = [
         JSON.stringify({
@@ -4409,8 +4427,9 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
     for await (const ev of loop.step("hello")) events.push(ev);
 
     // The stalled stream halts immediately, then uses one summary request through
-    // the same reasoning-loop recovery/card path as cross-iteration detection.
-    expect(chatCalls).toBe(2);
+    // the same reasoning-loop recovery/card path as cross-iteration detection —
+    // and, with auto-compaction on, RESUMES for a final healthy answer.
+    expect(chatCalls).toBe(3);
     expect(
       events.some(
         (ev) => ev.role === "warning" && ev.content?.includes("re-thinking the same point"),
@@ -4427,13 +4446,18 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
     expect(
       events.some((ev) => ev.role === "warning" && ev.content?.includes("without an answer")),
     ).toBe(false);
-    const final = events.find((ev) => ev.role === "assistant_final");
-    expect(final?.forcedSummary).toBe(true);
-    expect(final?.content).toContain("Recovered reasoning summary.");
+    const forcedFinal = events.find((ev) => ev.role === "assistant_final" && ev.forcedSummary);
+    expect(forcedFinal?.content).toContain("Recovered reasoning summary.");
+    // The turn resumes after the summary and ends on the healthy answer.
+    const finals = events.filter((ev) => ev.role === "assistant_final");
+    expect(finals[finals.length - 1]?.forcedSummary).toBeFalsy();
+    expect(finals[finals.length - 1]?.content).toContain("Finished after the recap.");
     expect(events.some((ev) => ev.role === "done")).toBe(true);
+    // Both the recap and the resumed answer are in the log.
     const assistantEntries = loop.log.entries.filter((m) => m.role === "assistant");
-    expect(assistantEntries).toHaveLength(1);
-    expect(assistantEntries[0]!.content).toContain("Recovered reasoning summary.");
+    expect(assistantEntries.some((m) => m.content.includes("Recovered reasoning summary."))).toBe(
+      true,
+    );
   });
 });
 
