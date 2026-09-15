@@ -946,6 +946,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
       tools: reg,
       stream: false,
+      repetitionGuardEnabled: true,
       maxToolIters: 8,
     });
 
@@ -1020,6 +1021,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
       tools: reg,
       stream: false,
+      repetitionGuardEnabled: true,
       maxToolIters: 8,
     });
 
@@ -2429,6 +2431,7 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
       client: new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock as typeof fetch }),
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: true,
+      repetitionGuardEnabled: true,
       maxToolIters: 1,
     });
 
@@ -2477,6 +2480,7 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: true,
+      repetitionGuardEnabled: true,
       maxToolIters: 1,
     });
 
@@ -2505,6 +2509,7 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: true,
+      repetitionGuardEnabled: true,
       maxToolIters: 1,
     });
 
@@ -2538,6 +2543,7 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: true,
+      repetitionGuardEnabled: true,
       maxToolIters: 1,
     });
 
@@ -2579,6 +2585,7 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: true,
+      repetitionGuardEnabled: true,
       maxToolIters: 1,
     });
 
@@ -4420,6 +4427,7 @@ describe("CacheFirstLoop — thinking-only completion continuation", () => {
       prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
       tools,
       stream: true,
+      repetitionGuardEnabled: true,
       model: "ollama/qwen3:32b",
     });
 

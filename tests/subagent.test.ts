@@ -201,6 +201,7 @@ describe("registerSubagentTool", () => {
       parentRegistry: new ToolRegistry(),
       system: "review",
       task: "review",
+      repetitionGuardEnabled: true,
       sink,
     });
 

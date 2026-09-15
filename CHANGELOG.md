@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Added: a Settings → Tools "Repetition guard" toggle (default off) for the model-stall guard.**
+
+- The stream repetition / "stuck re-thinking" guard is now opt-in. It covers every channel of a degenerating stream (periodic reasoning, content, and tool-call output) plus the cross-iteration identical-reasoning collapse, and was previously always on. It now stays off until enabled from Settings → Tools, so a fresh install never aborts a stream on repeated output. Auto-compaction, the tool-storm breaker, and the per-turn iteration cap are unaffected.
+
 **Fixed: a reasoning-loop collapse now resumes the conversation automatically instead of ending the turn.**
 
 - When the reasoning-loop / repetition guard fired, the turn collapsed to a forced summary and then stopped, forcing the user to re-prompt to "redirect from a fresh recap". With auto-compaction on it now resumes the turn from that recap immediately (bounded to a couple of resumes per turn so a model that keeps looping still terminates). With auto-compaction off it still stops, and the warning states which path it took.

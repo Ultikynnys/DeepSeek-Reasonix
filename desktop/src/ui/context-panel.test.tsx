@@ -791,6 +791,47 @@ describe("ContextPanel files", () => {
     expect(onSaveSettings).toHaveBeenCalledWith({ elevationEnabled: false });
   });
 
+  it("renders the Repetition guard toggle below Elevation and updates the setting", () => {
+    const onSaveSettings = vi.fn();
+    render(
+      <ContextPanel
+        settings={settings}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onSaveSettings={onSaveSettings}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    const elevation = screen.getByText("Elevation (Windows UAC)");
+    const repetition = screen.getByText("Repetition guard");
+    expect(
+      elevation.compareDocumentPosition(repetition) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const enableBtn = screen.getByRole("button", { name: "Enable repetition guard" });
+    const disableBtn = screen.getByRole("button", { name: "Disable repetition guard" });
+    // The guard is opt-in: an absent setting reads as off.
+    expect(enableBtn.getAttribute("data-on")).toBe("false");
+    expect(disableBtn.getAttribute("data-on")).toBe("true");
+
+    fireEvent.click(enableBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({ repetitionGuardEnabled: true });
+    fireEvent.click(disableBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({ repetitionGuardEnabled: false });
+  });
+
   it("displays auto-compaction disabled indicator in context meter legend when active", () => {
     render(
       <ContextPanel

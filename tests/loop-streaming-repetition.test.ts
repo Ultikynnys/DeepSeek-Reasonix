@@ -21,6 +21,7 @@ async function run(chunks: StreamChunk[]): Promise<StreamModelResult> {
     signal: new AbortController().signal,
     reasoningEffort: "low" as ReasoningEffort,
     turn: 1,
+    repetitionGuardEnabled: true,
   });
   // Drain the async generator; the settled result is the generator's return value.
   let next = await gen.next();

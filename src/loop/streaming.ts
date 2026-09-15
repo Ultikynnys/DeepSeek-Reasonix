@@ -18,6 +18,10 @@ export interface StreamModelOptions {
   turn: number;
   /** Optional checker for tools that require user intervention/confirmation. */
   isUserIntervention?: (name: string) => boolean;
+  /** When true, abort a stream that degenerates into an exact-periodic run on
+   *  any channel (reasoning, content, tool name/args). Defaults to false, so
+   *  the guard only runs when the user opts in via Settings → Tools. */
+  repetitionGuardEnabled?: boolean;
 }
 
 export interface StreamModelResult {
@@ -60,8 +64,12 @@ export async function* streamModelResponse(
   // trailing part rather than on the call itself (cloudwego/eino-ext#756).
   // Track the last one seen so a call streamed earlier can be backfilled.
   let streamThoughtSignature: string | undefined;
-  const contentRepetition = new StreamRepetitionDetector();
-  const reasoningRepetition = new StreamRepetitionDetector();
+  // The repetition guard is opt-in (Settings → Tools). When off, none of the
+  // per-channel detectors run, so a stream that degenerates into a repeated
+  // pattern is left to finish instead of being aborted.
+  const repetitionGuard = opts.repetitionGuardEnabled === true;
+  const contentRepetition = repetitionGuard ? new StreamRepetitionDetector() : null;
+  const reasoningRepetition = repetitionGuard ? new StreamRepetitionDetector() : null;
   const toolNameRepetitions = new Map<number, StreamRepetitionDetector>();
   const toolArgsRepetitions = new Map<number, StreamRepetitionDetector>();
   // File-editing tools stream arbitrary file bytes as arguments: repetitive
@@ -90,7 +98,7 @@ export async function* streamModelResponse(
         // terminates after reasoning-only deltas; marking it partial here
         // incorrectly disables the loop's bounded body-read retry.
         reasoningContent += chunk.reasoningDelta;
-        const repetition = reasoningRepetition.append(chunk.reasoningDelta);
+        const repetition = reasoningRepetition?.append(chunk.reasoningDelta);
         if (repetition) {
           repetitionStall = {
             channel: "reasoning",
@@ -115,7 +123,7 @@ export async function* streamModelResponse(
       if (chunk.contentDelta) {
         emittedOutput = true;
         assistantContent += chunk.contentDelta;
-        const repetition = contentRepetition.append(chunk.contentDelta);
+        const repetition = contentRepetition?.append(chunk.contentDelta);
         if (repetition) {
           repetitionStall = {
             channel: "content",
@@ -146,12 +154,12 @@ export async function* streamModelResponse(
         if (d.id) cur.id = d.id;
         if (d.name) {
           cur.function.name = (cur.function.name ?? "") + d.name;
-          let nameRep = toolNameRepetitions.get(d.index);
-          if (!nameRep) {
+          let nameRep = repetitionGuard ? toolNameRepetitions.get(d.index) : undefined;
+          if (repetitionGuard && !nameRep) {
             nameRep = new StreamRepetitionDetector();
             toolNameRepetitions.set(d.index, nameRep);
           }
-          const repetition = nameRep.append(d.name);
+          const repetition = nameRep?.append(d.name);
           if (repetition) {
             repetitionStall = {
               channel: "tool_call",
@@ -170,8 +178,8 @@ export async function* streamModelResponse(
         if (d.argumentsDelta) {
           cur.function.arguments = (cur.function.arguments ?? "") + d.argumentsDelta;
           const exempt = argsRepetitionExempt.has(cur.function.name);
-          let argsRep = exempt ? undefined : toolArgsRepetitions.get(d.index);
-          if (!argsRep && !exempt) {
+          let argsRep = !repetitionGuard || exempt ? undefined : toolArgsRepetitions.get(d.index);
+          if (!argsRep && repetitionGuard && !exempt) {
             argsRep = new StreamRepetitionDetector();
             toolArgsRepetitions.set(d.index, argsRep);
           }

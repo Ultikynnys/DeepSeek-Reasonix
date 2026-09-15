@@ -186,6 +186,8 @@ export interface CacheFirstLoopOptions {
   onPreCompaction?: () => void | Promise<void>;
   /** When true, disables all automatic compaction sources (turn-start folds, post-response folds, context guards). Manual compaction remains enabled. */
   disableAutoCompaction?: boolean;
+  /** When true, the stream repetition / "stuck re-thinking" guard may abort a degenerating stream. Defaults to false (opt-in). */
+  repetitionGuardEnabled?: boolean;
 }
 
 export interface ReconfigurableOptions {
@@ -201,6 +203,8 @@ export interface ReconfigurableOptions {
   maxIterPerTurn?: number | null;
   /** When true, disable all automatic compaction (auto-fold, turn-start fold, forced summary). Manual compaction remains available. */
   disableAutoCompaction?: boolean | null;
+  /** Toggle the stream repetition / "stuck re-thinking" guard. undefined = keep current. */
+  repetitionGuardEnabled?: boolean | null;
 }
 
 export interface LoopAbortOptions {
@@ -370,6 +374,8 @@ export class CacheFirstLoop {
   private _compacting = false;
   /** When true, all automatic compaction sources are disabled. */
   private _disableAutoCompaction: boolean;
+  /** When true, the stream repetition / "stuck re-thinking" guard is active. */
+  private _repetitionGuardEnabled: boolean;
   /** Host hook that force-cancels background jobs before compaction. */
   private readonly _onPreCompaction: (() => void | Promise<void>) | null;
 
@@ -394,6 +400,11 @@ export class CacheFirstLoop {
     return this._disableAutoCompaction;
   }
 
+  /** When true, the stream repetition / "stuck re-thinking" guard may abort a degenerating stream. */
+  get repetitionGuardEnabled(): boolean {
+    return this._repetitionGuardEnabled;
+  }
+
   constructor(opts: CacheFirstLoopOptions) {
     this.client = opts.client;
     this.prefix = opts.prefix;
@@ -404,6 +415,7 @@ export class CacheFirstLoop {
     this.maxIterPerTurn = opts.maxIterPerTurn ?? CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN;
     this._getEditMode = opts.getEditMode;
     this._disableAutoCompaction = Boolean(opts.disableAutoCompaction);
+    this._repetitionGuardEnabled = Boolean(opts.repetitionGuardEnabled);
     this.ctxMaxOverride = opts.ctxMaxOverride;
 
     this.hooks = opts.hooks ?? [];
@@ -638,6 +650,9 @@ export class CacheFirstLoop {
       const v = Boolean(opts.disableAutoCompaction);
       this._disableAutoCompaction = v;
       this.context.disableAutoCompaction = v;
+    }
+    if (opts.repetitionGuardEnabled !== undefined) {
+      this._repetitionGuardEnabled = Boolean(opts.repetitionGuardEnabled);
     }
   }
 
@@ -1327,6 +1342,7 @@ export class CacheFirstLoop {
             maxTokens: this.maxOutputTokens,
             turn: this._turn,
             isUserIntervention: (name) => this.tools.isUserIntervention(name),
+            repetitionGuardEnabled: this._repetitionGuardEnabled,
           });
           assistantContent = result.assistantContent;
           reasoningContent = result.reasoningContent;
@@ -1648,32 +1664,36 @@ export class CacheFirstLoop {
       // collapse the turn to a forced summary. This catches the "thinks in
       // circles" case that the storm breaker misses — e.g. re-reading a file
       // while the tool ARGS drift, so no identical-args repeat ever trips the
-      // storm. Producing real assistant text resets the counter.
-      const reasoningSig = normalizeReasoning(reasoningContent);
-      const producedText = assistantContent.length > 0;
-      // Count consecutive iterations of the same reasoning (the first occurrence
-      // is count 1). Fire when the identical thought repeats REASONING_LOOP_LIMIT
-      // times. Producing real assistant text or a different thought resets.
-      if (reasoningSig !== "" && reasoningSig === this._lastReasoningSig && !producedText) {
-        this._reasoningLoopCount++;
-      } else {
-        this._reasoningLoopCount = reasoningSig === "" ? 0 : 1;
-      }
-      this._lastReasoningSig = reasoningSig || null;
-      if (this._reasoningLoopCount >= CacheFirstLoop.REASONING_LOOP_LIMIT) {
-        const folded = yield* this.reasoningLoopEvents(
-          assistantContent,
-          withRepeatedPattern(
-            t("loop.reasoningLoopRepeated", { count: this._reasoningLoopCount }),
-            reasoningContent,
-          ),
-        );
-        restoreModelIfNeeded();
-        this._steerQueue.length = 0;
-        // Resume from the fresh recap instead of ending the turn: the user
-        // shouldn't have to re-prompt just because the model lost the thread.
-        if (this.resumeAfterDegeneration(folded)) continue;
-        return;
+      // storm. Producing real assistant text resets the counter. Gated by the
+      // repetition guard (Settings → Tools): when off, the loop never collapses
+      // the turn on repeated reasoning.
+      if (this._repetitionGuardEnabled) {
+        const reasoningSig = normalizeReasoning(reasoningContent);
+        const producedText = assistantContent.length > 0;
+        // Count consecutive iterations of the same reasoning (the first occurrence
+        // is count 1). Fire when the identical thought repeats REASONING_LOOP_LIMIT
+        // times. Producing real assistant text or a different thought resets.
+        if (reasoningSig !== "" && reasoningSig === this._lastReasoningSig && !producedText) {
+          this._reasoningLoopCount++;
+        } else {
+          this._reasoningLoopCount = reasoningSig === "" ? 0 : 1;
+        }
+        this._lastReasoningSig = reasoningSig || null;
+        if (this._reasoningLoopCount >= CacheFirstLoop.REASONING_LOOP_LIMIT) {
+          const folded = yield* this.reasoningLoopEvents(
+            assistantContent,
+            withRepeatedPattern(
+              t("loop.reasoningLoopRepeated", { count: this._reasoningLoopCount }),
+              reasoningContent,
+            ),
+          );
+          restoreModelIfNeeded();
+          this._steerQueue.length = 0;
+          // Resume from the fresh recap instead of ending the turn: the user
+          // shouldn't have to re-prompt just because the model lost the thread.
+          if (this.resumeAfterDegeneration(folded)) continue;
+          return;
+        }
       }
 
       // If the model leaked literal <think> tags into content (common with local

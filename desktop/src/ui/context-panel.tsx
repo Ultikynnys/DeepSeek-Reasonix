@@ -976,6 +976,39 @@ function CtxTools({
         </div>
       </div>
 
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.repetitionGuard")}</span>
+          <span className="right">
+            <div className="seg-ctrl" style={{ fontSize: "10.5px" }}>
+              <button
+                type="button"
+                aria-label={t("contextPanel.enableRepetitionGuard")}
+                aria-pressed={settings?.repetitionGuardEnabled === true}
+                data-on={settings?.repetitionGuardEnabled === true}
+                onClick={() => onSaveSettings?.({ repetitionGuardEnabled: true })}
+              >
+                {t("contextPanel.repetitionGuardEnabled")}
+              </button>
+              <button
+                type="button"
+                aria-label={t("contextPanel.disableRepetitionGuard")}
+                aria-pressed={settings?.repetitionGuardEnabled !== true}
+                data-on={settings?.repetitionGuardEnabled !== true}
+                onClick={() => onSaveSettings?.({ repetitionGuardEnabled: false })}
+              >
+                {t("contextPanel.repetitionGuardDisabled")}
+              </button>
+            </div>
+          </span>
+        </div>
+        <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>
+          {settings?.repetitionGuardEnabled === true
+            ? t("contextPanel.repetitionGuardEnabledDesc")
+            : t("contextPanel.repetitionGuardDisabledDesc")}
+        </div>
+      </div>
+
       {settings &&
       (settings.modelEndpoint?.provider === "ollama" ||
         settings.subagentModelEndpoint?.provider === "ollama") ? (

@@ -1694,6 +1694,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           disableAutoCompaction: ev.disableAutoCompaction ?? false,
           enableSubagents: ev.enableSubagents ?? true,
           elevationEnabled: ev.elevationEnabled ?? false,
+          repetitionGuardEnabled: ev.repetitionGuardEnabled ?? false,
           baseUrl: ev.baseUrl,
           apiKeyPrefix: ev.apiKeyPrefix,
           workspaceDir: ev.workspaceDir,

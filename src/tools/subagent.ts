@@ -1,7 +1,12 @@
 /** Isolated child loop. Inherits parent registry minus spawn_subagent + submit_plan; no hooks; non-streaming. */
 
 import { type DeepSeekClient, Usage } from "../client.js";
-import { type ModelProvider, isKnownModelId, providerForModel } from "../config.js";
+import {
+  type ModelProvider,
+  isKnownModelId,
+  loadRepetitionGuardEnabled,
+  providerForModel,
+} from "../config.js";
 import { CacheFirstLoop } from "../loop.js";
 import { applyProjectMemory } from "../memory/project.js";
 import { ImmutablePrefix } from "../memory/runtime.js";
@@ -92,6 +97,9 @@ export interface SpawnSubagentOptions {
   maxElapsedMs?: number;
   /** Continue an earlier session instead of starting fresh — loads the prior messages from disk; `task` is treated as a continuation nudge. */
   resumeSession?: string;
+  /** Whether the child loop's repetition / "stuck re-thinking" guard runs.
+   *  Defaults to the persisted config (`repetitionGuardEnabled`, disabled). */
+  repetitionGuardEnabled?: boolean;
   /** Provider and native billing unit resolved by the caller. */
   billingContext?: { kind: "usd" | "quota" | "none"; provider: ModelProvider };
   /** @deprecated Compatibility option. Prefer billingContext. */
@@ -316,6 +324,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     hooks: [],
     stream: true,
     session: sessionName,
+    repetitionGuardEnabled: opts.repetitionGuardEnabled ?? loadRepetitionGuardEnabled(),
     billingContextFor: () => billingContext,
   });
 

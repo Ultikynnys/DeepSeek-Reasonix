@@ -778,6 +778,15 @@ export const en = {
       "run_command can run a command elevated via the Windows UAC prompt. Each elevated run still asks for approval and shows the UAC dialog.",
     elevationDisabledDesc:
       "Elevated commands are blocked. run_command refuses elevate=true until this is enabled.",
+    repetitionGuard: "Repetition guard",
+    repetitionGuardEnabled: "Enabled",
+    repetitionGuardDisabled: "Disabled",
+    enableRepetitionGuard: "Enable repetition guard",
+    disableRepetitionGuard: "Disable repetition guard",
+    repetitionGuardEnabledDesc:
+      "Auto-stops a stream whose output degenerates into a repeated pattern (reasoning, content, or tool calls).",
+    repetitionGuardDisabledDesc:
+      "Off by default: a degenerate stream is allowed to finish. Enable to auto-stop a model stuck re-thinking the same point.",
     compactionDisabled: "auto-compaction disabled",
     autoCompactionDisabledTooltip: "Auto-compaction disabled (manual button only)",
     ollamaGeneration: "Ollama generation",

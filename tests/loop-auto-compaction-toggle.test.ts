@@ -98,6 +98,7 @@ describe("CacheFirstLoop auto-compaction toggle", () => {
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
       disableAutoCompaction: true,
+      repetitionGuardEnabled: true,
       stream: false,
     });
 

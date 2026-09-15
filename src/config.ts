@@ -408,6 +408,10 @@ export interface ReasonixConfig {
    *  Defaults to false: even if the model requests `elevate: true`, the tool
    *  refuses unless the user has pre-authorized the capability. */
   elevationEnabled?: boolean;
+  /** Whether the stream repetition / "stuck re-thinking" guard may abort a
+   *  degenerating model stream. Defaults to false: out of the box the loop lets
+   *  repeated output through, and the guard only runs when the user opts in. */
+  repetitionGuardEnabled?: boolean;
   /** Default workspace root for the desktop client. CLI uses cwd. */
   workspaceDir?: string;
   /** Last N workspace paths the desktop client has opened, most recent first. */
@@ -2142,6 +2146,23 @@ export function loadElevationEnabled(path: string = defaultConfigPath()): boolea
 export function saveElevationEnabled(enabled: boolean, path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
   cfg.elevationEnabled = enabled;
+  writeConfig(cfg, path);
+}
+
+/** Whether the stream repetition / "stuck re-thinking" guard is active.
+ *  Defaults to false: the guard is opt-in, so a fresh install never aborts a
+ *  stream on repeated output. */
+export function loadRepetitionGuardEnabled(path: string = defaultConfigPath()): boolean {
+  return readConfig(path).repetitionGuardEnabled === true;
+}
+
+/** Persist whether the stream repetition / "stuck re-thinking" guard is active. */
+export function saveRepetitionGuardEnabled(
+  enabled: boolean,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.repetitionGuardEnabled = enabled;
   writeConfig(cfg, path);
 }
 

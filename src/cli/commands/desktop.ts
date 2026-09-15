@@ -138,6 +138,7 @@ import {
   loadQuickSendId,
   loadReasoningEffort,
   loadRecentWorkspaces,
+  loadRepetitionGuardEnabled,
   loadResolvedSkillPaths,
   loadSubagentModels,
   loadTavilyApiKey,
@@ -174,6 +175,7 @@ import {
   saveOpenAIOAuth,
   saveQuickSendId,
   saveReasoningEffort,
+  saveRepetitionGuardEnabled,
   saveWorkspaceDir,
   setMcpServerDisabled,
   setMcpToolDisabled,
@@ -1149,6 +1151,8 @@ function emitSettings(tab: Tab): void {
       disableAutoCompaction: tab.runtime?.loop.disableAutoCompaction ?? loadDisableAutoCompaction(),
       enableSubagents: loadEnableSubagents(),
       elevationEnabled: loadElevationEnabled(),
+      repetitionGuardEnabled:
+        tab.runtime?.loop.repetitionGuardEnabled ?? loadRepetitionGuardEnabled(),
       disabledModels: loadDisabledModels(),
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
@@ -3468,6 +3472,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     maxIterPerTurn: loadMaxIterPerTurn(),
     maxOutputTokens: loadMaxOutputTokens(),
     disableAutoCompaction: loadDisableAutoCompaction(),
+    repetitionGuardEnabled: loadRepetitionGuardEnabled(),
     // Provider and billing unit come from resolved endpoint/config evidence.
     billingContextFor: (model) => {
       const billing = subagentBillingFor(model);
@@ -6152,6 +6157,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           // is needed — persisting + re-emitting settings is enough.
           saveElevationEnabled(msg.elevationEnabled);
           for (const openTab of tabs.values()) emitSettings(openTab);
+        }
+        if (msg.repetitionGuardEnabled !== undefined) {
+          saveRepetitionGuardEnabled(msg.repetitionGuardEnabled);
+          const next = loadRepetitionGuardEnabled();
+          for (const openTab of tabs.values()) {
+            openTab.runtime?.loop.configure({ repetitionGuardEnabled: next });
+            emitSettings(openTab);
+          }
         }
         if (msg.disabledModels !== undefined) {
           saveDisabledModels(Array.isArray(msg.disabledModels) ? msg.disabledModels : []);

@@ -751,6 +751,9 @@ export interface SettingsEvent {
   enableSubagents?: boolean;
   /** Whether `run_command` may run commands elevated via Windows UAC. Defaults to false. */
   elevationEnabled?: boolean;
+  /** Whether the stream repetition / "stuck re-thinking" guard may abort a
+   *  degenerating stream. Defaults to false (opt-in). */
+  repetitionGuardEnabled?: boolean;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -1025,6 +1028,8 @@ export interface SettingsPatch {
   enableSubagents?: boolean;
   /** Allow `run_command` to run commands elevated via Windows UAC. */
   elevationEnabled?: boolean;
+  /** Allow the stream repetition / "stuck re-thinking" guard to abort a degenerating stream. */
+  repetitionGuardEnabled?: boolean;
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;
