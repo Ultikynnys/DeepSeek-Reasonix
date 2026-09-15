@@ -963,6 +963,12 @@ describe("CacheFirstLoop (non-streaming)", () => {
         (e) => e.role === "warning" && /re-thinking the same point/i.test(e.content ?? ""),
       ),
     ).toBe(true);
+    const reasoningWarning = events.find(
+      (e) => e.role === "warning" && /re-thinking the same point/i.test(e.content ?? ""),
+    );
+    expect(reasoningWarning?.content).toContain("Repeated pattern:");
+    expect(reasoningWarning?.content).toContain("I wonder whether the answer is right");
+
     const finals = events.filter((e) => e.role === "assistant_final");
     expect(finals[finals.length - 1]?.forcedSummary).toBe(true);
     expect(events.filter((e) => e.role === "compaction_start")).toHaveLength(1);
@@ -2426,9 +2432,10 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(requestSignal?.aborted).toBe(true);
-    expect(events.find((event) => event.role === "warning")?.content).toContain(
-      "Stopped a degenerating model stream",
-    );
+    const contentWarning = events.find((event) => event.role === "warning")?.content;
+    expect(contentWarning).toContain("Stopped a degenerating model stream");
+    expect(contentWarning).toContain("Repeated pattern:");
+    expect(contentWarning).toContain("wrightwright");
     const final = events.find((event) => event.role === "assistant_final");
     expect(final?.content).toBe("Safe prefix ");
     expect(final?.replaceStreamedOutput).toBe(true);
@@ -2573,9 +2580,10 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     const events: LoopEvent[] = [];
     for await (const event of loop.step("think")) events.push(event);
 
-    expect(events.find((event) => event.role === "warning")?.content).toContain(
-      "re-thinking the same point",
-    );
+    const warningContent = events.find((event) => event.role === "warning")?.content;
+    expect(warningContent).toContain("re-thinking the same point");
+    expect(warningContent).toContain("Repeated pattern:");
+    expect(warningContent).toContain("cyclecycle");
     expect(events.find((event) => event.role === "compaction_start")).toMatchObject({
       compactionKind: "force-summary",
     });

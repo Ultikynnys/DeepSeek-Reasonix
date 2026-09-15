@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Fixed: the repetition and "stuck re-thinking" warnings now name the exact pattern that tripped them.**
+
+- The reasoning-loop and stream-repetition warnings read the same no matter what degenerated, so there was no way to see what the model was looping on. Each warning now appends a `Repeated pattern:` excerpt of the offending text: the run boundary for a within-stream repetition stall, or the repeated thought for a cross-iteration reasoning loop, capped at 240 characters.
+
 **Removed: model-authored self-escalation can no longer terminate a response or silently switch models.**
 
 - System prompts no longer instruct models to emit `<<<NEEDS_PRO>>>` instead of completing difficult work. The loop no longer parses that marker or retries the turn on another model, so model selection remains explicit and marker-shaped output has no hidden routing effect.

@@ -301,6 +301,9 @@ export interface TranslationSchema {
     repetitionStall: string;
     repetitionStallNoPrefix: string;
     reasoningLoop: string;
+    reasoningLoopRepeatStall: string;
+    reasoningLoopRepeated: string;
+    repeatedPatternLabel: string;
     forcingSummary: string;
     iterLimitReached: string;
     iterLimitGrace: string;

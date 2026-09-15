@@ -691,6 +691,11 @@ export const EN: TranslationSchema = {
       "[The model stream was stopped because it produced only repetitive output. Retry or switch models.]",
     reasoningLoop:
       "The model is stuck re-thinking the same point without making progress — collapsing to a summary so you can redirect from a fresh recap.",
+    reasoningLoopRepeatStall:
+      "The model is stuck re-thinking the same point without making progress. Its reasoning stalled on a repeating pattern (period {period}, {repeatedChars} chars); the turn was collapsed to a summary so you can redirect from a fresh recap.",
+    reasoningLoopRepeated:
+      "The model is stuck re-thinking the same point without making progress. It repeated the same reasoning across {count} consecutive iterations; the turn was collapsed to a summary so you can redirect from a fresh recap.",
+    repeatedPatternLabel: "Repeated pattern:",
     forcingSummary:
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
     iterLimitReached:

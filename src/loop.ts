@@ -1294,7 +1294,12 @@ export class CacheFirstLoop {
       let stopReason: string | undefined;
       let image: { dataUrl: string; mimeType: string } | undefined;
       let repetitionStall:
-        | { channel: "content" | "reasoning" | "tool_call"; period: number; repeatedChars: number }
+        | {
+            channel: "content" | "reasoning" | "tool_call";
+            period: number;
+            repeatedChars: number;
+            sample?: string;
+          }
         | undefined;
       const callModel = this.model;
 
@@ -1485,7 +1490,16 @@ export class CacheFirstLoop {
 
       if (repetitionStall?.channel === "reasoning") {
         this.appendAndPersist(buildAssistantMessage("", [], callModel, reasoningContent));
-        yield* this.reasoningLoopEvents(assistantContent);
+        yield* this.reasoningLoopEvents(
+          assistantContent,
+          withRepeatedPattern(
+            t("loop.reasoningLoopRepeatStall", {
+              period: repetitionStall.period,
+              repeatedChars: repetitionStall.repeatedChars,
+            }),
+            repetitionStall.sample ?? "",
+          ),
+        );
         restoreModelIfNeeded();
         this._steerQueue.length = 0;
         return;
@@ -1496,11 +1510,14 @@ export class CacheFirstLoop {
           turn: this._turn,
           role: "warning",
           severity: "high",
-          content: t("loop.repetitionStall", {
-            channel: repetitionStall.channel,
-            period: repetitionStall.period,
-            repeatedChars: repetitionStall.repeatedChars,
-          }),
+          content: withRepeatedPattern(
+            t("loop.repetitionStall", {
+              channel: repetitionStall.channel,
+              period: repetitionStall.period,
+              repeatedChars: repetitionStall.repeatedChars,
+            }),
+            repetitionStall.sample ?? "",
+          ),
         };
         if (assistantContent.trim().length === 0 && toolCalls.length === 0) {
           assistantContent = t("loop.repetitionStallNoPrefix");
@@ -1633,7 +1650,13 @@ export class CacheFirstLoop {
       }
       this._lastReasoningSig = reasoningSig || null;
       if (this._reasoningLoopCount >= CacheFirstLoop.REASONING_LOOP_LIMIT) {
-        yield* this.reasoningLoopEvents(assistantContent);
+        yield* this.reasoningLoopEvents(
+          assistantContent,
+          withRepeatedPattern(
+            t("loop.reasoningLoopRepeated", { count: this._reasoningLoopCount }),
+            reasoningContent,
+          ),
+        );
         restoreModelIfNeeded();
         this._steerQueue.length = 0;
         return;
@@ -2091,12 +2114,13 @@ export class CacheFirstLoop {
    *  compaction lifecycle provides the single persistent UI card. */
   private async *reasoningLoopEvents(
     assistantContent: string,
+    warningContent: string = t("loop.reasoningLoop"),
   ): AsyncGenerator<LoopEvent, void, void> {
     yield {
       turn: this._turn,
       role: "warning",
       severity: "high",
-      content: t("loop.reasoningLoop"),
+      content: warningContent,
     };
     if (!this._disableAutoCompaction) {
       yield* this.forcedSummaryEvents(`compaction-${++this._compactionSeq}`, "stuck");
@@ -2204,6 +2228,19 @@ function parsePositiveIntEnv(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/** Collapse whitespace and cap length for a warning's repeated-pattern excerpt. */
+function warningPatternExcerpt(raw: string, max = 240): string {
+  const flat = raw.replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max).trimEnd()}…`;
+}
+
+/** Append the offending excerpt so a degeneration warning names the pattern, not
+ *  just the fact of the stall. No-op when there is nothing to show. */
+function withRepeatedPattern(warning: string, rawSample: string): string {
+  const pattern = warningPatternExcerpt(rawSample);
+  return pattern ? `${warning}\n\n${t("loop.repeatedPatternLabel")}\n${pattern}` : warning;
 }
 
 /** Collapse reasoning to a stable signature for repeat detection — trims,

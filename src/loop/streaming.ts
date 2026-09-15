@@ -36,8 +36,14 @@ export interface StreamModelResult {
     channel: "content" | "reasoning" | "tool_call";
     period: number;
     repeatedChars: number;
+    /** Raw excerpt of the repeated run (starts at the run boundary) so the
+     *  warning can name the offending pattern, not just the fact of a stall. */
+    sample?: string;
   };
 }
+
+/** Cap on the raw excerpt carried with a repetition stall for the warning. */
+const STALL_SAMPLE_CHARS = 240;
 
 export async function* streamModelResponse(
   opts: StreamModelOptions,
@@ -86,12 +92,16 @@ export async function* streamModelResponse(
         reasoningContent += chunk.reasoningDelta;
         const repetition = reasoningRepetition.append(chunk.reasoningDelta);
         if (repetition) {
-          reasoningContent = reasoningContent.slice(0, repetition.safeLength);
           repetitionStall = {
             channel: "reasoning",
             period: repetition.period,
             repeatedChars: repetition.repeatedChars,
+            sample: reasoningContent.slice(
+              repetition.safeLength,
+              repetition.safeLength + STALL_SAMPLE_CHARS,
+            ),
           };
+          reasoningContent = reasoningContent.slice(0, repetition.safeLength);
           stallAbort.abort(new Error("Repetitive reasoning stream stopped"));
           break;
         }
@@ -107,12 +117,16 @@ export async function* streamModelResponse(
         assistantContent += chunk.contentDelta;
         const repetition = contentRepetition.append(chunk.contentDelta);
         if (repetition) {
-          assistantContent = assistantContent.slice(0, repetition.safeLength);
           repetitionStall = {
             channel: "content",
             period: repetition.period,
             repeatedChars: repetition.repeatedChars,
+            sample: assistantContent.slice(
+              repetition.safeLength,
+              repetition.safeLength + STALL_SAMPLE_CHARS,
+            ),
           };
+          assistantContent = assistantContent.slice(0, repetition.safeLength);
           stallAbort.abort(new Error("Repetitive content stream stopped"));
           break;
         }
@@ -139,12 +153,16 @@ export async function* streamModelResponse(
           }
           const repetition = nameRep.append(d.name);
           if (repetition) {
-            cur.function.name = cur.function.name.slice(0, repetition.safeLength);
             repetitionStall = {
               channel: "tool_call",
               period: repetition.period,
               repeatedChars: repetition.repeatedChars,
+              sample: cur.function.name.slice(
+                repetition.safeLength,
+                repetition.safeLength + STALL_SAMPLE_CHARS,
+              ),
             };
+            cur.function.name = cur.function.name.slice(0, repetition.safeLength);
             stallAbort.abort(new Error("Repetitive tool name stream stopped"));
             break;
           }
@@ -159,12 +177,16 @@ export async function* streamModelResponse(
           }
           const repetition = argsRep?.append(d.argumentsDelta);
           if (repetition) {
-            cur.function.arguments = cur.function.arguments.slice(0, repetition.safeLength);
             repetitionStall = {
               channel: "tool_call",
               period: repetition.period,
               repeatedChars: repetition.repeatedChars,
+              sample: cur.function.arguments.slice(
+                repetition.safeLength,
+                repetition.safeLength + STALL_SAMPLE_CHARS,
+              ),
             };
+            cur.function.arguments = cur.function.arguments.slice(0, repetition.safeLength);
             stallAbort.abort(new Error("Repetitive tool arguments stream stopped"));
             break;
           }
