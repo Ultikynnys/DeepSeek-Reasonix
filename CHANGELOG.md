@@ -29,6 +29,11 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Gemini 3 requires every replayed `functionCall` part to carry the model's `thoughtSignature`. Google Antigravity often returns the signature in snake_case (`thought_signature`), nested inside `functionCall`, in separate trailing parts, or only on the first call of a parallel tool batch. Reasonix now parses thought signatures across camelCase, snake_case, envelope, candidate, and nested locations in both streaming and non-streaming responses. Sibling calls in parallel turns and calls split or scavenged during tool repair now inherit and preserve the turn's signature, and the Antigravity payload builder backfills from conversation history so historical function calls in multi-turn sessions (e.g. `default_api:web_search`) are never echoed bare.
 
+**Fixed: Antigravity/Gemini 3 no longer 400s when a replayed function call has *no* signature anywhere to inherit.**
+
+- The backfill above only heals a signatureless `functionCall` when another call in the conversation still carries one. History transferred from another provider, a session persisted before signatures were captured, or a repaired/scavenged call the model never signed can leave a call with no signature to inherit, and Reasonix then echoed it bare — `Function call is missing a thought_signature in functionCall parts` (e.g. `default_api:unreal_mcp_get_capabilities`, position N), which fails the whole request. The Antigravity payload builder now echoes Google's documented sentinel `skip_thought_signature_validator` for a Gemini 3 function call that has no real signature, instead of omitting the field. The sentinel is appended only when no real signature exists (a captured signature is always preferred) and only for Gemini 3+, so legacy Gemini 2.5 requests stay byte-identical.
+
+
 **Fixed: Playwright browser installation no longer remains stuck after reaching 100%.**
 
 - Reasonix now enforces a 12-minute deadline for each official/mirror attempt and a 2-minute finalization deadline after download progress reaches 100%. A stalled installer process tree is terminated and settled explicitly, so fallback or an actionable error appears instead of an hour-long spinner. Settings also provides a Cancel installation button that terminates the active attempt without starting another source.

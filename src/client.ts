@@ -220,6 +220,17 @@ const GEMINI_SCHEMA_KEYS = new Set([
   "example",
 ]);
 
+/** Sentinel for a functionCall part with no real thought signature (history from
+ *  a non-signing source); a bare part 400s Gemini 3. */
+const SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator";
+
+/** True for models that enforce Gemini 3 thought-signature validation (Gemini 3+
+ *  and later); Gemini 2.5 ignores signatures and rejects the field entirely. */
+function requiresThoughtSignature(model: string): boolean {
+  const major = model.match(/^gemini-(\d+)/i)?.[1];
+  return major !== undefined && Number.parseInt(major, 10) >= 3;
+}
+
 /** Collapse a JSON-Schema `type` union (e.g. `["string","null"]`) to the single
  *  string Gemini's `Schema.type` proto accepts; `"null"` maps to `nullable: true`.
  *  Gemini 400s on an array here ("Proto field is not repeating, cannot start list"). */
@@ -1396,6 +1407,14 @@ export class DeepSeekClient {
             if (sig) {
               part.thoughtSignature = sig;
               lastKnownThoughtSignature = sig;
+            } else if (requiresThoughtSignature(opts.model)) {
+              // Gemini 3 requires a thought_signature on every functionCall part.
+              // When no real signature is available (history transferred from a
+              // provider that never emitted one, a pre-signature session, or a
+              // repaired/scavenged call the model never signed), echo Google's
+              // documented sentinel rather than a bare part — a bare part 400s the
+              // whole request ("Function call is missing a thought_signature").
+              part.thoughtSignature = SKIP_THOUGHT_SIGNATURE_VALIDATOR;
             }
             parts.push(part);
           }

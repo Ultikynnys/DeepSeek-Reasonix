@@ -317,6 +317,77 @@ describe("gemini payload", () => {
     expect(contents[3]?.parts[0]?.thoughtSignature).toBe("sig-turn-2");
   });
 
+  it("emits the skip_thought_signature_validator sentinel when no signature exists anywhere", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-3.1-flash-high",
+      messages: [
+        { role: "user", content: "go" },
+        {
+          role: "assistant",
+          tool_calls: [
+            { id: "call-1", function: { name: "unreal_mcp_get_capabilities", arguments: "{}" } },
+          ],
+        },
+        {
+          role: "tool",
+          name: "unreal_mcp_get_capabilities",
+          tool_call_id: "call-1",
+          content: "{}",
+        },
+      ],
+    });
+
+    const contents = (
+      captured as {
+        request: { contents: Array<{ role: string; parts: Array<{ thoughtSignature?: string }> }> };
+      }
+    ).request.contents;
+    // Gemini 3 400s on a bare functionCall part; the documented sentinel keeps
+    // the request alive for history carried over from a non-signing source.
+    expect(contents[1]?.parts[0]?.thoughtSignature).toBe("skip_thought_signature_validator");
+  });
+
+  it("never attaches a thoughtSignature sentinel to legacy Gemini 2.5 tool calls", async () => {
+    let captured: unknown = null;
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify(wrappedResponse([{ text: "done" }])), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    await client.chat({
+      model: "gemini-2.5-flash",
+      messages: [
+        { role: "user", content: "go" },
+        {
+          role: "assistant",
+          tool_calls: [{ id: "call-1", function: { name: "web_search", arguments: "{}" } }],
+        },
+        { role: "tool", name: "web_search", tool_call_id: "call-1", content: "r" },
+      ],
+    });
+
+    const contents = (
+      captured as {
+        request: { contents: Array<{ role: string; parts: Array<{ thoughtSignature?: string }> }> };
+      }
+    ).request.contents;
+    expect(contents[1]?.parts[0]?.thoughtSignature).toBeUndefined();
+  });
+
   it("accepts thought_signature snake_case on tool_calls", async () => {
     let captured: unknown = null;
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
