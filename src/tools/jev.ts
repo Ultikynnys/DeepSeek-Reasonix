@@ -364,7 +364,7 @@ export function registerJevTool(
   registry.register({
     name: "jev_evaluate",
     description:
-      "Use the JAI evaluation provider, officially TypeSafe Jev, to make narrow structured decisions over JSON state. Returns typed Noul probabilities, Choice distributions, or Score distributions using jev-latest. Pass 'questions' as a map of {type, instructions, criteria}: noul criteria is an optional {true,false} map, choice criteria is a map of option->description, score criteria is an array of levels. It does not generate chat text.",
+      "Use JEV (TypeSafe's System One evaluation model) to make narrow structured decisions over JSON state. Returns typed Noul probabilities, Choice distributions, or Score distributions using jev-latest. Pass 'questions' as a map of {type, instructions, criteria}: noul criteria is an optional {true,false} map, choice criteria is a map of option->description, score criteria is an array of levels. It does not generate chat text.",
     readOnly: true,
     parallelSafe: true,
     parameters: {

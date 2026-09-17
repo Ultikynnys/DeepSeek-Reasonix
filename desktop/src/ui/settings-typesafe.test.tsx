@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn().mockResolvedValue
 
 afterEach(cleanup);
 
-describe("TypeSafe JAI API-key settings", () => {
+describe("TypeSafe JEV API-key settings", () => {
   it("renders a password input and saves the key through the typed settings patch", () => {
     const onSave = vi.fn();
     render(
@@ -21,7 +21,7 @@ describe("TypeSafe JAI API-key settings", () => {
     );
 
     const input = document.querySelector('input[type="password"]') as HTMLInputElement;
-    expect(screen.getByText("JAI API key (TypeSafe)")).toBeTruthy();
+    expect(screen.getByText("JEV API key (TypeSafe)")).toBeTruthy();
     expect(input).toBeTruthy();
     fireEvent.change(input, { target: { value: "  typesafe-secret  " } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

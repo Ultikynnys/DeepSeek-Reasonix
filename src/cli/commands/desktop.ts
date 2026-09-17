@@ -3335,7 +3335,7 @@ function refreshSubagentKnowledge(tab: Tab, enabled: boolean): void {
   tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
 }
 
-/** Add/remove JAI at the knowledge level, then rebuild the immutable tool-spec prefix. */
+/** Add/remove JEV at the knowledge level, then rebuild the immutable tool-spec prefix. */
 function refreshJevKnowledge(tab: Tab, enabled: boolean): void {
   const toolset = tab.toolset;
   if (!toolset) return;

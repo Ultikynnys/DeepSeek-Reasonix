@@ -95,7 +95,7 @@ export interface CodeToolset {
    *  on this toolset's registry so later runtimes carry the new state. The prompt +
    *  skills-index half is the host's job (rebuild via codeSystemPrompt). */
   syncSubagentTools: (enabled: boolean) => void;
-  /** Knowledge-level JAI sync. Validation must complete before enabled=true. */
+  /** Knowledge-level JEV sync. Validation must complete before enabled=true. */
   syncJevTool: (enabled: boolean) => void;
 }
 
@@ -161,7 +161,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
       registerJevTool(tools, { configPath: opts.configPath });
     } catch (error) {
       process.stderr.write(
-        `reasonix: JAI tool unavailable because TypeSafe key validation failed — ${(error as Error).message}\n`,
+        `reasonix: JEV tool unavailable because TypeSafe key validation failed — ${(error as Error).message}\n`,
       );
     }
   }

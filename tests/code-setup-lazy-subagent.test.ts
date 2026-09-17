@@ -41,13 +41,13 @@ describe("buildCodeToolset", () => {
     await toolset.jobs.shutdown();
   });
 
-  it("does not expose JAI to models when no TypeSafe key is configured", async () => {
+  it("does not expose JEV to models when no TypeSafe key is configured", async () => {
     const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });
     expect(toolset.tools.has("jev_evaluate")).toBe(false);
     await toolset.jobs.shutdown();
   });
 
-  it("exposes JAI to models only after the configured TypeSafe key validates", async () => {
+  it("exposes JEV to models only after the configured TypeSafe key validates", async () => {
     writeFileSync(cfgPath, JSON.stringify({ typesafeApiKey: "valid-typesafe-key" }), "utf8");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
@@ -61,12 +61,12 @@ describe("buildCodeToolset", () => {
 
     const spec = toolset.tools.specs().find((entry) => entry.function.name === "jev_evaluate");
     expect(spec).toBeDefined();
-    expect(spec?.function.description).toMatch(/JAI evaluation provider.*TypeSafe Jev/i);
+    expect(spec?.function.description).toMatch(/JEV.*TypeSafe/s);
     expect(spec?.function.parameters.required).toEqual(["state", "questions"]);
     await toolset.jobs.shutdown();
   });
 
-  it("does not expose JAI when TypeSafe rejects the configured key", async () => {
+  it("does not expose JEV when TypeSafe rejects the configured key", async () => {
     writeFileSync(cfgPath, JSON.stringify({ typesafeApiKey: "invalid-typesafe-key" }), "utf8");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("unauthorized", { status: 401 }),
