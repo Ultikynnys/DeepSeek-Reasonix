@@ -95,22 +95,42 @@ function isInstructions(value: unknown): value is JevDescription {
   );
 }
 
+/** Copy-pasteable shape hints — a wrong call must be correctable in one round trip. */
+const QUESTION_SHAPES = {
+  noul: 'optional, and if present {"true": "<string>", "false": "<string>"} — e.g. {"true": "time-sensitive", "false": "not urgent"}',
+  choice:
+    'an OBJECT (map) of at least two options, each option id mapped to a description string or null — e.g. {"criteria": {"billing": "Payment issues", "technical": null}} (NOT an array)',
+  score:
+    'an ORDERED ARRAY of at least two level descriptions, low→high — e.g. {"criteria": ["Calm", "Frustrated", "Very angry"]} (NOT an object/map)',
+} as const;
+
 function validateQuestions(value: unknown): asserts value is Record<string, JevQuestion> {
+  if (typeof value === "string") {
+    throw new Error(
+      'jev_evaluate: questions must be a JSON object keyed by question id, not a JSON string — pass the object directly, e.g. {"is_urgent": {"type": "noul", "instructions": "..."}}',
+    );
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("jev_evaluate: questions must be a non-empty object keyed by question id");
+    throw new Error(
+      'jev_evaluate: questions must be a JSON object keyed by question id — e.g. {"is_urgent": {"type": "noul", "instructions": "..."}}',
+    );
   }
   const entries = Object.entries(value as Record<string, unknown>);
   if (entries.length === 0) {
-    throw new Error("jev_evaluate: questions must contain at least one question");
+    throw new Error(
+      'jev_evaluate: questions must contain at least one question — e.g. {"is_urgent": {"type": "noul", "instructions": "..."}}',
+    );
   }
   for (const [id, raw] of entries) {
     if (!id.trim() || !raw || typeof raw !== "object" || Array.isArray(raw)) {
-      throw new Error(`jev_evaluate: question ${JSON.stringify(id)} must be an object`);
+      throw new Error(
+        `jev_evaluate: question "${id}" must be an object — e.g. {"type": "noul" | "choice" | "score", "instructions": "..."}`,
+      );
     }
     const question = raw as Record<string, unknown>;
     if (!isInstructions(question.instructions)) {
       throw new Error(
-        `jev_evaluate: question ${JSON.stringify(id)} requires string or JSON instructions`,
+        `jev_evaluate: question "${id}" needs "instructions" (a string, or a JSON object/array) — e.g. "Does this convey urgency?"`,
       );
     }
     if (question.type === "noul") {
@@ -120,12 +140,14 @@ function validateQuestions(value: unknown): asserts value is Record<string, JevQ
           typeof question.criteria !== "object" ||
           Array.isArray(question.criteria)
         ) {
-          throw new Error(`jev_evaluate: noul question ${JSON.stringify(id)} has invalid criteria`);
+          throw new Error(
+            `jev_evaluate: noul question "${id}" criteria is ${QUESTION_SHAPES.noul}`,
+          );
         }
         for (const [key, description] of Object.entries(question.criteria)) {
           if ((key !== "true" && key !== "false") || typeof description !== "string") {
             throw new Error(
-              `jev_evaluate: noul question ${JSON.stringify(id)} has invalid criteria`,
+              `jev_evaluate: noul question "${id}" criteria is ${QUESTION_SHAPES.noul}`,
             );
           }
         }
@@ -138,7 +160,9 @@ function validateQuestions(value: unknown): asserts value is Record<string, JevQ
         typeof question.criteria !== "object" ||
         Array.isArray(question.criteria)
       ) {
-        throw new Error(`jev_evaluate: choice question ${JSON.stringify(id)} requires criteria`);
+        throw new Error(
+          `jev_evaluate: choice question "${id}" needs "criteria" — ${QUESTION_SHAPES.choice}`,
+        );
       }
       const choices = Object.entries(question.criteria);
       if (
@@ -148,7 +172,7 @@ function validateQuestions(value: unknown): asserts value is Record<string, JevQ
         )
       ) {
         throw new Error(
-          `jev_evaluate: choice question ${JSON.stringify(id)} requires at least two string or null criteria`,
+          `jev_evaluate: choice question "${id}" needs "criteria" — ${QUESTION_SHAPES.choice}`,
         );
       }
       continue;
@@ -160,13 +184,13 @@ function validateQuestions(value: unknown): asserts value is Record<string, JevQ
         !question.criteria.every(isJsonValue)
       ) {
         throw new Error(
-          `jev_evaluate: score question ${JSON.stringify(id)} requires at least two JSON criteria levels`,
+          `jev_evaluate: score question "${id}" needs "criteria" — ${QUESTION_SHAPES.score}`,
         );
       }
       continue;
     }
     throw new Error(
-      `jev_evaluate: question ${JSON.stringify(id)} has unsupported type ${JSON.stringify(question.type)}`,
+      `jev_evaluate: question "${id}" has type ${JSON.stringify(question.type)} — must be "noul", "choice", or "score"`,
     );
   }
 }
@@ -340,20 +364,25 @@ export function registerJevTool(
   registry.register({
     name: "jev_evaluate",
     description:
-      "Use the JAI evaluation provider, officially TypeSafe Jev, to make narrow structured decisions over JSON state. Returns typed Noul probabilities, Choice distributions, or Score distributions using jev-latest. Prefer this tool when code needs a classification, confidence-aware route, rubric score, or yes/no probability. It does not generate chat text.",
+      "Use the JAI evaluation provider, officially TypeSafe Jev, to make narrow structured decisions over JSON state. Returns typed Noul probabilities, Choice distributions, or Score distributions using jev-latest. Pass 'questions' as a map of {type, instructions, criteria}: noul criteria is an optional {true,false} map, choice criteria is a map of option->description, score criteria is an array of levels. It does not generate chat text.",
     readOnly: true,
     parallelSafe: true,
     parameters: {
       type: "object",
       properties: {
         state: {
-          description: "Text or JSON data to evaluate.",
+          description:
+            "Content to evaluate: a plain string (a message, document, etc.), or structured JSON (an object/array — a ticket, chat log, or record).",
         },
         questions: {
           type: "object",
-          description:
-            "Question map. Each value has type 'noul', 'choice', or 'score', instructions, and type-specific criteria.",
-          additionalProperties: true,
+          description: [
+            "Map of named questions; each answer returns under the same key. Every value is ONE of three shapes:",
+            '• noul (yes/no probability): {"type":"noul","instructions":"<string or JSON>","criteria":{"true":"<what yes means>","false":"<what no means>"}}  (criteria optional)',
+            '• choice (pick one): {"type":"choice","instructions":"...","criteria":{"<optionId>":"<description or null>", ...}}  — criteria is an OBJECT (map) with at least two options; NOT an array.',
+            '• score (rate on a rubric): {"type":"score","instructions":"...","criteria":["<level 0>","<level 1>", ...]}  — criteria is an ORDERED ARRAY of at least two levels; NOT a map.',
+          ].join("\n"),
+          additionalProperties: { type: "object" },
         },
       },
       required: ["state", "questions"],

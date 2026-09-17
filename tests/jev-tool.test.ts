@@ -143,6 +143,72 @@ describe("evaluateWithJev", () => {
     ).rejects.toThrow(/at least two/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("teaches the choice shape (map, not array) in the error", async () => {
+    const error = await evaluateWithJev(
+      "state",
+      {
+        route: {
+          type: "choice",
+          instructions: "Route this",
+          criteria: ["billing", "technical"],
+        },
+      },
+      { apiKey: "key" },
+    ).catch((caught: unknown) => caught as Error);
+    expect(error.message).toMatch(/OBJECT \(map\)/);
+    expect(error.message).toMatch(/NOT an array/);
+    expect(error.message).toMatch(/\{"criteria": \{/);
+  });
+
+  it("teaches the score shape (array, not map) in the error", async () => {
+    const error = await evaluateWithJev(
+      "state",
+      {
+        quality: {
+          type: "score",
+          instructions: "Rate quality",
+          criteria: { low: "Bad", high: "Good" },
+        },
+      },
+      { apiKey: "key" },
+    ).catch((caught: unknown) => caught as Error);
+    expect(error.message).toMatch(/ORDERED ARRAY/);
+    expect(error.message).toMatch(/NOT an object\/map/);
+    expect(error.message).toContain('["Calm", "Frustrated", "Very angry"]');
+  });
+
+  it("names the offending field when questions is passed as a JSON string", async () => {
+    const error = await evaluateWithJev(
+      "state",
+      '{"x":{"type":"noul","instructions":"y"}}' as unknown as Record<string, never>,
+      { apiKey: "key" },
+    ).catch((caught: unknown) => caught as Error);
+    expect(error.message).toMatch(/not a JSON string/);
+  });
+});
+
+describe("jev_evaluate schema self-description", () => {
+  it("documents every question type and its criteria shape to the model", () => {
+    const registry = registerJevTool(new ToolRegistry());
+    const params = registry.get("jev_evaluate")?.parameters as {
+      properties: Record<string, { description?: string }>;
+      required?: string[];
+    };
+    const questions = params.properties.questions?.description ?? "";
+    const state = params.properties.state?.description ?? "";
+
+    // Each question type is named …
+    expect(questions).toMatch(/noul/);
+    expect(questions).toMatch(/choice/);
+    expect(questions).toMatch(/score/);
+    // … and its criteria shape disambiguated (the exact thing models kept guessing wrong).
+    expect(questions).toMatch(/OBJECT \(map\).*NOT an array/s);
+    expect(questions).toMatch(/ORDERED ARRAY.*NOT a map/s);
+    // state is described as either text or structured JSON.
+    expect(state).toMatch(/string|JSON/);
+    expect(params.required).toEqual(["state", "questions"]);
+  });
 });
 
 describe("registerJevTool", () => {
