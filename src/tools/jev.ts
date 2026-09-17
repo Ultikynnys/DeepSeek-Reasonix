@@ -6,6 +6,16 @@ export const TYPESAFE_SYSTEM_ONE_URL = `${TYPESAFE_API_ROOT}/v1/systemone`;
 export const TYPESAFE_MODELS_URL = `${TYPESAFE_API_ROOT}/v1/models`;
 export const DEFAULT_JEV_MODEL = "jev-latest";
 
+/** Bounded retry for transient TypeSafe failures — mirrors the official SDK policy
+ *  (connection errors, timeouts, 408, 429, 5xx). 401/403/422 are never retried. */
+const TYPESAFE_MAX_RETRIES = 2;
+const TYPESAFE_RETRY_BASE_MS = 500;
+const TYPESAFE_RETRY_MAX_MS = 5_000;
+/** Per-attempt timeout for the evaluation request when the caller supplies none. */
+const TYPESAFE_EVAL_TIMEOUT_MS = 30_000;
+/** How long a successful key validation is trusted before re-checking. */
+const TYPESAFE_VALIDATION_TTL_MS = 10 * 60_000;
+
 export type JsonValue =
   | string
   | number
@@ -80,6 +90,8 @@ export interface TypesafeValidationOptions {
   endpoint?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Bypass the cached result (still refreshes it on success). */
+  force?: boolean;
 }
 
 function isJsonValue(value: unknown): value is JsonValue {
@@ -217,21 +229,94 @@ function statusError(status: number, body: string): Error {
   return new Error(`TypeSafe API returned HTTP ${status}${detail}`);
 }
 
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
+/** Parse `retry-after-ms` / `Retry-After` into milliseconds (prefers the -ms header). */
+function parseRetryAfterMs(headers: Headers | undefined): number | undefined {
+  if (!headers) return undefined;
+  const msHeader = headers.get("retry-after-ms");
+  if (msHeader !== null) {
+    const ms = Number(msHeader);
+    if (Number.isFinite(ms) && ms >= 0) return ms;
+  }
+  const raw = headers.get("retry-after");
+  if (raw === null) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return seconds >= 0 ? seconds * 1000 : undefined;
+  const date = Date.parse(raw);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
+/** Backoff for a zero-based attempt: server `Retry-After` when present, else capped
+ *  exponential with jitter. */
+function retryDelayMs(attempt: number, headers?: Headers): number {
+  const serverDelay = parseRetryAfterMs(headers);
+  if (serverDelay !== undefined) return Math.min(serverDelay, TYPESAFE_RETRY_MAX_MS);
+  const exponential = Math.min(TYPESAFE_RETRY_BASE_MS * 2 ** attempt, TYPESAFE_RETRY_MAX_MS);
+  return Math.round(exponential * (0.75 + Math.random() * 0.5));
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** One request with bounded retry on transient failure. Each attempt gets a fresh
+ *  timeout; a caller abort is re-thrown immediately (never retried). On the final
+ *  attempt a retryable non-2xx response is returned for the caller to map. */
+async function fetchTypesafeWithRetry(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  callerSignal: AbortSignal | undefined,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
+    let response: Response;
+    try {
+      response = await fetch(url, { ...init, signal });
+    } catch (error) {
+      if (callerSignal?.aborted) throw error;
+      if (attempt >= TYPESAFE_MAX_RETRIES) throw error;
+      await sleep(retryDelayMs(attempt), callerSignal);
+      continue;
+    }
+    if (response.ok || attempt >= TYPESAFE_MAX_RETRIES || !isRetryableStatus(response.status)) {
+      return response;
+    }
+    await response.body?.cancel().catch(() => undefined);
+    await sleep(retryDelayMs(attempt, response.headers), callerSignal);
+  }
+}
+
 export async function validateTypesafeApiKey(
   apiKey: string,
   options: TypesafeValidationOptions = {},
 ): Promise<TypesafeModelCard[]> {
   const key = apiKey.trim();
   if (!key) throw new Error("TypeSafe API key is required");
-  const timeout = AbortSignal.timeout(options.timeoutMs ?? 10_000);
-  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   const endpoint = options.endpoint ?? TYPESAFE_MODELS_URL;
   let response: Response;
   try {
-    response = await fetch(endpoint, {
-      headers: { Authorization: `Bearer ${key}` },
-      signal,
-    });
+    response = await fetchTypesafeWithRetry(
+      endpoint,
+      { headers: { Authorization: `Bearer ${key}` } },
+      options.timeoutMs ?? 10_000,
+      options.signal,
+    );
   } catch (error) {
     if (options.signal?.aborted) throw error;
     throw new Error(`Could not validate the TypeSafe API key at ${endpoint}`, { cause: error });
@@ -267,6 +352,58 @@ export async function validateTypesafeApiKey(
     throw new Error("The TypeSafe API key is valid but does not provide access to a Jev model");
   }
   return cards;
+}
+
+interface TypesafeValidationCacheEntry {
+  expiresAt: number;
+  models: TypesafeModelCard[];
+}
+
+let typesafeValidationCache: { key: string; entry: TypesafeValidationCacheEntry } | null = null;
+let typesafeValidationInFlight: { key: string; promise: Promise<TypesafeModelCard[]> } | null =
+  null;
+
+/** Drop the cached key-validation result. Lets tests isolate the module-level cache. */
+export function resetTypesafeValidationCache(): void {
+  typesafeValidationCache = null;
+  typesafeValidationInFlight = null;
+}
+
+/** Cache-aware validation for repeated call sites (per-tab toolset builds). A success
+ *  is trusted briefly; failures are never cached. `force: true` skips the cache read,
+ *  and concurrent calls for one key share a request. */
+export function validateTypesafeApiKeyCached(
+  apiKey: string,
+  options: TypesafeValidationOptions = {},
+): Promise<TypesafeModelCard[]> {
+  const key = apiKey.trim();
+  if (!key) return Promise.reject(new Error("TypeSafe API key is required"));
+  const fresh = !options.force;
+  if (fresh && typesafeValidationCache?.key === key) {
+    if (typesafeValidationCache.entry.expiresAt > Date.now()) {
+      return Promise.resolve(typesafeValidationCache.entry.models);
+    }
+    typesafeValidationCache = null;
+  }
+  if (fresh && typesafeValidationInFlight?.key === key) {
+    return typesafeValidationInFlight.promise;
+  }
+  const promise = validateTypesafeApiKey(key, options).then(
+    (models) => {
+      typesafeValidationCache = {
+        key,
+        entry: { expiresAt: Date.now() + TYPESAFE_VALIDATION_TTL_MS, models },
+      };
+      if (typesafeValidationInFlight?.key === key) typesafeValidationInFlight = null;
+      return models;
+    },
+    (error: unknown) => {
+      if (typesafeValidationInFlight?.key === key) typesafeValidationInFlight = null;
+      throw error;
+    },
+  );
+  typesafeValidationInFlight = { key, promise };
+  return promise;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -333,15 +470,19 @@ export async function evaluateWithJev(
   const endpoint = options.endpoint ?? TYPESAFE_SYSTEM_ONE_URL;
   let response: Response;
   try {
-    response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+    response = await fetchTypesafeWithRetry(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ state, model: DEFAULT_JEV_MODEL, questions }),
       },
-      body: JSON.stringify({ state, model: DEFAULT_JEV_MODEL, questions }),
-      signal: options.signal,
-    });
+      TYPESAFE_EVAL_TIMEOUT_MS,
+      options.signal,
+    );
   } catch (error) {
     if (options.signal?.aborted) throw error;
     throw new Error(`Could not reach TypeSafe at ${endpoint}`, { cause: error });

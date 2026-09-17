@@ -533,14 +533,18 @@ type Action =
   | { t: "antigravity_quota_refreshing" }
   | { t: "push_notice"; text: string; severity?: NoticeSeverity };
 
-function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
+export function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
   const {
     metasoApiKey: _metaso,
     baiduApiKey: _baidu,
     tavilyApiKey: _tavily,
     perplexityApiKey: _perplexity,
     exaApiKey: _exa,
+    braveApiKey: _brave,
     ollamaApiKey: _ollama,
+    zaiApiKey: _zai,
+    opencodeApiKey: _opencode,
+    typesafeApiKey: _typesafe,
     ollamaBaseUrl: _ollamaBaseUrl,
     ollamaGeneration: _ollamaGeneration,
     webSearchEndpoint,

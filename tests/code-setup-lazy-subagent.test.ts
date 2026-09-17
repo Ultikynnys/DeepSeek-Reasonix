@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANTIGRAVITY_OAUTH_CLIENT_ID } from "../src/antigravity-oauth.js";
 import { buildCodeToolset } from "../src/code/setup.js";
 import { saveAntigravityOAuth, saveEnableSubagents } from "../src/config.js";
+import { resetTypesafeValidationCache } from "../src/tools/jev.js";
 
 // #700-followup: buildCodeToolset used to eagerly construct a DeepSeekClient
 // for the subagent runner, which threw "DEEPSEEK_API_KEY is not set" before
@@ -18,6 +19,7 @@ describe("buildCodeToolset", () => {
   let cfgPath: string;
 
   beforeEach(() => {
+    resetTypesafeValidationCache();
     savedKey = process.env.DEEPSEEK_API_KEY;
     savedTypesafeKey = process.env.TYPESAFE_API_KEY;
     // biome-ignore lint/performance/noDelete: setting to "undefined" string would mask test

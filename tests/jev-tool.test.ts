@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../src/tools.js";
 import {
   DEFAULT_JEV_MODEL,
@@ -6,7 +6,9 @@ import {
   TYPESAFE_SYSTEM_ONE_URL,
   evaluateWithJev,
   registerJevTool,
+  resetTypesafeValidationCache,
   validateTypesafeApiKey,
+  validateTypesafeApiKeyCached,
 } from "../src/tools/jev.js";
 
 const VALID_RESULT = {
@@ -119,7 +121,11 @@ describe("evaluateWithJev", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
-        async () => new Response(JSON.stringify({ detail: "quota exhausted" }), { status: 429 }),
+        async () =>
+          new Response(JSON.stringify({ detail: "quota exhausted" }), {
+            status: 429,
+            headers: { "retry-after-ms": "0" },
+          }),
       ),
     );
     const error = await evaluateWithJev(
@@ -234,5 +240,102 @@ describe("registerJevTool", () => {
       if (originalKey === undefined) delete process.env.TYPESAFE_API_KEY;
       else process.env.TYPESAFE_API_KEY = originalKey;
     }
+  });
+});
+
+describe("TypeSafe request retry", () => {
+  const modelCard = () =>
+    new Response(
+      JSON.stringify({
+        models: [{ name: "jev-latest", description: "Jev", release_date: "2026-01-01" }],
+      }),
+      { status: 200 },
+    );
+
+  it("retries a transient 429 then succeeds", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("busy", { status: 429, headers: { "retry-after-ms": "0" } }),
+      )
+      .mockResolvedValueOnce(modelCard());
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(validateTypesafeApiKey("k")).resolves.toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after the retry budget on a persistent 5xx", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response("boom", { status: 503, headers: { "retry-after-ms": "0" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(validateTypesafeApiKey("k")).rejects.toThrow(/HTTP 503/);
+    expect(fetchMock).toHaveBeenCalledTimes(3); // 1 attempt + 2 retries
+  });
+
+  it("does not retry a 401", async () => {
+    const fetchMock = vi.fn(async () => new Response("nope", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(validateTypesafeApiKey("k")).rejects.toThrow(/authentication failed/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a caller abort", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchMock = vi.fn(async () => {
+      throw new DOMException("aborted", "AbortError");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(validateTypesafeApiKey("k", { signal: controller.signal })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("validateTypesafeApiKeyCached", () => {
+  beforeEach(() => resetTypesafeValidationCache());
+
+  const modelCard = () =>
+    new Response(
+      JSON.stringify({
+        models: [{ name: "jev-latest", description: "Jev", release_date: "2026-01-01" }],
+      }),
+      { status: 200 },
+    );
+
+  it("serves a repeated validation from cache", async () => {
+    const fetchMock = vi.fn(async () => modelCard());
+    vi.stubGlobal("fetch", fetchMock);
+    await validateTypesafeApiKeyCached("same-key");
+    await validateTypesafeApiKeyCached("same-key");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-checks when forced", async () => {
+    const fetchMock = vi.fn(async () => modelCard());
+    vi.stubGlobal("fetch", fetchMock);
+    await validateTypesafeApiKeyCached("k");
+    await validateTypesafeApiKeyCached("k", { force: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never caches a failure", async () => {
+    const fetchMock = vi.fn(async () => new Response("nope", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(validateTypesafeApiKeyCached("bad")).rejects.toThrow(/authentication failed/);
+    await expect(validateTypesafeApiKeyCached("bad")).rejects.toThrow(/authentication failed/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares one in-flight request for the same key", async () => {
+    const fetchMock = vi.fn(async () => modelCard());
+    vi.stubGlobal("fetch", fetchMock);
+    const [a, b] = await Promise.all([
+      validateTypesafeApiKeyCached("k"),
+      validateTypesafeApiKeyCached("k"),
+    ]);
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

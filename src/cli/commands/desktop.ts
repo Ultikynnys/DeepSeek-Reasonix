@@ -219,7 +219,7 @@ import {
 } from "../../mcp/extension.js";
 import { ensureNpxAvailable } from "../../mcp/node-runtime.js";
 import { quoteArg } from "../../mcp/stdio.js";
-import { validateTypesafeApiKey } from "../../tools/jev.js";
+import { validateTypesafeApiKeyCached } from "../../tools/jev.js";
 
 import {
   ANTIGRAVITY_OAUTH_CLIENT_ID,
@@ -6113,36 +6113,40 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       void refreshOpencodeModels(!!msg.force, tab);
       return;
     }
-    if (msg.cmd === "settings_save" && msg.typesafeApiKey !== undefined) {
-      const nextKey = msg.typesafeApiKey?.trim() || "";
-      void (async () => {
-        try {
-          if (nextKey) await validateTypesafeApiKey(nextKey);
-          const envKey = process.env.TYPESAFE_API_KEY?.trim() || "";
-          if (envKey && envKey !== nextKey) await validateTypesafeApiKey(envKey);
-          const cfg = readConfig();
-          cfg.typesafeApiKey = nextKey || undefined;
-          writeConfig(cfg);
-          const effectiveKey = envKey || nextKey;
-          for (const openTab of tabs.values()) {
-            refreshJevKnowledge(openTab, Boolean(effectiveKey));
-            emitSettings(openTab);
-          }
-        } catch (err) {
-          emit(
-            {
-              type: "$error",
-              message: `TypeSafe API key validation failed: ${(err as Error).message}`,
-            },
-            tab.id,
-          );
-          emitSettings(tab);
-        }
-      })();
-      return;
-    }
     if (msg.cmd === "settings_save") {
       try {
+        // JEV/TypeSafe key is validated asynchronously (network) but must never be
+        // dropped when co-sent with other fields — so handle it first, before the
+        // early-return branches below (e.g. workspaceDir) can swallow the message.
+        if (msg.typesafeApiKey !== undefined) {
+          const nextKey = msg.typesafeApiKey?.trim() || "";
+          void (async () => {
+            try {
+              if (nextKey) await validateTypesafeApiKeyCached(nextKey, { force: true });
+              const envKey = process.env.TYPESAFE_API_KEY?.trim() || "";
+              if (envKey && envKey !== nextKey) {
+                await validateTypesafeApiKeyCached(envKey, { force: true });
+              }
+              const cfg = readConfig();
+              cfg.typesafeApiKey = nextKey || undefined;
+              writeConfig(cfg);
+              const effectiveKey = envKey || nextKey;
+              for (const openTab of tabs.values()) {
+                refreshJevKnowledge(openTab, Boolean(effectiveKey));
+                emitSettings(openTab);
+              }
+            } catch (err) {
+              emit(
+                {
+                  type: "$error",
+                  message: `TypeSafe API key validation failed: ${(err as Error).message}`,
+                },
+                tab.id,
+              );
+              emitSettings(tab);
+            }
+          })();
+        }
         if (msg.reasoningEffort !== undefined && isReasoningEffort(msg.reasoningEffort)) {
           saveReasoningEffort(msg.reasoningEffort);
           tab.currentReasoningEffort = msg.reasoningEffort;

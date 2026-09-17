@@ -25,7 +25,7 @@ import { registerChoiceTool } from "../tools/choice.js";
 import { registerCodeQueryTools } from "../tools/code-query.js";
 import { registerFilesystemTools } from "../tools/filesystem.js";
 import { registerJavaSourceTool } from "../tools/java-source.js";
-import { registerJevTool, validateTypesafeApiKey } from "../tools/jev.js";
+import { registerJevTool, validateTypesafeApiKeyCached } from "../tools/jev.js";
 import { JobRegistry } from "../tools/jobs.js";
 import { registerMemoryTools } from "../tools/memory.js";
 import { registerPlanTool } from "../tools/plan.js";
@@ -157,7 +157,9 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   const typesafeApiKey = loadTypesafeApiKey(opts.configPath);
   if (typesafeApiKey) {
     try {
-      await validateTypesafeApiKey(typesafeApiKey);
+      // Cached: a successful validation is trusted briefly so per-tab toolset builds
+      // and workspace switches don't re-hit the network. Failures are never cached.
+      await validateTypesafeApiKeyCached(typesafeApiKey);
       registerJevTool(tools, { configPath: opts.configPath });
     } catch (error) {
       process.stderr.write(
