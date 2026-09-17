@@ -57,6 +57,7 @@ import {
   loadSubagentModels,
   loadTheme,
   loadToolRateLimit,
+  loadTypesafeApiKey,
   loadZaiApiKey,
   markEditModeHintShown,
   providerForModel,
@@ -1658,6 +1659,22 @@ describe("config", () => {
       } finally {
         if (origLong !== undefined) process.env.BRAVE_SEARCH_API_KEY = origLong;
         if (origShort !== undefined) process.env.BRAVE_API_KEY = origShort;
+      }
+    });
+  });
+
+  describe("TypeSafe credentials", () => {
+    it("loads the saved API key and lets TYPESAFE_API_KEY take precedence", () => {
+      const original = process.env.TYPESAFE_API_KEY;
+      writeConfig({ typesafeApiKey: "typesafe-config-key" }, path);
+      try {
+        expect(loadTypesafeApiKey(path)).toBe("typesafe-config-key");
+        process.env.TYPESAFE_API_KEY = "typesafe-env-key";
+        expect(loadTypesafeApiKey(path)).toBe("typesafe-env-key");
+      } finally {
+        // biome-ignore lint/performance/noDelete: restore exact env state
+        if (original === undefined) delete process.env.TYPESAFE_API_KEY;
+        else process.env.TYPESAFE_API_KEY = original;
       }
     });
   });

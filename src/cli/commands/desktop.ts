@@ -142,6 +142,7 @@ import {
   loadResolvedSkillPaths,
   loadSubagentModels,
   loadTavilyApiKey,
+  loadTypesafeApiKey,
   loadWorkspaceDir,
   loadZaiApiKey,
   mergeMcpServerEntry,
@@ -218,6 +219,7 @@ import {
 } from "../../mcp/extension.js";
 import { ensureNpxAvailable } from "../../mcp/node-runtime.js";
 import { quoteArg } from "../../mcp/stdio.js";
+import { validateTypesafeApiKey } from "../../tools/jev.js";
 
 import {
   ANTIGRAVITY_OAUTH_CLIENT_ID,
@@ -1026,6 +1028,7 @@ function collectWebSearchApiKeyPrefixes(): {
   brave?: string;
   zai?: string;
   opencode?: string;
+  typesafe?: string;
 } {
   return {
     metaso: maskApiKey(loadMetasoApiKey()),
@@ -1036,6 +1039,7 @@ function collectWebSearchApiKeyPrefixes(): {
     brave: maskApiKey(loadBraveApiKey()),
     zai: maskApiKey(loadZaiApiKey()),
     opencode: maskApiKey(loadOpencodeApiKey()),
+    typesafe: maskApiKey(loadTypesafeApiKey()),
   };
 }
 
@@ -3328,6 +3332,14 @@ function refreshSubagentKnowledge(tab: Tab, enabled: boolean): void {
     hasSemanticSearch: toolset.semantic.enabled,
     modelId: tab.currentModel,
   });
+  tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
+}
+
+/** Add/remove JAI at the knowledge level, then rebuild the immutable tool-spec prefix. */
+function refreshJevKnowledge(tab: Tab, enabled: boolean): void {
+  const toolset = tab.toolset;
+  if (!toolset) return;
+  toolset.syncJevTool(enabled);
   tab.runtime = tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
 }
 
@@ -6099,6 +6111,34 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "opencode_models_refresh") {
       void refreshOpencodeModels(!!msg.force, tab);
+      return;
+    }
+    if (msg.cmd === "settings_save" && msg.typesafeApiKey !== undefined) {
+      const nextKey = msg.typesafeApiKey?.trim() || "";
+      void (async () => {
+        try {
+          if (nextKey) await validateTypesafeApiKey(nextKey);
+          const envKey = process.env.TYPESAFE_API_KEY?.trim() || "";
+          if (envKey && envKey !== nextKey) await validateTypesafeApiKey(envKey);
+          const cfg = readConfig();
+          cfg.typesafeApiKey = nextKey || undefined;
+          writeConfig(cfg);
+          const effectiveKey = envKey || nextKey;
+          for (const openTab of tabs.values()) {
+            refreshJevKnowledge(openTab, Boolean(effectiveKey));
+            emitSettings(openTab);
+          }
+        } catch (err) {
+          emit(
+            {
+              type: "$error",
+              message: `TypeSafe API key validation failed: ${(err as Error).message}`,
+            },
+            tab.id,
+          );
+          emitSettings(tab);
+        }
+      })();
       return;
     }
     if (msg.cmd === "settings_save") {

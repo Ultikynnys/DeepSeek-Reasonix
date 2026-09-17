@@ -361,6 +361,8 @@ export interface ReasonixConfig {
   openaiApiKey?: string;
   /** Z.AI API key for glm-* models and Z.AI search. Falls back to ZAI_API_KEY. */
   zaiApiKey?: string;
+  /** TypeSafe API key for Jev System One evaluations. Falls back to TYPESAFE_API_KEY. */
+  typesafeApiKey?: string;
   /** Z.AI OpenAI-compatible endpoint override. Falls back to ZAI_BASE_URL. */
   zaiBaseUrl?: string;
   /** OpenCode API key for free/paid OpenCode models. Falls back to OPENCODE_API_KEY env or defaults to "public". */
@@ -693,6 +695,14 @@ export function loadExaApiKey(path: string = defaultConfigPath()): string | unde
 export function loadZaiApiKey(path: string = defaultConfigPath()): string | undefined {
   if (process.env.ZAI_API_KEY) return process.env.ZAI_API_KEY.trim();
   const cfg = readConfig(path).zaiApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
+/** TypeSafe API key for Jev System One evaluations: env > config > undefined. */
+export function loadTypesafeApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.TYPESAFE_API_KEY) return process.env.TYPESAFE_API_KEY.trim();
+  const cfg = readConfig(path).typesafeApiKey;
   if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
   return undefined;
 }

@@ -174,6 +174,14 @@ export type {
   WebSearchOptions,
   WebToolsOptions,
 } from "./tools/web.js";
+export { evaluateWithJev, registerJevTool, validateTypesafeApiKey } from "./tools/jev.js";
+export type {
+  JevAnswer,
+  JevEvaluationOptions,
+  JevQuestion,
+  JevResult,
+  JevToolOptions,
+} from "./tools/jev.js";
 
 export {
   SessionStats,

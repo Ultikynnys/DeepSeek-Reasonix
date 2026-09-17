@@ -13,25 +13,69 @@ import { saveAntigravityOAuth, saveEnableSubagents } from "../src/config.js";
 
 describe("buildCodeToolset", () => {
   let savedKey: string | undefined;
+  let savedTypesafeKey: string | undefined;
   let tmpRoot: string;
   let cfgPath: string;
 
   beforeEach(() => {
     savedKey = process.env.DEEPSEEK_API_KEY;
+    savedTypesafeKey = process.env.TYPESAFE_API_KEY;
     // biome-ignore lint/performance/noDelete: setting to "undefined" string would mask test
     delete process.env.DEEPSEEK_API_KEY;
+    // biome-ignore lint/performance/noDelete: setting to "undefined" string would mask test
+    delete process.env.TYPESAFE_API_KEY;
     tmpRoot = mkdtempSync(join(tmpdir(), "reasonix-code-setup-"));
     cfgPath = join(tmpRoot, "config.json");
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (savedKey !== undefined) process.env.DEEPSEEK_API_KEY = savedKey;
+    if (savedTypesafeKey !== undefined) process.env.TYPESAFE_API_KEY = savedTypesafeKey;
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
   it("builds without DEEPSEEK_API_KEY set", async () => {
     const toolset = await buildCodeToolset({ rootDir: tmpRoot });
     expect(toolset.tools.size).toBeGreaterThan(0);
+    await toolset.jobs.shutdown();
+  });
+
+  it("does not expose JAI to models when no TypeSafe key is configured", async () => {
+    const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });
+    expect(toolset.tools.has("jev_evaluate")).toBe(false);
+    await toolset.jobs.shutdown();
+  });
+
+  it("exposes JAI to models only after the configured TypeSafe key validates", async () => {
+    writeFileSync(cfgPath, JSON.stringify({ typesafeApiKey: "valid-typesafe-key" }), "utf8");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          models: [{ name: "jev-latest", description: "Jev", release_date: "2026-01-01" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });
+
+    const spec = toolset.tools.specs().find((entry) => entry.function.name === "jev_evaluate");
+    expect(spec).toBeDefined();
+    expect(spec?.function.description).toMatch(/JAI evaluation provider.*TypeSafe Jev/i);
+    expect(spec?.function.parameters.required).toEqual(["state", "questions"]);
+    await toolset.jobs.shutdown();
+  });
+
+  it("does not expose JAI when TypeSafe rejects the configured key", async () => {
+    writeFileSync(cfgPath, JSON.stringify({ typesafeApiKey: "invalid-typesafe-key" }), "utf8");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("unauthorized", { status: 401 }),
+    );
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });
+
+    expect(toolset.tools.has("jev_evaluate")).toBe(false);
+    expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/key validation failed/));
     await toolset.jobs.shutdown();
   });
 

@@ -952,7 +952,7 @@ function WebSearchEngineCredentials({
   if (!field) return null;
   const prefix = settings.webSearchApiKeys?.[field.engine];
   return (
-    <WebSearchApiKeyRow
+    <ProviderApiKeyRow
       engine={field.engine}
       patchKey={field.patchKey}
       signupUrl={field.signupUrl}
@@ -994,7 +994,7 @@ function SearxngEndpointRow({
   );
 }
 
-function WebSearchApiKeyRow({
+export function ProviderApiKeyRow({
   engine,
   patchKey,
   signupUrl,
@@ -1010,7 +1010,8 @@ function WebSearchApiKeyRow({
     | "brave"
     | "ollama"
     | "zai"
-    | "opencode";
+    | "opencode"
+    | "typesafe";
   patchKey:
     | "metasoApiKey"
     | "baiduApiKey"
@@ -1020,7 +1021,8 @@ function WebSearchApiKeyRow({
     | "braveApiKey"
     | "ollamaApiKey"
     | "zaiApiKey"
-    | "opencodeApiKey";
+    | "opencodeApiKey"
+    | "typesafeApiKey";
   signupUrl: string;
   prefix?: string;
   onSave: (patch: SettingsPatch) => void;
@@ -1495,8 +1497,21 @@ function PageModels({
         ) : null}
       </section>
       <section className="section">
+        <div className="stitle">{t("settings.typesafeSection")}</div>
+        <div className="h" style={{ marginBottom: 8 }}>
+          {t("settings.typesafeHint")}
+        </div>
+        <ProviderApiKeyRow
+          engine="typesafe"
+          patchKey="typesafeApiKey"
+          signupUrl="https://console.typesafe.ai"
+          prefix={settings.webSearchApiKeys?.typesafe}
+          onSave={onSave}
+        />
+      </section>
+      <section className="section">
         <div className="stitle">Z.AI / GLM</div>
-        <WebSearchApiKeyRow
+        <ProviderApiKeyRow
           engine="zai"
           patchKey="zaiApiKey"
           signupUrl="https://z.ai/manage-apikey/apikey-list"
@@ -1522,7 +1537,7 @@ function PageModels({
             }}
           />
         </div>
-        <WebSearchApiKeyRow
+        <ProviderApiKeyRow
           engine="opencode"
           patchKey="opencodeApiKey"
           signupUrl="https://opencode.ai/auth"
@@ -1548,7 +1563,7 @@ function PageModels({
             }}
           />
         </div>
-        <WebSearchApiKeyRow
+        <ProviderApiKeyRow
           engine="ollama"
           patchKey="ollamaApiKey"
           signupUrl="https://ollama.com/settings/keys"

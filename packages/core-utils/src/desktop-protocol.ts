@@ -779,6 +779,7 @@ export interface SettingsEvent {
     brave?: string;
     zai?: string;
     opencode?: string;
+    typesafe?: string;
   };
   opencodeBaseUrl?: string;
   /** Per-tab subagent model — the default model used when a subagent skill has no explicit `model:` frontmatter override. Absent = deepseek-v4-flash. */
@@ -1053,6 +1054,7 @@ export interface SettingsPatch {
   braveApiKey?: string | null;
   zaiApiKey?: string | null;
   opencodeApiKey?: string | null;
+  typesafeApiKey?: string | null;
   opencodeBaseUrl?: string | null;
 }
 

@@ -13,6 +13,7 @@ import {
   loadResolvedSkillPaths,
   loadSubagentModels,
   loadToolRateLimit,
+  loadTypesafeApiKey,
   providerForModel,
   readConfig,
   searchEnabled,
@@ -24,6 +25,7 @@ import { registerChoiceTool } from "../tools/choice.js";
 import { registerCodeQueryTools } from "../tools/code-query.js";
 import { registerFilesystemTools } from "../tools/filesystem.js";
 import { registerJavaSourceTool } from "../tools/java-source.js";
+import { registerJevTool, validateTypesafeApiKey } from "../tools/jev.js";
 import { JobRegistry } from "../tools/jobs.js";
 import { registerMemoryTools } from "../tools/memory.js";
 import { registerPlanTool } from "../tools/plan.js";
@@ -93,6 +95,8 @@ export interface CodeToolset {
    *  on this toolset's registry so later runtimes carry the new state. The prompt +
    *  skills-index half is the host's job (rebuild via codeSystemPrompt). */
   syncSubagentTools: (enabled: boolean) => void;
+  /** Knowledge-level JAI sync. Validation must complete before enabled=true. */
+  syncJevTool: (enabled: boolean) => void;
 }
 
 /** Mirror `editMode === "plan"` into the registry's dispatch gate — keeps a single source of truth (the persisted EditMode) for the read-only mode. */
@@ -150,6 +154,17 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   registerSeeImageTool(tools, { rootDir: opts.rootDir });
   registerScreenCaptureTool(tools, { rootDir: opts.rootDir });
   registerScaffoldTools(tools, { projectRoot: opts.rootDir });
+  const typesafeApiKey = loadTypesafeApiKey(opts.configPath);
+  if (typesafeApiKey) {
+    try {
+      await validateTypesafeApiKey(typesafeApiKey);
+      registerJevTool(tools, { configPath: opts.configPath });
+    } catch (error) {
+      process.stderr.write(
+        `reasonix: JAI tool unavailable because TypeSafe key validation failed — ${(error as Error).message}\n`,
+      );
+    }
+  }
   if (searchEnabled()) {
     registerWebTools(tools);
   }
@@ -233,5 +248,9 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
         subagentRunner,
         subagentsEnabled: enabled,
       }),
+    syncJevTool: (enabled) => {
+      if (enabled) registerJevTool(tools, { configPath: opts.configPath });
+      else tools.unregister("jev_evaluate");
+    },
   };
 }
