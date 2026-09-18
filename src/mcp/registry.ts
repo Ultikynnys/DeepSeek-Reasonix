@@ -46,16 +46,24 @@ export interface BridgeOptions {
    *  FIRST successful tool result of this bridge so every agent driving the
    *  browser learns the maintenance contract without a schema-cost bump. */
   toolingNotice?: string;
-  /** Compact pointer appended to every bridged tool description — keeps the
-   *  tooling dir unmissable in tool listings. Deterministic per install, so
-   *  the tool-list hash stays cache-stable. */
-  descriptionSuffix?: string;
+  /** Compact pointer appended to each bridged tool description. A string hits
+   *  every tool; a function targets specific tools (undefined = no suffix).
+   *  Deterministic per install, so the tool-list hash stays cache-stable. */
+  descriptionSuffix?: string | ((toolName: string) => string | undefined);
   /** Optional server-specific safety gate before the upstream MCP call. A string blocks dispatch. */
   beforeCall?: (
     toolName: string,
     args: Record<string, unknown>,
     ctx?: ToolCallContext,
   ) => Promise<string | null>;
+  /** Optional argument hydration before the upstream call. Inline a local file's
+   *  base64 into an email attachment so the model passes a path, not the bytes.
+   *  Returns replacement args; a thrown error becomes a JSON error result. */
+  transformArgs?: (
+    toolName: string,
+    args: Record<string, unknown>,
+    ctx?: ToolCallContext,
+  ) => Record<string, unknown> | undefined | Promise<Record<string, unknown> | undefined>;
 }
 
 /** Mutable holder so `/mcp reconnect` can swap the underlying client without re-bridging tools. */
@@ -96,11 +104,24 @@ export interface BridgeEnv {
   /** See BridgeOptions.toolingNotice — once-flag lives here so hot re-registrations inherit it. */
   toolingNotice?: string;
   toolingNoticeSeen?: boolean;
-  descriptionSuffix?: string;
+  descriptionSuffix?: string | ((toolName: string) => string | undefined);
   beforeCall?: BridgeOptions["beforeCall"];
+  transformArgs?: BridgeOptions["transformArgs"];
   /** Registered (wire) name → real MCP tool name, for the per-tool toggle list
    *  once the wire name is sanitized (`sanitizeWireToolName`). In-process only. */
   bareNames?: Map<string, string>;
+}
+
+/** Apply a description suffix: a string hits every tool, a function specific
+ *  ones (undefined = skip). Undefined description plus a suffix yields the suffix. */
+function withDescriptionSuffix(
+  description: string | undefined,
+  suffix: string | ((toolName: string) => string | undefined) | undefined,
+  toolName: string,
+): string | undefined {
+  const resolved = typeof suffix === "function" ? suffix(toolName) : suffix;
+  if (!resolved) return description;
+  return description ? `${description} ${resolved}` : resolved;
 }
 
 /** Register one MCP tool's bridged closure into the registry. Returns the registered name (or "" if skipped). */
@@ -125,11 +146,11 @@ export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string 
   env.bareNames?.set(registeredName, stableTool.name);
   env.registry.register({
     name: registeredName,
-    description: stableTool.description
-      ? env.descriptionSuffix
-        ? `${stableTool.description} ${env.descriptionSuffix}`
-        : stableTool.description
-      : env.descriptionSuffix,
+    description: withDescriptionSuffix(
+      stableTool.description,
+      env.descriptionSuffix,
+      stableTool.name,
+    ),
     parameters: stableTool.inputSchema as JSONSchema,
     fn: async (args: Record<string, unknown>, ctx) => {
       if (env.ready) {
@@ -140,14 +161,23 @@ export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string 
           ctx?.signal,
         );
       }
+      let params = args;
+      if (env.transformArgs) {
+        try {
+          const next = await env.transformArgs(stableTool.name, args, ctx);
+          if (next) params = next;
+        } catch (err) {
+          return JSON.stringify({ error: messageOf(err) });
+        }
+      }
       if (env.beforeCall) {
-        const blocked = await env.beforeCall(stableTool.name, args, ctx);
+        const blocked = await env.beforeCall(stableTool.name, params, ctx);
         if (blocked !== null) return blocked;
       }
       const t0 = performance.now();
       try {
         const live = env.host.client;
-        const toolResult = await live.callTool(stableTool.name, args, {
+        const toolResult = await live.callTool(stableTool.name, params, {
           onProgress: env.onProgress
             ? (info) => env.onProgress!({ toolName: registeredName, ...info })
             : undefined,
@@ -248,6 +278,7 @@ export async function bridgeMcpTools(
     toolingNotice: opts.toolingNotice,
     descriptionSuffix: opts.descriptionSuffix,
     beforeCall: opts.beforeCall,
+    transformArgs: opts.transformArgs,
     bareNames: new Map(),
   };
   const listed = await client.listTools();

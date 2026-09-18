@@ -58,6 +58,15 @@ export const OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS: readonly string[] = [
   "update-mailbox-settings",
 ];
 
+/** Model-facing pointer appended to every bridged Outlook tool description.
+ *  Teaches the native attachment path so agents stop hand-encoding base64 (which
+ *  is impossible for real files) or dumping a filesystem path into `contentBytes`. */
+export const outlookAttachmentGuidance =
+  "Attachments: to attach a local file, give its filesystem path in the attachment's `path` field " +
+  "(or place the path in `contentBytes`). Reasonix reads the file and inlines the raw base64 " +
+  "for you; never paste base64 yourself. Inline attachments are capped at 3 MB; larger files need " +
+  "create-mail-attachment-upload-session.";
+
 /** Fail-safe classifier for current and future upstream tools that can transmit mail. */
 export function isOutlookSendCapableTool(toolName: string): boolean {
   return (

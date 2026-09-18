@@ -9,6 +9,10 @@ import { withPlaywrightWorkspaceProfile } from "../../mcp/extension.js";
 import { isGmailMailSpec, resolveGmailToken } from "../../mcp/gmail-mail.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import {
+  OUTLOOK_ATTACHMENT_TOOLS,
+  hydrateOutlookAttachments,
+} from "../../mcp/outlook-attachments.js";
+import {
   OUTLOOK_MAIL_DEFAULT_DISABLED_TOOLS,
   confirmOutlookSend,
   isOutlookConfirmedSendTool,
@@ -16,6 +20,7 @@ import {
   isOutlookSendCapableTool,
   managedMcpToolsHiddenFromModel,
   mcpTextResult,
+  outlookAttachmentGuidance,
 } from "../../mcp/outlook-mail.js";
 import {
   ensurePlaywrightTooling,
@@ -260,6 +265,10 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
                   client: host.client,
                   gate: toolContext?.confirmationGate,
                 }),
+              transformArgs: (toolName, args) =>
+                hydrateOutlookAttachments(toolName, args, { workspaceDir }),
+              descriptionSuffix: (toolName) =>
+                OUTLOOK_ATTACHMENT_TOOLS.has(toolName) ? outlookAttachmentGuidance : undefined,
             }
           : {}),
         ...(playwrightTooling
