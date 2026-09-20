@@ -18,17 +18,18 @@ export const LATEST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Network timeout. Short — we never block the UI waiting on this. */
 export const LATEST_FETCH_TIMEOUT_MS = 2_000;
 
-/** `name === "reasonix"` guard avoids picking up an outer package.json when loaded as a dep. */
-function readPackageVersion(): string {
+/** Directory of this package — the local Reasonix installation. Walks up from
+ *  the module to the nearest `package.json` named "reasonix" (the `name` guard
+ *  avoids picking up an outer package.json when loaded as a dep). Pure
+ *  filesystem probe; returns null when none is reachable. */
+function findInstallDir(): string | null {
   try {
     let dir = dirname(fileURLToPath(import.meta.url));
     for (let i = 0; i < 6; i++) {
       const p = join(dir, "package.json");
       if (existsSync(p)) {
         const pkg = JSON.parse(readFileSync(p, "utf8"));
-        if (pkg?.name === "reasonix" && typeof pkg.version === "string") {
-          return pkg.version;
-        }
+        if (pkg?.name === "reasonix") return dir;
       }
       const parent = dirname(dir);
       if (parent === dir) break;
@@ -36,6 +37,28 @@ function readPackageVersion(): string {
     }
   } catch {
     /* fall through to fallback */
+  }
+  return null;
+}
+
+/** The local Reasonix installation directory — the folder the running app
+ *  lives in (dev: the repo root; installed: the bundled app folder). Falls back
+ *  to the process working directory when no `reasonix` package.json is
+ *  reachable; the desktop shell pins the daemon's cwd to this folder, so the
+ *  two coincide. Used as the default workspace for a New tab. */
+export function reasonixInstallDir(): string {
+  return findInstallDir() ?? process.cwd();
+}
+
+function readPackageVersion(): string {
+  const dir = findInstallDir();
+  if (dir) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+      if (typeof pkg.version === "string") return pkg.version;
+    } catch {
+      /* fall through to fallback */
+    }
   }
   return "0.0.0-dev";
 }

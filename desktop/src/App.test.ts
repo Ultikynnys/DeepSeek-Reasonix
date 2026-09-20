@@ -36,6 +36,7 @@ vi.mock("./theme", () => ({
 
 import {
   activePlanForMessage,
+  groupTabsByGroup,
   hasPendingIntervention,
   parseSessionTimestamp,
   reduce,
@@ -2606,5 +2607,30 @@ describe("sanitizeSettingsPatch — secrets never enter the settings view state"
     expect(sanitized).not.toHaveProperty("ollamaApiKey");
     expect(sanitized.model).toBe("deepseek-v4-flash");
     expect(sanitized.reasoningEffort).toBe("high");
+  });
+});
+
+describe("groupTabsByGroup — sessions stack into one tab", () => {
+  it("groups channels sharing a group id and keys standalone channels by id", () => {
+    const groups = groupTabsByGroup([
+      { id: "t1", group: "g1" },
+      { id: "t2", group: "g1" },
+      { id: "t3", group: "g2" },
+      { id: "t4" },
+    ]);
+    expect(groups.map((g) => g.key)).toEqual(["g1", "g2", "t4"]);
+    expect(groups[0]!.items.map((t) => t.id)).toEqual(["t1", "t2"]);
+    expect(groups[1]!.items.map((t) => t.id)).toEqual(["t3"]);
+    expect(groups[2]!.items.map((t) => t.id)).toEqual(["t4"]);
+  });
+
+  it("preserves first-seen order across interleaved groups", () => {
+    const groups = groupTabsByGroup([
+      { id: "t1", group: "g2" },
+      { id: "t2", group: "g1" },
+      { id: "t3", group: "g2" },
+    ]);
+    expect(groups.map((g) => g.key)).toEqual(["g2", "g1"]);
+    expect(groups[0]!.items.map((t) => t.id)).toEqual(["t1", "t3"]);
   });
 });

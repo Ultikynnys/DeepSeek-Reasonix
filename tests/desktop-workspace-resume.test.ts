@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pickResumeSession } from "../src/cli/commands/desktop.js";
+import { pickResumeSession, workspaceAbandonedBySwitch } from "../src/cli/commands/desktop.js";
 import {
   appendSessionMessage,
   listSessionsForWorkspace,
@@ -65,10 +65,47 @@ describe("desktop workspace-switch session resume", () => {
     expect(pickResumeSession(listSessionsForWorkspace("/proj/a"))?.name).toBe(newer);
   });
 
+  it("skips a session another channel already holds when picking a resume target", () => {
+    const older = "code-a-202605251200";
+    const newer = "code-a-202605251300";
+    appendSessionMessage(older, { role: "user", content: "old" });
+    appendSessionMessage(newer, { role: "user", content: "new" });
+    patchSessionMeta(older, { workspace: "/proj/a" });
+    patchSessionMeta(newer, { workspace: "/proj/a" });
+    pinOldMtime(older, newer);
+    const list = listSessionsForWorkspace("/proj/a");
+
+    // Newest wins normally…
+    expect(pickResumeSession(list)?.name).toBe(newer);
+    // …but if another channel already holds it, fall through to the next free one.
+    expect(pickResumeSession(list, (s) => s.name === newer)?.name).toBe(older);
+    // Every candidate held → null, so the switch mints a fresh session.
+    expect(pickResumeSession(list, () => true)).toBeNull();
+  });
+
   it("ignores sessions that belong to a different workspace", () => {
     appendSessionMessage("code-b-202605251300", { role: "user", content: "b" });
     patchSessionMeta("code-b-202605251300", { workspace: "/proj/b" });
 
     expect(pickResumeSession(listSessionsForWorkspace("/proj/a"))).toBeNull();
+  });
+});
+
+describe("workspaceAbandonedBySwitch — stop agents when no tab keeps the workspace", () => {
+  const tab = (id: string, groupId: string, rootDir: string) => ({ id, groupId, rootDir });
+
+  it("is true when no other tab targets the workspace", () => {
+    const tabs = [tab("t1", "g1", "/proj/a"), tab("t2", "g2", "/proj/b")];
+    expect(workspaceAbandonedBySwitch(tabs, tabs[0]!, "/proj/a")).toBe(true);
+  });
+
+  it("treats sibling sessions in the same group as the same tab", () => {
+    const tabs = [tab("t1", "g1", "/proj/a"), tab("t2", "g1", "/proj/a")];
+    expect(workspaceAbandonedBySwitch(tabs, tabs[0]!, "/proj/a")).toBe(true);
+  });
+
+  it("is false when another tab outside the group still has the workspace", () => {
+    const tabs = [tab("t1", "g1", "/proj/a"), tab("t2", "g2", "/proj/a")];
+    expect(workspaceAbandonedBySwitch(tabs, tabs[0]!, "/proj/a")).toBe(false);
   });
 });

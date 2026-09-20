@@ -12,6 +12,7 @@ import {
   detectNpmInstallPrefix,
   getLatestVersion,
   isNpxInstall,
+  reasonixInstallDir,
 } from "../src/version.js";
 
 describe("VERSION", () => {
@@ -19,6 +20,18 @@ describe("VERSION", () => {
     const pkgPath = join(process.cwd(), "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
     expect(VERSION).toBe(pkg.version);
+  });
+});
+
+describe("reasonixInstallDir", () => {
+  it("points at the local Reasonix package root (package.json named reasonix)", () => {
+    const dir = reasonixInstallDir();
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    expect(pkg.name).toBe("reasonix");
+  });
+
+  it("resolves to the repository root in the test environment", () => {
+    expect(reasonixInstallDir()).toBe(process.cwd());
   });
 });
 

@@ -5,6 +5,15 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Changed: sessions are now independent agents — a tab can host several, and several tabs can share one workspace.**
+
+- Sessions no longer replace one another. Clicking a session in the sidebar opens it as its own channel (a second session in the same tab, shown as a pill in the tab strip) or focuses it if it is already open, instead of swapping out — and aborting — the current session. Several tabs can share one workspace; the workspace picker no longer redirects focus to a tab that already has it.
+- A session is a single running agent: the daemon refuses to bind one session to two channels. Resume-on-workspace-switch and boot restore skip sessions another channel already holds, so two agents can never share one session's jsonl.
+- The sidebar now dots every session that has a live channel anywhere in the workspace, so multiple open sessions in one workspace are visible at a glance. The tab strip groups a tab's sessions and switches between them without cancelling the others.
+- Switching a tab's workspace away from one that no other tab still targets now stops every agent running in that workspace's sessions (their running turns are aborted). If another tab still points at the workspace, its agents — and this tab's sibling sessions — keep running.
+- A New tab now defaults to the local Reasonix installation folder (where the app lives); an explicit workspace pick still wins.
+- The tab-strip dot now shows how many agents are actively running in that tab (one per running session), and is hidden entirely when none are running.
+
 **Added: a Settings → Tools "Repetition guard" toggle (default off) for the model-stall guard.**
 
 - The stream repetition / "stuck re-thinking" guard is now opt-in. It covers every channel of a degenerating stream (periodic reasoning, content, and tool-call output) plus the cross-iteration identical-reasoning collapse, and was previously always on. It now stays off until enabled from Settings → Tools, so a fresh install never aborts a stream on repeated output. Auto-compaction, the tool-storm breaker, and the per-turn iteration cap are unaffected.

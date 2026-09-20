@@ -308,7 +308,7 @@ import { billingContextForModel, resolveContextTokens } from "../../telemetry/st
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage, TurnImage } from "../../types.js";
-import { VERSION } from "../../version.js";
+import { VERSION, reasonixInstallDir } from "../../version.js";
 import { dumpStartupProfile, markPhase } from "../startup-profile.js";
 import { type McpRuntime, createMcpRuntime } from "./mcp-runtime.js";
 
@@ -3092,6 +3092,10 @@ type SymbolEntry = { name: string; path: string; line: number; kind: string };
 
 interface Tab {
   readonly id: string;
+  /** Visual tab (group) this channel belongs to — channels sharing a groupId
+   *  render as multiple sessions stacked in one tab. A new tab (the + button)
+   *  mints a fresh group; opening a session into a tab reuses its group. */
+  groupId: string;
   rootDir: string;
   currentSession: string;
   /** Session name the shell-output totals are anchored to; null until the first
@@ -3213,10 +3217,49 @@ function nextTabId(): string {
   return `t${tabCounter}`;
 }
 
+let groupCounter = 0;
+function nextGroupId(): string {
+  groupCounter++;
+  return `g${groupCounter}`;
+}
+
+/** True when two workspace dirs point at one directory (case-insensitive on
+ *  Windows, where the same path can arrive with different casing). */
+function sameWorkspaceDir(a: string, b: string): boolean {
+  const ra = resolve(a);
+  const rb = resolve(b);
+  return process.platform === "win32" ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
+}
+
+/** Whether switching `switching`'s workspace away from `leavingDir` leaves that
+ *  workspace with no tab on it — i.e. no tab outside `switching`'s own group
+ *  still targets it. True means every agent still running in one of the
+ *  workspace's sessions should be stopped (nothing should keep running in a
+ *  workspace no tab shows). Pure so the rule is testable. */
+export function workspaceAbandonedBySwitch(
+  tabs: readonly { id: string; groupId: string; rootDir: string }[],
+  switching: { id: string; groupId: string },
+  leavingDir: string,
+): boolean {
+  return !tabs.some(
+    (t) =>
+      t.id !== switching.id &&
+      t.groupId !== switching.groupId &&
+      sameWorkspaceDir(t.rootDir, leavingDir),
+  );
+}
+
 /** The workspace's newest session to implicitly resume on a switch (callers pass
- *  a newest-first list), or null when it has none. Pure so the rule is testable. */
-export function pickResumeSession(sessions: readonly SessionInfo[]): SessionInfo | null {
-  return sessions[0] ?? null;
+ *  a newest-first list), or null when it has none. `skip` drops candidates that
+ *  must not be reused (e.g. a session another channel already holds) so the
+ *  resume can never bind one session to two channels. Pure so the rule is
+ *  testable. */
+export function pickResumeSession(
+  sessions: readonly SessionInfo[],
+  skip?: (session: SessionInfo) => boolean,
+): SessionInfo | null {
+  if (!skip) return sessions[0] ?? null;
+  return sessions.find((s) => !skip(s)) ?? null;
 }
 
 function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
@@ -3683,7 +3726,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   });
 
   /** Synchronous tab construction — no I/O. All cheap, disk-only events (`$settings`, `$sessions`, `$memory`, `$skills`, `$mcp_specs`) can fire against this immediately. The heavy bits (`buildCodeToolset`, MCP probes, runtime construction) happen in `initTabToolset` so the UI shell paints without waiting for them. */
-  function createTabSkeleton(initialDir?: string, restoreId?: string): Tab {
+  function createTabSkeleton(
+    initialDir?: string,
+    restoreId?: string,
+    restore?: { groupId?: string; session?: string },
+  ): Tab {
     const dir = resolve(initialDir ?? opts.dir ?? loadWorkspaceDir() ?? process.cwd());
     pushRecentWorkspace(dir);
     const model = opts.model || loadModel() || DEFAULT_MODEL;
@@ -3693,8 +3740,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const id = restoreId ?? nextTabId();
     const idMatch = /^t(\d+)$/.exec(id);
     if (idMatch) tabCounter = Math.max(tabCounter, Number(idMatch[1]));
+    // Restored groups keep their id; bump the counter past it so a freshly
+    // minted group never collides with a restored one (same rationale as id).
+    const groupId = restore?.groupId ?? nextGroupId();
+    const groupMatch = /^g(\d+)$/.exec(groupId);
+    if (groupMatch) groupCounter = Math.max(groupCounter, Number(groupMatch[1]));
     const tab: Tab = {
       id,
+      groupId,
       rootDir: dir,
       currentSession: "",
       shellMetricsSession: null,
@@ -3724,11 +3777,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       sessionsRevision: 0,
       hooks: loadHooks({ projectRoot: dir }),
     };
-    tab.currentSession = mintSessionFor(dir, {
-      model: tab.currentModel,
-      reasoningEffort: tab.currentReasoningEffort,
-      subagentModel: tab.currentSubagentModel,
-    });
+    // A restored session is bound synchronously (when its jsonl still exists)
+    // so the $tab_opened emit carries the real session; otherwise mint a fresh
+    // empty conversation. A missing jsonl falls back to a fresh mint so the
+    // channel never points at a dangling session name.
+    const restoredSession =
+      restore?.session && existsSync(sessionPath(restore.session)) ? restore.session : undefined;
+    tab.currentSession = restoredSession
+      ? restoredSession
+      : mintSessionFor(dir, {
+          model: tab.currentModel,
+          reasoningEffort: tab.currentReasoningEffort,
+          subagentModel: tab.currentSubagentModel,
+        });
     tabs.set(tab.id, tab);
     emitTabDiagnostic(tab, "tab.created", { active: false }, "info");
     return tab;
@@ -4033,6 +4094,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           dir: t.rootDir,
           id: t.id,
           session: t.currentSession || undefined,
+          groupId: t.groupId,
           active: t.id === lastActiveTabId,
         })),
       );
@@ -4043,6 +4105,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // best-effort — disk / perms shouldn't break tab management, but LOG
       process.stderr.write(`reasonix: open tabs persist failed — ${messageOf(err)}\n`);
     }
+  }
+
+  /** The channel (tab) that owns `name` as its current session, if any. A
+   *  session is a single running agent — at most one channel may hold it. */
+  function channelForSession(name: string): Tab | undefined {
+    for (const t of tabs.values()) {
+      if (t.currentSession === name) return t;
+    }
+    return undefined;
   }
 
   async function closeTab(tab: Tab): Promise<void> {
@@ -4425,6 +4496,18 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emitSettings(tab);
       return;
     }
+    // No agent should keep running in a workspace that will have no tab left on
+    // it. When this tab is the last one holding the old workspace (no *other*
+    // tab outside its group shares it), stop every agent bound to that
+    // workspace — this tab's own sibling sessions included. When another tab
+    // still holds the workspace, its agents (and this tab's siblings) keep
+    // running.
+    if (workspaceAbandonedBySwitch(Array.from(tabs.values()), tab, tab.rootDir)) {
+      const leavingDir = tab.rootDir;
+      for (const t of tabs.values()) {
+        if (sameWorkspaceDir(t.rootDir, leavingDir)) abortTurn(t);
+      }
+    }
     abortTurn(tab);
     try {
       await tab.toolset?.jobs.shutdown();
@@ -4437,6 +4520,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       process.stderr.write(`reasonix: tab job shutdown failed — ${messageOf(err)}\n`);
     }
     tab.rootDir = target;
+    // A group is single-workspace: a workspace change moves the tab out of its
+    // visual group so sibling sessions keep theirs.
+    tab.groupId = nextGroupId();
     saveWorkspaceDir(target);
     pushRecentWorkspace(target);
     tab.fileIndex = null;
@@ -4483,7 +4569,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // when the workspace has no sessions yet. loadSessionIntoTab restores the
     // stored model/effort and rebuilds the runtime + system prompt for it.
     const { value: workspaceSessions } = listSessionsForWorkspaceAsync(target);
-    const resume = pickResumeSession(await workspaceSessions);
+    // Never resume a session another channel already holds — that would put two
+    // agents on one session. Fall through to the next newest free session.
+    const resume = pickResumeSession(await workspaceSessions, (s) => {
+      const holder = channelForSession(s.name);
+      return holder !== undefined && holder.id !== tab.id;
+    });
     if (resume) {
       loadSessionIntoTab(tab, resume.name, { abortTurn, cancelPendingGates, persistOpenTabs });
     } else {
@@ -4511,6 +4602,18 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emitSettings(tab);
     emitSkills(tab);
     persistOpenTabs();
+    // Let the frontend regroup: the tab's workspace (and now groupId) changed.
+    emit(
+      {
+        type: "$tab_opened",
+        workspaceDir: tab.rootDir,
+        active: tab.id === lastActiveTabId,
+        groupId: tab.groupId,
+        sessions: [tab.currentSession],
+        activeSession: tab.currentSession,
+      },
+      tab.id,
+    );
     emitTabDiagnostic(tab, "workspace.switch.completed", { targetChars: target.length }, "info");
   }
 
@@ -4934,9 +5037,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // exists. emitBalance was already fire-and-forget.
   function bootstrapTab(
     initialDir?: string,
-    restore?: { id?: string; session?: string; active?: boolean },
+    restore?: { id?: string; session?: string; active?: boolean; groupId?: string },
   ): Tab {
-    const tab = createTabSkeleton(initialDir, restore?.id);
+    const tab = createTabSkeleton(initialDir, restore?.id, restore);
     emitTabDiagnostic(
       tab,
       "tab.bootstrap.requested",
@@ -4951,7 +5054,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // The conversation load below is async and must not gate the next tab's
     // $tab_opened — otherwise a multi-tab restore opens tabs one at a time,
     // each blocked behind the previous tab's full session jsonl read+parse.
-    emit({ type: "$tab_opened", workspaceDir: tab.rootDir, active: restore?.active }, tab.id);
+    emit(
+      {
+        type: "$tab_opened",
+        workspaceDir: tab.rootDir,
+        active: restore?.active,
+        groupId: tab.groupId,
+        sessions: [tab.currentSession],
+        activeSession: tab.currentSession,
+      },
+      tab.id,
+    );
     emitSettings(tab);
     emitMcpSpecs(tab);
     emitSkills(tab);
@@ -5092,14 +5205,23 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return false;
     }
   });
+  // Never restore the same session into two channels — a session is a single
+  // agent. Keep the first occurrence's session; later duplicates open fresh.
+  const seenRestoreSessions = new Set<string>();
+  const dedupedTabs = savedTabs.map((t) => {
+    if (!t.session) return t;
+    if (seenRestoreSessions.has(t.session)) return { ...t, session: undefined };
+    seenRestoreSessions.add(t.session);
+    return t;
+  });
   // When launched with --dir, find the matching saved tab so the user's
   // previous session is restored automatically.
   const startupDir = opts.dir;
   const startupTab = startupDir
-    ? savedTabs.find((t) => resolve(t.dir) === resolve(startupDir))
-    : savedTabs[0];
-  first = bootstrapTab(opts.dir ?? savedTabs[0]?.dir, startupTab);
-  const pendingRestores = savedTabs.filter((t) => t !== startupTab);
+    ? dedupedTabs.find((t) => resolve(t.dir) === resolve(startupDir))
+    : dedupedTabs[0];
+  first = bootstrapTab(opts.dir ?? dedupedTabs[0]?.dir, startupTab);
+  const pendingRestores = dedupedTabs.filter((t) => t !== startupTab);
   lastActiveTabId = first.id;
   // Account-wide quotas change underneath us (other devices, window resets) -
   // poll so the statusbar chips are never stale. Skipped mid-turn so the
@@ -5173,8 +5295,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
     if (msg.cmd === "tab_open") {
       try {
-        // A user-opened tab takes focus.
-        const opened = bootstrapTab(msg.workspaceDir, { active: true });
+        // A user-opened tab takes focus and starts a fresh group. It defaults to
+        // the local Reasonix installation so a New tab always opens at home; an
+        // explicit workspaceDir (e.g. the workspace picker) still wins.
+        const opened = bootstrapTab(msg.workspaceDir ?? reasonixInstallDir(), { active: true });
         lastActiveTabId = opened.id;
         persistOpenTabs();
       } catch (err) {
@@ -5284,7 +5408,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emit({ type: "$connected" });
       for (const t of tabs.values()) {
         emit(
-          { type: "$tab_opened", workspaceDir: t.rootDir, active: t.id === lastActiveTabId },
+          {
+            type: "$tab_opened",
+            workspaceDir: t.rootDir,
+            active: t.id === lastActiveTabId,
+            groupId: t.groupId,
+            sessions: [t.currentSession],
+            activeSession: t.currentSession,
+          },
           t.id,
         );
         emitSettings(t);
@@ -5299,6 +5430,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           id: t.id,
           workspaceDir: t.rootDir,
           active: t.id === lastActiveTabId,
+          groupId: t.groupId,
+          activeSession: t.currentSession,
         })),
       });
       void firstBootstrapSettled.then(async () => {
@@ -5810,6 +5943,29 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "session_load") {
+      // A session is a single running agent: never load one that another
+      // channel already holds (two agents on one session clobber the same
+      // jsonl). Focus the owning channel instead. Re-loading the tab's own
+      // session is a no-op (a reload would abort the live turn).
+      const holder = channelForSession(msg.name);
+      if (holder) {
+        if (holder.id !== tab.id) {
+          lastActiveTabId = holder.id;
+          persistOpenTabs();
+          emit(
+            {
+              type: "$tab_opened",
+              workspaceDir: holder.rootDir,
+              active: true,
+              groupId: holder.groupId,
+              sessions: [holder.currentSession],
+              activeSession: holder.currentSession,
+            },
+            holder.id,
+          );
+        }
+        return;
+      }
       try {
         loadSessionIntoTab(tab, msg.name, {
           abortTurn,
@@ -5823,6 +5979,46 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         });
         process.stderr.write(`session_load: "${msg.name}" threw — ${(err as Error).message}\n`);
         emit({ type: "$error", message: `session_load failed: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "session_open") {
+      const name = msg.name;
+      // Already open somewhere — focus it; never open a second agent on one
+      // session.
+      const existing = channelForSession(name);
+      if (existing) {
+        lastActiveTabId = existing.id;
+        persistOpenTabs();
+        emit(
+          {
+            type: "$tab_opened",
+            workspaceDir: existing.rootDir,
+            active: true,
+            groupId: existing.groupId,
+            sessions: [existing.currentSession],
+            activeSession: existing.currentSession,
+          },
+          existing.id,
+        );
+        return;
+      }
+      try {
+        // Stack the session into the requesting tab's group so one tab can host
+        // several sessions side by side (each an independent running agent).
+        const opened = bootstrapTab(tab.rootDir, {
+          session: name,
+          active: true,
+          groupId: tab.groupId,
+        });
+        lastActiveTabId = opened.id;
+        persistOpenTabs();
+      } catch (err) {
+        emitDiagnosticError("session.open.failed", err, {
+          tabId: tab.id,
+          details: { requestedSession: name, ...tabDiagnosticState(tab) },
+        });
+        emit({ type: "$error", message: `session_open failed: ${(err as Error).message}` }, tab.id);
       }
       return;
     }

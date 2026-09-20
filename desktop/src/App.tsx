@@ -2258,6 +2258,8 @@ interface TabRuntimeProps {
   currency: "CNY" | "USD";
   registerDispatch: (tabId: string, d: TabDispatcher | null) => void;
   onNewTab: () => void;
+  /** Reports this channel's running-agent state so the tab dot can count them. */
+  onBusyChange: (tabId: string, busy: boolean) => void;
   theme: Theme;
   themeStyle: ThemeStyle;
   onSetThemeStyle: (style: ThemeStyle) => void;
@@ -2298,7 +2300,7 @@ interface TabRuntimeProps {
   opencodeModelsError: string | null;
   opencodeVisionModels: ReadonlySet<string>;
   onRefreshOpencodeModels: (force?: boolean) => void;
-  tabsList: { id: string; workspaceDir?: string }[];
+  tabsList: { id: string; workspaceDir?: string; session?: string; group?: string; busy?: boolean }[];
   activeTabId: string;
   setActiveTabId: (id: string) => void;
   onRemoveWorkspace: (path: string) => void;
@@ -2311,6 +2313,7 @@ function TabRuntime({
   currency,
   registerDispatch,
   onNewTab,
+  onBusyChange,
   theme,
   themeStyle,
   onSetThemeStyle,
@@ -3205,6 +3208,23 @@ function TabRuntime({
     }
   }, [state.messages, session, appendNotice]);
 
+  // Sessions that currently have a live channel (an agent) in ANY tab on this
+  // tab's workspace — the sidebar dots one per open session.
+  const openSessions = useMemo(() => {
+    const target = normalizeWorkspacePath(state.settings?.workspaceDir);
+    const out = new Set<string>();
+    for (const t of tabsList) {
+      if (t.session && normalizeWorkspacePath(t.workspaceDir) === target) out.add(t.session);
+    }
+    return out;
+  }, [tabsList, state.settings?.workspaceDir]);
+
+  // Report this channel's running-agent state up so the tab dot can count the
+  // agents active in the tab (this channel plus its siblings).
+  useEffect(() => {
+    onBusyChange(tabId, state.busy);
+  }, [onBusyChange, tabId, state.busy]);
+
   return (
     <WorkspaceProvider value={{ dir: state.settings?.workspaceDir }}>
       <div
@@ -3265,9 +3285,12 @@ function TabRuntime({
           activeName={state.currentSession}
           workspaceDir={state.settings?.workspaceDir}
           onNewChat={newChat}
+          openSessions={openSessions}
           onLoadSession={(name) => {
             clearAbortDraft();
-            sendRpc({ cmd: "session_load", name });
+            // Open the session as its own channel (a new tab in this group), or
+            // focus it if already open — never replace/abort the current one.
+            sendRpc({ cmd: "session_open", name });
           }}
           onDeleteSession={(name) => {
             dispatch({ t: "session_delete_requested", name });
@@ -3634,16 +3657,12 @@ function TabRuntime({
           anchor={wdAnchor}
           onPick={(path) => {
             clearAbortDraft();
-            const existing = tabsList?.find(
-              (t) =>
-                t.workspaceDir &&
-                (t.workspaceDir === path || t.workspaceDir.toLowerCase() === path.toLowerCase()),
-            );
-            if (existing && existing.id !== tabId) {
-              setActiveTabId(existing.id);
-            } else {
-              saveSettings({ workspaceDir: path });
-            }
+            // Always apply the pick to THIS tab. A workspace is not unique
+            // app-wide: several tabs may target the same directory so each can
+            // drive the same project with its own agent. Redirecting focus to
+            // another tab that happens to share the workspace made a second tab
+            // on the same directory impossible — never switch tabs here.
+            saveSettings({ workspaceDir: path });
           }}
           onRemove={onRemoveWorkspace}
           onBrowse={pickWorkspace}
@@ -4169,6 +4188,26 @@ function TitleBar({
   );
 }
 
+/** Group tab channels by their visual-tab id (falling back to a standalone
+ *  group keyed by the tab id), preserving first-seen order. Pure for testing. */
+export function groupTabsByGroup<T extends { id: string; group?: string }>(
+  tabs: readonly T[],
+): { key: string; items: T[] }[] {
+  const groups: { key: string; items: T[] }[] = [];
+  const byKey = new Map<string, { key: string; items: T[] }>();
+  for (const t of tabs) {
+    const key = t.group ?? t.id;
+    let g = byKey.get(key);
+    if (!g) {
+      g = { key, items: [] };
+      byKey.set(key, g);
+      groups.push(g);
+    }
+    g.items.push(t);
+  }
+  return groups;
+}
+
 export function TabBar({
   tabs,
   activeId,
@@ -4178,7 +4217,7 @@ export function TabBar({
   onClearTabs,
   singleTab,
 }: {
-  tabs: { id: string; workspaceDir?: string }[];
+  tabs: { id: string; workspaceDir?: string; session?: string; group?: string; busy?: boolean }[];
   activeId: string;
   setActive: (id: string) => void;
   onClose: (id: string) => void;
@@ -4199,6 +4238,10 @@ export function TabBar({
     }
   };
 
+  // Group channels by their visual-tab id — a tab hosts one or more sessions,
+  // each a selectable pill. Tabs without a group id stand alone.
+  const groups = groupTabsByGroup(tabs);
+
   return (
     <div
       className="tabbar"
@@ -4207,34 +4250,83 @@ export function TabBar({
         setMenuAnchor({ x: e.clientX, y: e.clientY });
       }}
     >
-      {tabs.map((t) => {
-        const ws = t.workspaceDir ?? "";
+      {groups.map((g) => {
+        const activeInGroup = g.items.find((t) => t.id === activeId);
+        const head = activeInGroup ?? g.items[0];
+        if (!head) return null;
+        const ws = head.workspaceDir ?? "";
         const label =
           ws
             .replace(/[\\/]$/, "")
             .split(/[\\/]/)
             .pop() || "workspace";
+        // Active agents = sessions in this tab with a running turn. No dot when
+        // nothing is running.
+        const activeAgents = g.items.filter((t) => t.busy).length;
         return (
           <div
-            key={t.id}
-            className="tab"
-            data-active={t.id === activeId}
-            onClick={() => setActive(t.id)}
-            onKeyDown={activationHandler(() => setActive(t.id))}
+            key={g.key}
+            className="tab tab-group"
+            data-active={activeInGroup ? "true" : undefined}
+            onClick={() => setActive(head.id)}
+            onKeyDown={activationHandler(() => setActive(head.id))}
             title={ws || label}
           >
-            <span className="dot" data-state="running" />
+            {activeAgents > 0 ? (
+              <span
+                className="tab-active"
+                title={`${activeAgents} active agent${activeAgents === 1 ? "" : "s"}`}
+              >
+                <span className="dot" data-state="running" />
+                <span className="tab-active-count">{activeAgents}</span>
+              </span>
+            ) : null}
             <span className="label">{label}</span>
+            {g.items.length > 1 ? (
+              <span className="tab-sessions">
+                {g.items.map((t, i) => (
+                  <span
+                    key={t.id}
+                    className="tab-session"
+                    data-active={t.id === activeId ? "true" : undefined}
+                    title={t.session ?? ""}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActive(t.id);
+                    }}
+                    onKeyDown={activationHandler((e) => {
+                      e.stopPropagation();
+                      setActive(t.id);
+                    })}
+                  >
+                    <span className="tab-session-label">{`S${i + 1}`}</span>
+                    <span
+                      className="tab-session-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClose(t.id);
+                      }}
+                      onKeyDown={activationHandler((e) => {
+                        e.stopPropagation();
+                        onClose(t.id);
+                      })}
+                    >
+                      <I.x size={9} />
+                    </span>
+                  </span>
+                ))}
+              </span>
+            ) : null}
             {!singleTab ? (
               <span
                 className="close"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onClose(t.id);
+                  onClose(head.id);
                 }}
                 onKeyDown={activationHandler((e) => {
                   e.stopPropagation();
-                  onClose(t.id);
+                  onClose(head.id);
                 })}
               >
                 <I.x size={11} />
@@ -4645,7 +4737,20 @@ function UpdateOverlay({
   );
 }
 
-type TabMeta = { id: string; workspaceDir?: string; busy?: boolean };
+type TabMeta = {
+  id: string;
+  workspaceDir?: string;
+  busy?: boolean;
+  /** Session (channel) this tab currently holds. */
+  session?: string;
+  /** Visual-tab group id — tabs sharing a group render as sessions in one tab. */
+  group?: string;
+};
+
+/** Compare workspace dirs ignoring separator flavor, trailing slash, and case. */
+function normalizeWorkspacePath(p?: string): string {
+  return (p ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
 
 export function App() {
   const [tabs, setTabs] = useState<TabMeta[]>([]);
@@ -4977,11 +5082,23 @@ export function App() {
             }
 
             if (ev.type === "$tab_opened" && tabId) {
-              setTabs((prev) =>
-                prev.some((t) => t.id === tabId)
-                  ? prev
-                  : [...prev, { id: tabId, workspaceDir: ev.workspaceDir }],
-              );
+              setTabs((prev) => {
+                const session = ev.activeSession ?? ev.sessions?.[0];
+                const idx = prev.findIndex((t) => t.id === tabId);
+                if (idx === -1) {
+                  return [...prev, { id: tabId, workspaceDir: ev.workspaceDir, session, group: ev.groupId }];
+                }
+                // Merge so a workspace switch / regroup updates the existing tab.
+                const merged: TabMeta = {
+                  ...prev[idx],
+                  workspaceDir: ev.workspaceDir,
+                  session: session ?? prev[idx]!.session,
+                  group: ev.groupId ?? prev[idx]!.group,
+                };
+                const copy = prev.slice();
+                copy[idx] = merged;
+                return copy;
+              });
               // Seed the tab's own theme: its stored keys first, then the
               // legacy global keys (migration), then inherit whatever the
               // active tab was showing. Persist immediately so an inherited
@@ -5032,6 +5149,8 @@ export function App() {
                   id: t.id,
                   workspaceDir: t.workspaceDir,
                   busy: busyById.get(t.id),
+                  session: t.activeSession,
+                  group: t.groupId,
                 }));
               });
               for (const id of Array.from(dispatchersRef.current.keys())) {
@@ -5072,6 +5191,12 @@ export function App() {
               setTabs((prev) =>
                 prev.map((t) => (t.id === tabId ? { ...t, workspaceDir: ev.workspaceDir } : t)),
               );
+            }
+
+            // Track each channel's session so the sidebar can dot every session
+            // that has a live agent, across all tabs on a workspace.
+            if (ev.type === "$session_loaded" && tabId) {
+              setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, session: ev.name } : t)));
             }
 
             // Side effect only — the reducer tracks oauthWaiting from the same
@@ -5221,8 +5346,23 @@ export function App() {
     });
   }, [activeTabId]);
 
+  // Tracks each tab's running-agent flag so the tab dot can show how many
+  // agents are active in it. Every mounted TabRuntime reports its own busy.
+  const reportTabBusy = useCallback((tabId: string, busy: boolean) => {
+    setTabs((prev) => {
+      let changed = false;
+      const next = prev.map((t) => {
+        if (t.id !== tabId || t.busy === busy) return t;
+        changed = true;
+        return { ...t, busy };
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
   const openTab = useCallback(() => {
-    rpcSend({ cmd: "tab_open" }).catch((err) => {
+    // New tab — defaults to the local Reasonix installation (a fresh group).
+    rpcSend({ tabId: activeTabIdRef.current, cmd: "tab_open" }).catch((err) => {
       const target = activeTabIdRef.current || tabsRef.current[0]?.id;
       if (target) {
         deliverToTab(target, {
@@ -5324,6 +5464,7 @@ export function App() {
           currency={currency}
           registerDispatch={registerDispatch}
           onNewTab={openTab}
+          onBusyChange={reportTabBusy}
           theme={tabThemes[t.id]?.theme ?? DEFAULT_TAB_THEME.theme}
           themeStyle={tabThemes[t.id]?.themeStyle ?? DEFAULT_TAB_THEME.themeStyle}
           onSetThemeStyle={onSetThemeStyle}

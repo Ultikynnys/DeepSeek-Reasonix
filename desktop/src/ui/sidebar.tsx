@@ -54,6 +54,7 @@ export function Sidebar({
   sessions,
   activeName,
   workspaceDir,
+  openSessions,
   onNewChat,
   onLoadSession,
   onDeleteSession,
@@ -66,6 +67,8 @@ export function Sidebar({
   sessions: SessionInfo[];
   activeName?: string;
   workspaceDir?: string;
+  /** Session names that currently have a live channel (agent) anywhere in the workspace. */
+  openSessions?: Set<string>;
   onNewChat: () => void;
   onLoadSession: (name: string) => void;
   onDeleteSession: (name: string) => void;
@@ -259,7 +262,11 @@ export function Sidebar({
               >
                 <span
                   className="state"
-                  style={{ background: active ? "var(--accent)" : "var(--border-strong)" }}
+                  style={{
+                    background: openSessions?.has(s.name)
+                      ? "var(--accent)"
+                      : "var(--border-strong)",
+                  }}
                 />
                 <div className="body">
                   {editing ? (

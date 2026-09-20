@@ -412,6 +412,14 @@ export interface TabOpenedEvent {
   workspaceDir: string;
   /** True when the frontend should focus this tab (user-opened, or the restored focused tab). */
   active?: boolean;
+  /** Sessions (channels) currently open in the tab, in display order. A tab
+   *  hosts one or more sessions; each is an independent running agent. */
+  sessions?: string[];
+  /** Visual tab (group) this channel belongs to; channels sharing a groupId
+   *  render as sessions stacked in one tab. */
+  groupId?: string;
+  /** Session the tab should display as focused. */
+  activeSession?: string;
 }
 
 export type TabClosedEvent = { type: "$tab_closed" };
@@ -422,7 +430,17 @@ export type TabClosedEvent = { type: "$tab_closed" };
  *  instead of living on as ghosts that route events to the wrong tab. */
 export interface TabsSnapshotEvent {
   type: "$tabs_snapshot";
-  tabs: { id: string; workspaceDir: string; active: boolean }[];
+  tabs: {
+    id: string;
+    workspaceDir: string;
+    active: boolean;
+    /** Open sessions in the tab, in display order. */
+    sessions?: string[];
+    /** Visual tab (group) this channel belongs to. */
+    groupId?: string;
+    /** Focused session in the tab. */
+    activeSession?: string;
+  }[];
 }
 
 export type McpSpecStatus = "configured" | "handshake" | "connected" | "failed" | "disabled";
@@ -1091,6 +1109,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_clear" }
   | { cmd: "session_load"; name: string }
+  | { cmd: "session_open"; name: string }
   | { cmd: "session_rename"; name: string; title: string }
   | { cmd: "memory_read"; path: string }
   | {
