@@ -1,6 +1,10 @@
 export interface SessionRecencyInput {
   name: string;
   mtime: Date | string | number;
+  /** Explicit last-activity epoch-ms from the session's meta (`updatedAt`).
+   *  Wins over mtime when present so ordering survives file copies/restores
+   *  that reset the filesystem timestamps. */
+  lastActive?: number;
 }
 
 /** Parse compact timestamp (YYYYMMDDHHmmss or YYYYMMDDHHmm) from a session name. */
@@ -25,9 +29,15 @@ function mtimeMilliseconds(mtime: SessionRecencyInput["mtime"]): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-/** Compute session recency from filesystem mtime and the timestamp embedded in its name. */
+/** Compute session recency from the explicit activity stamp (when present),
+ *  the filesystem mtime, and the timestamp embedded in the name — max of the
+ *  three, so a stale mtime or missing meta can never hide recent activity. */
 export function sessionRecency(session: SessionRecencyInput): number {
-  return Math.max(mtimeMilliseconds(session.mtime), parseSessionTimestamp(session.name));
+  const lastActive =
+    typeof session.lastActive === "number" && Number.isFinite(session.lastActive)
+      ? session.lastActive
+      : 0;
+  return Math.max(lastActive, mtimeMilliseconds(session.mtime), parseSessionTimestamp(session.name));
 }
 
 /** Deterministic newest-first ordering with a descending-name tie-break. */

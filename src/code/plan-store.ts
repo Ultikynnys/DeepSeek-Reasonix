@@ -12,7 +12,7 @@ import {
 import { dirname, join } from "node:path";
 import { readJsonFileSilently } from "../core/json-file.js";
 import { fmtRelativeTime } from "../core/relative-time.js";
-import { sanitizeName, sessionsDir } from "../memory/session.js";
+import { sessionPlanPath, sessionPlansDir } from "../memory/session.js";
 import type { PlanStep, StepCompletion, StepEvidence } from "../tools/plan.js";
 
 export interface PlanStateOnDisk {
@@ -28,7 +28,7 @@ export interface PlanStateOnDisk {
 }
 
 export function planStatePath(sessionName: string): string {
-  return join(sessionsDir(), `${sanitizeName(sessionName)}.plan.json`);
+  return sessionPlanPath(sessionName);
 }
 
 export function loadPlanState(sessionName: string): PlanStateOnDisk | null {
@@ -95,11 +95,9 @@ export function archivePlanState(sessionName: string): string | null {
   if (!existsSync(active)) return null;
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const suffix = Math.random().toString(36).slice(2, 6);
-  const archive = join(
-    sessionsDir(),
-    `${sanitizeName(sessionName)}.plan.${stamp}-${suffix}.done.json`,
-  );
+  const archive = join(sessionPlansDir(sessionName), `${stamp}-${suffix}.done.json`);
   try {
+    mkdirSync(sessionPlansDir(sessionName), { recursive: true });
     renameSync(active, archive);
     return archive;
   } catch (err) {
@@ -239,11 +237,10 @@ function archiveSummaryFromParsed(parsed: ParsedPlanArchive, full: string): Plan
 }
 
 export function listPlanArchives(sessionName: string): PlanArchiveSummary[] {
-  const prefix = `${sanitizeName(sessionName)}.plan.`;
   const suffix = ".done.json";
   const summaries: PlanArchiveSummary[] = [];
-  for (const { full } of scanArchives(sessionsDir(), (name) =>
-    name.startsWith(prefix) && name.endsWith(suffix) ? "" : null,
+  for (const { full } of scanArchives(sessionPlansDir(sessionName), (name) =>
+    name.endsWith(suffix) ? "" : null,
   )) {
     const parsed = parsePlanArchiveFile(full);
     if (parsed) summaries.push(archiveSummaryFromParsed(parsed, full));

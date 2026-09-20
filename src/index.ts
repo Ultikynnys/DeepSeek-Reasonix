@@ -226,6 +226,7 @@ export {
   listSessions,
   loadSessionMessages,
   sanitizeName as sanitizeSessionName,
+  sessionDir,
   sessionPath,
   sessionsDir,
 } from "./memory/session.js";

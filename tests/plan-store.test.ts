@@ -20,6 +20,7 @@ import {
   relativeTime,
   savePlanState,
 } from "../src/code/plan-store.js";
+import { sanitizeName } from "../src/memory/session.js";
 
 // We point the test at a temp HOME so the real ~/.reasonix isn't
 // touched. sessionsDir() reads homedir() via os, which honors HOME on
@@ -199,8 +200,10 @@ describe("plan-store roundtrip", () => {
 
   it("sanitizes session names so unsafe chars don't escape the dir", () => {
     const path = planStatePath("../etc/passwd");
-    expect(path).toMatch(/\.plan\.json$/);
-    expect(path).not.toMatch(/\.\.[\\/]etc/);
+    expect(path.replace(/\\/g, "/")).toContain(
+      "sessions/_______passwd/plan.json".replace("_______passwd", sanitizeName("../etc/passwd")),
+    );
+    expect(path).not.toMatch(/\.\.[\\/]/);
   });
 });
 
@@ -352,10 +355,10 @@ describe("listPlanArchives", () => {
     const newStamp = "2026-04-20T15:30:00.000Z";
     const fs = await import("node:fs");
     const { join: pj } = await import("node:path");
-    const dir = pj(tempHome, ".reasonix", "sessions");
+    const dir = pj(tempHome, ".reasonix", "sessions", "test-list", "plans");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      pj(dir, "test-list.plan.2026-04-01-old.done.json"),
+      pj(dir, "2026-04-01-old.done.json"),
       JSON.stringify({
         version: 1,
         steps: [{ id: "x", title: "y", action: "z" }],
@@ -364,7 +367,7 @@ describe("listPlanArchives", () => {
       }),
     );
     fs.writeFileSync(
-      pj(dir, "test-list.plan.2026-04-20-new.done.json"),
+      pj(dir, "2026-04-20-new.done.json"),
       JSON.stringify({
         version: 1,
         steps: [
@@ -390,38 +393,34 @@ describe("listPlanArchives", () => {
   it("does NOT cross sessions — each project sees its own archives", async () => {
     const fs = await import("node:fs");
     const { join: pj } = await import("node:path");
-    const dir = pj(tempHome, ".reasonix", "sessions");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(
-      pj(dir, "project-a.plan.2026-04-01-x.done.json"),
-      JSON.stringify({
-        version: 1,
-        steps: [{ id: "x", title: "y", action: "z" }],
-        completedStepIds: [],
-        updatedAt: "2026-04-01T10:00:00.000Z",
-      }),
-    );
-    fs.writeFileSync(
-      pj(dir, "project-b.plan.2026-04-02-y.done.json"),
-      JSON.stringify({
-        version: 1,
-        steps: [{ id: "x", title: "y", action: "z" }],
-        completedStepIds: [],
-        updatedAt: "2026-04-02T10:00:00.000Z",
-      }),
-    );
+    const body = JSON.stringify({
+      version: 1,
+      steps: [{ id: "x", title: "y", action: "z" }],
+      completedStepIds: [],
+      updatedAt: "2026-04-01T10:00:00.000Z",
+    });
+    for (const project of ["project-a", "project-b"]) {
+      fs.mkdirSync(pj(tempHome, ".reasonix", "sessions", project, "plans"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        pj(tempHome, ".reasonix", "sessions", project, "plans", "2026-04-01-x.done.json"),
+        body,
+      );
+    }
     expect(listPlanArchives("project-a")).toHaveLength(1);
     expect(listPlanArchives("project-b")).toHaveLength(1);
+    expect(listPlanArchives("project-c")).toHaveLength(0);
   });
 
   it("skips corrupt archives without failing the whole list", async () => {
     const fs = await import("node:fs");
     const { join: pj } = await import("node:path");
-    const dir = pj(tempHome, ".reasonix", "sessions");
+    const dir = pj(tempHome, ".reasonix", "sessions", "robust", "plans");
     fs.mkdirSync(dir, { recursive: true });
     // One good, one malformed JSON, one wrong-version, one zero-steps.
     fs.writeFileSync(
-      pj(dir, "robust.plan.2026-01-good.done.json"),
+      pj(dir, "2026-01-good.done.json"),
       JSON.stringify({
         version: 1,
         steps: [{ id: "x", title: "y", action: "z" }],
@@ -429,13 +428,13 @@ describe("listPlanArchives", () => {
         updatedAt: "2026-01-15T00:00:00.000Z",
       }),
     );
-    fs.writeFileSync(pj(dir, "robust.plan.2026-01-bad-json.done.json"), "{ not json");
+    fs.writeFileSync(pj(dir, "2026-01-bad-json.done.json"), "{ not json");
     fs.writeFileSync(
-      pj(dir, "robust.plan.2026-01-bad-version.done.json"),
+      pj(dir, "2026-01-bad-version.done.json"),
       JSON.stringify({ version: 99, steps: [], completedStepIds: [] }),
     );
     fs.writeFileSync(
-      pj(dir, "robust.plan.2026-01-empty.done.json"),
+      pj(dir, "2026-01-empty.done.json"),
       JSON.stringify({
         version: 1,
         steps: [],
@@ -451,11 +450,11 @@ describe("listPlanArchives", () => {
   it("falls back to mtime when updatedAt is missing or unparseable", async () => {
     const fs = await import("node:fs");
     const { join: pj } = await import("node:path");
-    const dir = pj(tempHome, ".reasonix", "sessions");
+    const dir = pj(tempHome, ".reasonix", "sessions", "fallback", "plans");
     fs.mkdirSync(dir, { recursive: true });
     // Archive without updatedAt should still surface, dated by mtime.
     fs.writeFileSync(
-      pj(dir, "fallback.plan.2026-01-x.done.json"),
+      pj(dir, "2026-01-x.done.json"),
       JSON.stringify({
         version: 1,
         steps: [{ id: "x", title: "y", action: "z" }],

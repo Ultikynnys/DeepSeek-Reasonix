@@ -14,6 +14,15 @@ async function fixture(): Promise<string> {
   return dir;
 }
 
+/** Seed a folder-per-session fixture: `<root>/<name>/messages.jsonl` with `body`. */
+async function seedSession(root: string, name: string, body: string): Promise<string> {
+  const sessionDir = join(root, name);
+  await mkdir(sessionDir, { recursive: true });
+  const path = join(sessionDir, "messages.jsonl");
+  await writeFile(path, body);
+  return path;
+}
+
 afterEach(async () => {
   await Promise.all(
     dirs
@@ -25,7 +34,7 @@ afterEach(async () => {
 describe("SessionDirectoryIndex", () => {
   it("single-flights refreshes and reuses an unchanged snapshot", async () => {
     const dir = await fixture();
-    await writeFile(join(dir, "one.jsonl"), "a\nb\n");
+    await seedSession(dir, "one", "a\nb\n");
     const loadMeta = vi.fn(() => ({ workspace: "a" }));
     const index = new SessionDirectoryIndex(() => dir, loadMeta);
     const first = index.load();
@@ -40,8 +49,7 @@ describe("SessionDirectoryIndex", () => {
 
   it("counts only appended bytes and fully recounts truncation", async () => {
     const dir = await fixture();
-    const path = join(dir, "one.jsonl");
-    await writeFile(path, "a\n");
+    const path = await seedSession(dir, "one", "a\n");
     const index = new SessionDirectoryIndex(
       () => dir,
       () => ({}),
@@ -57,14 +65,14 @@ describe("SessionDirectoryIndex", () => {
 
   it("removes deleted files and retries an explicit refresh failure", async () => {
     const dir = await fixture();
-    await writeFile(join(dir, "one.jsonl"), "a\n");
+    await seedSession(dir, "one", "a\n");
     const index = new SessionDirectoryIndex(
       () => dir,
       () => ({}),
       0,
     );
     expect(await index.load().value).toHaveLength(1);
-    await rm(join(dir, "one.jsonl"));
+    await rm(join(dir, "one"), { recursive: true });
     expect(await index.load().value).toHaveLength(0);
     await rm(dir, { recursive: true });
     expect(await index.load().value).toEqual([]);
@@ -72,9 +80,9 @@ describe("SessionDirectoryIndex", () => {
 
   it("rejects a directory that exceeds the configured file cap", async () => {
     const dir = await fixture();
-    await writeFile(join(dir, "one.jsonl"), "a\n");
-    await writeFile(join(dir, "two.jsonl"), "b\n");
-    await writeFile(join(dir, "three.jsonl"), "c\n");
+    await seedSession(dir, "one", "a\n");
+    await seedSession(dir, "two", "b\n");
+    await seedSession(dir, "three", "c\n");
     const index = new SessionDirectoryIndex(
       () => dir,
       () => ({}),
@@ -89,8 +97,8 @@ describe("SessionDirectoryIndex", () => {
 
   it("indexes a directory right at the configured file cap", async () => {
     const dir = await fixture();
-    await writeFile(join(dir, "one.jsonl"), "a\n");
-    await writeFile(join(dir, "two.jsonl"), "b\n");
+    await seedSession(dir, "one", "a\n");
+    await seedSession(dir, "two", "b\n");
     const index = new SessionDirectoryIndex(
       () => dir,
       () => ({}),
@@ -104,8 +112,8 @@ describe("SessionDirectoryIndex", () => {
   it("persists the index to a cache file and reuses it across instances", async () => {
     const dir = await fixture();
     const cacheFile = join(dir, "index-cache.json");
-    await writeFile(join(dir, "one.jsonl"), "a\nb\n");
-    await writeFile(join(dir, "two.jsonl"), "x\ny\nz\n");
+    await seedSession(dir, "one", "a\nb\n");
+    await seedSession(dir, "two", "x\ny\nz\n");
     const loadMeta = vi.fn(() => ({ workspace: "a" }));
     const first = new SessionDirectoryIndex(
       () => dir,
@@ -124,7 +132,7 @@ describe("SessionDirectoryIndex", () => {
       version: number;
       records: Array<{ name: string; messageCount: number }>;
     };
-    expect(cached.version).toBe(1);
+    expect(cached.version).toBe(2);
     expect(cached.records).toHaveLength(2);
 
     // A fresh instance (simulating relaunch) reuses the cache: no meta reloads,
@@ -148,9 +156,8 @@ describe("SessionDirectoryIndex", () => {
   it("recounts only files that changed since the cache was written", async () => {
     const dir = await fixture();
     const cacheFile = join(dir, "index-cache.json");
-    const path = join(dir, "one.jsonl");
-    await writeFile(path, "a\n");
-    await writeFile(join(dir, "two.jsonl"), "x\n");
+    const path = await seedSession(dir, "one", "a\n");
+    await seedSession(dir, "two", "x\n");
     const first = new SessionDirectoryIndex(
       () => dir,
       () => ({}),
@@ -178,7 +185,7 @@ describe("SessionDirectoryIndex", () => {
   it("ignores a corrupt cache file and rebuilds from disk", async () => {
     const dir = await fixture();
     const cacheFile = join(dir, "index-cache.json");
-    await writeFile(join(dir, "one.jsonl"), "a\nb\n");
+    await seedSession(dir, "one", "a\nb\n");
     await writeFile(cacheFile, "{ not json");
     const index = new SessionDirectoryIndex(
       () => dir,
@@ -196,7 +203,7 @@ describe("SessionDirectoryIndex", () => {
     const count = 300;
     await Promise.all(
       Array.from({ length: count }, (_, index) =>
-        writeFile(join(dir, `session-${index}.jsonl`), "a\nb\nc\n"),
+        seedSession(dir, `session-${index}`, "a\nb\nc\n"),
       ),
     );
     const index = new SessionDirectoryIndex(

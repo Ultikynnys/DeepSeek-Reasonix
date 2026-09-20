@@ -1,9 +1,20 @@
-import { constants, type BigIntStats } from "node:fs";
+import { constants, type BigIntStats, statSync } from "node:fs";
 import { copyFile, mkdir, open, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { messageOf } from "@reasonix/core-utils";
 import { tmpSiblingPath } from "../core/atomic-write.js";
 import { readJsonFileSilentlyAsync } from "../core/json-file.js";
+import { SESSION_MESSAGES_FILENAME, SESSION_META_FILENAME } from "../memory/session-layout.js";
+
+/** True when `dir` holds a transcript with at least one byte — the "live session" test shared by the directory scan. */
+function hasMessages(dir: string): boolean {
+  try {
+    const stats = statSync(join(dir, SESSION_MESSAGES_FILENAME));
+    return stats.isFile() && stats.size > 0;
+  } catch {
+    return false;
+  }
+}
 
 const READ_BUFFER_BYTES = 64 * 1024;
 const MAX_SESSION_FILES = 100_000;
@@ -67,7 +78,8 @@ interface PersistedSessionIndexRecord<M> {
 }
 
 interface PersistedSessionIndex<M> {
-  version: 1;
+  /** v1 = flat <name>.jsonl layout (pre folder-per-session); v2 = <name>/messages.jsonl folders. */
+  version: 2;
   directory: string;
   records: PersistedSessionIndexRecord<M>[];
 }
@@ -87,7 +99,7 @@ function isSessionFileIdentity(value: unknown): value is SessionFileIdentity {
 function isPersistedSessionIndex(value: unknown): value is PersistedSessionIndex<unknown> {
   if (typeof value !== "object" || value === null) return false;
   const index = value as Record<string, unknown>;
-  if (index.version !== 1 || typeof index.directory !== "string") return false;
+  if (index.version !== 2 || typeof index.directory !== "string") return false;
   if (!Array.isArray(index.records)) return false;
   return index.records.every((record) => {
     if (typeof record !== "object" || record === null) return false;
@@ -173,7 +185,7 @@ export class SessionDirectoryIndex<M> {
   }
 
   remove(name: string): void {
-    this.records.delete(join(this.directory(), `${name}.jsonl`));
+    this.records.delete(join(this.directory(), name, SESSION_MESSAGES_FILENAME));
     this.invalidate();
     if (this.cacheFile !== undefined) void this.persistIndex(this.records);
   }
@@ -182,13 +194,15 @@ export class SessionDirectoryIndex<M> {
     await this.seedFromCache();
     let files: string[];
     try {
+      // One folder per session; only folders with a non-empty messages.jsonl
+      // are live sessions — empty folders are invisible (the whole point of
+      // the folder-per-session refactor).
       files = (await readdir(this.directory(), { withFileTypes: true }))
         .filter(
           (entry) =>
-            entry.isFile() &&
+            entry.isDirectory() &&
             !entry.isSymbolicLink() &&
-            entry.name.endsWith(".jsonl") &&
-            !entry.name.endsWith(".events.jsonl"),
+            hasMessages(join(this.directory(), entry.name)),
         )
         .map((entry) => entry.name);
     } catch (error) {
@@ -208,9 +222,8 @@ export class SessionDirectoryIndex<M> {
         const index = cursor;
         cursor += 1;
         if (index >= files.length) return;
-        const file = files[index]!;
-        const path = join(this.directory(), file);
-        const name = file.slice(0, -".jsonl".length);
+        const name = files[index]!;
+        const path = join(this.directory(), name, SESSION_MESSAGES_FILENAME);
         try {
           results[index] = await this.readRecord(path, name, this.records.get(path));
         } catch (error) {
@@ -285,7 +298,7 @@ export class SessionDirectoryIndex<M> {
     records: Map<string, SessionDirectoryRecord<M>>,
   ): PersistedSessionIndex<unknown> {
     return {
-      version: 1,
+      version: 2,
       directory: this.directory(),
       records: [...records.values()].map((record) => ({
         name: record.name,
@@ -321,7 +334,7 @@ export class SessionDirectoryIndex<M> {
       if (fileIdentity.size > MAX_SESSION_BYTES) {
         throw new Error(`session exceeds ${MAX_SESSION_BYTES} bytes: ${name}`);
       }
-      const metaStats = await stat(join(this.directory(), `${name}.meta.json`), {
+      const metaStats = await stat(join(this.directory(), name, SESSION_META_FILENAME), {
         bigint: true,
       }).catch((error) => {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;

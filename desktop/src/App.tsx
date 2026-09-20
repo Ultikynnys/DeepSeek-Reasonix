@@ -368,6 +368,9 @@ export type SessionInfo = {
   name: string;
   messageCount: number;
   mtime: string;
+  /** Explicit last-activity epoch-ms from the session's meta — copy-safe
+   *  sort key that wins over a stale filesystem mtime. */
+  updatedAt?: number;
   summary?: string;
   workspaceStatus?: "matched" | "legacy_missing_meta";
 };
@@ -1628,7 +1631,12 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       }
       return {
         ...state,
-        sessions: [...unique.values()].sort(sortSessionsDescending),
+        sessions: [...unique.values()].sort((a, b) =>
+          sortSessionsDescending(
+            { name: a.name, mtime: a.mtime, lastActive: a.updatedAt },
+            { name: b.name, mtime: b.mtime, lastActive: b.updatedAt },
+          ),
+        ),
         sessionsEpoch: ev.epoch,
         sessionsRevision: ev.revision,
         pendingSessionDeletes,
@@ -1847,7 +1855,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ...state,
         messages: insertNotice(
           state.messages,
-          `Session "${ev.name}" loaded with no messages (${sizeNote}). The file ~/.reasonix/sessions/${ev.name}.jsonl exists but couldn't be parsed — start a new chat or restore from .jsonl.bak if you have one.`,
+          `Session "${ev.name}" loaded with no messages (${sizeNote}). The file ~/.reasonix/sessions/${ev.name}/messages.jsonl exists but couldn't be parsed — start a new chat or restore from messages.jsonl.bak if you have one.`,
           "error",
         ),
       };

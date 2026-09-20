@@ -1,6 +1,7 @@
 import {
   appendFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -24,6 +25,7 @@ import {
   listSessionsForWorkspace,
   loadSessionMessages,
   loadSessionMeta,
+  migrateLegacyFlatSessions,
   normalizeWorkspace,
   parseSessionTimestamp,
   patchSessionMeta,
@@ -34,6 +36,8 @@ import {
   resolveSessionModelPrefs,
   rewriteSession,
   sanitizeName,
+  sessionDir,
+  sessionEventsPath,
   sessionPath,
   sessionRecency,
   sessionsDir,
@@ -74,11 +78,11 @@ describe("session persistence", () => {
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("sessionPath lives under <home>/.reasonix/sessions", () => {
+  it("sessionPath lives inside the session's own folder", () => {
     const p = sessionPath("demo");
     expect(p).toContain(".reasonix");
     expect(p).toContain("sessions");
-    expect(p.endsWith("demo.jsonl")).toBe(true);
+    expect(p.replace(/\\/g, "/")).toContain("sessions/demo/messages.jsonl");
     expect(p.startsWith(tmp)).toBe(true);
   });
 
@@ -608,12 +612,10 @@ describe("session persistence", () => {
       expect(preview!.messageCount).toBe(1);
     });
 
-    it("ignores timestamped sessions that have only .events.jsonl (no messages file)", () => {
+    it("ignores timestamped sessions that have only an events sidecar (no messages file)", () => {
       appendSessionMessage("myproject", { role: "user", content: "real messages" });
-      const eventsPath = sessionPath("myproject-20260430T200000").replace(
-        /\.jsonl$/,
-        ".events.jsonl",
-      );
+      const eventsPath = sessionEventsPath("myproject-20260430T200000");
+      mkdirSync(dirname(eventsPath), { recursive: true });
       writeFileSync(eventsPath, "{}");
 
       const { resolved, preview } = resolveSession("myproject");
@@ -696,8 +698,9 @@ describe("session persistence", () => {
       appendSessionMessage("project-20260430T143200", { role: "user", content: "b" });
 
       expect(findSessionsByPrefix("project-")).toEqual(["project-20260430T143200"]);
-      // No-dash prefix matches both; reverse-sort puts the bare name first ('.' > '-' in ASCII).
-      expect(findSessionsByPrefix("project")).toEqual(["project", "project-20260430T143200"]);
+      // No-dash prefix matches both; reverse-sort puts the timestamped name
+      // first ("project-…" > "project" lexicographically).
+      expect(findSessionsByPrefix("project")).toEqual(["project-20260430T143200", "project"]);
     });
   });
 
@@ -851,5 +854,108 @@ describe("normalizeWorkspace", () => {
   it("returns empty string for undefined or empty input", () => {
     expect(normalizeWorkspace(undefined)).toBe("");
     expect(normalizeWorkspace("")).toBe("");
+  });
+});
+
+describe("folder-per-session layout + legacy migration", () => {
+  let tmp: string;
+  const realHome = homedir();
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "reasonix-session-layout-"));
+    vi.stubEnv("USERPROFILE", tmp);
+    vi.stubEnv("HOME", tmp);
+    vi.spyOn(require("node:os"), "homedir").mockReturnValue(tmp);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("migrates legacy flat jsonl + sidecars into the session folder", () => {
+    const dir = sessionsDir();
+    mkdirSync(dir, { recursive: true });
+    const legacy = join(dir, "old-chat.jsonl");
+    writeFileSync(legacy, `${JSON.stringify({ role: "user", content: "hi" })}\n`);
+    writeFileSync(`${legacy.replace(/\.jsonl$/, "")}.meta.json`, JSON.stringify({ summary: "s" }));
+    writeFileSync(`${legacy.replace(/\.jsonl$/, "")}.events.jsonl`, "{}\n");
+
+    const { migrated } = migrateLegacyFlatSessions();
+    expect(migrated).toEqual(["old-chat"]);
+
+    // Everything lives in the folder now; nothing flat remains.
+    expect(existsSync(legacy)).toBe(false);
+    expect(loadSessionMessages("old-chat")).toEqual([{ role: "user", content: "hi" }]);
+    expect(loadSessionMeta("old-chat").summary).toBe("s");
+    expect(existsSync(sessionEventsPath("old-chat"))).toBe(true);
+  });
+
+  it("migration is idempotent — a migrated disk migrates nothing the second time", () => {
+    appendSessionMessage("already-foldered", { role: "user", content: "x" });
+    expect(migrateLegacyFlatSessions().migrated).toEqual([]);
+    expect(migrateLegacyFlatSessions().migrated).toEqual([]);
+    expect(loadSessionMessages("already-foldered")).toHaveLength(1);
+  });
+
+  it("migration removes legacy EMPTY flat jsonls (leaked empty sessions) entirely", () => {
+    const dir = sessionsDir();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "empty-chat.jsonl"), "");
+
+    const { prunedEmpty } = migrateLegacyFlatSessions();
+    expect(prunedEmpty).toEqual(["empty-chat"]);
+    expect(existsSync(join(dir, "empty-chat.jsonl"))).toBe(false);
+    expect(existsSync(sessionDir("empty-chat"))).toBe(false);
+  });
+
+  it("listSessions hides empty folders and shows only real conversations", () => {
+    appendSessionMessage("real", { role: "user", content: "x" });
+    // Empty folder + folder with only sidecars + stray file: none are sessions.
+    mkdirSync(sessionDir("empty"), { recursive: true });
+    mkdirSync(dirname(sessionEventsPath("sidecar-only")), { recursive: true });
+    writeFileSync(sessionEventsPath("sidecar-only"), "{}");
+    writeFileSync(join(sessionsDir(), "stray.txt"), "noise");
+
+    expect(listSessions().map((s) => s.name)).toEqual(["real"]);
+  });
+
+  it("updatedAt is stamped on append/patch and wins over a stale mtime when sorting", () => {
+    appendSessionMessage("older-activity", { role: "user", content: "x" });
+    // Give the first session an old explicit stamp and an old mtime.
+    patchSessionMeta("older-activity", { summary: "old" });
+    const old = Date.parse("2026-01-01T00:00:00.000Z");
+    // Backdate the meta's updatedAt by rewriting through the private path:
+    // patchSessionMeta always stamps now(), so simulate an old session by
+    // backdating both files afterwards.
+    utimesSync(sessionPath("older-activity"), old / 1000, old / 1000);
+
+    appendSessionMessage("newer-activity", { role: "user", content: "y" });
+    // newer-activity's meta.updatedAt is "now" — it must sort first even if
+    // filesystem mtimes were reordered by a copy/restore.
+    const sessions = listSessions();
+    expect(sessions[0]!.name).toBe("newer-activity");
+    expect(sessions[0]!.lastActive).toBeGreaterThan(old);
+  });
+
+  it("sessionRecency falls back through lastActive → mtime → name timestamp", () => {
+    const nameTs = Date.UTC(2026, 8, 5, 12, 0, 0);
+    const mtime = Date.UTC(2026, 8, 5, 10, 0, 0);
+
+    // No explicit stamp: max(mtime, name) as before.
+    expect(sessionRecency({ name: "desktop-20260905120000-1", mtime: new Date(mtime) })).toBe(
+      nameTs,
+    );
+
+    // Explicit stamp newer than both: wins.
+    const fresh = Date.UTC(2026, 8, 6, 0, 0, 0);
+    expect(
+      sessionRecency({
+        name: "desktop-20260905120000-1",
+        mtime: new Date(mtime),
+        lastActive: fresh,
+      }),
+    ).toBe(fresh);
   });
 });

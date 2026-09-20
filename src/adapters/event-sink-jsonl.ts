@@ -1,16 +1,11 @@
 import { type WriteStream, createWriteStream, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { Event } from "../core/events.js";
-import {
-  SESSION_EVENTS_SUFFIX,
-  chmodPrivate,
-  sanitizeName,
-  sessionsDir,
-} from "../memory/session.js";
+import { chmodPrivate, sessionEventsPath } from "../memory/session.js";
 import type { EventSink } from "../ports/event-sink.js";
 
 export function eventLogPath(sessionName: string): string {
-  return join(sessionsDir(), `${sanitizeName(sessionName)}${SESSION_EVENTS_SUFFIX}`);
+  return sessionEventsPath(sessionName);
 }
 
 export class JsonlEventSink implements EventSink {

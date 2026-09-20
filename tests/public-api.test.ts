@@ -346,6 +346,7 @@ const PUBLIC_API: readonly string[] = [
   "saveApiKey",
   "saveBaseUrl",
   "scavengeToolCalls",
+  "sessionDir",
   "sessionPath",
   "sessionsDir",
   "stripHallucinatedToolMarkup",

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { stdin } from "node:process";
 import { createInterface } from "node:readline";
 import {
@@ -268,7 +268,6 @@ import {
   type ModelPrefs,
   type SessionInfo,
   type SessionMeta,
-  chmodPrivate,
   deleteSession,
   firstFreeSessionName,
   listSessionsForWorkspace,
@@ -276,9 +275,11 @@ import {
   loadSessionMessages,
   loadSessionMessagesAsync,
   loadSessionMeta,
+  migrateLegacyFlatSessions,
   patchSessionMeta,
   patchSessionWorkspaceIfMissing,
   resolveSessionModelPrefs,
+  sessionExists,
   sessionPath,
   timestampSuffix,
 } from "../../memory/session.js";
@@ -2189,6 +2190,7 @@ async function emitSessions(
                 name: session.name,
                 messageCount: session.messageCount,
                 mtime: session.mtime.toISOString(),
+                updatedAt: session.meta.updatedAt,
                 summary: session.meta.summary,
                 workspaceStatus: session.workspaceStatus,
               },
@@ -3395,38 +3397,43 @@ export function pickResumeSession(
   return sessions.find((s) => !skip(s)) ?? null;
 }
 
-function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
-  // Seconds precision repeats when `new_chat` fires twice within one second —
-  // reuse the collision loop so the second mint takes `-1`, `-2`, … instead
-  // of truncating a session that already holds messages.
-  const name = firstFreeSessionName(`desktop-${timestampSuffix(14)}-${tabCounter}`, (candidate) => {
-    try {
-      const cp = sessionPath(candidate);
-      return existsSync(cp) && statSync(cp).size > 0;
-    } catch {
-      return false; /* stat failure: treat as free, create below */
-    }
-  });
+/** Pending per-session meta for lazily minted sessions — flushed to
+ *  `<session>/meta.json` on the session's first message write. Keyed so a
+ *  minted-but-never-used name costs nothing on disk. */
+const mintedSessionPrefs = new Map<string, Partial<SessionMeta>>();
+
+/** Flush a lazily minted session's pending meta (workspace/model prefs) to
+ *  disk. Called right before the first message lands, so the folder only ever
+ *  exists for sessions that actually contain a conversation. */
+function bindSessionMetaFor(name: string): void {
+  const prefs = mintedSessionPrefs.get(name);
+  if (!prefs) return;
+  mintedSessionPrefs.delete(name);
   try {
-    const p = sessionPath(name);
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, "", { flag: "w" });
-    chmodPrivate(p);
-  } catch (err) {
-    emitDiagnosticError("session.jsonl.create.failed", err, {
-      details: { session: name, workspaceDirChars: rootDir.length },
-    });
-    process.stderr.write(`reasonix: session jsonl create failed: ${messageOf(err)}\n`);
-  }
-  try {
-    patchSessionMeta(name, prefs ? { workspace: rootDir, ...prefs } : { workspace: rootDir });
+    patchSessionMeta(name, prefs);
   } catch (err) {
     // session meta is for filtering only: failure shouldn't block chat, but LOG
     emitDiagnosticError("session.meta.patch.failed", err, {
-      details: { session: name, workspaceDirChars: rootDir.length },
+      details: { session: name },
     });
     process.stderr.write(`reasonix: session meta patch failed: ${messageOf(err)}\n`);
   }
+}
+
+function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
+  // Seconds precision repeats when `new_chat` fires twice within one second —
+  // reuse the collision loop so the second mint takes `-1`, `-2`, … instead
+  // of truncating a session that already holds messages. Sessions with an
+  // empty (or missing) transcript are FREE — an abandoned new chat leaves no
+  // folder on disk at all, so it can never resurface in the sidebar.
+  const name = firstFreeSessionName(`desktop-${timestampSuffix(14)}-${tabCounter}`, (candidate) =>
+    sessionExists(candidate),
+  );
+  // Lazy creation: decide the name and DO NOT touch the disk. The session
+  // folder materializes on the first message (appendSessionMessage /
+  // rewriteSession via ensureSessionDir). patchSessionMeta would create the
+  // folder too, so it is deferred to the first turn — see bindSessionMetaFor.
+  mintedSessionPrefs.set(name, prefs ?? { workspace: rootDir });
   return name;
 }
 
@@ -3456,6 +3463,10 @@ function persistSessionModelPrefs(tab: Tab): void {
  *  (settings_save) or a freshly minted session writes after that. */
 function stampSessionModelPrefs(tab: Tab): void {
   if (!tab.currentSession) return;
+  // Lazily minted session taking its first turn: flush the pending
+  // workspace/model meta now — this materializes the session folder, which is
+  // exactly right because a turn is about to write messages into it.
+  bindSessionMetaFor(tab.currentSession);
   try {
     const meta = loadSessionMeta(tab.currentSession);
     if (meta.model !== undefined && meta.reasoningEffort !== undefined) return;
@@ -3841,6 +3852,20 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
   installDesktopCrashGuards();
   startProcessHealthDiagnostics();
+  // One-time move of pre-folder flat sessions (<name>.jsonl + sidecars) into
+  // their <name>/ folders. Idempotent — a partial migration finishes on the
+  // next boot, and a migrated disk is a single cheap readdir.
+  try {
+    const { migrated, prunedEmpty } = migrateLegacyFlatSessions();
+    if (migrated.length > 0 || prunedEmpty.length > 0) {
+      log.info(
+        `session layout migration: ${migrated.length} migrated, ${prunedEmpty.length} empty pruned`,
+      );
+    }
+  } catch (err) {
+    // Never block boot on migration — reads still fall back to legacy paths.
+    process.stderr.write(`reasonix: session layout migration failed — ${messageOf(err)}\n`);
+  }
 
   const tabs = new Map<string, Tab>();
   const tabContext = new AsyncLocalStorage<string>();
@@ -3915,7 +3940,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // empty conversation. A missing jsonl falls back to a fresh mint so the
     // channel never points at a dangling session name.
     const restoredSession =
-      restore?.session && existsSync(sessionPath(restore.session)) ? restore.session : undefined;
+      restore?.session && sessionExists(restore.session) ? restore.session : undefined;
     tab.currentSession = restoredSession
       ? restoredSession
       : mintSessionFor(dir, {
@@ -4720,16 +4745,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.recentMentions.length = 0;
     tab.hooks = loadHooks({ projectRoot: target });
     if (tab.currentSession) {
-      try {
-        const prevPath = sessionPath(tab.currentSession);
-        if (existsSync(prevPath) && statSync(prevPath).size === 0) {
-          deleteSession(tab.currentSession);
-        }
-      } catch (err) {
-        emitDiagnosticError("session.empty.cleanup.failed", err, {
-          tabId: tab.id,
-          details: { session: tab.currentSession },
-        });
+      // Folder-per-session: a session without messages doesn't exist on disk
+      // (or only holds a meta.json husk) — drop it so it can never resurface.
+      if (!sessionExists(tab.currentSession)) {
+        deleteSession(tab.currentSession);
       }
     }
     // Switch the UI to the new workspace BEFORE loading its conversation: the
@@ -4846,16 +4865,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (tab.aborter) tab.switching = true;
     cancelConversation(tab);
     if (options.cleanUpEmptyCurrent && tab.currentSession) {
-      try {
-        const prevPath = sessionPath(tab.currentSession);
-        if (existsSync(prevPath) && statSync(prevPath).size === 0) {
-          deleteSession(tab.currentSession);
-        }
-      } catch (err) {
-        emitDiagnosticError("session.empty.cleanup.failed", err, {
-          tabId: tab.id,
-          details: { session: tab.currentSession },
-        });
+      // Folder-per-session: a session without messages doesn't exist on disk
+      // (or only holds a meta.json husk) — drop it so it can never resurface.
+      if (!sessionExists(tab.currentSession)) {
+        deleteSession(tab.currentSession);
       }
     }
     try {
@@ -5266,7 +5279,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // see the restored pair before the toolset build starts.
       if (restore?.session) {
         try {
-          if (existsSync(sessionPath(restore.session))) {
+          if (sessionExists(restore.session)) {
             tab.currentSession = restore.session;
             restoreSessionModelPrefs(tab, loadSessionMeta(tab.currentSession));
           }
@@ -5333,7 +5346,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       let restoredMessages: LoadedMessage[] | undefined;
       if (restore?.session) {
         try {
-          if (existsSync(sessionPath(restore.session))) {
+          if (sessionExists(restore.session)) {
             const msgs = buildLoadedMessages(await loadSessionMessagesAsync(restore.session));
             if (msgs.length > 0) restoredMessages = msgs;
           }
@@ -6078,7 +6091,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "session_delete") {
-      const existed = existsSync(sessionPath(msg.name));
+      const existed = sessionExists(msg.name);
       const deleted = deleteSession(msg.name);
       const removed = deleted || !existed;
       if (!removed) {

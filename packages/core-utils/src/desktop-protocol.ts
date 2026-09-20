@@ -387,6 +387,10 @@ export interface SessionsEvent {
     name: string;
     messageCount: number;
     mtime: string;
+    /** Explicit last-activity epoch-ms from the session's meta — the sidebar
+     *  sorts on this (falling back to mtime) so ordering survives file
+     *  copies/restores that reset filesystem timestamps. */
+    updatedAt?: number;
     summary?: string;
     workspaceStatus?: "matched" | "legacy_missing_meta";
   }[];

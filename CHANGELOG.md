@@ -5,6 +5,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Changed: every session is now a folder on disk, and the sidebar sorts by an explicit last-activity timestamp.**
+
+- A chat is no longer a bare `<name>.jsonl` with scattered sidecar files — it is one folder under `~/.reasonix/sessions/<name>/` holding everything about that conversation: `messages.jsonl` (the transcript), `meta.json` (summary, workspace, cost, model prefs, …), `events.jsonl`, `plan.json` and a `plans/` subfolder for completed-plan archives. Folders are created lazily on the first message, so a conversation that is opened and abandoned leaves no trace, and a folder without a non-empty `messages.jsonl` is not a session at all — stray files or sidecar-only folders can never appear in the sidebar.
+- Session meta gains an explicit `updatedAt` stamp, written on every message append and meta patch. The sidebar sorts by `max(updatedAt, mtime, timestamp embedded in the name)`, so ordering keeps working even when a backup/restore or disk copy resets the filesystem timestamps — previously the only recency evidence.
+- A one-time, idempotent migration at desktop boot moves every legacy flat session (`<name>.jsonl` + `.meta.json`/`.events.jsonl`/`.plan.json` sidecars) into its folder; empty legacy files (leaked empty sessions) are pruned outright. The migration never blocks boot, and reads still fall back to legacy paths until it runs. The session-index cache format was bumped (v2) so pre-folder cached listings are discarded rather than mis-read.
+
 **Changed: models are now disabled by default — you opt in to the ones you want.**
 
 - The Settings → Models visibility setting is inverted from a hide-list to an opt-in allow-list: instead of every model being offered until you hide each one, **all models are off by default** and only the ones you explicitly enable appear in the composer model menus (main and subagent) and are marked `enabled` in the Settings grid. The setting is stored as `enabledModels: string[]` in `~/.reasonix/config.json` (replacing `disabledModels`; old hide-lists are incompatible with the new semantics and are ignored). The grid gains Enable all / Disable all bulk buttons and an `{count} of {total} enabled` counter, and the picker shows a "no models enabled" hint pointing at Settings when the allow-list is empty. As before, a tab's currently active model always stays selectable in its own picker even if it isn't enabled, so a running session can never strand itself.
