@@ -597,11 +597,9 @@ export class DeepSeekClient {
     return this.transportResolver();
   }
 
-  /** The other Z.AI endpoint for this client's baseUrl. Z.AI binds a key type to
-   *  a host path — Developer keys only authenticate on `/api/paas/v4`, GLM
-   *  Coding Plan keys only on `/api/coding/paas/v4` — so a 401 on one means the
-   *  key belongs on the other. Null when baseUrl is neither (a custom/proxied
-   *  Z.AI endpoint is never swapped). */
+  /** The other Z.AI endpoint for this baseUrl. A key 401s on the endpoint it
+   *  isn't bound to (Developer vs GLM Coding Plan), so we retry the alternate.
+   *  Null for custom/proxied URLs, which are never swapped. */
   private zaiAlternateBaseUrl(): string | null {
     const strip = (u: string) => u.replace(/\/+$/, "");
     const base = strip(this.baseUrl);

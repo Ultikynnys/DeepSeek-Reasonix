@@ -18,10 +18,8 @@ export const LATEST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Network timeout. Short — we never block the UI waiting on this. */
 export const LATEST_FETCH_TIMEOUT_MS = 2_000;
 
-/** Directory of this package — the local Reasonix installation. Walks up from
- *  the module to the nearest `package.json` named "reasonix" (the `name` guard
- *  avoids picking up an outer package.json when loaded as a dep). Pure
- *  filesystem probe; returns null when none is reachable. */
+/** Directory of the nearest `package.json` named "reasonix" — this package's
+ *  install root; null when none is reachable. */
 function findInstallDir(): string | null {
   try {
     let dir = dirname(fileURLToPath(import.meta.url));
@@ -41,11 +39,9 @@ function findInstallDir(): string | null {
   return null;
 }
 
-/** The local Reasonix installation directory — the folder the running app
- *  lives in (dev: the repo root; installed: the bundled app folder). Falls back
- *  to the process working directory when no `reasonix` package.json is
- *  reachable; the desktop shell pins the daemon's cwd to this folder, so the
- *  two coincide. Used as the default workspace for a New tab. */
+/** The local Reasonix installation directory (dev: repo root; installed: the
+ *  bundled app folder). Falls back to `process.cwd()`, which the desktop shell
+ *  pins to the same folder. Used as a New tab's default workspace. */
 export function reasonixInstallDir(): string {
   return findInstallDir() ?? process.cwd();
 }

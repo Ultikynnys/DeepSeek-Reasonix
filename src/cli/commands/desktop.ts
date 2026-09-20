@@ -3231,11 +3231,9 @@ function sameWorkspaceDir(a: string, b: string): boolean {
   return process.platform === "win32" ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
 }
 
-/** Whether switching `switching`'s workspace away from `leavingDir` leaves that
- *  workspace with no tab on it — i.e. no tab outside `switching`'s own group
- *  still targets it. True means every agent still running in one of the
- *  workspace's sessions should be stopped (nothing should keep running in a
- *  workspace no tab shows). Pure so the rule is testable. */
+/** True when switching `switching` away from `leavingDir` leaves that workspace
+ *  with no other tab — every agent in its sessions should then be stopped. Pure
+ *  so the rule is testable. */
 export function workspaceAbandonedBySwitch(
   tabs: readonly { id: string; groupId: string; rootDir: string }[],
   switching: { id: string; groupId: string },
@@ -3249,11 +3247,9 @@ export function workspaceAbandonedBySwitch(
   );
 }
 
-/** The workspace's newest session to implicitly resume on a switch (callers pass
- *  a newest-first list), or null when it has none. `skip` drops candidates that
- *  must not be reused (e.g. a session another channel already holds) so the
- *  resume can never bind one session to two channels. Pure so the rule is
- *  testable. */
+/** The newest session to implicitly resume on a switch (newest-first list), or
+ *  null when none. `skip` drops candidates another channel holds so one session
+ *  can't bind to two channels. Pure so the rule is testable. */
 export function pickResumeSession(
   sessions: readonly SessionInfo[],
   skip?: (session: SessionInfo) => boolean,
