@@ -785,7 +785,7 @@ export const EN: TranslationSchema = {
     zaiAuth:
       "Z.AI authentication failed (401): {inner}. Check that the key matches the endpoint: Developer API keys use https://api.z.ai/api/paas/v4, GLM Coding Plan keys use https://api.z.ai/api/coding/paas/v4 (a Coding Plan key returns 401 on the Developer endpoint). Reasonix retries the other endpoint automatically; if it still fails, set ZAI_API_KEY in Settings → Models. Manage keys at https://z.ai/manage-apikey/apikey-list.",
     zaiCredits:
-      "Z.AI has insufficient balance, quota, or no applicable resource package: {inner}. Check Z.AI billing/Coding Plan quota and use the Coding Plan dedicated endpoint when your subscription requires it.",
+      "Z.AI reports no usable balance or resource package: {inner}. Reasonix already tries both the Developer (api.z.ai/api/paas/v4) and GLM Coding Plan (api.z.ai/api/coding/paas/v4) endpoints; if both are rejected, the key has no active Developer balance or Coding Plan — recharge at https://z.ai or subscribe at https://z.ai/subscribe.",
     zaiPermission:
       "Z.AI denied this request (403): {inner}. Check the Z.AI key permissions, model entitlement, and Coding Plan endpoint.",
     zaiNotFound:

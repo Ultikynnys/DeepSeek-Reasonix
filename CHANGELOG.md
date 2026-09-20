@@ -16,7 +16,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 **Fixed: a valid Z.AI key no longer reports "authentication failed" when it's a GLM Coding Plan key.**
 
-- Z.AI binds a key type to a host path: Developer API keys authenticate on `https://api.z.ai/api/paas/v4` while GLM Coding Plan keys authenticate only on `https://api.z.ai/api/coding/paas/v4`, and each returns `401 Authentication Failed` (code 1000) on the other. The client only ever called the Developer endpoint, so a Coding Plan key — a perfectly valid key — failed as if invalid. A chat/stream request that 401s against a recognized Z.AI endpoint now retries once against the other one, so either key type just works. Custom/proxied endpoints are left untouched.
+- Z.AI binds a key type to a host path: Developer API keys authenticate on `https://api.z.ai/api/paas/v4` while GLM Coding Plan keys authenticate only on `https://api.z.ai/api/coding/paas/v4`. The Developer endpoint rejects a Coding Plan key with `401 Authentication Failed` (code 1000) or `429 Insufficient balance or no resource package` (code 1113), and the client only ever called the Developer endpoint — so a valid Coding Plan key failed as if invalid or unfunded. A chat/stream request now retries the other endpoint on a 401 or a no-balance 429, keeping whichever endpoint actually answers; custom/proxied endpoints are left untouched.
 
 **Added: a Settings → Tools "Repetition guard" toggle (default off) for the model-stall guard.**
 

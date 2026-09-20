@@ -515,6 +515,9 @@ export class DeepSeekClient {
   private readonly minChatIntervalMs: number;
   private readonly apiKeyResolver?: () => Promise<string | undefined>;
   private readonly transportResolver?: () => Promise<ResolvedTransport | null>;
+  /** Resolved Z.AI endpoint after a key/endpoint mismatch forced a swap, so
+   *  later requests skip the wrong endpoint (and its retries). */
+  private zaiResolvedBase: string | null = null;
   private readonly geminiAuthResolver?: () => Promise<{
     accessToken: string;
     projectId?: string;
@@ -602,10 +605,19 @@ export class DeepSeekClient {
    *  Null for custom/proxied URLs, which are never swapped. */
   private zaiAlternateBaseUrl(): string | null {
     const strip = (u: string) => u.replace(/\/+$/, "");
-    const base = strip(this.baseUrl);
+    const base = strip(this.zaiResolvedBase ?? this.baseUrl);
     if (base === strip(DEFAULT_ZAI_CHAT_URL)) return DEFAULT_ZAI_CODING_CHAT_URL;
     if (base === strip(DEFAULT_ZAI_CODING_CHAT_URL)) return DEFAULT_ZAI_CHAT_URL;
     return null;
+  }
+
+  /** True when a Z.AI reply means the key doesn't belong on this endpoint — a
+   *  401, or a 429 reporting no Developer balance / resource package. */
+  private async zaiEndpointMismatch(resp: Response): Promise<boolean> {
+    if (resp.status === 401 || resp.status === 402) return true;
+    if (resp.status !== 429) return false;
+    const body = await resp.clone().text().catch(() => "");
+    return /insufficient balance|no resource package|please recharge/i.test(body);
   }
 
   /** Stable per-conversation id for OpenCode's x-opencode-session header —
@@ -676,7 +688,7 @@ export class DeepSeekClient {
       transport?.endpoint ??
       (isOllama
         ? `${deriveNativeOllamaOrigin(this.baseUrl)}/api/chat`
-        : `${this.baseUrl}/chat/completions`);
+        : `${this.zaiResolvedBase ?? this.baseUrl}/chat/completions`);
     const ollamaNumCtx = isOllama ? await this.resolveOllamaNumCtx(opts) : undefined;
     const init: RequestInit = {
       method: "POST",
@@ -686,20 +698,24 @@ export class DeepSeekClient {
     };
     try {
       let resp = await fetchWithRetry(this._fetch, endpoint, init, { ...this.retry, signal });
-      // Z.AI binds the key type to the host path: a GLM Coding Plan key 401s on
-      // the Developer endpoint and vice versa, so a valid key of either type
-      // looks "invalid" on the wrong one. On a 401 against a recognized Z.AI
-      // endpoint, retry once against the other so either key just works.
-      // Custom/proxied endpoints (a transport, or an unrecognized baseUrl) are
-      // left untouched.
-      if (resp.status === 401 && !transport && providerForModel(opts.model) === "zai") {
+      // Z.AI binds a key type to a host path: the Developer endpoint rejects a
+      // GLM Coding Plan key (401, or 429 "no resource package" when it has no
+      // Developer balance) and vice versa. On either signal against a recognized
+      // Z.AI endpoint, try the other; keep it unless it too looks wrong-keyed
+      // (then the original error is the accurate one). Proxied endpoints are
+      // never swapped.
+      if (!transport && providerForModel(opts.model) === "zai") {
         const altBase = this.zaiAlternateBaseUrl();
-        if (altBase) {
-          log.verbose(`zai 401 on ${endpoint} — retrying the alternate Z.AI endpoint`);
-          resp = await fetchWithRetry(this._fetch, `${altBase}/chat/completions`, init, {
+        if (altBase && (await this.zaiEndpointMismatch(resp))) {
+          log.verbose(`zai ${resp.status} on ${endpoint} — trying the alternate Z.AI endpoint`);
+          const altResp = await fetchWithRetry(this._fetch, `${altBase}/chat/completions`, init, {
             ...this.retry,
             signal,
           });
+          if (altResp.ok || !(await this.zaiEndpointMismatch(altResp))) {
+            this.zaiResolvedBase = altBase;
+            resp = altResp;
+          }
         }
       }
       recordDiagnostic("model.response.headers", {
