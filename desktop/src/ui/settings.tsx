@@ -1402,13 +1402,16 @@ function PageModels({
 
   const allAvailable = groups.flatMap((g) => g.models);
   const isKnown = catalog.knownModelIds.has(settings.model);
-  const hiddenSet = new Set(settings.disabledModels ?? []);
-  const hiddenCount = allAvailable.filter((id) => hiddenSet.has(id)).length;
-  const toggleHidden = (id: string): void => {
-    const next = new Set(settings.disabledModels ?? []);
+  const enabledSet = new Set(settings.enabledModels ?? []);
+  const enabledCount = allAvailable.filter((id) => enabledSet.has(id)).length;
+  const toggleEnabled = (id: string): void => {
+    const next = new Set(settings.enabledModels ?? []);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    onSave({ disabledModels: [...next] });
+    onSave({ enabledModels: [...next] });
+  };
+  const setAllEnabled = (enabled: boolean): void => {
+    onSave({ enabledModels: enabled ? [...allAvailable] : [] });
   };
   return (
     <>
@@ -1416,20 +1419,25 @@ function PageModels({
         <div className="stitle">{t("settings.defaultModelCurrent", { model: settings.model })}</div>
         <div className="h" style={{ marginBottom: 8 }}>
           {t("settings.modelVisibilityHint")}
-          {hiddenCount > 0 ? (
-            <>
-              {" "}
-              {t("settings.modelHiddenCount", { count: hiddenCount })}{" "}
-              <button
-                type="button"
-                className="mini-btn"
-                title={t("settings.modelShowAll")}
-                onClick={() => onSave({ disabledModels: [] })}
-              >
-                {t("settings.modelShowAll")}
-              </button>
-            </>
-          ) : null}
+          {" "}
+          {t("settings.modelEnabledCount", { count: enabledCount, total: allAvailable.length })}{" "}
+          <button
+            type="button"
+            className="mini-btn"
+            title={t("settings.modelEnableAll")}
+            onClick={() => setAllEnabled(true)}
+          >
+            {t("settings.modelEnableAll")}
+          </button>
+          {" "}
+          <button
+            type="button"
+            className="mini-btn"
+            title={t("settings.modelDisableAll")}
+            onClick={() => setAllEnabled(false)}
+          >
+            {t("settings.modelDisableAll")}
+          </button>
         </div>
         {groups.map((g) => (
           <div key={g.title} style={{ marginBottom: 12 }}>
@@ -1438,29 +1446,29 @@ function PageModels({
             </div>
             <div className="model-grid">
               {g.models.map((id) => {
-                const hidden = hiddenSet.has(id);
+                const enabled = enabledSet.has(id);
                 return (
                   <div
                     key={id}
                     className="mcard"
                     data-on={settings.model === id}
-                    data-hidden={hidden}
+                    data-disabled={!enabled}
                     onClick={() => onSave({ model: id })}
                     onKeyDown={activationHandler(() => onSave({ model: id }))}
                   >
                     <div className="nm">{modelDisplayName(id)}</div>
                     {catalog.acceptsImages(id) ? <span className="badge">vision</span> : null}
-                    {hidden ? <span className="badge">{t("settings.modelHidden")}</span> : null}
+                    {enabled ? <span className="badge">{t("settings.modelEnabled")}</span> : null}
                     <button
                       type="button"
                       className="mini-btn model-visibility-btn"
-                      title={hidden ? t("settings.modelShow") : t("settings.modelHide")}
+                      title={enabled ? t("settings.modelDisable") : t("settings.modelEnable")}
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggleHidden(id);
+                        toggleEnabled(id);
                       }}
                     >
-                      {hidden ? t("settings.modelShow") : t("settings.modelHide")}
+                      {enabled ? t("settings.modelDisable") : t("settings.modelEnable")}
                     </button>
                   </div>
                 );
@@ -1599,29 +1607,29 @@ function PageModels({
           <div className="model-grid ollama-model-grid">
             {ollamaModels.map((id) => {
               const full = `ollama/${id}`;
-              const hidden = hiddenSet.has(full);
+              const enabled = enabledSet.has(full);
               return (
                 <div
                   key={full}
                   className="mcard"
                   data-on={settings.model === full}
-                  data-hidden={hidden}
+                  data-disabled={!enabled}
                   onClick={() => onSave({ model: full })}
                   onKeyDown={activationHandler(() => onSave({ model: full }))}
                 >
                   <div className="nm">{full}</div>
                   {catalog.acceptsImages(full) ? <span className="badge">vision</span> : null}
-                  {hidden ? <span className="badge">{t("settings.modelHidden")}</span> : null}
+                  {enabled ? <span className="badge">{t("settings.modelEnabled")}</span> : null}
                   <button
                     type="button"
                     className="mini-btn model-visibility-btn"
-                    title={hidden ? t("settings.modelShow") : t("settings.modelHide")}
+                    title={enabled ? t("settings.modelDisable") : t("settings.modelEnable")}
                     onClick={(e) => {
                       e.stopPropagation();
-                      toggleHidden(full);
+                      toggleEnabled(full);
                     }}
                   >
-                    {hidden ? t("settings.modelShow") : t("settings.modelHide")}
+                    {enabled ? t("settings.modelDisable") : t("settings.modelEnable")}
                   </button>
                 </div>
               );

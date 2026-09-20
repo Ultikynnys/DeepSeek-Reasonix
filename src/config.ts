@@ -433,9 +433,10 @@ export interface ReasonixConfig {
   mcp?: string[];
   /** Names of servers in `mcp` to skip on bridge — see `/mcp disable <name>`. */
   mcpDisabled?: string[];
-  /** Model ids hidden from every model picker (composer menus, Settings grid).
-   *  Global persistent setting — edited from Settings → Models, stored here. */
-  disabledModels?: string[];
+  /** Model ids offered by every model picker (composer menus, Settings grid).
+   *  Opt-in allow-list — models not listed here are hidden. Global persistent
+   *  setting — edited from Settings → Models, stored here. */
+  enabledModels?: string[];
   /** Env overlay per MCP server name (matches the `name=` prefix of the spec). Stdio transports merge this over process.env; SSE/HTTP ignore it. */
   mcpEnv?: Record<string, Record<string, string>>;
   /** Canonical MCP server configuration — merges with and overrides legacy `mcp`/`mcpEnv`/`mcpDisabled`. */
@@ -934,7 +935,7 @@ export function defaultConfigPath(): string {
 const STRING_ARRAY_FIELDS: Array<readonly string[]> = [
   ["mcp"],
   ["mcpDisabled"],
-  ["disabledModels"],
+  ["enabledModels"],
   ["recentWorkspaces"],
   ["skills", "paths"],
 ];
@@ -2184,9 +2185,9 @@ export function saveRepetitionGuardEnabled(
   writeConfig(cfg, path);
 }
 
-/** Model ids hidden from every model picker. Empty/absent = show everything. */
-export function loadDisabledModels(path: string = defaultConfigPath()): string[] {
-  const v = readConfig(path).disabledModels;
+/** Model ids offered by every model picker. Empty/absent = none enabled (all hidden). */
+export function loadEnabledModels(path: string = defaultConfigPath()): string[] {
+  const v = readConfig(path).enabledModels;
   if (!Array.isArray(v)) return [];
   const seen = new Set<string>();
   for (const s of v) {
@@ -2197,8 +2198,8 @@ export function loadDisabledModels(path: string = defaultConfigPath()): string[]
   return [...seen];
 }
 
-/** Persist the hidden-model list. Dedupes + trims; empty clears the field. */
-export function saveDisabledModels(models: string[], path: string = defaultConfigPath()): void {
+/** Persist the enabled-model allow-list. Dedupes + trims; empty clears the field. */
+export function saveEnabledModels(models: string[], path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
   const seen = new Set<string>();
   for (const s of models) {
@@ -2206,7 +2207,7 @@ export function saveDisabledModels(models: string[], path: string = defaultConfi
     const trimmed = s.trim();
     if (trimmed) seen.add(trimmed);
   }
-  cfg.disabledModels = seen.size > 0 ? [...seen] : undefined;
+  cfg.enabledModels = seen.size > 0 ? [...seen] : undefined;
   writeConfig(cfg, path);
 }
 

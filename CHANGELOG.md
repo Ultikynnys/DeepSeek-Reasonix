@@ -5,6 +5,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+**Changed: models are now disabled by default — you opt in to the ones you want.**
+
+- The Settings → Models visibility setting is inverted from a hide-list to an opt-in allow-list: instead of every model being offered until you hide each one, **all models are off by default** and only the ones you explicitly enable appear in the composer model menus (main and subagent) and are marked `enabled` in the Settings grid. The setting is stored as `enabledModels: string[]` in `~/.reasonix/config.json` (replacing `disabledModels`; old hide-lists are incompatible with the new semantics and are ignored). The grid gains Enable all / Disable all bulk buttons and an `{count} of {total} enabled` counter, and the picker shows a "no models enabled" hint pointing at Settings when the allow-list is empty. As before, a tab's currently active model always stays selectable in its own picker even if it isn't enabled, so a running session can never strand itself.
+
 **Changed: sessions are now independent agents — a tab can host several, and several tabs can share one workspace.**
 
 - Sessions no longer replace one another. Clicking a session in the sidebar opens it as its own channel (a second session in the same tab, shown as a pill in the tab strip) or focuses it if it is already open, instead of swapping out — and aborting — the current session. Several tabs can share one workspace; the workspace picker no longer redirects focus to a tab that already has it.

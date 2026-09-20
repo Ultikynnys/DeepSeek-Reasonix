@@ -104,7 +104,7 @@ export function Composer({
   opencodeVisionModels,
   onRefreshOpencodeModels,
   customModels,
-  disabledModels,
+  enabledModels,
   textareaRef,
   workspaceDir,
   queuedSends,
@@ -163,9 +163,10 @@ export function Composer({
   /** Ids with an explicit `models` provider mapping in config.json — offered
    *  in the general list because the user declared them. */
   customModels?: string[];
-  /** Model ids hidden from every model picker. Global persistent setting
-   *  (`disabledModels` in config.json), edited from Settings → Models. */
-  disabledModels?: string[];
+  /** Model ids offered by every picker (opt-in allow-list — unlisted models
+   *  are hidden). Global persistent setting (`enabledModels` in config.json),
+   *  edited from Settings → Models. */
+  enabledModels?: string[];
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   workspaceDir?: string;
   /** Messages typed while busy=true; rendered as removable chips above the textarea and auto-drained FIFO on turn-complete. */
@@ -456,7 +457,7 @@ export function Composer({
     opencodeModelsError,
     opencodeVisionModels,
     customModels,
-    disabledModels,
+    enabledModels,
     onRefreshOllamaModels,
     onRefreshAntigravityModels,
     onRefreshOpencodeModels,
@@ -809,7 +810,7 @@ function ModelList({
   opencodeModelsError,
   opencodeVisionModels,
   customModels,
-  disabledModels,
+  enabledModels,
   onRefreshOllamaModels,
   onRefreshAntigravityModels,
   onRefreshOpencodeModels,
@@ -827,8 +828,9 @@ function ModelList({
   opencodeVisionModels?: ReadonlySet<string>;
   /** Ids with an explicit `models` provider mapping — user-declared, so offered. */
   customModels?: string[];
-  /** Model ids hidden from every picker. The active model always stays visible. */
-  disabledModels?: string[];
+  /** Model ids offered by the picker (opt-in allow-list). The active model
+   *  always stays visible so a running tab can never strand itself. */
+  enabledModels?: string[];
   onRefreshOllamaModels?: (force?: boolean) => void;
   onRefreshAntigravityModels?: () => void;
   onRefreshOpencodeModels?: (force?: boolean) => void;
@@ -844,10 +846,11 @@ function ModelList({
   });
   const ollamaGroup = Boolean(ollamaModels && ollamaModels.length > 0);
 
-  // Global hide list from Settings → Models. The active model always stays
-  // visible so a hidden-but-selected tab can never strand itself.
-  const hiddenSet = new Set(disabledModels ?? []);
-  const visibleUnlessActive = (id: string): boolean => id === activeModel || !hiddenSet.has(id);
+  // Global allow-list from Settings → Models: only enabled models are offered.
+  // The active model always stays visible so a running tab can never strand
+  // itself, even when it isn't on the allow-list (or the list is empty).
+  const enabledSet = new Set(enabledModels ?? []);
+  const visibleUnlessActive = (id: string): boolean => id === activeModel || enabledSet.has(id);
 
   type GroupDef = {
     key: string;
@@ -935,6 +938,9 @@ function ModelList({
 
   return (
     <div className="popup-list model-menu-list">
+      {enabledModels && enabledModels.length > 0 ? null : (
+        <div className="model-menu-error">{t("composer.modelNoneEnabled")}</div>
+      )}
       {visibleGroups.map((group) => {
         if (group.models.length === 0 && !group.error) return null;
         const Icon = group.icon ?? I.brain;

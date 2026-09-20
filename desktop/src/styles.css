@@ -6472,9 +6472,9 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-/* Hidden models stay editable in Settings → Models (dimmed) but never
- * appear in the composer pickers. */
-.mcard[data-hidden="true"] {
+/* Disabled models stay editable in Settings → Models (dimmed) but never
+ * appear in the composer pickers — only enabledModels are offered. */
+.mcard[data-disabled="true"] {
   opacity: 0.55;
 }
 .model-visibility-btn {

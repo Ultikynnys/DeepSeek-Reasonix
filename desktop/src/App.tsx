@@ -1765,7 +1765,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           recentWorkspaces: ev.recentWorkspaces,
           model: ev.model,
           customModels: ev.customModels,
-          disabledModels: ev.disabledModels,
+          enabledModels: ev.enabledModels,
           webSearchEngine: ev.webSearchEngine,
           webSearchEndpoint: ev.webSearchEndpoint,
           webSearchApiKeys: ev.webSearchApiKeys,
@@ -3576,7 +3576,7 @@ function TabRuntime({
                 opencodeModelsError={opencodeModelsError ?? undefined}
                 opencodeVisionModels={opencodeVisionModels}
                 customModels={state.settings?.customModels}
-                disabledModels={state.settings?.disabledModels}
+                enabledModels={state.settings?.enabledModels}
                 onRefreshOllamaModels={onRefreshOllamaModels}
                 onRefreshAntigravityModels={onRefreshAntigravityModels}
                 onRefreshOpencodeModels={onRefreshOpencodeModels}

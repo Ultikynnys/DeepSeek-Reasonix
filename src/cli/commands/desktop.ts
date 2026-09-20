@@ -118,11 +118,11 @@ import {
   loadCustomQuickSends,
   loadDesktopOpenTabs,
   loadDisableAutoCompaction,
-  loadDisabledModels,
   loadEditMode,
   loadEffectiveMcpConfig,
   loadElevationEnabled,
   loadEnableSubagents,
+  loadEnabledModels,
   loadEndpoint,
   loadEndpointForModel,
   loadExaApiKey,
@@ -166,10 +166,10 @@ import {
   saveCustomQuickSends,
   saveDesktopOpenTabs,
   saveDisableAutoCompaction,
-  saveDisabledModels,
   saveEditMode,
   saveElevationEnabled,
   saveEnableSubagents,
+  saveEnabledModels,
   saveGmailOAuth,
   saveMailProvider,
   saveMaxIterPerTurn,
@@ -1161,7 +1161,7 @@ function emitSettings(tab: Tab): void {
       elevationEnabled: loadElevationEnabled(),
       repetitionGuardEnabled:
         tab.runtime?.loop.repetitionGuardEnabled ?? loadRepetitionGuardEnabled(),
-      disabledModels: loadDisabledModels(),
+      enabledModels: loadEnabledModels(),
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
       workspaceDir: tab.rootDir,
@@ -6623,8 +6623,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             emitSettings(openTab);
           }
         }
-        if (msg.disabledModels !== undefined) {
-          saveDisabledModels(Array.isArray(msg.disabledModels) ? msg.disabledModels : []);
+        if (msg.enabledModels !== undefined) {
+          saveEnabledModels(Array.isArray(msg.enabledModels) ? msg.enabledModels : []);
           for (const openTab of tabs.values()) emitSettings(openTab);
         }
         if (msg.ollamaGeneration !== undefined) {

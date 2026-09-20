@@ -780,9 +780,10 @@ export interface SettingsEvent {
   /** Ids with an explicit `models` provider mapping in config.json — offered
    *  by the model picker alongside the catalogs, since the user declared them. */
   customModels?: string[];
-  /** Model ids hidden from every model picker. Global persistent setting
-   *  (`disabledModels` in config.json), edited from Settings → Models. */
-  disabledModels?: string[];
+  /** Model ids offered by every model picker (opt-in allow-list — unlisted
+   *  models are hidden). Global persistent setting (`enabledModels` in
+   *  config.json), edited from Settings → Models. */
+  enabledModels?: string[];
   /** Ollama chat endpoint (OpenAI-compatible) — shown in the Models settings page. */
   ollamaBaseUrl?: string;
   webSearchEngine?: WebSearchEngineName;
@@ -1092,9 +1093,9 @@ export interface SettingsPatch {
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;
-  /** Model ids hidden from every model picker. Replaces the whole persisted
-   *  `disabledModels` list; empty array clears it (show everything). */
-  disabledModels?: string[];
+  /** Model ids offered by every model picker. Replaces the whole persisted
+   *  `enabledModels` allow-list; empty array disables everything. */
+  enabledModels?: string[];
   /** Per-tab subagent model — default for subagent skills without an explicit `model:` frontmatter. */
   subagentModel?: string;
   /** Ollama chat endpoint override (OpenAI-compatible). null = back to the local default. */

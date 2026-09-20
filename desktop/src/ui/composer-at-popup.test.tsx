@@ -4,6 +4,12 @@ import { fireEvent, render } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./composer";
+import {
+  OPENAI_MODELS,
+  OPENCODE_MODELS,
+  SUPPORTED_OFFICIAL_MODELS,
+  ZAI_MODELS,
+} from "@reasonix/core-utils";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 afterEach(() => {
@@ -45,6 +51,7 @@ describe("desktop Composer model catalog", () => {
         "chat_20706",
         "gemini-2.5-pro",
       ],
+      enabledModels: ["gemini-account-model", "claude-account-model"],
     });
     fireEvent.click(container.querySelector(".model-pill")!);
     const text = container.querySelector(".model-menu-list")?.textContent ?? "";
@@ -75,6 +82,7 @@ describe("desktop Composer model catalog", () => {
     const onSubagentModelChange = vi.fn();
     const { container } = renderComposer({
       subagentModelLabel: "deepseek-v4-flash",
+      enabledModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
       onModelChange,
       onSubagentModelChange,
     });
@@ -105,6 +113,15 @@ describe("desktop Composer model catalog", () => {
       customModels: ["my-fine-tuned-model"],
       antigravityModels: ["gemini-3.7-flash-tiered"],
       ollamaModels: ["llama3.1:latest"],
+      enabledModels: [
+        "my-fine-tuned-model",
+        "gemini-3.7-flash-tiered",
+        "ollama/llama3.1:latest",
+        ...SUPPORTED_OFFICIAL_MODELS,
+        ...OPENAI_MODELS,
+        ...ZAI_MODELS,
+        ...OPENCODE_MODELS,
+      ],
     });
     fireEvent.click(container.querySelector(".model-pill")!);
     const groups = Array.from(container.querySelectorAll(".model-menu-group")).map(
@@ -125,6 +142,7 @@ describe("desktop Composer model catalog", () => {
     const { container } = renderComposer({
       opencodeModels: ["dynamic-vision-free"],
       opencodeVisionModels: new Set(["dynamic-vision-free"]),
+      enabledModels: ["dynamic-vision-free"],
     });
     fireEvent.click(container.querySelector(".model-pill")!);
     const item = Array.from(container.querySelectorAll(".popup-item")).find((el) =>
@@ -133,23 +151,37 @@ describe("desktop Composer model catalog", () => {
     expect(item?.textContent).toContain("vision");
   });
 
-  it("hides disabledModels from both menus but keeps the active model visible", () => {
+  it("shows only enabledModels but keeps the active model visible", () => {
     const { container } = renderComposer({
       modelLabel: "glm-4.5",
-      disabledModels: ["deepseek-v4-pro", "glm-4.5", "ollama/llama3.1:latest"],
+      enabledModels: ["glm-4.5", "ollama/qwen3:32b"],
       ollamaModels: ["llama3.1:latest", "qwen3:32b"],
     });
     fireEvent.click(container.querySelector(".model-pill")!);
     const mainText = container.querySelector(".model-menu-list")?.textContent ?? "";
-    expect(mainText).not.toContain("deepseek-v4-pro");
-    expect(mainText).not.toContain("ollama/llama3.1:latest");
-    // Active model escapes the filter so a hidden-but-selected tab never strands.
+    // Allow-list: only enabled ids appear...
     expect(mainText).toContain("glm-4.5");
     expect(mainText).toContain("qwen3:32b");
+    expect(mainText).not.toContain("ollama/llama3.1:latest");
+    expect(mainText).not.toContain("deepseek-v4-pro");
 
     fireEvent.click(container.querySelector(".subagent-pill")!);
     const subText = container.querySelector(".model-menu-list")?.textContent ?? "";
     expect(subText).not.toContain("deepseek-v4-pro");
+  });
+
+  it("keeps the active model visible and shows the enable hint when nothing is enabled", () => {
+    const { container } = renderComposer({
+      modelLabel: "glm-4.5",
+      enabledModels: [],
+      ollamaModels: ["llama3.1:latest", "qwen3:32b"],
+    });
+    fireEvent.click(container.querySelector(".model-pill")!);
+    const mainText = container.querySelector(".model-menu-list")?.textContent ?? "";
+    // Active model escapes the filter so a hidden-but-selected tab never strands.
+    expect(mainText).toContain("glm-4.5");
+    expect(mainText).not.toContain("qwen3:32b");
+    expect(mainText).toContain("No models enabled — enable them in Settings");
   });
 
   it("subagent menu shares the backend-generated Ollama and Gemini models with the main agent", () => {
@@ -159,6 +191,10 @@ describe("desktop Composer model catalog", () => {
       subagentModelLabel: "deepseek-v4-flash",
       ollamaModels,
       antigravityModels,
+      enabledModels: [
+        ...ollamaModels.map((id) => `ollama/${id}`),
+        ...antigravityModels,
+      ],
     });
 
     fireEvent.click(container.querySelector(".model-pill")!);
@@ -180,6 +216,12 @@ describe("desktop Composer model catalog", () => {
   it("does not sort antigravity models into custom group even if passed in customModels", () => {
     const { container } = renderComposer({
       customModels: [
+        "claude-opus-4-6-thinking",
+        "claude-sonnet-4-6",
+        "gemini-3.7-flash-tiered",
+        "my-real-custom-gateway",
+      ],
+      enabledModels: [
         "claude-opus-4-6-thinking",
         "claude-sonnet-4-6",
         "gemini-3.7-flash-tiered",
