@@ -616,7 +616,10 @@ export class DeepSeekClient {
   private async zaiEndpointMismatch(resp: Response): Promise<boolean> {
     if (resp.status === 401 || resp.status === 402) return true;
     if (resp.status !== 429) return false;
-    const body = await resp.clone().text().catch(() => "");
+    const body = await resp
+      .clone()
+      .text()
+      .catch(() => "");
     return /insufficient balance|no resource package|please recharge/i.test(body);
   }
 
