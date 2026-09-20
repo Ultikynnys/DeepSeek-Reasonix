@@ -40,6 +40,7 @@ import {
   hasPendingIntervention,
   parseSessionTimestamp,
   reduce,
+  runningSessionNames,
   sanitizeSettingsPatch,
   sessionRecency,
   sortSessionsDescending,
@@ -1531,6 +1532,44 @@ describe("Desktop App reducer — $session_loaded resync echo", () => {
     const next = reduce(base, loaded("sess-2", false));
     expect(next.currentSession).toBe("sess-2");
     expect(next.messages).toHaveLength(2);
+  });
+});
+
+describe("runningSessionNames — sidebar dot is running-agents only", () => {
+  const WS = "C:\\repo";
+  const tab = (over: Partial<{ id: string; workspaceDir: string; session: string; busy: boolean }>) => ({
+    id: "t1",
+    workspaceDir: WS,
+    busy: false,
+    ...over,
+  });
+
+  it("dots only sessions with a busy agent — open idle channels get no dot", () => {
+    const tabs = [
+      tab({ id: "t1", session: "busy-chat", busy: true }),
+      tab({ id: "t2", session: "idle-chat", busy: false }),
+      tab({ id: "t3", session: "idle-chat-2", busy: false }),
+    ];
+    const running = runningSessionNames(tabs, WS);
+    expect(running.has("busy-chat")).toBe(true);
+    expect(running.has("idle-chat")).toBe(false);
+    expect(running.has("idle-chat-2")).toBe(false);
+    expect(running.size).toBe(1);
+  });
+
+  it("only counts tabs on the SAME workspace as the sidebar's tab", () => {
+    const tabs = [
+      tab({ id: "t1", workspaceDir: WS, session: "here", busy: true }),
+      tab({ id: "t2", workspaceDir: "D:\\other", session: "elsewhere", busy: true }),
+    ];
+    const running = runningSessionNames(tabs, WS);
+    expect(running.has("here")).toBe(true);
+    expect(running.has("elsewhere")).toBe(false);
+  });
+
+  it("a busy tab with no session bound yet contributes nothing", () => {
+    const running = runningSessionNames([tab({ id: "t1", session: undefined, busy: true })], WS);
+    expect(running.size).toBe(0);
   });
 });
 

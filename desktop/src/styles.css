@@ -1692,6 +1692,9 @@ html[data-platform="macos"] .titlebar .tb-left {
   height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
+  /* Reserved for RUNNING agents only — the element is not rendered at all
+   * when the session's agent is idle, so no gray "idle" dot exists. */
+  background: var(--accent);
 }
 .session-item[data-active="true"] .state {
   box-shadow: 0 0 0 3px var(--accent-soft);

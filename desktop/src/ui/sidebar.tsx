@@ -54,7 +54,7 @@ export function Sidebar({
   sessions,
   activeName,
   workspaceDir,
-  openSessions,
+  runningSessions,
   onNewChat,
   onLoadSession,
   onDeleteSession,
@@ -67,8 +67,10 @@ export function Sidebar({
   sessions: SessionInfo[];
   activeName?: string;
   workspaceDir?: string;
-  /** Session names that currently have a live channel (agent) anywhere in the workspace. */
-  openSessions?: Set<string>;
+  /** Session names whose agent is actively running (a turn in flight) anywhere
+   *  in the workspace — the ONLY thing that dots a session item, matching the
+   *  tab bar's running-agents-only rule. No dot for a merely open channel. */
+  runningSessions?: Set<string>;
   onNewChat: () => void;
   onLoadSession: (name: string) => void;
   onDeleteSession: (name: string) => void;
@@ -260,14 +262,7 @@ export function Sidebar({
                   if (e.key === "Enter" && s.name !== activeName) onLoadSession(s.name);
                 }}
               >
-                <span
-                  className="state"
-                  style={{
-                    background: openSessions?.has(s.name)
-                      ? "var(--accent)"
-                      : "var(--border-strong)",
-                  }}
-                />
+                {runningSessions?.has(s.name) ? <span className="state" /> : null}
                 <div className="body">
                   {editing ? (
                     <input
@@ -449,5 +444,3 @@ function SessionConfirmPopover({
     </div>
   );
 }
-
-

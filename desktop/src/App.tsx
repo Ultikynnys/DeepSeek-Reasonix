@@ -3241,16 +3241,14 @@ function TabRuntime({
     }
   }, [state.messages, session, appendNotice]);
 
-  // Sessions that currently have a live channel (an agent) in ANY tab on this
-  // tab's workspace — the sidebar dots one per open session.
-  const openSessions = useMemo(() => {
-    const target = normalizeWorkspacePath(state.settings?.workspaceDir);
-    const out = new Set<string>();
-    for (const t of tabsList) {
-      if (t.session && normalizeWorkspacePath(t.workspaceDir) === target) out.add(t.session);
-    }
-    return out;
-  }, [tabsList, state.settings?.workspaceDir]);
+  // Sessions whose agent is ACTIVELY RUNNING (a turn in flight) in any tab on
+  // this tab's workspace — the sidebar dots one per running session. A merely
+  // open channel must NOT dot: the tab bar reserves the dot for running agents
+  // and the sidebar follows the same rule (issue: 3 dots for 1 working agent).
+  const runningSessions = useMemo(
+    () => runningSessionNames(tabsList, state.settings?.workspaceDir),
+    [tabsList, state.settings?.workspaceDir],
+  );
 
   // Report this channel's running-agent state up so the tab dot can count the
   // agents active in the tab (this channel plus its siblings).
@@ -3325,7 +3323,7 @@ function TabRuntime({
           activeName={state.currentSession}
           workspaceDir={state.settings?.workspaceDir}
           onNewChat={newChat}
-          openSessions={openSessions}
+          runningSessions={runningSessions}
           onLoadSession={(name) => {
             clearAbortDraft();
             // Open the session as its own channel (a new tab in this group), or
@@ -4230,6 +4228,23 @@ function TitleBar({
       </div>
     </header>
   );
+}
+
+/** Session names whose agent is ACTIVELY running (turn in flight) in any tab on
+ *  `workspaceDir`. The ONLY input to the sidebar dot: a merely open channel
+ *  must not dot — the tab bar reserves the dot for running agents and the
+ *  sidebar follows the same rule (issue: 3 orange dots for 1 working agent). */
+export function runningSessionNames<
+  T extends { id: string; workspaceDir?: string; session?: string; busy?: boolean },
+>(tabs: readonly T[], workspaceDir?: string): Set<string> {
+  const target = normalizeWorkspacePath(workspaceDir);
+  const out = new Set<string>();
+  for (const t of tabs) {
+    if (t.busy && t.session && normalizeWorkspacePath(t.workspaceDir) === target) {
+      out.add(t.session);
+    }
+  }
+  return out;
 }
 
 /** Group independently running session channels into unique visual workspace
