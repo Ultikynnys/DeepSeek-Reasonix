@@ -31,6 +31,7 @@ function endpointFor(model: string): ModelEndpointInfo {
     model === "gemini-3.7-flash"
   )
     return { provider: "gemini", baseUrl: "https://daily-cloudcode-pa.googleapis.com" };
+  if (model.startsWith("glm-")) return { provider: "zai", baseUrl: "https://api.z.ai/api/v1" };
   return { provider: "deepseek", baseUrl: "https://api.deepseek.com" };
 }
 
@@ -215,6 +216,12 @@ describe("StatusBar quota display", () => {
     });
     expect(screen.getByText(/off-peak|peak/)).toBeTruthy();
     expect(screen.getByText(/1x|2x/)).toBeTruthy();
+  });
+
+  it("shows the Z.AI rate chip with a 0.5x/1x multiplier", () => {
+    renderBar({ settings: { model: "glm-5.3-flash" } as Settings });
+    expect(screen.getByText(/off-peak|peak/)).toBeTruthy();
+    expect(screen.getByText(/0\.5x|1x/)).toBeTruthy();
   });
 
   it("hides the rate chip for local Ollama and other Ollama models", () => {

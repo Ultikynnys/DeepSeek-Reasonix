@@ -37,12 +37,14 @@ export type { SessionRecencyInput } from "./session-order.js";
 export {
   DEEPSEEK_RATE_SCHEDULE,
   OLLAMA_RATE_SCHEDULE,
+  ZAI_RATE_SCHEDULE,
   isOffPeakRate,
   isOllamaPeakPricedModel,
   isPeakRate,
   isRateScheduleWeekend,
   minutesUntilRateChangeForSchedule,
   normalizeOllamaModelId,
+  rateMultiplierForSchedule,
 } from "./rate-periods.js";
 export type { RateSchedule } from "./rate-periods.js";
 export {

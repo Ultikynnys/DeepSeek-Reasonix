@@ -14,6 +14,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A New tab now defaults to the local Reasonix installation folder (where the app lives); an explicit workspace pick still wins.
 - The tab-strip dot now shows how many agents are actively running in that tab (one per running session), and is hidden entirely when none are running.
 
+**Added: the status-bar rate chip now covers Z.AI's peak/off-peak pricing.**
+
+- Z.AI charges GLM usage at half the standard rate outside its peak window (Mon–Fri 14:00–18:00 SGT = 06:00–10:00 UTC; weekends off-peak all day). The bottom-bar clock chip now renders on Z.AI tabs like the DeepSeek and Ollama ones — the current period, time to the next change, and the rate multiplier (`0.5x` off-peak / `1x` peak). This adds an optional per-schedule multiplier to the shared rate engine; DeepSeek and Ollama keep their `1x`/`2x` surcharge framing.
+
 **Fixed: GLM Coding Plan keys now work — Z.AI serves them on the Responses API, not chat-completions.**
 
 - Z.AI's GLM Coding Plan keys are served on the **Responses API** (`https://api.z.ai/api/v1`), which speaks the Responses wire format (`input`/`instructions`, `response.*` SSE). The chat-completions paths — the Developer endpoint `https://api.z.ai/api/paas/v4` and the Coding Plan's `https://api.z.ai/api/coding/paas/v4` — reject a Coding Plan key with `401 Authentication Failed` (code 1000) or `429 Insufficient balance or no resource package` (code 1113), so a valid, funded Coding Plan key failed as if invalid or unfunded. Z.AI models now route through the Responses endpoint (Reasonix's existing Responses path); if it rejects the key, a chat-completions request is retried on the Developer endpoint and, on success, remembered so later requests skip the probe. Custom/proxied base URLs are left untouched.

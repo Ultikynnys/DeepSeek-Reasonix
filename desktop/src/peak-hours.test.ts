@@ -1,10 +1,15 @@
-import { OLLAMA_RATE_SCHEDULE, isOllamaPeakPricedModel } from "@reasonix/core-utils";
+import {
+  OLLAMA_RATE_SCHEDULE,
+  ZAI_RATE_SCHEDULE,
+  isOllamaPeakPricedModel,
+} from "@reasonix/core-utils";
 import { describe, expect, it } from "vitest";
 import {
   isBeijingWeekendDay,
   isOffPeak,
   isPeak,
   minutesUntilRateChange,
+  rateMultiplier,
 } from "./peak-hours";
 
 /** Weekday fixture — 2026-01-01 (Thursday). */
@@ -134,5 +139,32 @@ describe("minutesUntilRateChange", () => {
     expect(minutesUntilRateChange(monday(0, 30))).toBe(30);
     // Mon 23:00 UTC → Tue 01:00 UTC.
     expect(minutesUntilRateChange(monday(23))).toBe(120);
+  });
+});
+
+describe("Z.AI GLM rate periods", () => {
+  it.each([
+    [5, 59, true], // 05:59 UTC — before the peak window
+    [6, 0, false], // 06:00 UTC = 14:00 SGT — peak starts
+    [9, 59, false], // 09:59 UTC = 17:59 SGT — still peak
+    [10, 0, true], // 10:00 UTC = 18:00 SGT — peak ends (end-exclusive)
+  ])("UTC %i:%02i off-peak = %s", (hour, minute, offPeak) => {
+    expect(isOffPeak(weekday(hour, minute), ZAI_RATE_SCHEDULE)).toBe(offPeak);
+    expect(isPeak(weekday(hour, minute), ZAI_RATE_SCHEDULE)).toBe(!offPeak);
+  });
+
+  it("is off-peak all weekend on the SGT billing calendar", () => {
+    expect(isPeak(saturday(7), ZAI_RATE_SCHEDULE)).toBe(false);
+    expect(isPeak(sunday(7), ZAI_RATE_SCHEDULE)).toBe(false);
+  });
+
+  it("shows a 0.5x off-peak / 1x peak multiplier", () => {
+    expect(rateMultiplier(weekday(2), ZAI_RATE_SCHEDULE)).toBe(0.5);
+    expect(rateMultiplier(weekday(7), ZAI_RATE_SCHEDULE)).toBe(1);
+  });
+
+  it("keeps the 1x/2x surcharge framing for the default (DeepSeek) schedule", () => {
+    expect(rateMultiplier(weekday(12))).toBe(1);
+    expect(rateMultiplier(weekday(2))).toBe(2);
   });
 });

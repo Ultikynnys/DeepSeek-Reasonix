@@ -29,3 +29,13 @@ export function minutesUntilRateChange(
 ): number {
   return minutesUntilRateChangeForSchedule(date, schedule);
 }
+
+/** The rate multiplier the status bar shows for the current period. */
+export function rateMultiplier(
+  date: Date,
+  schedule: RateSchedule = DEEPSEEK_RATE_SCHEDULE,
+): number {
+  return isPeakRate(date, schedule)
+    ? (schedule.peakMultiplier ?? 2)
+    : (schedule.offPeakMultiplier ?? 1);
+}

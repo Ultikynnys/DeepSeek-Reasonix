@@ -1,6 +1,7 @@
 import {
   DEEPSEEK_RATE_SCHEDULE,
   OLLAMA_RATE_SCHEDULE,
+  ZAI_RATE_SCHEDULE,
   isOllamaPeakPricedModel,
   modelDisplayName,
 } from "@reasonix/core-utils";
@@ -8,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Balance, Settings, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
-import { isOffPeak, minutesUntilRateChange } from "../peak-hours";
+import { isOffPeak, minutesUntilRateChange, rateMultiplier } from "../peak-hours";
 import type { AntigravityQuota, CodexQuota, JobInfo, OllamaQuota } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { hitPercent, tokenLabel } from "./format";
@@ -216,6 +217,7 @@ export function StatusBar({
   // Antigravity (Gemini Code Assist): plan + the active model's used fraction.
   const geminiTab = provider === "gemini";
   const deepseekTab = ep ? ep.provider === "deepseek" : provider === "deepseek";
+  const zaiTab = ep?.provider === "zai";
   // Rate-period visibility follows daemon-resolved provider/deployment metadata.
   // Model matching only selects a price row after Ollama has already been resolved.
   const ollamaPeakPricing =
@@ -227,7 +229,9 @@ export function StatusBar({
     ? OLLAMA_RATE_SCHEDULE
     : deepseekTab
       ? DEEPSEEK_RATE_SCHEDULE
-      : null;
+      : zaiTab
+        ? ZAI_RATE_SCHEDULE
+        : null;
   const antigravityQuotaData = antigravityQuota && geminiTab ? antigravityQuota : null;
   const agActive =
     antigravityQuotaData?.windows.find((w) => w.modelId === settings?.model) ??
@@ -309,6 +313,7 @@ export function StatusBar({
   }, []);
   const offPeak = rateSchedule ? isOffPeak(rateNow, rateSchedule) : true;
   const rateMins = rateSchedule ? minutesUntilRateChange(rateNow, rateSchedule) : 0;
+  const rateMult = rateSchedule ? rateMultiplier(rateNow, rateSchedule) : 1;
   // Weekends push the next change past a full day — render "2d 9h" instead of
   // a raw "3420 min".
   const when =
@@ -321,9 +326,13 @@ export function StatusBar({
     ? offPeak
       ? t("statusbar.ollamaOffPeakTitle", { when })
       : t("statusbar.ollamaPeakTitle", { when })
-    : offPeak
-      ? t("statusbar.offPeakTitle", { when })
-      : t("statusbar.peakTitle", { when });
+    : zaiTab
+      ? offPeak
+        ? t("statusbar.zaiOffPeakTitle", { when })
+        : t("statusbar.zaiPeakTitle", { when })
+      : offPeak
+        ? t("statusbar.offPeakTitle", { when })
+        : t("statusbar.peakTitle", { when });
   const [themeOpen, setThemeOpen] = useState(false);
   const themePopRef = useRef<HTMLDivElement | null>(null);
   const themeButtonRef = useRef<HTMLSpanElement | null>(null);
@@ -453,7 +462,7 @@ export function StatusBar({
           <I.clock size={11} style={{ color: offPeak ? "var(--success)" : "var(--warning)" }} />
           <span className={`v ${offPeak ? "ok" : "warn"}`}>
             {offPeak ? t("statusbar.offPeak") : t("statusbar.peak")}
-            <span className="conv">{offPeak ? "1x" : "2x"}</span>
+            <span className="conv">{`${rateMult}x`}</span>
           </span>
         </span>
       ) : null}

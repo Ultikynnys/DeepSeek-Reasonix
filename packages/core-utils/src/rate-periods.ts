@@ -4,6 +4,10 @@ export interface RateSchedule {
   peakWindowsUtc: readonly { startMinute: number; endMinute: number }[];
   /** Offset used to decide whether the provider's billing calendar is on a weekend. */
   weekendOffsetMinutes: number;
+  /** Peak-window multiplier vs the provider's standard rate (default 2 = surcharge). */
+  peakMultiplier?: number;
+  /** Off-peak multiplier vs the standard rate (default 1 = baseline). */
+  offPeakMultiplier?: number;
 }
 
 /** DeepSeek's billing calendar uses Beijing weekdays and two UTC peak windows. */
@@ -19,6 +23,15 @@ export const DEEPSEEK_RATE_SCHEDULE: RateSchedule = {
 export const OLLAMA_RATE_SCHEDULE: RateSchedule = {
   peakWindowsUtc: [{ startMinute: 12 * 60, endMinute: 18 * 60 }],
   weekendOffsetMinutes: 0,
+};
+
+/** Z.AI (GLM) charges off-peak usage at half the standard rate; peak is
+ *  Mon–Fri 14:00–18:00 SGT (06:00–10:00 UTC). */
+export const ZAI_RATE_SCHEDULE: RateSchedule = {
+  peakWindowsUtc: [{ startMinute: 360, endMinute: 600 }],
+  weekendOffsetMinutes: 8 * 60,
+  peakMultiplier: 1,
+  offPeakMultiplier: 0.5,
 };
 
 /** Strip the `ollama/` namespace prefix and any `:tag` suffix from an Ollama model id. */
@@ -50,6 +63,13 @@ export function isPeakRate(date: Date, schedule: RateSchedule): boolean {
 
 export function isOffPeakRate(date: Date, schedule: RateSchedule): boolean {
   return !isPeakRate(date, schedule);
+}
+
+/** The rate multiplier the status bar shows for the current peak/off-peak period. */
+export function rateMultiplierForSchedule(date: Date, schedule: RateSchedule): number {
+  return isPeakRate(date, schedule)
+    ? (schedule.peakMultiplier ?? 2)
+    : (schedule.offPeakMultiplier ?? 1);
 }
 
 /** Minutes until the next actual peak/off-peak transition, including weekend suppression. */
