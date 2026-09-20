@@ -159,6 +159,31 @@ describe("TabMenu component", () => {
 });
 
 describe("TabBar context menu integration", () => {
+  it("renders one workspace tab for multiple independent session channels", () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <TabBar
+        tabs={[
+          { id: "alpha-1", workspaceDir: "/project/alpha", session: "session-a" },
+          { id: "alpha-2", workspaceDir: "/project/alpha/", session: "session-b" },
+          { id: "beta-1", workspaceDir: "/project/beta", session: "session-c" },
+        ]}
+        activeId="alpha-2"
+        setActive={vi.fn()}
+        onClose={onClose}
+        onNew={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll(".tab-group")).toHaveLength(2);
+    expect(container.querySelectorAll(".tab-session")).toHaveLength(0);
+    expect(screen.getAllByText("alpha")).toHaveLength(1);
+
+    const alphaTab = screen.getByText("alpha").closest(".tab-group")!;
+    fireEvent.click(alphaTab.querySelector(".close")!);
+    expect(onClose).toHaveBeenCalledWith("alpha-2");
+  });
+
   it("opens drop down menu on right-clicking the ribbon and clears tabs", () => {
     const onClearTabs = vi.fn();
     const tabs = [

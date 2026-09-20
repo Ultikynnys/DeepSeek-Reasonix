@@ -3210,9 +3210,9 @@ type SymbolEntry = { name: string; path: string; line: number; kind: string };
 
 interface Tab {
   readonly id: string;
-  /** Visual tab (group) this channel belongs to — channels sharing a groupId
-   *  render as multiple sessions stacked in one tab. A new tab (the + button)
-   *  mints a fresh group; opening a session into a tab reuses its group. */
+  /** Workspace-tab identity. Each Tab object is one independently running
+   *  session channel; every channel in the same visual workspace tab shares
+   *  this group id. */
   groupId: string;
   rootDir: string;
   currentSession: string;
@@ -3349,20 +3349,39 @@ function sameWorkspaceDir(a: string, b: string): boolean {
   return process.platform === "win32" ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
 }
 
-/** True when switching `switching` away from `leavingDir` leaves that workspace
- *  with no other tab — every agent in its sessions should then be stopped. Pure
- *  so the rule is testable. */
-export function workspaceAbandonedBySwitch(
-  tabs: readonly { id: string; groupId: string; rootDir: string }[],
-  switching: { id: string; groupId: string },
-  leavingDir: string,
-): boolean {
-  return !tabs.some(
-    (t) =>
-      t.id !== switching.id &&
-      t.groupId !== switching.groupId &&
-      sameWorkspaceDir(t.rootDir, leavingDir),
-  );
+/** Collapse persisted session channels onto one visual group per canonical
+ *  workspace. The first occurrence owns the group's identity and order; later
+ *  channels keep their independent sessions but join that workspace tab. */
+export function normalizeWorkspaceTabGroups<T extends { dir: string; groupId?: string }>(
+  entries: readonly T[],
+  mintGroupId: () => string = nextGroupId,
+): T[] {
+  const workspaces: Array<{ dir: string; groupId: string }> = [];
+  const groupOwners = new Map<string, string>();
+
+  return entries.map((entry) => {
+    const existing = workspaces.find((workspace) => sameWorkspaceDir(workspace.dir, entry.dir));
+    if (existing) return { ...entry, groupId: existing.groupId };
+
+    let groupId = entry.groupId;
+    const owner = groupId ? groupOwners.get(groupId) : undefined;
+    if (!groupId || (owner !== undefined && !sameWorkspaceDir(owner, entry.dir))) {
+      do {
+        groupId = mintGroupId();
+      } while (groupOwners.has(groupId));
+    }
+    workspaces.push({ dir: entry.dir, groupId });
+    groupOwners.set(groupId, entry.dir);
+    return { ...entry, groupId };
+  });
+}
+
+/** Every independently running session owned by one visual workspace tab. */
+export function channelsInWorkspaceTab<T extends { groupId: string }>(
+  channels: readonly T[],
+  selected: { groupId: string },
+): T[] {
+  return channels.filter((channel) => channel.groupId === selected.groupId);
 }
 
 /** The newest session to implicitly resume on a switch (newest-first list), or
@@ -4230,11 +4249,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     return undefined;
   }
 
-  async function closeTab(tab: Tab): Promise<void> {
+  async function closeChannel(
+    tab: Tab,
+    options: { ensureFallback?: boolean; persist?: boolean } = {},
+  ): Promise<void> {
     emitTabDiagnostic(tab, "tab.close.started", undefined, "info");
     cancelMailAuth(tab, MailProvider.Outlook);
     cancelMailAuth(tab, MailProvider.Gmail);
     abortTurn(tab);
+    cancelPendingGates(tab);
     try {
       await tab.toolset?.jobs.shutdown();
     } catch (err) {
@@ -4270,17 +4293,41 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tabs.delete(tab.id);
     if (first && first.id === tab.id) {
       const next = tabs.values().next().value;
-      if (next) {
-        first = next;
-      } else {
-        const clean = bootstrapTab(undefined, { active: true });
-        first = clean;
-        lastActiveTabId = clean.id;
-      }
+      if (next) first = next;
     }
-    persistOpenTabs();
+    if (lastActiveTabId === tab.id) {
+      lastActiveTabId = tabs.values().next().value?.id ?? "";
+    }
+    if (options.ensureFallback !== false && tabs.size === 0) {
+      const clean = bootstrapTab(undefined, { active: true });
+      first = clean;
+      lastActiveTabId = clean.id;
+    }
+    if (options.persist !== false) persistOpenTabs();
     emitTabDiagnostic(tab, "tab.close.completed", undefined, "info");
     emit({ type: "$tab_closed" }, tab.id);
+  }
+
+  /** Remove a visual workspace tab and every independently running session it
+   *  owns. This is the only user tab-close path: child agents are not exposed
+   *  as separate ribbon tabs or implicitly replaced. */
+  async function closeWorkspaceTab(
+    tab: Tab,
+    options: { ensureFallback?: boolean; persist?: boolean } = {},
+  ): Promise<void> {
+    const channels = channelsInWorkspaceTab(Array.from(tabs.values()), tab);
+    for (const channel of channels) {
+      await closeChannel(channel, { ensureFallback: false, persist: false });
+    }
+    if (options.ensureFallback !== false && tabs.size === 0) {
+      const clean = bootstrapTab(undefined, { active: true });
+      first = clean;
+      lastActiveTabId = clean.id;
+    } else if (!tabs.has(first?.id)) {
+      const next = tabs.values().next().value;
+      if (next) first = next;
+    }
+    if (options.persist !== false) persistOpenTabs();
   }
 
   async function runTurn(tab: Tab, text: string, images?: TurnImage[]): Promise<void> {
@@ -4595,9 +4642,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   async function switchWorkspace(tab: Tab, nextDir: string): Promise<void> {
     const target = resolve(nextDir);
     emitTabDiagnostic(tab, "workspace.switch.started", { targetChars: target.length }, "info");
-    if (target === tab.rootDir) {
-      emitTabDiagnostic(tab, "workspace.switch.skipped", { reason: "same-workspace" });
-      emitSettings(tab);
+    if (sameWorkspaceDir(target, tab.rootDir)) {
+      // Re-opening the current workspace means "new session", never a second
+      // workspace tab and never a destructive reload of this agent.
+      const opened = bootstrapTab(tab.rootDir, {
+        active: true,
+        groupId: tab.groupId,
+      });
+      lastActiveTabId = opened.id;
+      persistOpenTabs();
+      emitTabDiagnostic(tab, "workspace.switch.redirected", { reason: "same-workspace" });
       return;
     }
     if (!existsSync(target) || !statSync(target).isDirectory()) {
@@ -4611,19 +4665,37 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emitSettings(tab);
       return;
     }
-    // No agent should keep running in a workspace that will have no tab left on
-    // it. When this tab is the last one holding the old workspace (no *other*
-    // tab outside its group shares it), stop every agent bound to that
-    // workspace — this tab's own sibling sessions included. When another tab
-    // still holds the workspace, its agents (and this tab's siblings) keep
-    // running.
-    if (workspaceAbandonedBySwitch(Array.from(tabs.values()), tab, tab.rootDir)) {
-      const leavingDir = tab.rootDir;
-      for (const t of tabs.values()) {
-        if (sameWorkspaceDir(t.rootDir, leavingDir)) abortTurn(t);
-      }
+    // A workspace tab owns all of its session agents. Changing that tab's
+    // workspace stops/removes every child except this channel, which is reused
+    // for the target workspace below.
+    const siblings = channelsInWorkspaceTab(Array.from(tabs.values()), tab).filter(
+      (candidate) => candidate.id !== tab.id,
+    );
+    for (const sibling of siblings) {
+      await closeChannel(sibling, { ensureFallback: false, persist: false });
     }
+
+    // The target may already have a workspace tab. In that case this source tab
+    // is removed as a unit and the request becomes a new independent session in
+    // the existing target tab—never a duplicate workspace ribbon entry.
+    const targetTab = Array.from(tabs.values()).find(
+      (candidate) => candidate.id !== tab.id && sameWorkspaceDir(candidate.rootDir, target),
+    );
+    if (targetTab) {
+      await closeChannel(tab, { ensureFallback: false, persist: false });
+      const opened = bootstrapTab(target, {
+        active: true,
+        groupId: targetTab.groupId,
+      });
+      lastActiveTabId = opened.id;
+      persistOpenTabs();
+      return;
+    }
+
     abortTurn(tab);
+    cancelPendingGates(tab);
+    cancelMailAuth(tab, MailProvider.Outlook);
+    cancelMailAuth(tab, MailProvider.Gmail);
     try {
       await tab.toolset?.jobs.shutdown();
     } catch (err) {
@@ -4635,8 +4707,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       process.stderr.write(`reasonix: tab job shutdown failed — ${messageOf(err)}\n`);
     }
     tab.rootDir = target;
-    // A group is single-workspace: a workspace change moves the tab out of its
-    // visual group so sibling sessions keep theirs.
+    // The reused channel becomes the sole initial session in a new workspace
+    // tab. Its former sibling agents were closed above.
     tab.groupId = nextGroupId();
     saveWorkspaceDir(target);
     pushRecentWorkspace(target);
@@ -5314,13 +5386,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // Restore the full tab set from the previous session — workspace dir,
   // loaded session and focused tab (issues #933, #1244). Missing dirs
   // are silently skipped — a deleted workspace shouldn't break boot.
-  const savedTabs = loadDesktopOpenTabs().filter((t) => {
-    try {
-      return existsSync(t.dir) && statSync(t.dir).isDirectory();
-    } catch {
-      return false;
-    }
-  });
+  const savedTabs = normalizeWorkspaceTabGroups(
+    loadDesktopOpenTabs().filter((t) => {
+      try {
+        return existsSync(t.dir) && statSync(t.dir).isDirectory();
+      } catch {
+        return false;
+      }
+    }),
+  );
   // Never restore the same session into two channels — a session is a single
   // agent. Keep the first occurrence's session; later duplicates open fresh.
   const seenRestoreSessions = new Set<string>();
@@ -5334,7 +5408,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // previous session is restored automatically.
   const startupDir = opts.dir;
   const startupTab = startupDir
-    ? dedupedTabs.find((t) => resolve(t.dir) === resolve(startupDir))
+    ? dedupedTabs.find((t) => sameWorkspaceDir(t.dir, startupDir))
     : dedupedTabs[0];
   first = bootstrapTab(opts.dir ?? dedupedTabs[0]?.dir, startupTab);
   const pendingRestores = dedupedTabs.filter((t) => t !== startupTab);
@@ -5411,10 +5485,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
     if (msg.cmd === "tab_open") {
       try {
-        // A user-opened tab takes focus and starts a fresh group. It defaults to
-        // the local Reasonix installation so a New tab always opens at home; an
-        // explicit workspaceDir (e.g. the workspace picker) still wins.
-        const opened = bootstrapTab(msg.workspaceDir ?? reasonixInstallDir(), { active: true });
+        // A workspace may appear in the ribbon only once. Opening an already-
+        // visible workspace adds a fresh independent session to that tab.
+        const target = resolve(msg.workspaceDir ?? reasonixInstallDir());
+        const existing = Array.from(tabs.values()).find((candidate) =>
+          sameWorkspaceDir(candidate.rootDir, target),
+        );
+        const opened = bootstrapTab(target, {
+          active: true,
+          groupId: existing?.groupId,
+        });
         lastActiveTabId = opened.id;
         persistOpenTabs();
       } catch (err) {
@@ -5617,8 +5697,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             first = clean;
             lastActiveTabId = clean.id;
           }
-          for (const t of matchingTabs) {
-            void closeTab(t);
+          const groups = new Set(matchingTabs.map((t) => t.groupId));
+          for (const groupId of groups) {
+            const workspaceTab = Array.from(tabs.values()).find((t) => t.groupId === groupId);
+            if (workspaceTab) void closeWorkspaceTab(workspaceTab);
           }
         }
         persistOpenTabs();
@@ -5669,7 +5751,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "tab_close") {
-      closeTab(tab).catch((err) => {
+      closeWorkspaceTab(tab).catch((err) => {
         emitDiagnosticError("tab.close.failed", err, {
           tabId: tab.id,
           details: tabDiagnosticState(tab),
@@ -6059,10 +6141,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "session_load") {
-      // A session is a single running agent: never load one that another
-      // channel already holds (two agents on one session clobber the same
-      // jsonl). Focus the owning channel instead. Re-loading the tab's own
-      // session is a no-op (a reload would abort the live turn).
+      // Legacy alias for additive session_open. Loading from the sidebar must
+      // never replace or abort the channel the user is currently watching.
       const holder = channelForSession(msg.name);
       if (holder) {
         if (holder.id !== tab.id) {
@@ -6083,11 +6163,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         return;
       }
       try {
-        loadSessionIntoTab(tab, msg.name, {
-          abortTurn,
-          cancelPendingGates,
-          persistOpenTabs,
+        const opened = bootstrapTab(tab.rootDir, {
+          session: msg.name,
+          active: true,
+          groupId: tab.groupId,
         });
+        lastActiveTabId = opened.id;
+        persistOpenTabs();
       } catch (err) {
         emitDiagnosticError("session.load.failed", err, {
           tabId: tab.id,
@@ -6218,7 +6300,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "new_chat") {
-      startFreshSession(tab, { cleanUpEmptyCurrent: true, reason: "new-chat" });
+      // New chat is additive: preserve every existing agent in this workspace
+      // tab and mount a fresh independent session beside them.
+      try {
+        const opened = bootstrapTab(tab.rootDir, {
+          active: true,
+          groupId: tab.groupId,
+        });
+        lastActiveTabId = opened.id;
+        persistOpenTabs();
+      } catch (err) {
+        emitDiagnosticError("session.new-chat.failed", err, {
+          tabId: tab.id,
+          details: tabDiagnosticState(tab),
+        });
+        emit({ type: "$error", message: `new-chat failed: ${(err as Error).message}` }, tab.id);
+      }
       return;
     }
     if (msg.cmd === "oauth_begin") {

@@ -2425,17 +2425,19 @@ export function removeRecentWorkspace(dir: string, path: string = defaultConfigP
   writeConfig(cfg, path);
 }
 
-/** Desktop only — one open tab's restorable state. */
+/** Desktop only — one open session channel's restorable state. Multiple
+ *  records may share a workspace tab because every session has an independent
+ *  runtime that must survive app restarts. */
 export interface DesktopOpenTab {
   dir: string;
-  /** Tab id (t1, t2, …) — persisted so a restarted backend reuses the same
+  /** Channel id (t1, t2, …) — persisted so a restarted backend reuses the same
    *  ids instead of re-minting t1..tN that collide with the frontend's still-
-   *  open tabs (events then route to the wrong tab). */
+   *  open channels (events then route to the wrong agent). */
   id?: string;
-  /** Session the tab had loaded; reopened on boot if its jsonl still exists. */
+  /** Session the channel had loaded; reopened on boot if its jsonl still exists. */
   session?: string;
-  /** Visual tab (group) this channel belongs to — channels sharing a groupId
-   *  render as sessions stacked in one tab. */
+  /** Workspace-tab identity. Every channel for the same canonical workspace
+   *  is normalized onto one group during desktop restore. */
   groupId?: string;
   /** Whether this was the focused tab. */
   active?: boolean;

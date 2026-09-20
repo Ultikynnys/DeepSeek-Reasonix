@@ -36,13 +36,14 @@ vi.mock("./theme", () => ({
 
 import {
   activePlanForMessage,
-  groupTabsByGroup,
+  groupTabsByWorkspace,
   hasPendingIntervention,
   parseSessionTimestamp,
   reduce,
   sanitizeSettingsPatch,
   sessionRecency,
   sortSessionsDescending,
+  workspaceTabRepresentatives,
 } from "./App";
 import type { ModelTurnStartedEvent } from "./protocol";
 import { getThreadMaxWidth } from "./ui/thread-layout";
@@ -2613,27 +2614,44 @@ describe("sanitizeSettingsPatch — secrets never enter the settings view state"
   });
 });
 
-describe("groupTabsByGroup — sessions stack into one tab", () => {
-  it("groups channels sharing a group id and keys standalone channels by id", () => {
-    const groups = groupTabsByGroup([
+describe("groupTabsByWorkspace — one ribbon tab per workspace", () => {
+  it("groups independent session channels by normalized workspace, not group id", () => {
+    const groups = groupTabsByWorkspace([
+      { id: "t1", workspaceDir: "C:\\Work\\Alpha", group: "g1" },
+      { id: "t2", workspaceDir: "c:/work/alpha/", group: "legacy-duplicate" },
+      { id: "t3", workspaceDir: "C:\\Work\\Beta", group: "g1" },
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0]!.items.map((tab) => tab.id)).toEqual(["t1", "t2"]);
+    expect(groups[1]!.items.map((tab) => tab.id)).toEqual(["t3"]);
+  });
+
+  it("preserves case-sensitive POSIX workspace identity", () => {
+    const groups = groupTabsByWorkspace([
+      { id: "t1", workspaceDir: "/work/Alpha" },
+      { id: "t2", workspaceDir: "/work/alpha" },
+    ]);
+    expect(groups).toHaveLength(2);
+  });
+
+  it("keeps pending channels separate unless their backend group matches", () => {
+    const groups = groupTabsByWorkspace([
       { id: "t1", group: "g1" },
       { id: "t2", group: "g1" },
       { id: "t3", group: "g2" },
-      { id: "t4" },
     ]);
-    expect(groups.map((g) => g.key)).toEqual(["g1", "g2", "t4"]);
-    expect(groups[0]!.items.map((t) => t.id)).toEqual(["t1", "t2"]);
-    expect(groups[1]!.items.map((t) => t.id)).toEqual(["t3"]);
-    expect(groups[2]!.items.map((t) => t.id)).toEqual(["t4"]);
+
+    expect(groups.map((group) => group.items.map((tab) => tab.id))).toEqual([["t1", "t2"], ["t3"]]);
   });
 
-  it("preserves first-seen order across interleaved groups", () => {
-    const groups = groupTabsByGroup([
-      { id: "t1", group: "g2" },
-      { id: "t2", group: "g1" },
-      { id: "t3", group: "g2" },
-    ]);
-    expect(groups.map((g) => g.key)).toEqual(["g2", "g1"]);
-    expect(groups[0]!.items.map((t) => t.id)).toEqual(["t1", "t3"]);
+  it("uses the active session channel as its workspace's representative", () => {
+    const tabs = [
+      { id: "a1", workspaceDir: "/proj/a" },
+      { id: "b1", workspaceDir: "/proj/b" },
+      { id: "a2", workspaceDir: "/proj/a" },
+    ];
+
+    expect(workspaceTabRepresentatives(tabs, "a2").map((tab) => tab.id)).toEqual(["a2", "b1"]);
   });
 });

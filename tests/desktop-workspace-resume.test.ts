@@ -2,7 +2,11 @@ import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pickResumeSession, workspaceAbandonedBySwitch } from "../src/cli/commands/desktop.js";
+import {
+  channelsInWorkspaceTab,
+  normalizeWorkspaceTabGroups,
+  pickResumeSession,
+} from "../src/cli/commands/desktop.js";
 import {
   appendSessionMessage,
   listSessionsForWorkspace,
@@ -91,21 +95,55 @@ describe("desktop workspace-switch session resume", () => {
   });
 });
 
-describe("workspaceAbandonedBySwitch — stop agents when no tab keeps the workspace", () => {
-  const tab = (id: string, groupId: string, rootDir: string) => ({ id, groupId, rootDir });
+describe("normalizeWorkspaceTabGroups — one visual tab per workspace", () => {
+  it("joins duplicate workspace channels into the first workspace group", () => {
+    let next = 0;
+    const normalized = normalizeWorkspaceTabGroups(
+      [
+        { dir: "/proj/a", groupId: "g7", session: "a-1" },
+        { dir: "/proj/b", groupId: "g8", session: "b-1" },
+        { dir: "/proj/a/", groupId: "legacy-duplicate", session: "a-2" },
+      ],
+      () => `new-${++next}`,
+    );
 
-  it("is true when no other tab targets the workspace", () => {
-    const tabs = [tab("t1", "g1", "/proj/a"), tab("t2", "g2", "/proj/b")];
-    expect(workspaceAbandonedBySwitch(tabs, tabs[0]!, "/proj/a")).toBe(true);
+    expect(normalized.map((entry) => entry.groupId)).toEqual(["g7", "g8", "g7"]);
+    expect(normalized.map((entry) => entry.session)).toEqual(["a-1", "b-1", "a-2"]);
   });
 
-  it("treats sibling sessions in the same group as the same tab", () => {
-    const tabs = [tab("t1", "g1", "/proj/a"), tab("t2", "g1", "/proj/a")];
-    expect(workspaceAbandonedBySwitch(tabs, tabs[0]!, "/proj/a")).toBe(true);
+  it("separates a corrupt group id reused by different workspaces", () => {
+    let next = 0;
+    const normalized = normalizeWorkspaceTabGroups(
+      [
+        { dir: "/proj/a", groupId: "g1" },
+        { dir: "/proj/b", groupId: "g1" },
+      ],
+      () => `new-${++next}`,
+    );
+
+    expect(normalized[0]!.groupId).toBe("g1");
+    expect(normalized[1]!.groupId).toBe("new-1");
+  });
+});
+
+describe("channelsInWorkspaceTab — workspace tab owns all child agents", () => {
+  const channel = (id: string, groupId: string, rootDir: string) => ({ id, groupId, rootDir });
+
+  it("selects every session channel in the workspace tab", () => {
+    const channels = [
+      channel("t1", "g1", "/proj/a"),
+      channel("t2", "g1", "/proj/a"),
+      channel("t3", "g2", "/proj/b"),
+    ];
+
+    expect(channelsInWorkspaceTab(channels, channels[0]!).map((item) => item.id)).toEqual([
+      "t1",
+      "t2",
+    ]);
   });
 
-  it("is false when another tab outside the group still has the workspace", () => {
-    const tabs = [tab("t1", "g1", "/proj/a"), tab("t2", "g2", "/proj/a")];
-    expect(workspaceAbandonedBySwitch(tabs, tabs[0]!, "/proj/a")).toBe(false);
+  it("does not capture an agent owned by another workspace tab", () => {
+    const channels = [channel("t1", "g1", "/proj/a"), channel("t2", "g2", "/proj/b")];
+    expect(channelsInWorkspaceTab(channels, channels[0]!)).toEqual([channels[0]]);
   });
 });

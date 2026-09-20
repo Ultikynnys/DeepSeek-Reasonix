@@ -410,18 +410,18 @@ export interface MentionPreviewEvent {
 export interface TabOpenedEvent {
   type: "$tab_opened";
   workspaceDir: string;
-  /** True when the frontend should focus this tab (user-opened, or the restored focused tab). */
+  /** True when the frontend should focus this session channel. */
   active?: boolean;
-  /** Sessions (channels) currently open in the tab, in display order. A tab
-   *  hosts one or more sessions; each is an independent running agent. */
+  /** Compatibility snapshot for this channel; currently contains its one session. */
   sessions?: string[];
-  /** Visual tab (group) this channel belongs to; channels sharing a groupId
-   *  render as sessions stacked in one tab. */
+  /** Visual workspace-tab identity shared by all of its session channels. */
   groupId?: string;
-  /** Session the tab should display as focused. */
+  /** Session owned by this channel. */
   activeSession?: string;
 }
 
+/** One backend session channel closed. A tab_close command emits this once for
+ *  every channel in the addressed visual workspace tab. */
 export type TabClosedEvent = { type: "$tab_closed" };
 
 /** Authoritative tab list, emitted at the END of a `desktop_resync`. The
@@ -434,11 +434,11 @@ export interface TabsSnapshotEvent {
     id: string;
     workspaceDir: string;
     active: boolean;
-    /** Open sessions in the tab, in display order. */
+    /** Compatibility snapshot for this channel; currently contains one session. */
     sessions?: string[];
-    /** Visual tab (group) this channel belongs to. */
+    /** Visual workspace-tab identity shared by sibling channels. */
     groupId?: string;
-    /** Focused session in the tab. */
+    /** Session owned by this channel. */
     activeSession?: string;
   }[];
 }
@@ -1148,7 +1148,9 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "desktop_resync" }
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_clear" }
+  /** Legacy alias for additive session_open; never replaces the active agent. */
   | { cmd: "session_load"; name: string }
+  /** Focus an existing session agent or add it to the current workspace tab. */
   | { cmd: "session_open"; name: string }
   | { cmd: "session_rename"; name: string; title: string }
   | { cmd: "memory_read"; path: string }
@@ -1185,7 +1187,9 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
   | { cmd: "mention_picked"; path: string }
+  /** Open a workspace tab, or add a fresh session when that workspace is open. */
   | { cmd: "tab_open"; workspaceDir?: string }
+  /** Close the addressed channel's entire visual workspace tab and all agents in it. */
   | { cmd: "tab_close" }
   | { cmd: "tab_activate"; tabId: string }
   | { cmd: "workspace_recent_remove"; path: string }

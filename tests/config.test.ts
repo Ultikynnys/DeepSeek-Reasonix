@@ -1454,11 +1454,19 @@ describe("config", () => {
       expect(loadDesktopOpenTabs(path)).toEqual([]);
     });
 
-    it("round-trips dir + session + active", () => {
-      saveDesktopOpenTabs([{ dir: "/a", session: "s-a", active: true }, { dir: "/b" }], path);
+    it("round-trips channels sharing one workspace-tab group", () => {
+      saveDesktopOpenTabs(
+        [
+          { dir: "/a", session: "s-a1", groupId: "g1", active: true },
+          { dir: "/a", session: "s-a2", groupId: "g1" },
+          { dir: "/b", groupId: "g2" },
+        ],
+        path,
+      );
       expect(loadDesktopOpenTabs(path)).toEqual([
-        { dir: "/a", session: "s-a", active: true },
-        { dir: "/b" },
+        { dir: "/a", session: "s-a1", groupId: "g1", active: true },
+        { dir: "/a", session: "s-a2", groupId: "g1" },
+        { dir: "/b", groupId: "g2" },
       ]);
     });
 

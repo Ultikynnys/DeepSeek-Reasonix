@@ -3284,25 +3284,32 @@ function TabRuntime({
           activeId={activeTabId}
           setActive={setActiveTabId}
           onClose={(id) => {
-            if (tabsList.length <= 1) return;
             rpcSend({ cmd: "tab_close", tabId: id }).catch((err) =>
               console.error("tab_close failed", err),
             );
           }}
           onNew={onNewTab}
           onClearTabs={(scope) => {
-            const targets = getTabsToClear(tabsList, activeTabId, scope);
-            if (targets.length === 0) return;
-            if (scope === "all") {
-              onNewTab();
-            }
-            for (const t of targets) {
-              rpcSend({ cmd: "tab_close", tabId: t.id }).catch((err) =>
+            const workspaceTabs = workspaceTabRepresentatives(tabsList, activeTabId);
+            const activeWorkspace = workspaceTabs.find((representative) => {
+              const workspace = normalizeWorkspacePath(representative.workspaceDir);
+              return tabsList.some(
+                (tab) =>
+                  tab.id === activeTabId && normalizeWorkspacePath(tab.workspaceDir) === workspace,
+              );
+            });
+            const targets = getTabsToClear(
+              workspaceTabs,
+              activeWorkspace?.id ?? activeTabId,
+              scope,
+            );
+            for (const target of targets) {
+              rpcSend({ cmd: "tab_close", tabId: target.id }).catch((err) =>
                 console.error("tab_close failed", err),
               );
             }
           }}
-          singleTab={tabsList.length <= 1}
+          singleTab={groupTabsByWorkspace(tabsList).length <= 1}
         />
 
         <Sidebar
@@ -4217,24 +4224,37 @@ function TitleBar({
   );
 }
 
-/** Group tab channels by their visual-tab id (falling back to a standalone
- *  group keyed by the tab id), preserving first-seen order. Pure for testing. */
-export function groupTabsByGroup<T extends { id: string; group?: string }>(
-  tabs: readonly T[],
-): { key: string; items: T[] }[] {
+/** Group independently running session channels into unique visual workspace
+ *  tabs. Workspace identity, not a historical backend group id, is the final
+ *  defensive boundary against duplicate ribbon entries. */
+export function groupTabsByWorkspace<
+  T extends { id: string; workspaceDir?: string; group?: string },
+>(tabs: readonly T[]): { key: string; items: T[] }[] {
   const groups: { key: string; items: T[] }[] = [];
   const byKey = new Map<string, { key: string; items: T[] }>();
-  for (const t of tabs) {
-    const key = t.group ?? t.id;
-    let g = byKey.get(key);
-    if (!g) {
-      g = { key, items: [] };
-      byKey.set(key, g);
-      groups.push(g);
+  for (const tab of tabs) {
+    const workspace = normalizeWorkspacePath(tab.workspaceDir);
+    const key = workspace ? `workspace:${workspace}` : `pending:${tab.group ?? tab.id}`;
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, items: [] };
+      byKey.set(key, group);
+      groups.push(group);
     }
-    g.items.push(t);
+    group.items.push(tab);
   }
   return groups;
+}
+
+/** One representative channel per visual workspace tab. The currently active
+ *  channel represents its workspace so keyboard navigation preserves focus. */
+export function workspaceTabRepresentatives<
+  T extends { id: string; workspaceDir?: string; group?: string },
+>(tabs: readonly T[], activeId: string): T[] {
+  return groupTabsByWorkspace(tabs).flatMap((group) => {
+    const representative = group.items.find((tab) => tab.id === activeId) ?? group.items[0];
+    return representative ? [representative] : [];
+  });
 }
 
 export function TabBar({
@@ -4267,9 +4287,23 @@ export function TabBar({
     }
   };
 
-  // Group channels by their visual-tab id — a tab hosts one or more sessions,
-  // each a selectable pill. Tabs without a group id stand alone.
-  const groups = groupTabsByGroup(tabs);
+  // The ribbon is workspace-only. Session channels stay mounted and running,
+  // but are selected from the sidebar instead of duplicated as S1/S2 pills.
+  const groups = groupTabsByWorkspace(tabs);
+  const lastActiveByWorkspace = useRef(new Map<string, string>());
+  const activeGroup = groups.find((group) => group.items.some((tab) => tab.id === activeId));
+  if (activeGroup) lastActiveByWorkspace.current.set(activeGroup.key, activeId);
+  const visualTabs = groups.flatMap((group) => {
+    const active = group.items.find((tab) => tab.id === activeId);
+    const rememberedId = lastActiveByWorkspace.current.get(group.key);
+    const remembered = group.items.find((tab) => tab.id === rememberedId);
+    const representative = active ?? remembered ?? group.items[0];
+    return representative ? [representative] : [];
+  });
+  const activeVisualId =
+    visualTabs.find((tab) =>
+      activeGroup?.items.some((candidate) => candidate.id === tab.id),
+    )?.id ?? activeId;
 
   return (
     <div
@@ -4281,7 +4315,9 @@ export function TabBar({
     >
       {groups.map((g) => {
         const activeInGroup = g.items.find((t) => t.id === activeId);
-        const head = activeInGroup ?? g.items[0];
+        const rememberedId = lastActiveByWorkspace.current.get(g.key);
+        const head =
+          activeInGroup ?? g.items.find((t) => t.id === rememberedId) ?? g.items[0];
         if (!head) return null;
         const ws = head.workspaceDir ?? "";
         const label =
@@ -4311,41 +4347,6 @@ export function TabBar({
               </span>
             ) : null}
             <span className="label">{label}</span>
-            {g.items.length > 1 ? (
-              <span className="tab-sessions">
-                {g.items.map((t, i) => (
-                  <span
-                    key={t.id}
-                    className="tab-session"
-                    data-active={t.id === activeId ? "true" : undefined}
-                    title={t.session ?? ""}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActive(t.id);
-                    }}
-                    onKeyDown={activationHandler((e) => {
-                      e.stopPropagation();
-                      setActive(t.id);
-                    })}
-                  >
-                    <span className="tab-session-label">{`S${i + 1}`}</span>
-                    <span
-                      className="tab-session-close"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onClose(t.id);
-                      }}
-                      onKeyDown={activationHandler((e) => {
-                        e.stopPropagation();
-                        onClose(t.id);
-                      })}
-                    >
-                      <I.x size={9} />
-                    </span>
-                  </span>
-                ))}
-              </span>
-            ) : null}
             {!singleTab ? (
               <span
                 className="close"
@@ -4376,8 +4377,8 @@ export function TabBar({
       {menuAnchor ? (
         <TabMenu
           anchor={menuAnchor}
-          tabs={tabs}
-          activeId={activeId}
+          tabs={visualTabs}
+          activeId={activeVisualId}
           onClear={handleClear}
           onClose={() => setMenuAnchor(null)}
         />
@@ -4767,18 +4768,22 @@ function UpdateOverlay({
 }
 
 type TabMeta = {
+  /** Backend channel id for one independently running session agent. */
   id: string;
   workspaceDir?: string;
   busy?: boolean;
-  /** Session (channel) this tab currently holds. */
   session?: string;
-  /** Visual-tab group id — tabs sharing a group render as sessions in one tab. */
+  /** Visual workspace-tab id shared by sibling session channels. */
   group?: string;
 };
 
-/** Compare workspace dirs ignoring separator flavor, trailing slash, and case. */
+/** Compare workspace dirs across separator flavor and trailing slashes.
+ *  Windows drive/UNC paths are case-insensitive; POSIX paths are not. */
 function normalizeWorkspacePath(p?: string): string {
-  return (p ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const raw = p ?? "";
+  const normalized = raw.replace(/\\/g, "/").replace(/\/+$/, "");
+  const windowsPath = raw.includes("\\") || /^[a-z]:\//i.test(normalized) || normalized.startsWith("//");
+  return windowsPath ? normalized.toLowerCase() : normalized;
 }
 
 export function App() {
@@ -5147,12 +5152,16 @@ export function App() {
               return;
             }
             if (ev.type === "$tab_closed" && tabId) {
-              setTabs((prev) => prev.filter((t) => t.id !== tabId));
-              setActiveTabId((prev) => {
-                if (prev !== tabId) return prev;
-                const remaining = tabsRef.current.filter((t) => t.id !== tabId);
-                return remaining[0]?.id ?? "";
-              });
+              const remaining = tabsRef.current.filter((t) => t.id !== tabId);
+              // Update the mirror synchronously: closing one visual workspace
+              // emits one event per child channel, often in a single React
+              // batch. A stale ref could otherwise re-focus an already-closed
+              // sibling between those events.
+              tabsRef.current = remaining;
+              setTabs(remaining);
+              setActiveTabId((prev) =>
+                prev === tabId ? (remaining[0]?.id ?? "") : prev,
+              );
               setTabThemes((prev) => {
                 if (!prev[tabId]) return prev;
                 const { [tabId]: _dropped, ...rest } = prev;
@@ -5405,7 +5414,7 @@ export function App() {
 
   const closeTab = useCallback(
     (id: string) => {
-      if (tabs.length <= 1) return;
+      if (groupTabsByWorkspace(tabs).length <= 1) return;
       rpcSend({ cmd: "tab_close", tabId: id }).catch((err) => {
         deliverToTab(id, {
           t: "push_notice",
@@ -5414,7 +5423,7 @@ export function App() {
         });
       });
     },
-    [tabs.length, deliverToTab],
+    [tabs, deliverToTab],
   );
 
   useEffect(() => {
@@ -5423,15 +5432,19 @@ export function App() {
       if (mod && (e.key === "t" || e.key === "T")) {
         e.preventDefault();
         openTab();
-      } else if (mod && (e.key === "w" || e.key === "W") && activeTabId && tabs.length > 1) {
+      } else if (mod && (e.key === "w" || e.key === "W") && activeTabId) {
+        if (groupTabsByWorkspace(tabs).length <= 1) return;
         e.preventDefault();
         closeTab(activeTabId);
       } else if (mod && e.key === "Tab") {
-        if (tabs.length <= 1) return;
+        const workspaceTabs = workspaceTabRepresentatives(tabs, activeTabId);
+        if (workspaceTabs.length <= 1) return;
         e.preventDefault();
-        const idx = tabs.findIndex((t) => t.id === activeTabId);
-        const next = e.shiftKey ? (idx - 1 + tabs.length) % tabs.length : (idx + 1) % tabs.length;
-        const target = tabs[next];
+        const idx = workspaceTabs.findIndex((tab) => tab.id === activeTabId);
+        const next = e.shiftKey
+          ? (idx - 1 + workspaceTabs.length) % workspaceTabs.length
+          : (idx + 1) % workspaceTabs.length;
+        const target = workspaceTabs[next];
         if (target) setActiveTabId(target.id);
       } else if (mod && (e.key === "b" || e.key === "B")) {
         if (e.altKey) {

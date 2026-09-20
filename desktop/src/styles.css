@@ -739,43 +739,6 @@ html[data-platform="macos"] .app {
 .tab-group {
   gap: 6px;
 }
-.tab .tab-sessions {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.tab .tab-session {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 4px 1px 6px;
-  border-radius: 4px;
-  background: var(--panel-2);
-  color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.5;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-.tab .tab-session[data-active="true"] {
-  color: var(--fg);
-  background: var(--panel);
-  border-color: var(--accent);
-}
-.tab .tab-session:hover {
-  color: var(--fg-2);
-}
-.tab .tab-session-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 3px;
-  color: var(--muted-2);
-}
-.tab .tab-session-close:hover {
-  color: var(--fg);
-  background: var(--panel-2);
-}
 .tab .close {
   width: 16px;
   height: 16px;
