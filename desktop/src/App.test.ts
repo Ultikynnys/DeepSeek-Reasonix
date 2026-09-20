@@ -1599,12 +1599,17 @@ describe("Desktop App session sorting", () => {
     ]);
   });
 
-  it("orders, deduplicates, and omits empty incoming sessions", () => {
+  it("orders, deduplicates, and keeps empty sessions — empty is a real session", () => {
     const state = initialState();
     const older = {
       name: "desktop-20260901100000-1",
       messageCount: 2,
       mtime: new Date(1000).toISOString(),
+    };
+    const empty = {
+      name: "desktop-20260905120000-1",
+      messageCount: 0,
+      mtime: new Date(5000).toISOString(),
     };
     const next = reduce(state, {
       t: "incoming",
@@ -1612,32 +1617,12 @@ describe("Desktop App session sorting", () => {
         type: "$sessions",
         epoch: "daemon-1",
         revision: 1,
-        items: [
-          older,
-          older,
-          {
-            name: "desktop-20260905120000-1",
-            messageCount: 0,
-            mtime: new Date(1000).toISOString(),
-          },
-        ],
+        items: [older, older, empty],
       },
     });
-    expect(next.sessions).toEqual([older]);
-  });
-
-  it("keeps the current (active) session in Recent even while it has zero messages", () => {
-    const emptyActive = {
-      name: "desktop-20260905120000-1",
-      messageCount: 0,
-      mtime: new Date(1000).toISOString(),
-    };
-    const base = { ...initialState(), currentSession: emptyActive.name };
-    const next = reduce(base, {
-      t: "incoming",
-      event: { type: "$sessions", epoch: "daemon-1", revision: 1, items: [emptyActive] },
-    });
-    expect(next.sessions).toEqual([emptyActive]);
+    // Empty sessions list like any other (newest first) and are never dropped
+    // for having zero messages.
+    expect(next.sessions.map((s) => s.name)).toEqual([empty.name, older.name]);
   });
 
   it("switching sessions never reorders or drops others — only the snapshot content matters", () => {
@@ -1678,27 +1663,31 @@ describe("Desktop App session sorting", () => {
     expect(refreshed.sessions.map((s) => s.name)).toEqual([b.name, a.name]);
   });
 
-  it("a refresh whose items omit a non-current empty session hides it again (draft cleanup)", () => {
-    const draft = {
+  it("an empty session SURVIVES switching away — only an explicit delete removes it", () => {
+    const empty = {
       name: "desktop-20260905120000-1",
       messageCount: 0,
       mtime: new Date(1000).toISOString(),
     };
-    const base = { ...initialState(), currentSession: draft.name };
-    const withDraft = reduce(base, {
+    const other = {
+      name: "desktop-20260902100000-1",
+      messageCount: 3,
+      mtime: new Date(2000).toISOString(),
+    };
+    const base = { ...initialState(), currentSession: empty.name };
+    const withEmpty = reduce(base, {
       t: "incoming",
-      event: { type: "$sessions", epoch: "daemon-1", revision: 1, items: [draft] },
+      event: { type: "$sessions", epoch: "daemon-1", revision: 1, items: [other, empty] },
     });
-    expect(withDraft.sessions).toEqual([draft]);
+    expect(withEmpty.sessions.map((s) => s.name)).toEqual([empty.name, other.name]);
 
-    // The user switched away; the snapshot no longer contains the draft and
-    // it is no longer current — it must disappear rather than linger.
-    const afterSwitch = { ...withDraft, currentSession: "desktop-20260902100000-1" };
-    const cleaned = reduce(afterSwitch, {
+    // Switch to the other conversation: the empty session stays listed and
+    // the recency order is untouched.
+    const afterSwitch = reduce(withEmpty, {
       t: "incoming",
-      event: { type: "$sessions", epoch: "daemon-1", revision: 2, items: [] },
+      event: { type: "$sessions", epoch: "daemon-1", revision: 2, items: [other, empty] },
     });
-    expect(cleaned.sessions).toEqual([]);
+    expect(afterSwitch.sessions.map((s) => s.name)).toEqual([empty.name, other.name]);
   });
 
   it("keeps optimistic deletion hidden until its authoritative snapshot settles", () => {

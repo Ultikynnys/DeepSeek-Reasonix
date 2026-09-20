@@ -158,7 +158,8 @@ export function firstFreeSessionName(base: string, occupied: (name: string) => b
 }
 
 /** Session names starting with `prefix`, newest-first by folder name. Archive
- *  folders (`__archive_`) and empty sessions are excluded. */
+ *  folders (`__archive_`) are excluded; empty sessions count — resume prefers
+ *  the newest conversation whether or not it has messages yet. */
 export function findSessionsByPrefix(prefix: string): string[] {
   const dir = sessionsDir();
   if (!existsSync(dir)) return [];
@@ -170,7 +171,9 @@ export function findSessionsByPrefix(prefix: string): string[] {
           !e.isSymbolicLink() &&
           e.name.startsWith(prefix) &&
           !e.name.includes("__archive_") &&
-          sessionHasMessages(join(dir, e.name)),
+          // Must at least have a transcript file (empty is fine); a folder
+          // holding only sidecars was never minted and can't be resumed.
+          existsSync(join(dir, e.name, SESSION_MESSAGES_FILENAME)),
       )
       .map((e) => e.name)
       .sort()
@@ -289,17 +292,23 @@ async function readSessionMessagesAsync(
   }
 }
 
-/** Lazily materialize the session folder. Called on first message write —
- *  minting a session must NOT call this, so an abandoned new chat leaves no
- *  trace on disk. */
-function ensureSessionDir(name: string): string {
+/** Materialize the session folder + an (empty) transcript. Minting calls this
+ *  immediately: an empty session is a REAL session — it lists like any other
+ *  and nothing implicitly destroys it. */
+export function ensureSessionDir(name: string): string {
   const dir = sessionDir(name);
   mkdirSync(dir, { recursive: true });
+  const messages = sessionMessagesPath(name);
+  if (!existsSync(messages)) {
+    writeFileSync(messages, "", { flag: "w" });
+    chmodPrivate(messages);
+  }
   return dir;
 }
 
 export function appendSessionMessage(name: string, message: ChatMessage): void {
   const path = sessionPath(name);
+  ensureSessionDir(name);
   appendJsonlLine(path, message);
   chmodPrivate(path);
   touchSessionUpdatedAt(name);
@@ -320,30 +329,20 @@ function touchSessionUpdatedAt(name: string): void {
   }
 }
 
-/** True when the folder holds a transcript with at least one byte — the definition of a "real" (listable) session. */
-export function sessionHasMessages(dir: string): boolean {
-  try {
-    const st = statSync(join(dir, SESSION_MESSAGES_FILENAME));
-    return st.isFile() && st.size > 0;
-  } catch {
-    return false;
-  }
-}
-
-/** Whether the named session has messages on disk (either layout). */
+/** A session EXISTS iff its folder exists — empty transcripts are real
+ *  sessions (a fresh "New chat" has zero messages but must list and survive).
+ *  Only stray files that are not session folders at all are invisible. */
 export function sessionExists(name: string): boolean {
-  return sessionHasMessages(sessionDir(name)) || existsSync(legacyFlatJsonlPath(name));
+  return existsSync(sessionDir(name)) || existsSync(legacyFlatJsonlPath(name));
 }
 
-/** Enumerate live session folders — non-empty transcripts only. */
+/** Enumerate session folders — every session folder lists, empty or not. */
 function listSessionDirs(): Array<{ name: string; dir: string }> {
   const dir = sessionsDir();
   if (!existsSync(dir)) return [];
   try {
     return readdirSync(dir, { withFileTypes: true })
-      .filter(
-        (e) => e.isDirectory() && !e.isSymbolicLink() && sessionHasMessages(join(dir, e.name)),
-      )
+      .filter((e) => e.isDirectory() && !e.isSymbolicLink())
       .map((e) => ({ name: e.name, dir: join(dir, e.name) }));
   } catch {
     return [];
@@ -377,15 +376,25 @@ export function listSessions(opts?: {
         }
       }
       const path = messagesPathForRead(name);
-      const stat = statSync(path);
+      // A session folder always carries messages.jsonl when minted through
+      // ensureSessionDir, but tolerate hand-made folders without one.
+      let size = 0;
+      let mtime = new Date(0);
+      try {
+        const stat = statSync(path);
+        size = stat.size;
+        mtime = stat.mtime;
+      } catch {
+        void 0; /* no transcript file — still a (zero-message) session */
+      }
       const messageCount = countLines(path);
       return [
         {
           name,
           path: dir,
-          size: stat.size,
+          size,
           messageCount,
-          mtime: stat.mtime,
+          mtime,
           lastActive: meta.updatedAt,
           meta,
           workspaceStatus,
@@ -703,7 +712,9 @@ function migrateSingleLegacySession(name: string): string | null {
   }
 }
 
-/** One-time migration: move legacy flat `<name>.jsonl` + sidecars into `<name>/` folders (idempotent, one readdir). Empty flat files are removed outright — they are exactly the leaked empty sessions this refactor prevents. */
+/** One-time migration: move legacy flat `<name>.jsonl` + sidecars into
+ *  `<name>/` folders (idempotent, one readdir). Empty legacy files migrate
+ *  too — an empty session is a real session. */
 export function migrateLegacyFlatSessions(): { migrated: string[]; prunedEmpty: string[] } {
   const dir = sessionsDir();
   const migrated: string[] = [];
@@ -719,33 +730,6 @@ export function migrateLegacyFlatSessions(): { migrated: string[]; prunedEmpty: 
     if (!entry.endsWith(".jsonl") || entry.includes("__archive_")) continue;
     if (entry.endsWith(".events.jsonl")) continue;
     const name = entry.slice(0, -".jsonl".length);
-    const legacy = join(dir, entry);
-    let empty = false;
-    try {
-      empty = statSync(legacy).size === 0;
-    } catch {
-      continue;
-    }
-    if (empty) {
-      try {
-        unlinkSync(legacy);
-        for (const ext of LEGACY_SIDECAR_SUFFIXES) {
-          try {
-            unlinkSync(join(dir, `${name}${ext}`));
-          } catch (sidecarErr) {
-            process.stderr.write(
-              `reasonix: legacy sidecar prune skipped for "${name}${ext}" — ${messageOf(sidecarErr)}\n`,
-            );
-          }
-        }
-        prunedEmpty.push(name);
-      } catch (err) {
-        process.stderr.write(
-          `reasonix: legacy empty prune skipped for "${name}" — ${messageOf(err)}\n`,
-        );
-      }
-      continue;
-    }
     if (migrateSingleLegacySession(name)) migrated.push(name);
   }
   return { migrated, prunedEmpty };

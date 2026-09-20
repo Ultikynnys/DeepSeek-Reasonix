@@ -1,20 +1,10 @@
-import { constants, type BigIntStats, statSync } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import { copyFile, mkdir, open, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { messageOf } from "@reasonix/core-utils";
 import { tmpSiblingPath } from "../core/atomic-write.js";
 import { readJsonFileSilentlyAsync } from "../core/json-file.js";
 import { SESSION_MESSAGES_FILENAME, SESSION_META_FILENAME } from "../memory/session-layout.js";
-
-/** True when `dir` holds a transcript with at least one byte — the "live session" test shared by the directory scan. */
-function hasMessages(dir: string): boolean {
-  try {
-    const stats = statSync(join(dir, SESSION_MESSAGES_FILENAME));
-    return stats.isFile() && stats.size > 0;
-  } catch {
-    return false;
-  }
-}
 
 const READ_BUFFER_BYTES = 64 * 1024;
 const MAX_SESSION_FILES = 100_000;
@@ -194,16 +184,12 @@ export class SessionDirectoryIndex<M> {
     await this.seedFromCache();
     let files: string[];
     try {
-      // One folder per session; only folders with a non-empty messages.jsonl
-      // are live sessions — empty folders are invisible (the whole point of
-      // the folder-per-session refactor).
+      // One folder per session — every session folder lists, empty or not (an
+      // empty session is a real session: New chat materializes it eagerly and
+      // only an explicit delete removes it). Stray non-directory entries are
+      // invisible.
       files = (await readdir(this.directory(), { withFileTypes: true }))
-        .filter(
-          (entry) =>
-            entry.isDirectory() &&
-            !entry.isSymbolicLink() &&
-            hasMessages(join(this.directory(), entry.name)),
-        )
+        .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
         .map((entry) => entry.name);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {

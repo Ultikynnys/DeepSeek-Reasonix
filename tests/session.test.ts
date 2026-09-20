@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -18,6 +19,7 @@ import {
   appendSessionMessage,
   archiveSession,
   deleteSession,
+  ensureSessionDir,
   findSessionsByPrefix,
   firstFreeSessionName,
   freshSessionName,
@@ -38,6 +40,8 @@ import {
   sanitizeName,
   sessionDir,
   sessionEventsPath,
+  sessionExists,
+  sessionMessagesPath,
   sessionPath,
   sessionRecency,
   sessionsDir,
@@ -612,8 +616,10 @@ describe("session persistence", () => {
       expect(preview!.messageCount).toBe(1);
     });
 
-    it("ignores timestamped sessions that have only an events sidecar (no messages file)", () => {
+    it("prefers a prefixed session with messages over a sidecar-only folder", () => {
       appendSessionMessage("myproject", { role: "user", content: "real messages" });
+      // A folder with ONLY an events sidecar (no messages.jsonl) is not a
+      // usable resume target — the prefixed scan skips it.
       const eventsPath = sessionEventsPath("myproject-20260430T200000");
       mkdirSync(dirname(eventsPath), { recursive: true });
       writeFileSync(eventsPath, "{}");
@@ -899,26 +905,46 @@ describe("folder-per-session layout + legacy migration", () => {
     expect(loadSessionMessages("already-foldered")).toHaveLength(1);
   });
 
-  it("migration removes legacy EMPTY flat jsonls (leaked empty sessions) entirely", () => {
+  it("migration keeps EMPTY legacy flat jsonls — an empty session is a real session", () => {
     const dir = sessionsDir();
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "empty-chat.jsonl"), "");
 
-    const { prunedEmpty } = migrateLegacyFlatSessions();
-    expect(prunedEmpty).toEqual(["empty-chat"]);
+    const { migrated, prunedEmpty } = migrateLegacyFlatSessions();
+    expect(migrated).toEqual(["empty-chat"]);
+    expect(prunedEmpty).toEqual([]);
+    // The empty transcript survives as an empty messages.jsonl in its folder.
     expect(existsSync(join(dir, "empty-chat.jsonl"))).toBe(false);
-    expect(existsSync(sessionDir("empty-chat"))).toBe(false);
+    expect(existsSync(sessionDir("empty-chat"))).toBe(true);
+    expect(loadSessionMessages("empty-chat")).toEqual([]);
   });
 
-  it("listSessions hides empty folders and shows only real conversations", () => {
+  it("listSessions lists every session folder — empty or not — and hides stray files", () => {
     appendSessionMessage("real", { role: "user", content: "x" });
-    // Empty folder + folder with only sidecars + stray file: none are sessions.
+    // An empty session folder (fresh New chat) IS a session; a stray file is not.
     mkdirSync(sessionDir("empty"), { recursive: true });
-    mkdirSync(dirname(sessionEventsPath("sidecar-only")), { recursive: true });
-    writeFileSync(sessionEventsPath("sidecar-only"), "{}");
+    writeFileSync(sessionMessagesPath("empty"), "");
     writeFileSync(join(sessionsDir(), "stray.txt"), "noise");
 
-    expect(listSessions().map((s) => s.name)).toEqual(["real"]);
+    const names = listSessions()
+      .map((s) => s.name)
+      .sort();
+    expect(names).toEqual(["empty", "real"]);
+    const emptyInfo = listSessions().find((s) => s.name === "empty");
+    expect(emptyInfo?.messageCount).toBe(0);
+  });
+
+  it("ensureSessionDir eagerly materializes folder + empty transcript + meta", () => {
+    ensureSessionDir("fresh-chat");
+    patchSessionMeta("fresh-chat", { workspace: "C:\\repo" });
+
+    expect(existsSync(sessionDir("fresh-chat"))).toBe(true);
+    expect(existsSync(sessionPath("fresh-chat"))).toBe(true);
+    expect(statSync(sessionPath("fresh-chat")).size).toBe(0);
+    // It exists, lists, and loads as an empty conversation.
+    expect(sessionExists("fresh-chat")).toBe(true);
+    expect(listSessions().map((s) => s.name)).toContain("fresh-chat");
+    expect(loadSessionMessages("fresh-chat")).toEqual([]);
   });
 
   it("updatedAt is stamped on append/patch and wins over a stale mtime when sorting", () => {

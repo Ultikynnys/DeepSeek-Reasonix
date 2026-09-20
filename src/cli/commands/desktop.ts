@@ -269,6 +269,7 @@ import {
   type SessionInfo,
   type SessionMeta,
   deleteSession,
+  ensureSessionDir,
   firstFreeSessionName,
   listSessionsForWorkspace,
   listSessionsForWorkspaceAsync,
@@ -465,16 +466,6 @@ export function shouldReplaceDeletedSession(
   deleted: boolean,
 ): boolean {
   return deleted && currentSession === deletedSession;
-}
-
-/** Whether a listed session should appear in the sidebar: non-empty sessions
- *  always; an empty one only while it is the tab's current (lazily minted,
- *  folderless) chat. Pure for tests. */
-export function sessionVisibleInList(
-  session: { name: string; messageCount: number },
-  currentSession: string | undefined,
-): boolean {
-  return session.messageCount > 0 || session.name === currentSession;
 }
 
 /** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
@@ -2191,36 +2182,16 @@ async function emitSessions(
   const source = listSessionsForWorkspaceAsync(tab.rootDir);
   const request = {
     cache: source.cache,
-    value: source.value.then(async (sessions): Promise<SessionsEvent["items"]> => {
-      const items: SessionsEvent["items"] = [];
-      let currentListed = false;
-      for (const session of sessions) {
-        if (!sessionVisibleInList(session, tab.currentSession)) continue;
-        if (session.name === tab.currentSession) currentListed = true;
-        items.push({
-          name: session.name,
-          messageCount: session.messageCount,
-          mtime: session.mtime.toISOString(),
-          updatedAt: session.meta.updatedAt,
-          summary: session.meta.summary,
-          workspaceStatus: session.workspaceStatus,
-        });
-      }
-      // Folder-per-session: a freshly minted "new chat" has NO folder on disk
-      // until its first message, so the directory listing cannot see it.
-      // Inject it so the sidebar keeps showing the current conversation
-      // between mint and first send — otherwise it vanishes on the next
-      // $sessions refresh. (Sorting places it by its name timestamp, which
-      // is the newest anyway.)
-      if (tab.currentSession && !currentListed) {
-        items.push({
-          name: tab.currentSession,
-          messageCount: 0,
-          mtime: new Date().toISOString(),
-        });
-      }
-      return items;
-    }),
+    value: source.value.then((sessions): SessionsEvent["items"] =>
+      sessions.map((session) => ({
+        name: session.name,
+        messageCount: session.messageCount,
+        mtime: session.mtime.toISOString(),
+        updatedAt: session.meta.updatedAt,
+        summary: session.meta.summary,
+        workspaceStatus: session.workspaceStatus,
+      })),
+    ),
   };
   emitTabDiagnostic(tab, "sessions.list.started", { cache: request.cache });
   try {
@@ -3421,43 +3392,28 @@ export function pickResumeSession(
   return sessions.find((s) => !skip(s)) ?? null;
 }
 
-/** Pending per-session meta for lazily minted sessions — flushed to
- *  `<session>/meta.json` on the session's first message write. Keyed so a
- *  minted-but-never-used name costs nothing on disk. */
-const mintedSessionPrefs = new Map<string, Partial<SessionMeta>>();
-
-/** Flush a lazily minted session's pending meta (workspace/model prefs) to
- *  disk. Called right before the first message lands, so the folder only ever
- *  exists for sessions that actually contain a conversation. */
-function bindSessionMetaFor(name: string): void {
-  const prefs = mintedSessionPrefs.get(name);
-  if (!prefs) return;
-  mintedSessionPrefs.delete(name);
-  try {
-    patchSessionMeta(name, prefs);
-  } catch (err) {
-    // session meta is for filtering only: failure shouldn't block chat, but LOG
-    emitDiagnosticError("session.meta.patch.failed", err, {
-      details: { session: name },
-    });
-    process.stderr.write(`reasonix: session meta patch failed: ${messageOf(err)}\n`);
-  }
-}
-
 function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
   // Seconds precision repeats when `new_chat` fires twice within one second —
   // reuse the collision loop so the second mint takes `-1`, `-2`, … instead
-  // of truncating a session that already holds messages. Sessions with an
-  // empty (or missing) transcript are FREE — an abandoned new chat leaves no
-  // folder on disk at all, so it can never resurface in the sidebar.
+  // of truncating a session that already exists. Every minted session occupies
+  // its name — even an empty one is real.
   const name = firstFreeSessionName(`desktop-${timestampSuffix(14)}-${tabCounter}`, (candidate) =>
     sessionExists(candidate),
   );
-  // Lazy creation: decide the name and DO NOT touch the disk. The session
-  // folder materializes on the first message (appendSessionMessage /
-  // rewriteSession via ensureSessionDir). patchSessionMeta would create the
-  // folder too, so it is deferred to the first turn — see bindSessionMetaFor.
-  mintedSessionPrefs.set(name, prefs ?? { workspace: rootDir });
+  // EAGER creation: New chat means NEW chat — the folder and its (empty)
+  // transcript + meta land on disk immediately. An empty session is a real
+  // session: it lists in the sidebar, survives switches, and is only ever
+  // removed by an explicit delete.
+  try {
+    ensureSessionDir(name);
+    patchSessionMeta(name, prefs ? { workspace: rootDir, ...prefs } : { workspace: rootDir });
+  } catch (err) {
+    // meta is for filtering only: failure shouldn't block chat, but LOG
+    emitDiagnosticError("session.meta.patch.failed", err, {
+      details: { session: name },
+    });
+    process.stderr.write(`reasonix: session mint failed: ${messageOf(err)}\n`);
+  }
   return name;
 }
 
@@ -3487,10 +3443,6 @@ function persistSessionModelPrefs(tab: Tab): void {
  *  (settings_save) or a freshly minted session writes after that. */
 function stampSessionModelPrefs(tab: Tab): void {
   if (!tab.currentSession) return;
-  // Lazily minted session taking its first turn: flush the pending
-  // workspace/model meta now — this materializes the session folder, which is
-  // exactly right because a turn is about to write messages into it.
-  bindSessionMetaFor(tab.currentSession);
   try {
     const meta = loadSessionMeta(tab.currentSession);
     if (meta.model !== undefined && meta.reasoningEffort !== undefined) return;
@@ -4877,7 +4829,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   function startFreshSession(
     tab: Tab,
     options: {
-      cleanUpEmptyCurrent: boolean;
       reason: "new-chat" | "session-delete";
       settledDeletes?: SessionsEvent["settledDeletes"];
     },
@@ -4888,13 +4839,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // suppress the first events emitted by the replacement session (#1217).
     if (tab.aborter) tab.switching = true;
     cancelConversation(tab);
-    if (options.cleanUpEmptyCurrent && tab.currentSession) {
-      // Folder-per-session: a session without messages doesn't exist on disk
-      // (or only holds a meta.json husk) — drop it so it can never resurface.
-      if (!sessionExists(tab.currentSession)) {
-        deleteSession(tab.currentSession);
-      }
-    }
+    // Empty sessions are REAL sessions — the previous session is never cleaned
+    // up implicitly here. Only an explicit session_delete removes a session.
     try {
       tab.currentSession = mintSessionFor(tab.rootDir, {
         model: tab.currentModel,
@@ -6125,7 +6071,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const settledDeletes = [{ name: msg.name, removed }];
         if (shouldReplaceDeletedSession(openTab.currentSession, msg.name, removed)) {
           startFreshSession(openTab, {
-            cleanUpEmptyCurrent: false,
             reason: "session-delete",
             settledDeletes,
           });
@@ -6154,7 +6099,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       for (const openTab of tabs.values()) {
         if (deletedSessions.has(openTab.currentSession)) {
           startFreshSession(openTab, {
-            cleanUpEmptyCurrent: false,
             reason: "session-delete",
             settledDeletes,
           });

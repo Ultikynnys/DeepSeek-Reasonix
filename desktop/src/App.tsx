@@ -1621,11 +1621,10 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       const hidden = new Set(pendingSessionDeletes);
       const unique = new Map<string, SessionInfo>();
       for (const session of ev.items) {
-        // The current conversation always shows in Recent even before its
-        // first message, so a freshly created chat is visible the moment it's
-        // made; old empty draft sessions stay hidden (issue: new-chat latency).
-        const isCurrent = session.name === state.currentSession;
-        if ((session.messageCount > 0 || isCurrent) && !hidden.has(session.name)) {
+        // Every session the backend lists shows as-is — an empty session is a
+        // real session (New chat materializes it eagerly on disk), so there is
+        // no message-count visibility filter here anymore.
+        if (!hidden.has(session.name)) {
           unique.set(session.name, session);
         }
       }
