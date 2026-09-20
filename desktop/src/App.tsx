@@ -70,6 +70,7 @@ import {
   type SubagentProgressEvent,
   type TurnOutcome,
   type UserImageAttachment,
+  type ZaiQuota,
   MailProvider,
   resolveActiveQuickSend,
   rpcSend,
@@ -442,6 +443,12 @@ type State = {
   antigravityQuotaRefreshing: boolean;
   /** Why the last Antigravity quota fetch produced no data — shown in the chip tooltip. */
   antigravityQuotaReason: string | null;
+  /** Z.AI GLM Coding Plan usage (5-hour + weekly) for zai-provider tabs. */
+  zaiQuota: ZaiQuota | null;
+  /** True between a statusbar chip click and the $zai_quota reply. */
+  zaiQuotaRefreshing: boolean;
+  /** Why the last Z.AI usage fetch produced no data — shown in the chip tooltip. */
+  zaiQuotaReason: string | null;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
   mcpSpecs: McpSpecInfo[];
@@ -531,6 +538,7 @@ type Action =
   | { t: "codex_quota_refreshing" }
   | { t: "ollama_quota_refreshing" }
   | { t: "antigravity_quota_refreshing" }
+  | { t: "zai_quota_refreshing" }
   | { t: "push_notice"; text: string; severity?: NoticeSeverity };
 
 export function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
@@ -720,6 +728,8 @@ export function reduce(state: State, action: Action): State {
       return { ...state, ollamaQuotaRefreshing: true };
     case "antigravity_quota_refreshing":
       return { ...state, antigravityQuotaRefreshing: true };
+    case "zai_quota_refreshing":
+      return { ...state, zaiQuotaRefreshing: true };
     case "batch_delta": {
       const collapsed: DeltaBatchItem[] = [];
       for (const item of action.items) {
@@ -1712,6 +1722,14 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         antigravityQuotaRefreshing: false,
         usage: applyQuotaDelta(state.usage, "gemini", ev.quota?.turnUsedPct ?? null),
       };
+    case "$zai_quota":
+      return {
+        ...state,
+        zaiQuota: ev.quota,
+        zaiQuotaReason: ev.reason ?? null,
+        zaiQuotaRefreshing: false,
+        usage: applyQuotaDelta(state.usage, "zai", ev.quota?.turnUsedPct ?? null),
+      };
     case "$settings": {
       const prevWs = state.settings?.workspaceDir;
       const wsChanged = prevWs !== undefined && prevWs !== ev.workspaceDir;
@@ -2377,6 +2395,9 @@ function TabRuntime({
     antigravityQuota: null,
     antigravityQuotaRefreshing: false,
     antigravityQuotaReason: null,
+    zaiQuota: null,
+    zaiQuotaRefreshing: false,
+    zaiQuotaReason: null,
     mentionResults: null,
     mentionPreview: null,
     mcpSpecs: [],
@@ -2496,6 +2517,10 @@ function TabRuntime({
   const refreshAntigravityQuota = useCallback(() => {
     dispatch({ t: "antigravity_quota_refreshing" });
     sendRpc({ cmd: "antigravity_quota_get" });
+  }, [sendRpc]);
+  const refreshZaiQuota = useCallback(() => {
+    dispatch({ t: "zai_quota_refreshing" });
+    sendRpc({ cmd: "zai_quota_get" });
   }, [sendRpc]);
   // Fetch the Ollama catalog whenever the tab's model is an Ollama model — the
   // composer menu and the Models settings page render the fetched list. The
@@ -3631,6 +3656,10 @@ function TabRuntime({
           antigravityQuotaRefreshing={state.antigravityQuotaRefreshing}
           antigravityQuotaReason={state.antigravityQuotaReason}
           onRefreshAntigravityQuota={refreshAntigravityQuota}
+          zaiQuota={state.zaiQuota}
+          zaiQuotaRefreshing={state.zaiQuotaRefreshing}
+          zaiQuotaReason={state.zaiQuotaReason}
+          onRefreshZaiQuota={refreshZaiQuota}
           usage={state.usage}
           busy={state.busy}
           ready={state.ready}

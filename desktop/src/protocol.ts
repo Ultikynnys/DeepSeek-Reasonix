@@ -112,6 +112,9 @@ import type {
   TurnOutcome,
   UserImageAttachment,
   WebSearchEngineName,
+  ZaiQuota,
+  ZaiQuotaEvent,
+  ZaiQuotaWindow,
 } from "@reasonix/core-utils";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -216,6 +219,9 @@ export type {
   UserImageAttachment,
   QuickSend,
   WebSearchEngineName,
+  ZaiQuota,
+  ZaiQuotaEvent,
+  ZaiQuotaWindow,
 };
 
 /** Legacy alias for the memory-browser name (context-panel imports it). */
@@ -262,6 +268,7 @@ export type IncomingEvent = { tabId?: string } & (
   | OllamaModelsEvent
   | OpencodeModelsEvent
   | AntigravityQuotaEvent
+  | ZaiQuotaEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent
   | StepCompletedEvent

@@ -75,6 +75,9 @@ import type {
   TurnCompleteEvent,
   TurnOutcome,
   UserImageAttachment,
+  ZaiQuota,
+  ZaiQuotaEvent,
+  ZaiQuotaWindow,
 } from "@reasonix/core-utils";
 import {
   type FileWithStats,
@@ -422,6 +425,7 @@ type EmittableEvent =
   | OllamaModelsEvent
   | OpencodeModelsEvent
   | AntigravityQuotaEvent
+  | ZaiQuotaEvent
   | MentionResultsEvent
   | MentionPreviewEvent
   | RetryResultEvent
@@ -1995,6 +1999,120 @@ async function emitAntigravityQuota(tab: Tab): Promise<void> {
   // Native unit: Antigravity bills plan-window %, not dollars.
   accumulateQuotaIntoSession(tab, "gemini", turnUsedPct);
   emit({ type: "$antigravity_quota", quota: { ...quota, turnUsedPct } }, tab.id);
+}
+
+/** A raw `limits[]` row from Z.AI's monitor endpoint — only the fields we read. */
+interface ZaiLimitRow {
+  type?: string;
+  unit?: number;
+  number?: number;
+  usage?: number;
+  currentValue?: number;
+  remaining?: number;
+  percentage?: number;
+  nextResetTime?: number;
+}
+
+/** Z.AI GLM Coding Plan usage — `GET {origin}/api/monitor/usage/quota/limit`. The
+ *  token/credit rows are matched by `unit` (3 = 5-hour, 6 = weekly); each carries a
+ *  `percentage` (0-100) plus an epoch-ms `nextResetTime`. Undefined on any failure. */
+export async function fetchZaiQuota(
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs = 10_000,
+): Promise<Omit<ZaiQuota, "turnUsedPct" | "fetchedAt"> | undefined> {
+  try {
+    const resp = await fetch(`${new URL(baseUrl).origin}/api/monitor/usage/quota/limit`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!resp.ok) return undefined;
+    const data = (await resp.json()) as {
+      data?: { limits?: unknown; level?: unknown };
+    };
+    const limits = data?.data?.limits;
+    if (!Array.isArray(limits)) return undefined;
+    const toWindow = (unit: number): ZaiQuotaWindow | null => {
+      const row = (limits as ZaiLimitRow[]).find(
+        (r) => r && (r.type === "TOKENS_LIMIT" || r.type === "CREDIT_LIMIT") && r.unit === unit,
+      );
+      if (!row) return null;
+      // The server usually reports `percentage` directly; fall back to the
+      // currentValue/usage ratio for payloads that omit it.
+      const pct =
+        typeof row.percentage === "number"
+          ? row.percentage
+          : typeof row.currentValue === "number" && typeof row.usage === "number" && row.usage > 0
+            ? (row.currentValue / row.usage) * 100
+            : null;
+      if (pct === null) return null;
+      return {
+        usagePct: pct,
+        remainingPct: Math.max(0, 100 - pct),
+        resetsAt: typeof row.nextResetTime === "number" ? row.nextResetTime : null,
+      };
+    };
+    const fiveHour = toWindow(3);
+    const weekly = toWindow(6);
+    if (!fiveHour && !weekly) return undefined;
+    const level = data?.data?.level;
+    return { plan: typeof level === "string" ? level : null, fiveHour, weekly };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Last API-reported Z.AI 5-hour / weekly usage % — the delta to the next fetch
+ *  is the percent points of the window consumed since (each $turn_complete
+ *  refetches; the 5-hour window resets on a rolling basis). */
+let lastZaiFiveHourUsedPct: number | null = null;
+let lastZaiWeeklyUsedPct: number | null = null;
+
+/** Z.AI GLM Coding Plan usage for a `zai`-provider tab with a configured key.
+ *  Fetches the monitor endpoint, scales the API's `percentage` to "% left", and
+ *  accumulates the measured delta as the session's native-unit quota %. */
+async function emitZaiQuota(tab: Tab): Promise<void> {
+  if (providerForModel(tab.currentModel) !== "zai") {
+    emitTabDiagnostic(tab, "quota.skipped", { reason: "non-zai-provider" });
+    return;
+  }
+  const apiKey = loadZaiApiKey();
+  if (!apiKey) {
+    emitTabDiagnostic(tab, "quota.skipped", { reason: "zai-no-api-key" });
+    return;
+  }
+  emitTabDiagnostic(tab, "quota.fetch.started");
+  const ep = loadEndpointForModel(tab.currentModel);
+  const quota = await fetchZaiQuota(ep.baseUrl ?? DEFAULT_ZAI_CHAT_URL, apiKey);
+  if (!quota) {
+    emitTabDiagnostic(tab, "quota.fetch.failed", { reason: "usage-unavailable" }, "error");
+    emit({ type: "$zai_quota", quota: null, reason: "usage-unavailable" }, tab.id);
+    return;
+  }
+  // Prefer the 5-hour window (finer resolution); fall back to weekly for plans
+  // that report only the weekly window.
+  const fiveHourPct = quota.fiveHour?.usagePct ?? null;
+  const weeklyPct = quota.weekly?.usagePct ?? null;
+  const currentPct = fiveHourPct !== null ? fiveHourPct : weeklyPct;
+  const baseline = fiveHourPct !== null ? lastZaiFiveHourUsedPct : lastZaiWeeklyUsedPct;
+  // A rollover (window reset) makes the delta go backwards — report no turn cost
+  // for this fetch and adopt the new baseline.
+  const turnUsedPct =
+    baseline !== null && currentPct !== null && currentPct >= baseline
+      ? currentPct - baseline
+      : null;
+  if (fiveHourPct !== null) lastZaiFiveHourUsedPct = fiveHourPct;
+  else if (weeklyPct !== null) lastZaiWeeklyUsedPct = weeklyPct;
+  emitTabDiagnostic(tab, "quota.fetch.succeeded", {
+    plan: quota.plan,
+    fiveHour: fiveHourPct,
+    weekly: weeklyPct,
+    turnUsedPct,
+  });
+  // Native unit: the GLM Coding Plan bills plan-window %, not dollars.
+  accumulateQuotaIntoSession(tab, "zai", turnUsedPct);
+  emit({ type: "$zai_quota", quota: { ...quota, turnUsedPct, fetchedAt: Date.now() } }, tab.id);
 }
 
 /** Provider-aware billing for subagent and main-loop model calls. */
@@ -4452,6 +4570,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           void emitCodexQuota(tab, { force: true });
           void emitOllamaQuota(tab);
           void emitAntigravityQuota(tab);
+          void emitZaiQuota(tab);
           if (tab.hooks.some((h) => h.event === "Stop")) {
             const stopReport = await runHooks({
               hooks: tab.hooks,
@@ -5187,6 +5306,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       void emitCodexQuota(tab);
       void emitOllamaQuota(tab);
       void emitAntigravityQuota(tab);
+      void emitZaiQuota(tab);
     })();
     return tab;
   }
@@ -6288,6 +6408,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "antigravity_quota_get") {
       void emitAntigravityQuota(tab);
+      return;
+    }
+    if (msg.cmd === "zai_quota_get") {
+      void emitZaiQuota(tab);
       return;
     }
     if (msg.cmd === "ollama_models_list") {

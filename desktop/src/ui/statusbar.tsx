@@ -10,7 +10,7 @@ import type { Balance, Settings, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
 import { isOffPeak, minutesUntilRateChange, rateMultiplier } from "../peak-hours";
-import type { AntigravityQuota, CodexQuota, JobInfo, OllamaQuota } from "../protocol";
+import type { AntigravityQuota, CodexQuota, JobInfo, OllamaQuota, ZaiQuota } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { hitPercent, tokenLabel } from "./format";
 import { formatMoney } from "../money";
@@ -44,6 +44,10 @@ export function StatusBar({
   onRefreshAntigravityQuota,
   antigravityQuotaRefreshing,
   antigravityQuotaReason,
+  zaiQuota,
+  onRefreshZaiQuota,
+  zaiQuotaRefreshing,
+  zaiQuotaReason,
   usage,
   busy,
   ready,
@@ -78,6 +82,11 @@ export function StatusBar({
   onRefreshAntigravityQuota?: () => void;
   antigravityQuotaRefreshing?: boolean;
   antigravityQuotaReason?: string | null;
+  /** Z.AI GLM Coding Plan usage (5-hour + weekly) — mirrors the Ollama chip. */
+  zaiQuota: ZaiQuota | null;
+  onRefreshZaiQuota?: () => void;
+  zaiQuotaRefreshing?: boolean;
+  zaiQuotaReason?: string | null;
   usage: UsageStats;
   busy: boolean;
   ready: boolean;
@@ -139,6 +148,9 @@ export function StatusBar({
   const openaiQuotaBilling = openaiTab && !openaiTokenBilling;
   const ollamaTokenBilling = provider === "ollama" && ep?.billingKind === "usd";
   const ollamaQuotaBilling = provider === "ollama" && !ollamaTokenBilling;
+  // Z.AI GLM Coding Plan tabs bill plan-window % (fetched from the monitor
+  // endpoint), never dollars — the chip replaces the DeepSeek balance.
+  const zaiQuotaBilling = provider === "zai";
   const sessionQuotaProvider =
     openaiQuotaBilling
       ? "openai"
@@ -146,7 +158,9 @@ export function StatusBar({
         ? provider
       : ollamaQuotaBilling
         ? "ollama"
-        : null;
+        : zaiQuotaBilling
+          ? "zai"
+          : null;
   const sessionQuotaCost =
     sessionQuotaProvider !== null ? usage.costByProvider?.[sessionQuotaProvider] : undefined;
   const sessionQuotaPct = sessionQuotaCost?.quotaUsedPct ?? null;
@@ -255,6 +269,22 @@ export function StatusBar({
     !antigravityQuotaData && antigravityQuotaReason
       ? `${antigravityQuotaTitle}\n${t("statusbar.codexReason", { reason: antigravityQuotaReason })}`
       : antigravityQuotaTitle;
+  // Z.AI GLM Coding Plan: the 5-hour window is the primary ribbon value (finer
+  // resolution than weekly), falling back to weekly when the plan omits it.
+  const zaiQuotaData = zaiQuota && zaiQuotaBilling ? zaiQuota : null;
+  const zaiWindow = zaiQuotaData?.fiveHour ?? zaiQuotaData?.weekly ?? null;
+  const zaiTurnPct = zaiQuotaData?.turnUsedPct ?? null;
+  const zaiQuotaTitle =
+    zaiQuotaData && zaiWindow
+      ? t("statusbar.zaiQuotaTitle", {
+          left: Math.round(zaiWindow.remainingPct),
+          plan: zaiQuotaData.plan ?? "GLM Coding Plan",
+        })
+      : t("statusbar.zaiNoData");
+  const zaiQuotaTitleWithReason =
+    !zaiQuotaData && zaiQuotaReason
+      ? `${zaiQuotaTitle}\n${t("statusbar.codexReason", { reason: zaiQuotaReason })}`
+      : zaiQuotaTitle;
   // A failed fetch stays diagnosable: append the reason to the tooltip.
   const ollamaQuotaTitleWithReason =
     !ollamaQuotaData && ollamaQuotaReason
@@ -407,7 +437,9 @@ export function StatusBar({
                 ? t("statusbar.ollamaTurnQuotaTitle", { pct: ollamaTurnPct.toFixed(1) })
                 : agTurnPct != null
                   ? t("statusbar.antigravityTurnQuotaTitle", { pct: agTurnPct.toFixed(1) })
-                  : undefined
+                  : zaiTurnPct != null
+                    ? t("statusbar.zaiTurnQuotaTitle", { pct: zaiTurnPct.toFixed(1) })
+                    : undefined
           }
         >
           <I.coin size={11} />
@@ -430,6 +462,12 @@ export function StatusBar({
             ) : (
               <span className="v ok">—</span>
             )
+          ) : zaiQuotaBilling ? (
+            zaiTurnPct != null ? (
+              <span className="v ok">{zaiTurnPct.toFixed(1)}%</span>
+            ) : (
+              <span className="v ok">—</span>
+            )
           ) : (
             <span className="v ok">
               {turnCost}
@@ -439,7 +477,11 @@ export function StatusBar({
         </span>
       ) : null}
 
-      {showSessionCost && !openaiQuotaBilling && !ollamaQuotaBilling && !geminiTab ? (
+      {showSessionCost &&
+      !openaiQuotaBilling &&
+      !ollamaQuotaBilling &&
+      !geminiTab &&
+      !zaiQuotaBilling ? (
         <span className="seg" title={t("settings.sessionCost")}>
           <I.coin size={11} />
           <span>{t("settings.sessionCost")}</span>
@@ -581,6 +623,29 @@ export function StatusBar({
                 <span className="conv">{ollamaPlan ?? "free"}</span>
               </>
             ) : ollamaQuotaRefreshing ? (
+              <span className="v acc">{t("statusbar.codexRefreshing")}</span>
+            ) : (
+              <span className="v acc">—</span>
+            )}
+          </span>
+        ) : zaiQuotaBilling ? (
+          <span
+            className="seg"
+            title={zaiQuotaTitleWithReason}
+            style={onRefreshZaiQuota ? { cursor: "pointer" } : undefined}
+            onClick={onRefreshZaiQuota}
+            onKeyDown={onRefreshZaiQuota ? activationHandler(onRefreshZaiQuota) : undefined}
+          >
+            <I.coin size={11} style={{ color: "var(--accent)" }} />
+            <span>{t("statusbar.zaiQuota")}</span>
+            {zaiQuotaData && zaiWindow ? (
+              <>
+                <span className="v acc">
+                  {Math.round(zaiWindow.remainingPct)}% {t("statusbar.codexLeft")}
+                </span>
+                <span className="conv">{zaiQuotaData.plan ?? "GLM"}</span>
+              </>
+            ) : zaiQuotaRefreshing ? (
               <span className="v acc">{t("statusbar.codexRefreshing")}</span>
             ) : (
               <span className="v acc">—</span>

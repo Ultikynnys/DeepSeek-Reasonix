@@ -3,7 +3,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Settings, UsageStats } from "../App";
-import type { AntigravityQuota, CodexQuota, ModelEndpointInfo, OllamaQuota } from "../protocol";
+import type {
+  AntigravityQuota,
+  CodexQuota,
+  ModelEndpointInfo,
+  OllamaQuota,
+  ZaiQuota,
+} from "../protocol";
 import { THEME, THEME_STYLES } from "../theme";
 import { StatusBar } from "./statusbar";
 
@@ -48,6 +54,7 @@ function renderBar(overrides: Partial<Parameters<typeof StatusBar>[0]> = {}) {
     codexQuota: null,
     ollamaQuota: null,
     antigravityQuota: null,
+    zaiQuota: null,
     usage: { totalCostUsd: 0, lastCallCostUsd: 0 } as unknown as UsageStats,
     busy: false,
     ready: true,
@@ -224,6 +231,41 @@ describe("StatusBar quota display", () => {
     expect(screen.getByText(/0\.5x|1x/)).toBeTruthy();
   });
 
+  it("shows GLM plan % left + plan + this-turn % for Z.AI tabs", () => {
+    renderBar({
+      settings: { model: "glm-5.3-flash" } as Settings,
+      zaiQuota: {
+        plan: "pro",
+        fiveHour: { usagePct: 30, remainingPct: 70, resetsAt: null },
+        weekly: { usagePct: 12, remainingPct: 88, resetsAt: null },
+        turnUsedPct: 1.5,
+        fetchedAt: 0,
+      } as ZaiQuota,
+    });
+    expect(screen.getByText(/70%\s*left/)).toBeTruthy();
+    expect(screen.getByText("pro")).toBeTruthy();
+    expect(screen.getByText(/1\.5%/)).toBeTruthy();
+    // The balance and $ amounts are replaced by the GLM usage percentages.
+    expect(screen.queryByText("balance")).toBeNull();
+    expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
+  });
+
+  it("keeps the GLM usage chip (em dash + retry) without data — never the DeepSeek balance", () => {
+    renderBar({ settings: { model: "glm-5.3-flash" } as Settings, zaiQuota: null });
+    expect(screen.getByText("GLM usage")).toBeTruthy();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("balance")).toBeNull();
+    expect(screen.getByTitle(/set a Z\.AI API key/)).toBeTruthy();
+  });
+
+  it("surfaces the Z.AI usage fetch failure reason in the chip tooltip", () => {
+    renderBar({
+      settings: { model: "glm-5.3-flash" } as Settings,
+      zaiQuota: null,
+      zaiQuotaReason: "usage-unavailable",
+    });
+    expect(screen.getByTitle(/usage-unavailable/)).toBeTruthy();
+  });
   it("hides the rate chip for local Ollama and other Ollama models", () => {
     renderBar({ settings: { model: "ollama/llama3.1:latest" } as Settings });
     expect(screen.queryByText(/off-peak|peak/)).toBeNull();

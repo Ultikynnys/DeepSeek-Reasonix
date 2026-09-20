@@ -10,6 +10,7 @@ import {
   type ModelProvider,
   loadEndpointForModel,
   loadPricingOverride,
+  loadZaiApiKey,
   providerForModel,
   readConfig,
 } from "../config.js";
@@ -334,6 +335,11 @@ export function billingContextForModel(model: string, path?: string): BillingCon
     }
     case "opencode":
       return { kind: "none", provider };
+    case "zai":
+      // A Z.AI GLM key is evidence of a Coding Plan account, whose real unit is
+      // plan-window % (fetched from the monitor endpoint), never dollars. Keyless
+      // tabs stay unbilled ("none") rather than inventing a USD figure.
+      return { kind: loadZaiApiKey(path) ? "quota" : "none", provider };
     default:
       return { kind: "usd", provider };
   }

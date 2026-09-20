@@ -960,6 +960,46 @@ export interface OllamaQuotaEvent {
   reason?: string;
 }
 
+/** One Z.AI GLM Coding Plan usage window (`GET {origin}/api/monitor/usage/quota/limit`).
+ *  Unlike Ollama/Codex, the API reports plan usage directly as a percentage
+ *  (`percentage`) per window, plus an epoch-ms reset time. The 5-hour window
+ *  (`unit: 3`) resets on a rolling basis; the weekly window (`unit: 6`) resets
+ *  every 7 days. */
+export interface ZaiQuotaWindow {
+  /** API-reported plan-window usage, 0-100 (the server's `percentage` field). */
+  usagePct: number;
+  /** 100 - usagePct — the statusbar's "% left". */
+  remainingPct: number;
+  /** Epoch millis when the window resets, or null when the server didn't report one. */
+  resetsAt: number | null;
+}
+
+/** Z.AI GLM Coding Plan usage (daemon source: the undocumented `GET
+ *  {origin}/api/monitor/usage/quota/limit` monitor endpoint with the same Bearer
+ *  key as chat). `null` payload means "no data" — no key, a Developer (pay-per-
+ *  token) key, or a fetch failure — the UI degrades to a dash, never a wrong
+ *  number. */
+export interface ZaiQuota {
+  /** Plan tier from the payload's `level` (e.g. "lite", "pro", "max"), or null. */
+  plan: string | null;
+  /** 5-hour rolling window (`unit: 3`), or null when the plan has none. */
+  fiveHour: ZaiQuotaWindow | null;
+  /** Weekly window (`unit: 6`), or null when the plan has none. */
+  weekly: ZaiQuotaWindow | null;
+  /** Percentage points of the 5-hour window consumed since the previous fetch
+   *  (fetches fire on every $turn_complete). Null until a second measurement
+   *  exists. */
+  turnUsedPct?: number | null;
+  fetchedAt: number;
+}
+
+export interface ZaiQuotaEvent {
+  type: "$zai_quota";
+  quota: ZaiQuota | null;
+  /** Why quota is null — surfaced in the statusbar tooltip. */
+  reason?: string;
+}
+
 /** The account's Google Antigravity (Gemini Code Assist) plan, from
  *  loadCodeAssist.currentTier. */
 export interface AntigravityPlan {
@@ -1140,6 +1180,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "codex_quota_get" }
   | { cmd: "ollama_quota_get" }
   | { cmd: "antigravity_quota_get" }
+  | { cmd: "zai_quota_get" }
   | { cmd: "ollama_models_list"; force?: boolean }
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }

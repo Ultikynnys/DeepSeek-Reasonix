@@ -678,6 +678,11 @@ export const en = {
     antigravityTurnQuotaTitle: "This turn used {pct}% of the Antigravity quota",
     antigravityNoData:
       "Antigravity usage · no data — sign in to Google Antigravity (Settings → Gemini) to see plan usage · click to retry",
+    zaiQuota: "GLM usage",
+    zaiQuotaTitle: "GLM Coding Plan {plan} · {left}% left · click to refresh",
+    zaiTurnQuotaTitle: "This turn used {pct}% of the GLM 5-hour quota",
+    zaiNoData:
+      "GLM usage · no data — set a Z.AI API key (Settings → Z.AI / GLM) to see plan usage · click to retry",
     offPeak: "off-peak",
     peak: "peak",
     offPeakTitle:
