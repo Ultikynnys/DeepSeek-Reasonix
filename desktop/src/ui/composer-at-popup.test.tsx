@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render } from "@testing-library/react";
-import { createRef } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { Composer } from "./composer";
 import {
   OPENAI_MODELS,
   OPENCODE_MODELS,
   SUPPORTED_OFFICIAL_MODELS,
   ZAI_MODELS,
 } from "@reasonix/core-utils";
+import { fireEvent, render } from "@testing-library/react";
+import { createRef } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Composer } from "./composer";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 afterEach(() => {
@@ -191,10 +191,7 @@ describe("desktop Composer model catalog", () => {
       subagentModelLabel: "deepseek-v4-flash",
       ollamaModels,
       antigravityModels,
-      enabledModels: [
-        ...ollamaModels.map((id) => `ollama/${id}`),
-        ...antigravityModels,
-      ],
+      enabledModels: [...ollamaModels.map((id) => `ollama/${id}`), ...antigravityModels],
     });
 
     fireEvent.click(container.querySelector(".model-pill")!);

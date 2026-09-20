@@ -467,6 +467,16 @@ export function shouldReplaceDeletedSession(
   return deleted && currentSession === deletedSession;
 }
 
+/** Whether a listed session should appear in the sidebar: non-empty sessions
+ *  always; an empty one only while it is the tab's current (lazily minted,
+ *  folderless) chat. Pure for tests. */
+export function sessionVisibleInList(
+  session: { name: string; messageCount: number },
+  currentSession: string | undefined,
+): boolean {
+  return session.messageCount > 0 || session.name === currentSession;
+}
+
 /** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
 export function writeAllSync(
   fd: number,
@@ -2181,22 +2191,36 @@ async function emitSessions(
   const source = listSessionsForWorkspaceAsync(tab.rootDir);
   const request = {
     cache: source.cache,
-    value: source.value.then((sessions) =>
-      sessions.flatMap((session): SessionsEvent["items"] =>
-        session.messageCount === 0 && session.name !== tab.currentSession
-          ? []
-          : [
-              {
-                name: session.name,
-                messageCount: session.messageCount,
-                mtime: session.mtime.toISOString(),
-                updatedAt: session.meta.updatedAt,
-                summary: session.meta.summary,
-                workspaceStatus: session.workspaceStatus,
-              },
-            ],
-      ),
-    ),
+    value: source.value.then(async (sessions): Promise<SessionsEvent["items"]> => {
+      const items: SessionsEvent["items"] = [];
+      let currentListed = false;
+      for (const session of sessions) {
+        if (!sessionVisibleInList(session, tab.currentSession)) continue;
+        if (session.name === tab.currentSession) currentListed = true;
+        items.push({
+          name: session.name,
+          messageCount: session.messageCount,
+          mtime: session.mtime.toISOString(),
+          updatedAt: session.meta.updatedAt,
+          summary: session.meta.summary,
+          workspaceStatus: session.workspaceStatus,
+        });
+      }
+      // Folder-per-session: a freshly minted "new chat" has NO folder on disk
+      // until its first message, so the directory listing cannot see it.
+      // Inject it so the sidebar keeps showing the current conversation
+      // between mint and first send — otherwise it vanishes on the next
+      // $sessions refresh. (Sorting places it by its name timestamp, which
+      // is the newest anyway.)
+      if (tab.currentSession && !currentListed) {
+        items.push({
+          name: tab.currentSession,
+          messageCount: 0,
+          mtime: new Date().toISOString(),
+        });
+      }
+      return items;
+    }),
   };
   emitTabDiagnostic(tab, "sessions.list.started", { cache: request.cache });
   try {

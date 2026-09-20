@@ -388,7 +388,14 @@ describe("Desktop App reducer — usage", () => {
     inc({ type: "model.final", id: 2, ts: "t", turn: 1, content: "hello", usage: null });
     inc({ type: "$turn_complete", ts: "t" });
     act({ t: "send_user", text: "second", clientId: "c-2" });
-    inc({ type: "error", id: 3, ts: "t", turn: 2, message: "404 model not found", recoverable: false });
+    inc({
+      type: "error",
+      id: 3,
+      ts: "t",
+      turn: 2,
+      message: "404 model not found",
+      recoverable: false,
+    });
 
     // Unified numbering: the retry ("proceed") is turn 3 for BOTH sides — the
     // error for turn 3 lands below user-3, never above it.
@@ -402,7 +409,14 @@ describe("Desktop App reducer — usage", () => {
       reasoningEffort: "medium",
       prefixHash: "h",
     });
-    inc({ type: "error", id: 5, ts: "t", turn: 3, message: "404 model not found", recoverable: false });
+    inc({
+      type: "error",
+      id: 5,
+      ts: "t",
+      turn: 3,
+      message: "404 model not found",
+      recoverable: false,
+    });
     expect(labels(s.messages)).toEqual([
       "user-1",
       "assistant-1",
@@ -1585,6 +1599,67 @@ describe("Desktop App session sorting", () => {
       event: { type: "$sessions", epoch: "daemon-1", revision: 1, items: [emptyActive] },
     });
     expect(next.sessions).toEqual([emptyActive]);
+  });
+
+  it("switching sessions never reorders or drops others — only the snapshot content matters", () => {
+    const a = {
+      name: "desktop-20260901100000-1",
+      messageCount: 2,
+      mtime: new Date(1000).toISOString(),
+      summary: "first chat",
+    };
+    const b = {
+      name: "desktop-20260902100000-1",
+      messageCount: 4,
+      mtime: new Date(2000).toISOString(),
+      summary: "second chat",
+    };
+    const base = { ...initialState(), currentSession: b.name };
+    const listed = reduce(base, {
+      t: "incoming",
+      event: { type: "$sessions", epoch: "daemon-1", revision: 1, items: [b, a] },
+    });
+    expect(listed.sessions.map((s) => s.name)).toEqual([b.name, a.name]);
+
+    // Switch to the other conversation: b (with messages) must STILL be listed
+    // and the order must stay recency-based — a must not be reordered to the
+    // top just because it is now current.
+    const switched = reduce(listed, {
+      t: "incoming",
+      event: { type: "$sessions", epoch: "daemon-1", revision: 2, items: [b, a] },
+    });
+    void (function setCurrentSession() {
+      // simulate the $session_loaded side effect of switching
+      switched.currentSession = a.name;
+    })();
+    const refreshed = reduce(switched, {
+      t: "incoming",
+      event: { type: "$sessions", epoch: "daemon-1", revision: 3, items: [b, a] },
+    });
+    expect(refreshed.sessions.map((s) => s.name)).toEqual([b.name, a.name]);
+  });
+
+  it("a refresh whose items omit a non-current empty session hides it again (draft cleanup)", () => {
+    const draft = {
+      name: "desktop-20260905120000-1",
+      messageCount: 0,
+      mtime: new Date(1000).toISOString(),
+    };
+    const base = { ...initialState(), currentSession: draft.name };
+    const withDraft = reduce(base, {
+      t: "incoming",
+      event: { type: "$sessions", epoch: "daemon-1", revision: 1, items: [draft] },
+    });
+    expect(withDraft.sessions).toEqual([draft]);
+
+    // The user switched away; the snapshot no longer contains the draft and
+    // it is no longer current — it must disappear rather than linger.
+    const afterSwitch = { ...withDraft, currentSession: "desktop-20260902100000-1" };
+    const cleaned = reduce(afterSwitch, {
+      t: "incoming",
+      event: { type: "$sessions", epoch: "daemon-1", revision: 2, items: [] },
+    });
+    expect(cleaned.sessions).toEqual([]);
   });
 
   it("keeps optimistic deletion hidden until its authoritative snapshot settles", () => {
