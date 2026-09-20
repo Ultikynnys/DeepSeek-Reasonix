@@ -127,10 +127,13 @@ describe("Z.AI GLM chat", () => {
       const url = String(input);
       urls.push(url);
       if (url.includes("/api/paas/v4/chat/completions")) {
-        return new Response(JSON.stringify({ error: { code: "1000", message: "Authentication Failed" } }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ error: { code: "1000", message: "Authentication Failed" } }),
+          {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
       return jsonResponse({ choices: [{ message: { content: "ok" } }] });
     }) as unknown as typeof globalThis.fetch;
