@@ -3,6 +3,7 @@ import { DeepSeekClient, type DeepSeekClientOptions } from "./client.js";
 import { resolveCodexTransport } from "./codex-backend.js";
 import {
   DEFAULT_OPENCODE_CHAT_URL,
+  DEFAULT_ZAI_RESPONSES_URL,
   isOpenAIStandardEndpoint,
   loadEndpointForModel,
   providerForModel,
@@ -35,7 +36,13 @@ export function modelClientOptions(opts: ResolvedModelClientOptions): DeepSeekCl
             headers: { Authorization: `Bearer ${endpoint.apiKey ?? "public"}` },
             api: "responses" as const,
           })
-        : undefined,
+        : provider === "zai"
+          ? async () => ({
+              endpoint: `${DEFAULT_ZAI_RESPONSES_URL}/responses`,
+              headers: { Authorization: `Bearer ${endpoint.apiKey ?? ""}` },
+              api: "responses" as const,
+            })
+          : undefined,
     geminiAuthResolver:
       provider === "gemini" ? () => resolveGeminiAuth(opts.configPath) : undefined,
   };

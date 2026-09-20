@@ -14,9 +14,9 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A New tab now defaults to the local Reasonix installation folder (where the app lives); an explicit workspace pick still wins.
 - The tab-strip dot now shows how many agents are actively running in that tab (one per running session), and is hidden entirely when none are running.
 
-**Fixed: a valid Z.AI key no longer reports "authentication failed" when it's a GLM Coding Plan key.**
+**Fixed: GLM Coding Plan keys now work — Z.AI serves them on the Responses API, not chat-completions.**
 
-- Z.AI binds a key type to a host path: Developer API keys authenticate on `https://api.z.ai/api/paas/v4` while GLM Coding Plan keys authenticate only on `https://api.z.ai/api/coding/paas/v4`. The Developer endpoint rejects a Coding Plan key with `401 Authentication Failed` (code 1000) or `429 Insufficient balance or no resource package` (code 1113), and the client only ever called the Developer endpoint — so a valid Coding Plan key failed as if invalid or unfunded. A chat/stream request now retries the other endpoint on a 401 or a no-balance 429, keeping whichever endpoint actually answers; custom/proxied endpoints are left untouched.
+- Z.AI's GLM Coding Plan keys are served on the **Responses API** (`https://api.z.ai/api/v1`), which speaks the Responses wire format (`input`/`instructions`, `response.*` SSE). The chat-completions paths — the Developer endpoint `https://api.z.ai/api/paas/v4` and the Coding Plan's `https://api.z.ai/api/coding/paas/v4` — reject a Coding Plan key with `401 Authentication Failed` (code 1000) or `429 Insufficient balance or no resource package` (code 1113), so a valid, funded Coding Plan key failed as if invalid or unfunded. Z.AI models now route through the Responses endpoint (Reasonix's existing Responses path); if it rejects the key, a chat-completions request is retried on the Developer endpoint and, on success, remembered so later requests skip the probe. Custom/proxied base URLs are left untouched.
 
 **Added: a Settings → Tools "Repetition guard" toggle (default off) for the model-stall guard.**
 

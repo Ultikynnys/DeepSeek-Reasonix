@@ -150,6 +150,10 @@ export const DEFAULT_ZAI_CHAT_URL = "https://api.z.ai/api/paas/v4";
  *  return 401 against the Developer endpoint); Developer keys the reverse. */
 export const DEFAULT_ZAI_CODING_CHAT_URL = "https://api.z.ai/api/coding/paas/v4";
 
+/** Z.AI Responses endpoint. GLM Coding Plan keys are served here in the
+ *  Responses wire format — the chat-completions paths 401 them. */
+export const DEFAULT_ZAI_RESPONSES_URL = "https://api.z.ai/api/v1";
+
 /** OpenCode Zen OpenAI-compatible endpoint used for free/paid OpenCode models. */
 export const DEFAULT_OPENCODE_CHAT_URL = "https://opencode.ai/zen/v1";
 

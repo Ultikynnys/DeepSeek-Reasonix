@@ -518,6 +518,9 @@ export class DeepSeekClient {
   /** Resolved Z.AI endpoint after a key/endpoint mismatch forced a swap, so
    *  later requests skip the wrong endpoint (and its retries). */
   private zaiResolvedBase: string | null = null;
+  /** Set once a Z.AI Responses request is rejected but chat-completions
+   *  accepts the key, so later requests skip the Responses attempt. */
+  private zaiChatFallback = false;
   private readonly geminiAuthResolver?: () => Promise<{
     accessToken: string;
     projectId?: string;
@@ -597,7 +600,12 @@ export class DeepSeekClient {
   /** Resolved per request — transport override or null (falls through to baseUrl+apiKey). */
   private async resolveTransport(): Promise<ResolvedTransport | null> {
     if (!this.transportResolver) return null;
-    return this.transportResolver();
+    const transport = await this.transportResolver();
+    // Z.AI Coding Plan keys are served on the Responses API, but a Developer
+    // key may only work on chat-completions — once chat is confirmed, drop the
+    // Responses transport so later requests go straight to chat.
+    if (transport?.api === "responses" && this.zaiChatFallback) return null;
+    return transport;
   }
 
   /** The other Z.AI endpoint for this baseUrl. A key 401s on the endpoint it
@@ -670,7 +678,7 @@ export class DeepSeekClient {
     const rateLimitStartedAt = startedAt;
     await this.waitForChatRateLimit(signal);
     const rateLimitWaitMs = performance.now() - rateLimitStartedAt;
-    const transport = await this.resolveTransport();
+    let transport = await this.resolveTransport();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (stream) headers.Accept = "text/event-stream";
     if (transport) {
@@ -719,6 +727,26 @@ export class DeepSeekClient {
             this.zaiResolvedBase = altBase;
             resp = altResp;
           }
+        }
+      }
+      // A Z.AI Responses request that fails may mean the key belongs on
+      // chat-completions (Developer keys). Retry there and, on success, remember
+      // the choice so later requests skip the Responses attempt.
+      if (transport?.api === "responses" && providerForModel(opts.model) === "zai" && !resp.ok) {
+        log.verbose(`zai ${resp.status} on ${transport.endpoint} — trying chat completions`);
+        const chatResp = await fetchWithRetry(
+          this._fetch,
+          `${this.baseUrl}/chat/completions`,
+          {
+            ...init,
+            body: stringifyJsonTransport(this.buildPayload(opts, stream, null, ollamaNumCtx)),
+          },
+          { ...this.retry, signal },
+        );
+        if (chatResp.ok || !(await this.zaiEndpointMismatch(chatResp))) {
+          this.zaiChatFallback = true;
+          resp = chatResp;
+          transport = null;
         }
       }
       recordDiagnostic("model.response.headers", {

@@ -219,6 +219,105 @@ describe("Z.AI GLM chat", () => {
     ).rejects.toThrow(/429/);
   });
 
+  it("routes Z.AI through the Responses API when the transport is Responses", async () => {
+    let url = "";
+    let body: Record<string, unknown> | undefined;
+    const fetch = vi.fn(async (input, requestInit) => {
+      url = String(input);
+      body = JSON.parse(String((requestInit as RequestInit).body)) as Record<string, unknown>;
+      const frames = [
+        `event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", delta: "pong", output_index: 0 })}\n\n`,
+        `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { status: "completed", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } })}\n\n`,
+        "data: [DONE]\n\n",
+      ];
+      const stream = new ReadableStream({
+        start(controller) {
+          for (const frame of frames) controller.enqueue(new TextEncoder().encode(frame));
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+    const client = new DeepSeekClient({
+      apiKey: "coding-plan-key",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      fetch,
+      transportResolver: async () => ({
+        endpoint: "https://api.z.ai/api/v1/responses",
+        headers: { Authorization: "Bearer coding-plan-key" },
+        api: "responses" as const,
+      }),
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream({
+      model: "glm-5.3-flash",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(url).toBe("https://api.z.ai/api/v1/responses");
+    expect(body?.messages).toBeUndefined();
+    expect(body?.input).toBeDefined();
+    expect(body?.store).toBe(false);
+    expect(chunks.find((c) => c.contentDelta)?.contentDelta).toBe("pong");
+  });
+
+  it("falls back to chat completions when the Z.AI Responses endpoint rejects the key", async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn(async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/api/v1/responses")) {
+        return new Response(
+          JSON.stringify({ error: { code: "1000", message: "Authentication Failed" } }),
+          { status: 401, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      const frames = [
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`,
+        "data: [DONE]\n\n",
+      ];
+      const stream = new ReadableStream({
+        start(controller) {
+          for (const frame of frames) controller.enqueue(new TextEncoder().encode(frame));
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+    const client = new DeepSeekClient({
+      apiKey: "developer-key",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      fetch,
+      retry: { maxAttempts: 1 },
+      transportResolver: async () => ({
+        endpoint: "https://api.z.ai/api/v1/responses",
+        headers: { Authorization: "Bearer developer-key" },
+        api: "responses" as const,
+      }),
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream({
+      model: "glm-5.3-flash",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(urls[0]).toBe("https://api.z.ai/api/v1/responses");
+    expect(urls[1]).toBe("https://api.z.ai/api/paas/v4/chat/completions");
+    expect(chunks.find((c) => c.contentDelta)?.contentDelta).toBe("ok");
+  });
+
   it("classifies GLM models as preserved-thinking models", () => {
     expect(isThinkingModeModel("glm-5.3-flash")).toBe(true);
     expect(thinkingModeForModel("glm-5.3")).toBe("enabled");
