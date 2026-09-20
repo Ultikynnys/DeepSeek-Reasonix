@@ -143,8 +143,12 @@ export const DEFAULT_OLLAMA_CHAT_URL = "https://ollama.com/v1";
 /** Antigravity daily gateway used for gemini-* models. */
 export const DEFAULT_GEMINI_CHAT_URL = "https://daily-cloudcode-pa.googleapis.com";
 
-/** Z.AI OpenAI-compatible endpoint used for glm-* models. */
+/** Z.AI Developer endpoint (pay-per-token) used for glm-* models. */
 export const DEFAULT_ZAI_CHAT_URL = "https://api.z.ai/api/paas/v4";
+
+/** Z.AI GLM Coding Plan endpoint. Coding Plan keys authenticate ONLY here (and
+ *  return 401 against the Developer endpoint); Developer keys the reverse. */
+export const DEFAULT_ZAI_CODING_CHAT_URL = "https://api.z.ai/api/coding/paas/v4";
 
 /** OpenCode Zen OpenAI-compatible endpoint used for free/paid OpenCode models. */
 export const DEFAULT_OPENCODE_CHAT_URL = "https://opencode.ai/zen/v1";

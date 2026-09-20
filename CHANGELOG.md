@@ -14,6 +14,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A New tab now defaults to the local Reasonix installation folder (where the app lives); an explicit workspace pick still wins.
 - The tab-strip dot now shows how many agents are actively running in that tab (one per running session), and is hidden entirely when none are running.
 
+**Fixed: a valid Z.AI key no longer reports "authentication failed" when it's a GLM Coding Plan key.**
+
+- Z.AI binds a key type to a host path: Developer API keys authenticate on `https://api.z.ai/api/paas/v4` while GLM Coding Plan keys authenticate only on `https://api.z.ai/api/coding/paas/v4`, and each returns `401 Authentication Failed` (code 1000) on the other. The client only ever called the Developer endpoint, so a Coding Plan key — a perfectly valid key — failed as if invalid. A chat/stream request that 401s against a recognized Z.AI endpoint now retries once against the other one, so either key type just works. Custom/proxied endpoints are left untouched.
+
 **Added: a Settings → Tools "Repetition guard" toggle (default off) for the model-stall guard.**
 
 - The stream repetition / "stuck re-thinking" guard is now opt-in. It covers every channel of a degenerating stream (periodic reasoning, content, and tool-call output) plus the cross-iteration identical-reasoning collapse, and was previously always on. It now stays off until enabled from Settings → Tools, so a fresh install never aborts a stream on repeated output. Auto-compaction, the tool-storm breaker, and the per-turn iteration cap are unaffected.

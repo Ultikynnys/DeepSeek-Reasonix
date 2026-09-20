@@ -3,6 +3,8 @@ import { messageOf } from "@reasonix/core-utils";
 import { type EventSourceMessage, createParser } from "eventsource-parser";
 import { ANTIGRAVITY_CLOUD_CODE_URL, antigravityHeaders } from "./antigravity-oauth.js";
 import {
+  DEFAULT_ZAI_CHAT_URL,
+  DEFAULT_ZAI_CODING_CHAT_URL,
   deriveNativeOllamaOrigin,
   loadOllamaGenerationSettings,
   loadOllamaNumCtx,
@@ -595,6 +597,19 @@ export class DeepSeekClient {
     return this.transportResolver();
   }
 
+  /** The other Z.AI endpoint for this client's baseUrl. Z.AI binds a key type to
+   *  a host path — Developer keys only authenticate on `/api/paas/v4`, GLM
+   *  Coding Plan keys only on `/api/coding/paas/v4` — so a 401 on one means the
+   *  key belongs on the other. Null when baseUrl is neither (a custom/proxied
+   *  Z.AI endpoint is never swapped). */
+  private zaiAlternateBaseUrl(): string | null {
+    const strip = (u: string) => u.replace(/\/+$/, "");
+    const base = strip(this.baseUrl);
+    if (base === strip(DEFAULT_ZAI_CHAT_URL)) return DEFAULT_ZAI_CODING_CHAT_URL;
+    if (base === strip(DEFAULT_ZAI_CODING_CHAT_URL)) return DEFAULT_ZAI_CHAT_URL;
+    return null;
+  }
+
   /** Stable per-conversation id for OpenCode's x-opencode-session header —
    *  the configured session identity when present, else one uuid per client. */
   private resolveOpencodeSessionId(): string {
@@ -665,18 +680,30 @@ export class DeepSeekClient {
         ? `${deriveNativeOllamaOrigin(this.baseUrl)}/api/chat`
         : `${this.baseUrl}/chat/completions`);
     const ollamaNumCtx = isOllama ? await this.resolveOllamaNumCtx(opts) : undefined;
+    const init: RequestInit = {
+      method: "POST",
+      headers,
+      body: stringifyJsonTransport(this.buildPayload(opts, stream, transport, ollamaNumCtx)),
+      signal,
+    };
     try {
-      const resp = await fetchWithRetry(
-        this._fetch,
-        endpoint,
-        {
-          method: "POST",
-          headers,
-          body: stringifyJsonTransport(this.buildPayload(opts, stream, transport, ollamaNumCtx)),
-          signal,
-        },
-        { ...this.retry, signal },
-      );
+      let resp = await fetchWithRetry(this._fetch, endpoint, init, { ...this.retry, signal });
+      // Z.AI binds the key type to the host path: a GLM Coding Plan key 401s on
+      // the Developer endpoint and vice versa, so a valid key of either type
+      // looks "invalid" on the wrong one. On a 401 against a recognized Z.AI
+      // endpoint, retry once against the other so either key just works.
+      // Custom/proxied endpoints (a transport, or an unrecognized baseUrl) are
+      // left untouched.
+      if (resp.status === 401 && !transport && providerForModel(opts.model) === "zai") {
+        const altBase = this.zaiAlternateBaseUrl();
+        if (altBase) {
+          log.verbose(`zai 401 on ${endpoint} — retrying the alternate Z.AI endpoint`);
+          resp = await fetchWithRetry(this._fetch, `${altBase}/chat/completions`, init, {
+            ...this.retry,
+            signal,
+          });
+        }
+      }
       recordDiagnostic("model.response.headers", {
         durationMs: performance.now() - startedAt,
         details: {

@@ -121,6 +121,36 @@ describe("Z.AI GLM chat", () => {
     expect((body?.messages as Array<{ content: unknown }>)[0]?.content).toEqual(content);
   });
 
+  it("retries the alternate Z.AI endpoint when the Developer endpoint 401s a Coding Plan key", async () => {
+    const urls: string[] = [];
+    const fetch = vi.fn(async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/api/paas/v4/chat/completions")) {
+        return new Response(JSON.stringify({ error: { code: "1000", message: "Authentication Failed" } }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return jsonResponse({ choices: [{ message: { content: "ok" } }] });
+    }) as unknown as typeof globalThis.fetch;
+    const client = new DeepSeekClient({
+      apiKey: "coding-plan-key",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      fetch,
+      retry: { maxAttempts: 1 },
+    });
+
+    const response = await client.chat({
+      model: "glm-5.3-flash",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(urls[0]).toBe("https://api.z.ai/api/paas/v4/chat/completions");
+    expect(urls[1]).toBe("https://api.z.ai/api/coding/paas/v4/chat/completions");
+    expect(response.content).toBe("ok");
+  });
+
   it("classifies GLM models as preserved-thinking models", () => {
     expect(isThinkingModeModel("glm-5.3-flash")).toBe(true);
     expect(thinkingModeForModel("glm-5.3")).toBe("enabled");
