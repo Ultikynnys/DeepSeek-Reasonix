@@ -117,6 +117,7 @@ import {
   type StartupFailureState,
   coerceStartupFailure,
 } from "./ui/startup-failure";
+import { StartupLoadingOverlay } from "./ui/startup-loading";
 import { StatusBar } from "./ui/statusbar";
 import { type ClearTabsScope, TabMenu, getTabsToClear } from "./ui/tab-menu";
 import { toWorkspaceRelative } from "./workspace-path";
@@ -4902,6 +4903,9 @@ function normalizeWorkspacePath(p?: string): string {
 export function App() {
   const [tabs, setTabs] = useState<TabMeta[]>([]);
   const [backendConnected, setBackendConnected] = useState(false);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
+  const expectedTabsRef = useRef<Set<string> | null>(null);
+  const loadedSessionsTabsRef = useRef<Set<string>>(new Set());
   const [activeTabId, setActiveTabId] = useState<string>("");
   const [startupFailure, setStartupFailure] = useState<StartupFailureState | null>(null);
   // App-global Ollama catalog — the backend fetches it once at launch and
@@ -4930,6 +4934,14 @@ export function App() {
   useEffect(() => {
     tabsRef.current = tabs;
   }, [tabs]);
+
+  useEffect(() => {
+    if (!loadingWorkspaces) return;
+    const timer = window.setTimeout(() => {
+      setLoadingWorkspaces(false);
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [loadingWorkspaces]);
 
   // Mirror of activeTabId for listener closures — the startup effect must
   // NOT re-run on every tab switch (it tears down and re-fires desktop_resync,
@@ -5187,6 +5199,9 @@ export function App() {
     const setup = async () => {
       startupStderrRef.current = [];
       setStartupFailure(null);
+      setLoadingWorkspaces(true);
+      expectedTabsRef.current = null;
+      loadedSessionsTabsRef.current.clear();
       const subs = await Promise.all([
         listen<{ data: string }>("rpc:event", (e) => {
           try {
@@ -5294,6 +5309,13 @@ export function App() {
               // re-minted after a restart) get pruned instead of living on
               // as ghosts that route events to the wrong tab.
               const ids = new Set(ev.tabs.map((t) => t.id));
+              expectedTabsRef.current = ids;
+              if (
+                ids.size === 0 ||
+                Array.from(ids).every((id) => loadedSessionsTabsRef.current.has(id))
+              ) {
+                setLoadingWorkspaces(false);
+              }
               setTabs((prev) => {
                 const busyById = new Map(prev.map((t) => [t.id, t.busy]));
                 return ev.tabs.map((t) => ({
@@ -5419,6 +5441,17 @@ export function App() {
                 });
                 return;
               }
+              if (ev.type === "$sessions" || ev.type === "$error") {
+                loadedSessionsTabsRef.current.add(target);
+                if (
+                  expectedTabsRef.current &&
+                  Array.from(expectedTabsRef.current).every((id) =>
+                    loadedSessionsTabsRef.current.has(id),
+                  )
+                ) {
+                  setLoadingWorkspaces(false);
+                }
+              }
               deliverToTab(target, { t: "incoming", event: ev });
             }
           } catch (err) {
@@ -5445,6 +5478,7 @@ export function App() {
         }),
         listen<{ code: number | null }>("rpc:exit", (e) => {
           setBackendConnected(false);
+          setLoadingWorkspaces(false);
           for (const tabId of dispatchersRef.current.keys()) flushTabDeltas(tabId);
           if (dispatchersRef.current.size === 0) {
             const exitError = new Error(`reasonix exited (code ${e.payload.code ?? "?"})`);
@@ -5474,6 +5508,7 @@ export function App() {
         }
       } catch (err) {
         if (!cancelled) {
+          setLoadingWorkspaces(false);
           setStartupFailure(coerceStartupFailure(err, startupStderrRef.current));
           console.error("rpc_spawn failed", err);
         }
@@ -5541,6 +5576,11 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (loadingWorkspaces) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       if (mod && (e.key === "t" || e.key === "T")) {
         e.preventDefault();
@@ -5569,9 +5609,9 @@ export function App() {
         }
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [openTab, closeTab, activeTabId, tabs, onToggleCtx, onToggleSide]);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [openTab, closeTab, activeTabId, tabs, onToggleCtx, onToggleSide, loadingWorkspaces]);
 
   const onSetThemeStyle = useCallback(
     (nextStyle: ThemeStyle) => {
@@ -5610,6 +5650,7 @@ export function App() {
 
   return (
     <>
+      {loadingWorkspaces ? <StartupLoadingOverlay /> : null}
       {tabs.map((t) => (
         <TabRuntime
           key={t.id}

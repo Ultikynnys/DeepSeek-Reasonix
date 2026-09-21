@@ -498,6 +498,8 @@ export const en = {
     jumpToBottom: "Jump to bottom",
     splashSubtitle: "DeepSeek Agents",
     connecting: "Connecting to reasonix core…",
+    loadingWorkspaces: "Loading workspaces…",
+    loadingSessions: "Restoring sessions and workspace state…",
     startupFailedTitle: "Reasonix could not start",
     startupFailedMessage: "The desktop backend failed before opening a workspace.",
     startupFailedRetry: "Retry",
