@@ -3551,6 +3551,20 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .tool-call .row .v .num {
   color: var(--violet);
 }
+/* A raised truncation cap means long results (read_file, pretty-printed args)
+ * stay internally scrollable instead of stretching the transcript. */
+.tool-call .row .v .pre-text {
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* Shared pre-wrap block — plan/approval bodies and expanded tool-card
+ * args/result text all flow through .pre-text so multi-line content
+ * (pretty-printed JSON, diffs, output) keeps its line breaks. */
+.pre-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* ---- Image / attachment card ---- */
 
@@ -3984,7 +3998,6 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   color: var(--fg);
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .notice-body[data-severity="error"] {

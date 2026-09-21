@@ -25,6 +25,7 @@ import {
   ShellCard,
   SubagentCard,
   ToolCard,
+  PreText,
   WarningCard,
   extractSubagentDetails,
   extractSubagentResultMeta,
@@ -119,7 +120,7 @@ export const UserMsg = memo(function UserMsg({
             ))}
           </div>
         ) : null}
-        <div className="msg-text">{text}</div>
+        <PreText className="msg-text">{text}</PreText>
         <div className="msg-actions">
           <button
             type="button"
@@ -488,7 +489,7 @@ export function PlanApprovalCard({
             </div>
           ) : null}
           {p.summary ? <div style={{ marginBottom: 6 }}>{p.summary}</div> : null}
-          <div style={{ whiteSpace: "pre-wrap" }}>{p.plan}</div>
+          <PreText>{p.plan}</PreText>
         </>
       }
       meta={`plan/#${p.id}`}
@@ -522,7 +523,7 @@ export function CheckpointApprovalCard({
       sub={t("thread.checkpointSub", { completed: c.completed, total: c.total })}
       body={
         <>
-          <div style={{ whiteSpace: "pre-wrap" }}>{c.result}</div>
+          <PreText>{c.result}</PreText>
           {c.notes ? (
             <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--muted)" }}>{c.notes}</div>
           ) : null}
@@ -640,14 +641,14 @@ export function ConfirmApprovalCard({
       sub={prompt.subtitle}
       preview={
         prompt.kind === "email" ? (
-          <div style={{ whiteSpace: "pre-wrap" }}>
+          <PreText>
             {Object.entries(prompt.meta ?? {}).map(([key, value]) => (
               <div key={key}>
                 <strong>{key}:</strong> {value}
               </div>
             ))}
             <div style={{ marginTop: 8 }}>{prompt.preview}</div>
-          </div>
+          </PreText>
         ) : (
           <>
             <span style={{ color: "var(--accent)" }}>$</span> {prompt.preview ?? prompt.subtitle}

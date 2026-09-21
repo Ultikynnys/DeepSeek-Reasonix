@@ -1,4 +1,4 @@
-import { type ReactNode, memo, useContext, useMemo, useState } from "react";
+import { type CSSProperties, type ReactNode, memo, useContext, useMemo, useState } from "react";
 import { Markdown, WorkspaceContext, resolveAgainstWorkspace, revealInExplorer } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
@@ -579,6 +579,48 @@ export function CompactionCard({
 
 // ---- Generic Tool ----
 
+/** Shared pre-wrap text block — the readable multi-line body style the plan /
+ *  approval cards use, reused for expanded tool cards so every card formats
+ *  multi-line content the same way. */
+export function PreText({
+  children,
+  className,
+  style,
+}: {
+  children: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <div className={className ? `pre-text ${className}` : "pre-text"} style={style}>
+      {children}
+    </div>
+  );
+}
+
+/** Shared single-line-cap helper — every card that shows raw tool text
+ *  truncates through here so the caps live in one place. */
+export function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/** Args/result truncation caps for expanded tool cards. Generous enough that
+ *  a `read_file` result or pretty-printed args stay useful when expanded. */
+const ARGS_TRUNC = 2000;
+const RESULT_TRUNC = 4000;
+
+/** Pretty-print JSON tool args so an expanded card reads as an indented block
+ *  rather than a single-line blob; non-JSON text passes through untouched. */
+function formatArgs(args: string): string {
+  try {
+    const v: unknown = JSON.parse(args);
+    if (v && typeof v === "object") return JSON.stringify(v, null, 2);
+  } catch {
+    // not JSON — render verbatim
+  }
+  return args;
+}
+
 export function ToolCard({
   name,
   args,
@@ -596,6 +638,7 @@ export function ToolCard({
 }) {
   useLang();
   const fileRef = useMemo(() => extractToolFileRef(args), [args]);
+  const formattedArgs = useMemo(() => (args ? formatArgs(args) : ""), [args]);
   const running = result === undefined;
   const tone: Tone = running ? (waiting ? "warning" : "default") : ok === false ? "danger" : "success";
   // Web tool results (web_search, web_fetch, …) carry the engine that
@@ -640,7 +683,7 @@ export function ToolCard({
           <div className="row">
             <span className="k">args</span>
             <span className="v">
-              <span className="str">{args.length > 600 ? `${args.slice(0, 600)}…` : args}</span>
+              <PreText className="str">{truncate(formattedArgs, ARGS_TRUNC)}</PreText>
             </span>
           </div>
         ) : null}
@@ -648,9 +691,9 @@ export function ToolCard({
           <div className="row">
             <span className="k">{ok === false ? t("cards.error") : t("cards.result")}</span>
             <span className="v">
-              <span className={ok === false ? "num" : "str"}>
-                {result.length > 1200 ? `${result.slice(0, 1200)}…` : result}
-              </span>
+              <PreText className={ok === false ? "num" : "str"}>
+                {truncate(result, RESULT_TRUNC)}
+              </PreText>
             </span>
           </div>
         ) : null}
@@ -868,7 +911,7 @@ export function NoticeCard({
       defaultOpen
       compact
     >
-      <div className="notice-body" data-severity={severity}>
+      <div className="notice-body pre-text" data-severity={severity}>
         {text}
       </div>
     </Card>

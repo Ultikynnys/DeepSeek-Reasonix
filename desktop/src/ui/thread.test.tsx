@@ -9,6 +9,7 @@ vi.mock("./cards", () => ({
   ShellCard: () => null,
   ToolCard: () => null,
   ReasoningCard: () => null,
+  PreText: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
 }));
 
 import {

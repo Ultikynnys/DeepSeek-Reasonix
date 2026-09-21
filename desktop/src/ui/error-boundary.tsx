@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from "react";
 import { recordFrontendDiagnostic } from "../diagnostics";
 import { t } from "../i18n";
+import { PreText } from "./cards";
 
 type Props = { label: string; children: ReactNode };
 type State = { error: Error | null };
@@ -24,20 +25,18 @@ export class PanelErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (!this.state.error) return this.props.children;
     return (
-      <div
+      <PreText
         className="ctx-empty"
         style={{
           color: "var(--danger, #e25555)",
           padding: 12,
           fontSize: 12,
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
         }}
       >
         {t("panel.renderError", { panel: this.props.label })}
         {": "}
         {this.state.error.message}
-      </div>
+      </PreText>
     );
   }
 }

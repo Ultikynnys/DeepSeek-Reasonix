@@ -184,6 +184,81 @@ describe("ToolCard — show-in-explorer button", () => {
   });
 });
 
+describe("ToolCard — expanded body formatting", () => {
+  it("pretty-prints JSON args as an indented pre-wrap block when expanded", () => {
+    const { container } = render(
+      wrap(
+        <ToolCard
+          name="mark_step_complete"
+          args={JSON.stringify({
+            stepId: "step-1",
+            title: "Remove the 3 buttons + relayout",
+            evidence: [{ kind: "manual", summary: "3 edits applied" }],
+          })}
+          result="Done."
+          ok
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByText("mark_step_complete"));
+
+    const argsValue = container.querySelector(".tool-call .row .v .pre-text");
+    expect(argsValue).not.toBeNull();
+    // pre-wrap is on the element (class), not an inline style — shared with plan cards
+    expect(argsValue!.className).toContain("pre-text");
+    // pretty-printed: keys land on their own lines, not one blob
+    expect(argsValue!.textContent).toContain("\n  \"stepId\": \"step-1\"");
+    expect(argsValue!.textContent).toContain("\n  \"title\":");
+  });
+
+  it("keeps line breaks in a multi-line result (multi_edit summary) via pre-wrap", () => {
+    const { container } = render(
+      wrap(
+        <ToolCard
+          name="multi_edit"
+          args={JSON.stringify({ edits: [{ path: "src/a.ts", search: "x", replace: "y" }] })}
+          result={"multi_edit: applied 7 edits across 1 file\n# src/a.ts\n@@ -14,4 +14,3 @@"}
+          ok
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByText("multi_edit"));
+
+    const rows = container.querySelectorAll(".tool-call .row .v .pre-text");
+    expect(rows.length).toBe(2);
+    const resultValue = rows[1]!;
+    expect(resultValue.textContent).toContain("\n");
+  });
+
+  it("renders a long read_file result past the old 1200-char cap", () => {
+    const content = `${"x".repeat(1500)}\nEND-MARKER`;
+    const { container } = render(
+      wrap(
+        <ToolCard
+          name="read_file"
+          args={JSON.stringify({ path: "src/big.ts" })}
+          result={content}
+          ok
+        />,
+      ),
+    );
+    fireEvent.click(screen.getByText("read_file"));
+
+    const body = container.querySelector(".tool-call")!;
+    expect(body.textContent).toContain("END-MARKER");
+  });
+
+  it("leaves non-JSON args (shell command text) untouched", () => {
+    const { container } = render(
+      wrap(<ToolCard name="unknown_tool" args={"--flag value\nsecond line"} result="ok" ok />),
+    );
+    fireEvent.click(screen.getByText("unknown_tool"));
+
+    const argsValue = container.querySelector(".tool-call .row .v .pre-text")!;
+    expect(argsValue.textContent).toBe("--flag value\nsecond line");
+  });
+});
+
 describe("SubagentCard — model visibility", () => {
   const run = {
     runId: "run-1",
