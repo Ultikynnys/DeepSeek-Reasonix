@@ -120,7 +120,6 @@ import {
 import { StartupLoadingOverlay } from "./ui/startup-loading";
 import { StatusBar } from "./ui/statusbar";
 import { type ClearTabsScope, TabMenu, getTabsToClear } from "./ui/tab-menu";
-import { toWorkspaceRelative } from "./workspace-path";
 import {
   AssistantMsg,
   CheckpointApprovalCard,
@@ -139,6 +138,9 @@ import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { useResizable } from "./ui/useResizable";
 import { WorkdirPop } from "./ui/workdir-pop";
 import { anyVoiceModelDownloaded } from "./voice/models";
+import { StartupTimingTracker } from "./startup-timing";
+import { areWorkspacesLoaded } from "./workspace-loading";
+import { toWorkspaceRelative } from "./workspace-path";
 
 const RIGHT_SIDEBAR_COLLAPSE_WIDTH = 1120;
 const LEFT_SIDEBAR_COLLAPSE_WIDTH = 760;
@@ -436,6 +438,7 @@ type State = {
   sessions: SessionInfo[];
   sessionsEpoch: string;
   sessionsRevision: number;
+  workspaceInitializationRevision: number;
   pendingSessionDeletes: string[];
   settings: Settings | null;
   balance: Balance | null;
@@ -1475,6 +1478,14 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     }
     case "$ready":
       return { ...state, ready: true, needsSetup: false };
+    case "$workspace_initialized":
+      return {
+        ...state,
+        workspaceInitializationRevision: Math.max(
+          state.workspaceInitializationRevision,
+          ev.revision,
+        ),
+      };
     case "$needs_setup":
       return { ...state, needsSetup: true, ready: false };
     case "$turn_complete": {
@@ -2308,6 +2319,7 @@ interface TabRuntimeProps {
   backendConnected: boolean;
   currency: "CNY" | "USD";
   registerDispatch: (tabId: string, d: TabDispatcher | null) => void;
+  onWorkspaceInitialized: (tabId: string) => void;
   onNewTab: () => void;
   /** Reports this channel's running-agent state so the tab dot can count them. */
   onBusyChange: (tabId: string, busy: boolean) => void;
@@ -2363,6 +2375,7 @@ function TabRuntime({
   backendConnected,
   currency,
   registerDispatch,
+  onWorkspaceInitialized,
   onNewTab,
   onBusyChange,
   theme,
@@ -2416,6 +2429,7 @@ function TabRuntime({
     sessions: [],
     sessionsEpoch: "",
     sessionsRevision: 0,
+    workspaceInitializationRevision: 0,
     pendingSessionDeletes: [],
     settings: null,
     balance: null,
@@ -2507,6 +2521,11 @@ function TabRuntime({
     registerDispatch(tabId, dispatch);
     return () => registerDispatch(tabId, null);
   }, [tabId, registerDispatch]);
+
+  useEffect(() => {
+    if (state.workspaceInitializationRevision === 0) return;
+    onWorkspaceInitialized(tabId);
+  }, [onWorkspaceInitialized, state.workspaceInitializationRevision, tabId]);
 
   // Voice input is only usable once at least one model is downloaded. Refresh
   // on mount and whenever the settings modal closes (downloads happen there).
@@ -4900,21 +4919,13 @@ function normalizeWorkspacePath(p?: string): string {
   return windowsPath ? normalized.toLowerCase() : normalized;
 }
 
-function areWorkspacesLoaded(expected: Set<string> | null, loaded: Set<string>): boolean {
-  if (!expected) return false;
-  if (expected.size === 0) return true;
-  for (const id of expected) {
-    if (!loaded.has(id)) return false;
-  }
-  return true;
-}
-
 export function App() {
   const [tabs, setTabs] = useState<TabMeta[]>([]);
   const [backendConnected, setBackendConnected] = useState(false);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
+  const timingTrackerRef = useRef<StartupTimingTracker>(new StartupTimingTracker());
   const expectedTabsRef = useRef<Set<string> | null>(null);
-  const loadedSessionsTabsRef = useRef<Set<string>>(new Set());
+  const initializedTabsRef = useRef<Set<string>>(new Set());
   const [activeTabId, setActiveTabId] = useState<string>("");
   const [startupFailure, setStartupFailure] = useState<StartupFailureState | null>(null);
   // App-global Ollama catalog — the backend fetches it once at launch and
@@ -4943,14 +4954,6 @@ export function App() {
   useEffect(() => {
     tabsRef.current = tabs;
   }, [tabs]);
-
-  useEffect(() => {
-    if (!loadingWorkspaces) return;
-    const timer = window.setTimeout(() => {
-      setLoadingWorkspaces(false);
-    }, 6000);
-    return () => window.clearTimeout(timer);
-  }, [loadingWorkspaces]);
 
   // Mirror of activeTabId for listener closures — the startup effect must
   // NOT re-run on every tab switch (it tears down and re-fires desktop_resync,
@@ -5136,6 +5139,28 @@ export function App() {
     }
   }, []);
 
+  const markWorkspaceInitialized = useCallback((tabId: string) => {
+    initializedTabsRef.current.add(tabId);
+    const expected = expectedTabsRef.current;
+    const remaining = expected
+      ? Array.from(expected).filter((id) => !initializedTabsRef.current.has(id))
+      : [];
+    timingTrackerRef.current.mark("workspace_initialized_ui_acknowledged", {
+      tabId,
+      details: {
+        totalExpected: expected?.size ?? null,
+        initializedCount: initializedTabsRef.current.size,
+        remainingTabs: remaining,
+      },
+    });
+    if (areWorkspacesLoaded(expectedTabsRef.current, initializedTabsRef.current)) {
+      timingTrackerRef.current.finish("all_workspaces_initialized", {
+        tabs: Array.from(initializedTabsRef.current),
+      });
+      setLoadingWorkspaces(false);
+    }
+  }, []);
+
   const retryStartup = useCallback(() => {
     setStartupRetryNonce((n) => n + 1);
   }, []);
@@ -5206,11 +5231,14 @@ export function App() {
     };
 
     const setup = async () => {
+      const tracker = new StartupTimingTracker();
+      timingTrackerRef.current = tracker;
+      tracker.mark("setup_started");
       startupStderrRef.current = [];
       setStartupFailure(null);
       setLoadingWorkspaces(true);
       expectedTabsRef.current = null;
-      loadedSessionsTabsRef.current.clear();
+      initializedTabsRef.current.clear();
       const subs = await Promise.all([
         listen<{ data: string }>("rpc:event", (e) => {
           try {
@@ -5218,12 +5246,21 @@ export function App() {
             const tabId = ev.tabId;
 
             if (ev.type === "$connected") {
+              tracker.mark("backend_connected");
               setBackendConnected(true);
               return;
             }
 
             if (ev.type === "$diagnostic") {
               const diagnostic = ev as DesktopDiagnosticEvent & { tabId?: string };
+              tracker.mark(`diagnostic:${diagnostic.event}`, {
+                tabId: diagnostic.tabId,
+                details: {
+                  source: diagnostic.source,
+                  level: diagnostic.level,
+                  ...(diagnostic.details ?? {}),
+                },
+              });
               const prefix = `[reasonix ${diagnostic.source}] ${diagnostic.event}`;
               const safeMessage = diagnostic.message
                 ? redactDiagnosticText(diagnostic.message)
@@ -5253,6 +5290,15 @@ export function App() {
             }
 
             if (ev.type === "$tab_opened" && tabId) {
+              expectedTabsRef.current?.add(tabId);
+              tracker.mark("tab_opened", {
+                tabId,
+                details: {
+                  workspaceDir: ev.workspaceDir,
+                  session: ev.activeSession ?? ev.sessions?.[0] ?? null,
+                  active: ev.active ?? false,
+                },
+              });
               setTabs((prev) => {
                 const session = ev.activeSession ?? ev.sessions?.[0];
                 const idx = prev.findIndex((t) => t.id === tabId);
@@ -5289,6 +5335,7 @@ export function App() {
               return;
             }
             if (ev.type === "$tab_closed" && tabId) {
+              tracker.mark("tab_closed", { tabId });
               const remaining = tabsRef.current.filter((t) => t.id !== tabId);
               // Update the mirror synchronously: closing one visual workspace
               // emits one event per child channel, often in a single React
@@ -5309,7 +5356,7 @@ export function App() {
               pendingEventsRef.current.delete(tabId);
               pendingDeltasRef.current.delete(tabId);
               expectedTabsRef.current?.delete(tabId);
-              if (areWorkspacesLoaded(expectedTabsRef.current, loadedSessionsTabsRef.current)) {
+              if (areWorkspacesLoaded(expectedTabsRef.current, initializedTabsRef.current)) {
                 setLoadingWorkspaces(false);
               }
               return;
@@ -5323,7 +5370,17 @@ export function App() {
               // as ghosts that route events to the wrong tab.
               const ids = new Set(ev.tabs.map((t) => t.id));
               expectedTabsRef.current = ids;
-              if (areWorkspacesLoaded(ids, loadedSessionsTabsRef.current)) {
+              tracker.mark("tabs_snapshot_received", {
+                details: {
+                  tabCount: ids.size,
+                  tabIds: Array.from(ids),
+                  initializedCount: initializedTabsRef.current.size,
+                },
+              });
+              if (areWorkspacesLoaded(ids, initializedTabsRef.current)) {
+                tracker.finish("tabs_snapshot_already_initialized", {
+                  tabs: Array.from(ids),
+                });
                 setLoadingWorkspaces(false);
               }
               setTabs((prev) => {
@@ -5370,7 +5427,19 @@ export function App() {
               }
             }
 
+            if (ev.type === "$ready" && tabId) {
+              tracker.mark("tab_runtime_ready", { tabId });
+            }
+
+            if (ev.type === "$needs_setup" && tabId) {
+              tracker.mark("tab_needs_setup", { tabId, details: { reason: ev.reason } });
+            }
+
             if (ev.type === "$settings" && tabId) {
+              tracker.mark("tab_settings_loaded", {
+                tabId,
+                details: { workspaceDir: ev.workspaceDir, model: ev.model },
+              });
               setTabs((prev) =>
                 prev.map((t) => (t.id === tabId ? { ...t, workspaceDir: ev.workspaceDir } : t)),
               );
@@ -5379,6 +5448,14 @@ export function App() {
             // Track each channel's session so the sidebar can dot every session
             // that has a live agent, across all tabs on a workspace.
             if (ev.type === "$session_loaded" && tabId) {
+              tracker.mark("session_loaded", {
+                tabId,
+                details: {
+                  name: ev.name,
+                  messagesCount: ev.messages.length,
+                  resync: Boolean(ev.resync),
+                },
+              });
               setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, session: ev.name } : t)));
             }
 
@@ -5429,6 +5506,20 @@ export function App() {
               return;
             }
 
+            if (ev.type === "$sessions" && tabId) {
+              tracker.mark("sessions_list_received", {
+                tabId,
+                details: { count: ev.items.length, epoch: ev.epoch, revision: ev.revision },
+              });
+            }
+
+            if (ev.type === "$workspace_initialized" && tabId) {
+              tracker.mark("backend_workspace_initialized", {
+                tabId,
+                details: { revision: ev.revision },
+              });
+            }
+
             const target = tabId;
             if (target) {
               flushTabDeltas(target);
@@ -5450,12 +5541,6 @@ export function App() {
                   },
                 });
                 return;
-              }
-              if (ev.type === "$sessions" || ev.type === "$error") {
-                loadedSessionsTabsRef.current.add(target);
-                if (areWorkspacesLoaded(expectedTabsRef.current, loadedSessionsTabsRef.current)) {
-                  setLoadingWorkspaces(false);
-                }
               }
               deliverToTab(target, { t: "incoming", event: ev });
             }
@@ -5482,6 +5567,7 @@ export function App() {
           });
         }),
         listen<{ code: number | null }>("rpc:exit", (e) => {
+          tracker.fail("rpc_exit", { code: e.payload.code });
           setBackendConnected(false);
           setLoadingWorkspaces(false);
           for (const tabId of dispatchersRef.current.keys()) flushTabDeltas(tabId);
@@ -5504,15 +5590,20 @@ export function App() {
       }
       cleanups.push(...subs);
       try {
+        tracker.mark("rpc_spawn_invoked");
         await invoke("rpc_spawn");
+        tracker.mark("rpc_spawn_resolved");
         // WebView reload (DevTools F5, host respawn) keeps the Node child
         // alive but loses every $tab_opened / $settings / $needs_setup that
         // already fired. Ask the desktop server to re-emit them.
         if (!cancelled) {
+          tracker.mark("desktop_resync_sent");
           await rpcSend({ cmd: "desktop_resync" });
+          tracker.mark("desktop_resync_acknowledged");
         }
       } catch (err) {
         if (!cancelled) {
+          tracker.fail("rpc_spawn_failed", { error: String(err) });
           setLoadingWorkspaces(false);
           setStartupFailure(coerceStartupFailure(err, startupStderrRef.current));
           console.error("rpc_spawn failed", err);
@@ -5664,6 +5755,7 @@ export function App() {
           backendConnected={backendConnected}
           currency={currency}
           registerDispatch={registerDispatch}
+          onWorkspaceInitialized={markWorkspaceInitialized}
           onNewTab={openTab}
           onBusyChange={reportTabBusy}
           theme={tabThemes[t.id]?.theme ?? DEFAULT_TAB_THEME.theme}

@@ -431,6 +431,11 @@ export interface TabOpenedEvent {
  *  every channel in the addressed visual workspace tab. */
 export type TabClosedEvent = { type: "$tab_closed" };
 
+export interface WorkspaceInitializedEvent {
+  type: "$workspace_initialized";
+  revision: number;
+}
+
 /** Authoritative tab list, emitted at the END of a `desktop_resync`. The
  *  frontend replaces its tab set with this snapshot — stale tabs left over
  *  from an older backend generation (id reuse across restarts) get pruned

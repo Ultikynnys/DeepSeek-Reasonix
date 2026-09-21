@@ -137,6 +137,7 @@ export type {
   MentionPreviewEvent,
   TabOpenedEvent,
   TabClosedEvent,
+  WorkspaceInitializedEvent,
   TabsSnapshotEvent,
   McpSpecStatus,
   McpSpecInfo,

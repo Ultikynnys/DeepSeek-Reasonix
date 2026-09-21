@@ -112,6 +112,7 @@ import type {
   TurnOutcome,
   UserImageAttachment,
   WebSearchEngineName,
+  WorkspaceInitializedEvent,
   ZaiQuota,
   ZaiQuotaEvent,
   ZaiQuotaWindow,
@@ -277,6 +278,7 @@ export type IncomingEvent = { tabId?: string } & (
   | MentionPreviewEvent
   | TabOpenedEvent
   | TabClosedEvent
+  | WorkspaceInitializedEvent
   | TabsSnapshotEvent
   | McpSpecsEvent
   | McpExtensionStatusEvent

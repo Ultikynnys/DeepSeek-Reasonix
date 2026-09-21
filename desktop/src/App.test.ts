@@ -79,6 +79,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     sessions: [],
     sessionsEpoch: "",
     sessionsRevision: 0,
+    workspaceInitializationRevision: 0,
     pendingSessionDeletes: [],
     settings: null,
     balance: null,
@@ -176,6 +177,20 @@ function makePathPrompt(
 }
 
 describe("Desktop App reducer — usage", () => {
+  it("records explicit workspace initialization monotonically", () => {
+    const initialized = reduce(initialState(), {
+      t: "incoming",
+      event: { type: "$workspace_initialized", revision: 2 },
+    });
+    const stale = reduce(initialized, {
+      t: "incoming",
+      event: { type: "$workspace_initialized", revision: 1 },
+    });
+
+    expect(initialized.workspaceInitializationRevision).toBe(2);
+    expect(stale.workspaceInitializationRevision).toBe(2);
+  });
+
   it("falls back prompt tokens to cache miss tokens when cache fields are absent", () => {
     const next = reduce(initialState(), {
       t: "incoming",

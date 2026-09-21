@@ -75,6 +75,7 @@ import type {
   TurnCompleteEvent,
   TurnOutcome,
   UserImageAttachment,
+  WorkspaceInitializedEvent,
   ZaiQuota,
   ZaiQuotaEvent,
   ZaiQuotaWindow,
@@ -434,6 +435,7 @@ type EmittableEvent =
   | BtwResultEvent
   | TabOpenedEvent
   | TabClosedEvent
+  | WorkspaceInitializedEvent
   | TabsSnapshotEvent
   | McpSpecsEvent
   | McpExtensionStatusEvent
@@ -3246,6 +3248,8 @@ interface Tab {
   toolset: Awaited<ReturnType<typeof buildCodeToolset>> | null;
   /** Empty while bootstrapping; populated together with `toolset`. */
   system: string;
+  initialization: Promise<void> | null;
+  initializationRevision: number;
   runtime: RuntimeState | null;
   aborter: AbortController | null;
   /** Priority barrier owned by a user-requested compaction. New turns wait on
@@ -3924,6 +3928,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       ctxMaxOverride: loadContextTokens(),
       toolset: null,
       system: "",
+      initialization: null,
+      initializationRevision: 0,
       runtime: null,
       aborter: null,
       manualCompaction: null,
@@ -4056,6 +4062,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       },
       "info",
     );
+  }
+
+  async function emitWorkspaceInitialized(
+    tab: Tab,
+    sessionsInitialized: Promise<void>,
+  ): Promise<void> {
+    await Promise.all([tab.initialization, sessionsInitialized]);
+    emit({ type: "$workspace_initialized", revision: ++tab.initializationRevision }, tab.id);
   }
 
   async function settleTabSemantic(tab: Tab, root: string, toolset: CodeToolset): Promise<void> {
@@ -5321,7 +5335,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // history, once per restored tab. This order ($ready before
       // $session_loaded) is the same the desktop_resync path already emits, so
       // the frontend handles it.
-      void initTabToolset(tab, tab === first || restore?.active ? 1 : 0)
+      tab.initialization = initTabToolset(tab, tab === first || restore?.active ? 1 : 0)
         .then(() => {
           if (tabHasCredential(tab)) {
             emitTabDiagnostic(tab, "tab.ready", undefined, "info");
@@ -5379,7 +5393,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       if (tab.currentSession) {
         patchSessionWorkspaceIfMissing(tab.currentSession, tab.rootDir);
       }
-      emitSessionsForWorkspace(tab.rootDir);
+      const sessionsInitialized = emitSessions(tab);
       emitMemory(tab);
       if (restoredMessages) {
         const meta = loadSessionMeta(tab.currentSession);
@@ -5403,6 +5417,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           tab.id,
         );
       }
+      await emitWorkspaceInitialized(tab, sessionsInitialized);
       void emitBalance(tab);
       void emitCodexQuota(tab);
       void emitOllamaQuota(tab);
@@ -5439,8 +5454,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   const startupTab = startupDir
     ? dedupedTabs.find((t) => sameWorkspaceDir(t.dir, startupDir))
     : dedupedTabs[0];
-  first = bootstrapTab(opts.dir ?? dedupedTabs[0]?.dir, startupTab);
   const pendingRestores = dedupedTabs.filter((t) => t !== startupTab);
+  void firstBootstrapSettled.then(() => {
+    for (const saved of pendingRestores) bootstrapTab(saved.dir, saved);
+    persistOpenTabs();
+  });
+  first = bootstrapTab(opts.dir ?? dedupedTabs[0]?.dir, startupTab);
   lastActiveTabId = first.id;
   // Account-wide quotas change underneath us (other devices, window resets) -
   // poll so the statusbar chips are never stale. Skipped mid-turn so the
@@ -5489,10 +5508,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   const rl = createInterface({ input: stdin });
   emit({ type: "$connected" });
   markPhase("rpc_stdin_listening");
-  void firstBootstrapSettled.then(() => {
-    for (const saved of pendingRestores) bootstrapTab(saved.dir, saved);
-    persistOpenTabs();
-  });
   rl.on("line", (line) => {
     lastUserActivityAt = Date.now();
     const trimmed = line.trim();
@@ -5662,7 +5677,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       });
       void firstBootstrapSettled.then(async () => {
         for (const t of tabs.values()) {
-          void emitSessions(t);
+          const sessionsInitialized = emitSessions(t);
           emitMemory(t);
           void emitBalance(t);
           if (t.currentSession) {
@@ -5687,8 +5702,20 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               process.stderr.write(
                 `reasonix: session load for resync failed — ${messageOf(err)}\n`,
               );
+              emit(
+                {
+                  type: "$session_loaded",
+                  name: t.currentSession,
+                  messages: [],
+                  carryover: emptySessionCarryover(),
+                  resync: true,
+                },
+                t.id,
+              );
+              emit({ type: "$error", message: `session resync failed: ${messageOf(err)}` }, t.id);
             }
           }
+          await emitWorkspaceInitialized(t, sessionsInitialized);
           emitCtxBreakdown(t);
         }
       });
