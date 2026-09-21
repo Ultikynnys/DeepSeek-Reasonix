@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shouldReplaceDeletedSession } from "../src/cli/commands/desktop.js";
+import {
+  shouldMaterializeFreshSession,
+  shouldReplaceDeletedSession,
+} from "../src/cli/commands/desktop.js";
 
 describe("desktop session deletion synchronization", () => {
   it("replaces the backend-bound session after deleting the active session", () => {
@@ -12,5 +15,13 @@ describe("desktop session deletion synchronization", () => {
 
   it("does not replace the current session when deletion fails", () => {
     expect(shouldReplaceDeletedSession("active-session", "active-session", false)).toBe(false);
+  });
+
+  it("keeps deletion replacements virtual so deleted sessions stay absent", () => {
+    expect(shouldMaterializeFreshSession("session-delete")).toBe(false);
+  });
+
+  it("still materializes an explicit New chat immediately", () => {
+    expect(shouldMaterializeFreshSession("new-chat")).toBe(true);
   });
 });

@@ -541,6 +541,14 @@ export class CacheFirstLoop {
     return this.context.getLogTokens();
   }
 
+  /** Detach every persistence path before an active session is deleted. The
+   * in-flight generator may still unwind after abort, but can no longer recreate
+   * the removed folder through an append, rewrite, compaction, or stats update. */
+  detachSessionPersistence(): void {
+    this.sessionName = null;
+    this.context.detachSessionPersistence();
+  }
+
   appendAndPersist(message: ChatMessage): void {
     const retained = shrinkMessageForRetention(message);
     this.log.append(retained);

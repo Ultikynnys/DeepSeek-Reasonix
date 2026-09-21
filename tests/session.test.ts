@@ -518,6 +518,28 @@ describe("session persistence", () => {
     expect(reloaded).toEqual([{ role: "user", content: "[!ls]\n$ ls\n[exit 0]\nfile1 file2" }]);
   });
 
+  it("a detached active loop cannot recreate its deleted session", () => {
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: (async () => new Response()) as any,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      session: "active-delete",
+    });
+    loop.appendAndPersist({ role: "user", content: "before deletion" });
+    loop.detachSessionPersistence();
+    expect(deleteSession("active-delete")).toBe(true);
+
+    // Simulate a late event yielded while an aborted turn unwinds.
+    loop.appendAndPersist({ role: "assistant", content: "late event" });
+
+    expect(sessionExists("active-delete")).toBe(false);
+    expect(loop.sessionName).toBeNull();
+  });
+
   describe("timestampSuffix", () => {
     it("returns a 12-character string of digits", () => {
       const ts = timestampSuffix();

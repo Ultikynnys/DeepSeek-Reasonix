@@ -468,6 +468,12 @@ export function shouldReplaceDeletedSession(
   return deleted && currentSession === deletedSession;
 }
 
+/** Explicit New chat sessions list immediately; a blank replacement created
+ * after deletion stays virtual until its first user-visible activity. */
+export function shouldMaterializeFreshSession(reason: "new-chat" | "session-delete"): boolean {
+  return reason === "new-chat";
+}
+
 /** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
 export function writeAllSync(
   fd: number,
@@ -3392,14 +3398,23 @@ export function pickResumeSession(
   return sessions.find((s) => !skip(s)) ?? null;
 }
 
-function mintSessionFor(rootDir: string, prefs?: ModelPrefs): string {
+function mintSessionFor(
+  rootDir: string,
+  prefs?: ModelPrefs,
+  options: { materialize?: boolean } = {},
+): string {
+  const materialize = options.materialize !== false;
+  // Virtual deletion replacements need unique names even though they do not
+  // occupy disk yet. Eager sessions retain the stable, human-readable suffix.
+  const suffix = materialize ? `${tabCounter}` : `${tabCounter}-${randomUUID().slice(0, 8)}`;
   // Seconds precision repeats when `new_chat` fires twice within one second —
   // reuse the collision loop so the second mint takes `-1`, `-2`, … instead
-  // of truncating a session that already exists. Every minted session occupies
-  // its name — even an empty one is real.
-  const name = firstFreeSessionName(`desktop-${timestampSuffix(14)}-${tabCounter}`, (candidate) =>
+  // of truncating a session that already exists.
+  const name = firstFreeSessionName(`desktop-${timestampSuffix(14)}-${suffix}`, (candidate) =>
     sessionExists(candidate),
   );
+  if (!materialize) return name;
+
   // EAGER creation: New chat means NEW chat — the folder and its (empty)
   // transcript + meta land on disk immediately. An empty session is a real
   // session: it lists in the sidebar, survives switches, and is only ever
@@ -4831,22 +4846,30 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     options: {
       reason: "new-chat" | "session-delete";
       settledDeletes?: SessionsEvent["settledDeletes"];
+      conversationCancelled?: boolean;
     },
   ): void {
     const diagnosticPrefix = options.reason === "new-chat" ? "session.new-chat" : "session.delete";
     emitTabDiagnostic(tab, `${diagnosticPrefix}.started`, undefined, "info");
     // Only set switching when a live turn is being aborted. Otherwise it would
     // suppress the first events emitted by the replacement session (#1217).
-    if (tab.aborter) tab.switching = true;
-    cancelConversation(tab);
-    // Empty sessions are REAL sessions — the previous session is never cleaned
-    // up implicitly here. Only an explicit session_delete removes a session.
+    if (!options.conversationCancelled) {
+      if (tab.aborter) tab.switching = true;
+      cancelConversation(tab);
+    }
+    // Explicit New chat sessions are persisted immediately. A replacement for
+    // a deleted active session stays virtual so clear-all can leave the sidebar
+    // genuinely empty; the first send materializes it through normal writes.
     try {
-      tab.currentSession = mintSessionFor(tab.rootDir, {
-        model: tab.currentModel,
-        reasoningEffort: tab.currentReasoningEffort,
-        subagentModel: tab.currentSubagentModel,
-      });
+      tab.currentSession = mintSessionFor(
+        tab.rootDir,
+        {
+          model: tab.currentModel,
+          reasoningEffort: tab.currentReasoningEffort,
+          subagentModel: tab.currentSubagentModel,
+        },
+        { materialize: shouldMaterializeFreshSession(options.reason) },
+      );
       persistOpenTabs();
       tab.runtime = tab.toolset && tabCurrentModelUsable(tab) ? buildRuntimeFor(tab) : null;
     } catch (err) {
@@ -6061,11 +6084,30 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "session_delete") {
+      // Stop every live owner BEFORE removing its folder. Deleting first leaves
+      // the old runtime a window to append another event and recreate the same
+      // session directory with an empty transcript and reset metadata.
+      const affectedTabs = Array.from(tabs.values()).filter(
+        (openTab) => openTab.currentSession === msg.name,
+      );
+      for (const affectedTab of affectedTabs) {
+        if (affectedTab.aborter) affectedTab.switching = true;
+        cancelConversation(affectedTab);
+        affectedTab.runtime?.loop.detachSessionPersistence();
+      }
+
       const existed = sessionExists(msg.name);
       const deleted = deleteSession(msg.name);
       const removed = deleted || !existed;
       if (!removed) {
         emit({ type: "$error", message: `session_delete failed: ${msg.name}` }, tab.id);
+        for (const affectedTab of affectedTabs) {
+          affectedTab.runtime =
+            affectedTab.toolset && tabCurrentModelUsable(affectedTab)
+              ? buildRuntimeFor(affectedTab)
+              : null;
+          affectedTab.switching = false;
+        }
       }
       for (const openTab of tabs.values()) {
         const settledDeletes = [{ name: msg.name, removed }];
@@ -6073,6 +6115,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           startFreshSession(openTab, {
             reason: "session-delete",
             settledDeletes,
+            conversationCancelled: true,
           });
         } else {
           void emitSessions(openTab, settledDeletes);
@@ -6082,6 +6125,18 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "session_clear") {
       const candidates = listSessionsForWorkspace(tab.rootDir);
+      const candidateNames = new Set(candidates.map((session) => session.name));
+      // As with single deletion, detach active writers before touching disk so
+      // none can resurrect a just-deleted session from an in-flight turn.
+      const affectedTabs = Array.from(tabs.values()).filter((openTab) =>
+        candidateNames.has(openTab.currentSession),
+      );
+      for (const affectedTab of affectedTabs) {
+        if (affectedTab.aborter) affectedTab.switching = true;
+        cancelConversation(affectedTab);
+        affectedTab.runtime?.loop.detachSessionPersistence();
+      }
+
       const settledDeletes = candidates.map((session) => ({
         name: session.name,
         removed: deleteSession(session.name),
@@ -6095,12 +6150,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           { type: "$error", message: `session_clear failed for ${failed.length} session(s)` },
           tab.id,
         );
+        for (const affectedTab of affectedTabs) {
+          if (deletedSessions.has(affectedTab.currentSession)) continue;
+          affectedTab.runtime =
+            affectedTab.toolset && tabCurrentModelUsable(affectedTab)
+              ? buildRuntimeFor(affectedTab)
+              : null;
+          affectedTab.switching = false;
+        }
       }
       for (const openTab of tabs.values()) {
         if (deletedSessions.has(openTab.currentSession)) {
           startFreshSession(openTab, {
             reason: "session-delete",
             settledDeletes,
+            conversationCancelled: true,
           });
         } else {
           void emitSessions(openTab, settledDeletes);

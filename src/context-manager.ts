@@ -325,6 +325,11 @@ export class ContextManager {
     });
   }
 
+  /** Stop compaction from recreating a session after the user deletes it. */
+  detachSessionPersistence(): void {
+    this.deps.sessionName = null;
+  }
+
   /** Real-time token count of the current log — Desktop's context meter.
    *  O(1) steady-state: appends increment a running total, compaction
    *  invalidates it and the next call recomputes lazily. */
