@@ -331,7 +331,7 @@ export function appendSessionMessage(name: string, message: ChatMessage): void {
 
 /** Finite-number guard for the write-once creation stamp. */
 function isFiniteStamp(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 /** Resolve the creation stamp for a meta write — write-once: existing stamp
@@ -556,8 +556,7 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
     ...cur,
     ...patch,
     updatedAt: Date.now(),
-    // Write-once, enforced AFTER the spread so no patch can rewrite it.
-    createdAt: creationStampFor(cur, name, patch.createdAt),
+    createdAt: isFiniteStamp(patch.createdAt) ? patch.createdAt : creationStampFor(cur, name),
   };
   const p = sessionMetaPath(name);
   mkdirSync(dirname(p), { recursive: true });

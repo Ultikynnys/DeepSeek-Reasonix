@@ -544,6 +544,8 @@ type Action =
   | { t: "settings_patch"; patch: SettingsPatch }
   | { t: "session_delete_requested"; name: string }
   | { t: "session_clear_requested" }
+  | { t: "session_rename_requested"; name: string; title: string }
+  | { t: "session_bump_requested"; name: string; createdAt?: number }
   | { t: "workspace_recent_removed"; path: string }
   | { t: "oauth_waiting"; waiting: boolean }
   | { t: "antigravity_oauth_waiting"; waiting: boolean }
@@ -720,6 +722,25 @@ export function reduce(state: State, action: Action): State {
           ...new Set([...state.pendingSessionDeletes, ...state.sessions.map((s) => s.name)]),
         ],
       };
+    case "session_rename_requested": {
+      const title = flattenText(action.title).slice(0, 200);
+      return {
+        ...state,
+        sessions: state.sessions.map((session) =>
+          session.name === action.name ? { ...session, summary: title || undefined } : session,
+        ),
+      };
+    }
+    case "session_bump_requested": {
+      const now = action.createdAt ?? Date.now();
+      const nextSessions = state.sessions.map((session) =>
+        session.name === action.name ? { ...session, createdAt: now } : session,
+      );
+      return {
+        ...state,
+        sessions: nextSessions.sort(sortSessionsByCreationDescending),
+      };
+    }
     case "workspace_recent_removed":
       return state.settings
         ? {
@@ -1639,12 +1660,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       }
       return {
         ...state,
-        sessions: [...unique.values()].sort((a, b) =>
-          sortSessionsByCreationDescending(
-            { name: a.name, mtime: a.mtime, createdAt: a.createdAt },
-            { name: b.name, mtime: b.mtime, createdAt: b.createdAt },
-          ),
-        ),
+        sessions: [...unique.values()].sort(sortSessionsByCreationDescending),
         sessionsEpoch: ev.epoch,
         sessionsRevision: ev.revision,
         pendingSessionDeletes,
@@ -3346,7 +3362,11 @@ function TabRuntime({
             dispatch({ t: "session_clear_requested" });
             sendRpc({ cmd: "session_clear" });
           }}
-          onRenameSession={(name, title) => sendRpc({ cmd: "session_rename", name, title })}
+          onReorderSession={(name) => {
+            const now = Date.now();
+            dispatch({ t: "session_bump_requested", name, createdAt: now });
+            sendRpc({ cmd: "session_reorder", name, createdAt: now });
+          }}
           onOpenWorkdir={(anchor) => {
             setWdAnchor(anchor);
             setWdOpen(true);
@@ -3393,6 +3413,16 @@ function TabRuntime({
                 onOpenWorkdir={(anchor) => {
                   setWdAnchor(anchor);
                   setWdOpen(true);
+                }}
+                onRename={(title) => {
+                  if (state.currentSession) {
+                    dispatch({
+                      t: "session_rename_requested",
+                      name: state.currentSession,
+                      title,
+                    });
+                    sendRpc({ cmd: "session_rename", name: state.currentSession, title });
+                  }
                 }}
               />
               <div className="thread" ref={threadRef}>
@@ -4426,6 +4456,7 @@ function MainHead({
   hasMessages,
   onExport,
   onOpenWorkdir,
+  onRename,
 }: {
   session: string;
   model?: string;
@@ -4434,8 +4465,31 @@ function MainHead({
   hasMessages: boolean;
   onExport: () => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
+  onRename?: (title: string) => void;
 }) {
   useLang();
+  const [title, setTitle] = useState(session);
+  const [isEditing, setIsEditing] = useState(false);
+  const isEditingRef = useRef(false);
+
+  useEffect(() => {
+    if (!isEditingRef.current) {
+      setTitle(session);
+    }
+  }, [session]);
+
+  const commit = useCallback(() => {
+    if (!isEditingRef.current) return;
+    isEditingRef.current = false;
+    setIsEditing(false);
+    const next = flattenText(title).slice(0, 200);
+    if (next && next !== session) {
+      onRename?.(next);
+    } else {
+      setTitle(session);
+    }
+  }, [title, session, onRename]);
+
   const wsLabel = workspaceDir
     ? workspaceDir.split(/[\\/]/).pop() || "workspace"
     : t("app.header.noWorkspace");
@@ -4443,7 +4497,35 @@ function MainHead({
     <div className="main-head">
       <div className="title-wrap">
         <h1>
-          <span className="editable">{session}</span>
+          <input
+            className="editable"
+            value={isEditing ? title : session}
+            onChange={(e) => setTitle(e.target.value)}
+            onFocus={() => {
+              isEditingRef.current = true;
+              setIsEditing(true);
+              setTitle(session);
+            }}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commit();
+                e.currentTarget.blur();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                isEditingRef.current = false;
+                setIsEditing(false);
+                setTitle(session);
+                e.currentTarget.blur();
+              }
+            }}
+            size={Math.max(1, (isEditing ? title : session).length)}
+            maxLength={200}
+            title={t("sidebarPanel.renameSession")}
+            aria-label={t("sidebarPanel.renameSession")}
+            spellCheck={false}
+          />
           {busy ? (
             <span className="pill" style={{ color: "var(--accent)" }}>
               <span className="dot" />

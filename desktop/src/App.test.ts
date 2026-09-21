@@ -1669,6 +1669,67 @@ describe("Desktop App session sorting", () => {
     expect(next.sessions.map((s) => s.name)).toEqual([newestCreated.name, oldButActive.name]);
   });
 
+  it("session_bump_requested sets creation date to now and moves session to top", () => {
+    const state = initialState();
+    const session1 = {
+      name: "desktop-20260901100000-1",
+      messageCount: 2,
+      mtime: new Date(1000).toISOString(),
+      createdAt: 1000,
+    };
+    const session2 = {
+      name: "desktop-20260905120000-1",
+      messageCount: 5,
+      mtime: new Date(5000).toISOString(),
+      createdAt: 5000,
+    };
+    const populated = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$sessions",
+        epoch: "daemon-1",
+        revision: 1,
+        items: [session1, session2],
+      },
+    });
+    expect(populated.sessions.map((s) => s.name)).toEqual([session2.name, session1.name]);
+
+    const bumped = reduce(populated, {
+      t: "session_bump_requested",
+      name: session1.name,
+      createdAt: 10000,
+    });
+    expect(bumped.sessions.map((s) => s.name)).toEqual([session1.name, session2.name]);
+    expect(bumped.sessions[0]?.createdAt).toBe(10000);
+  });
+
+  it("session_rename_requested updates session summary optimistically", () => {
+    const state = initialState();
+    const session = {
+      name: "desktop-20260901100000-1",
+      messageCount: 2,
+      mtime: new Date(1000).toISOString(),
+      summary: "Old Title",
+    };
+    const populated = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$sessions",
+        epoch: "daemon-1",
+        revision: 1,
+        items: [session],
+      },
+    });
+    expect(populated.sessions[0]?.summary).toBe("Old Title");
+
+    const renamed = reduce(populated, {
+      t: "session_rename_requested",
+      name: session.name,
+      title: "New Title",
+    });
+    expect(renamed.sessions[0]?.summary).toBe("New Title");
+  });
+
   it("orders, deduplicates, and keeps empty sessions — empty is a real session", () => {
     const state = initialState();
     const older = {

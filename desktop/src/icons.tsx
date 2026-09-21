@@ -24,6 +24,11 @@ function Ic({ size = 14, children, ...rest }: IconProps & { children: React.Reac
 }
 
 export const I = {
+  arrowUp: (p: IconProps) => (
+    <Ic {...p}>
+      <path d="M12 19V5M5 12l7-7 7 7" />
+    </Ic>
+  ),
   plus: (p: IconProps) => (
     <Ic {...p}>
       <path d="M12 5v14M5 12h14" />

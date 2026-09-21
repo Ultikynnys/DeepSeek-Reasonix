@@ -1738,7 +1738,8 @@ html[data-platform="macos"] .titlebar .tb-left {
   opacity: 0;
   transition: opacity 120ms, background 120ms, color 120ms;
 }
-.session-item .rename-btn {
+.session-item .rename-btn,
+.session-item .reorder-btn {
   flex-shrink: 0;
   width: 22px;
   height: 22px;
@@ -1758,7 +1759,10 @@ html[data-platform="macos"] .titlebar .tb-left {
 .session-item .delete-btn:focus-visible,
 .session-item:hover .rename-btn,
 .session-item:focus-within .rename-btn,
-.session-item .rename-btn:focus-visible {
+.session-item .rename-btn:focus-visible,
+.session-item:hover .reorder-btn,
+.session-item:focus-within .reorder-btn,
+.session-item .reorder-btn:focus-visible {
   opacity: 1;
 }
 .session-item .delete-btn:hover {
@@ -1769,11 +1773,13 @@ html[data-platform="macos"] .titlebar .tb-left {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
-.session-item .rename-btn:hover {
+.session-item .rename-btn:hover,
+.session-item .reorder-btn:hover {
   background: var(--panel-2, rgba(255, 255, 255, 0.06));
   color: var(--fg);
 }
-.session-item .rename-btn:focus-visible {
+.session-item .rename-btn:focus-visible,
+.session-item .reorder-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
@@ -2113,11 +2119,34 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   gap: 8px;
 }
 .main-head h1 .editable {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
   border-bottom: 1px dashed transparent;
-  padding: 0 2px;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  outline: none;
+  min-width: 60px;
+  max-width: min(520px, 50vw);
+  field-sizing: content;
+  text-overflow: ellipsis;
+  white-space: pre;
+  transition: border-color 120ms, background 120ms, box-shadow 120ms;
 }
 .main-head h1 .editable:hover {
+  border-bottom-color: var(--border-strong);
+}
+.main-head h1 .editable:focus {
+  background: var(--panel);
   border-color: var(--border-strong);
+  border-bottom-style: solid;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  text-overflow: clip;
 }
 .main-head .sub {
   margin-top: 2px;

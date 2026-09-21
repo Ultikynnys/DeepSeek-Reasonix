@@ -895,6 +895,7 @@ export const en = {
     clearAllSessions: "Clear all sessions",
     clearAllConfirm: "{count} session(s) for this workspace",
     deleteAll: "Delete all",
+    moveToTop: "Move to top",
     renameSession: "Rename session",
     renamePlaceholder: "Session title",
     approvalRules: "Approval rules",

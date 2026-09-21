@@ -256,6 +256,23 @@ describe("session persistence", () => {
     }
   });
 
+  it("patchSessionMeta updates createdAt when explicitly passed (reordering to now)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 8, 5, 12, 0, 0));
+    try {
+      appendSessionMessage("reorder-test", { role: "user", content: "x" });
+      expect(loadSessionMeta("reorder-test").createdAt).toBe(Date.UTC(2026, 8, 5, 12, 0, 0));
+
+      const now = Date.UTC(2026, 8, 7, 10, 0, 0);
+      vi.setSystemTime(now);
+      patchSessionMeta("reorder-test", { createdAt: now });
+      const meta = loadSessionMeta("reorder-test");
+      expect(meta.createdAt).toBe(now);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("listSessions exposes createdAt from meta, falling back to the name timestamp", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.UTC(2026, 8, 5, 12, 0, 0));

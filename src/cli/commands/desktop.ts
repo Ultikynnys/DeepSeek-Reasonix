@@ -6209,6 +6209,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       return;
     }
+    if (msg.cmd === "session_reorder") {
+      try {
+        const now =
+          typeof msg.createdAt === "number" && Number.isFinite(msg.createdAt) && msg.createdAt > 0
+            ? msg.createdAt
+            : Date.now();
+        patchSessionMeta(msg.name, { createdAt: now });
+        emitSessionsForWorkspace(tab.rootDir);
+      } catch (err) {
+        emit(
+          { type: "$error", message: `session_reorder failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
     if (msg.cmd === "session_load") {
       // Legacy alias for additive session_open. Loading from the sidebar must
       // never replace or abort the channel the user is currently watching.

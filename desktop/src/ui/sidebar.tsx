@@ -7,8 +7,6 @@ import { useClampedPopupPosition } from "./file-menu";
 import { activationHandler } from "./keyboard";
 import { Shortcut } from "./shortcut";
 
-const RENAME_MAX_CHARS = 200;
-
 type PendingDelete = {
   name: string;
   pretty: string;
@@ -59,7 +57,7 @@ export function Sidebar({
   onLoadSession,
   onDeleteSession,
   onClearSessions,
-  onRenameSession,
+  onReorderSession,
   onOpenWorkdir,
   onOpenSettings,
   onOpenAbout,
@@ -75,7 +73,7 @@ export function Sidebar({
   onLoadSession: (name: string) => void;
   onDeleteSession: (name: string) => void;
   onClearSessions: () => void;
-  onRenameSession: (name: string, title: string) => void;
+  onReorderSession?: (name: string) => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
   onOpenSettings: () => void;
   onOpenAbout: () => void;
@@ -84,8 +82,6 @@ export function Sidebar({
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [pendingClear, setPendingClear] = useState<PendingClear | null>(null);
-  const [editingName, setEditingName] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState("");
   const workspaceLabel = workspaceDir
     ? workspaceDir.split(/[\\/]/).pop() || workspaceDir
     : t("sidebarPanel.noWorkspace");
@@ -230,114 +226,69 @@ export function Sidebar({
             const active = s.name === activeName;
             const mtime = Date.parse(s.mtime);
             const updated = Number.isFinite(mtime) ? relative(Date.now() - mtime) : s.mtime;
-            const editing = editingName === s.name;
-            const currentSummary = s.summary?.trim() ?? "";
-            const commitRename = () => {
-              const next = editValue.trim().slice(0, RENAME_MAX_CHARS);
-              if (next !== currentSummary) onRenameSession(s.name, next);
-              setEditingName(null);
-              setEditValue("");
-            };
             return (
               <div
                 key={s.name}
                 className="session-item"
                 data-active={active}
-                data-editing={editing || undefined}
-                onClick={
-                  editing
-                    ? undefined
-                    : () => {
-                        // Skip the round-trip when clicking the already-loaded
-                        // session — a reload would clear live in-turn state (#1653).
-                        if (s.name === activeName) return;
-                        onLoadSession(s.name);
-                      }
-                }
-                role={editing ? undefined : "button"}
-                tabIndex={editing ? -1 : 0}
+                onClick={() => {
+                  // Skip the round-trip when clicking the already-loaded
+                  // session — a reload would clear live in-turn state (#1653).
+                  if (s.name === activeName) return;
+                  onLoadSession(s.name);
+                }}
+                role="button"
+                tabIndex={0}
                 title={s.name}
                 onKeyDown={(e) => {
-                  if (editing) return;
                   if (e.key === "Enter" && s.name !== activeName) onLoadSession(s.name);
                 }}
               >
                 {runningSessions?.has(s.name) ? <span className="state" /> : null}
                 <div className="body">
-                  {editing ? (
-                    <input
-                      className="title-edit"
-                      // biome-ignore lint/a11y/noAutofocus: rename flow — the input must be focused the moment editing starts
-                      autoFocus
-                      value={editValue}
-                      maxLength={RENAME_MAX_CHARS}
-                      placeholder={t("sidebarPanel.renamePlaceholder")}
-                      aria-label={t("sidebarPanel.renameSession")}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={commitRename}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          commitRename();
-                        } else if (e.key === "Escape") {
-                          e.preventDefault();
-                          setEditingName(null);
-                          setEditValue("");
-                        }
-                      }}
-                    />
-                  ) : (
-                    <span className="title">{prettyName(s)}</span>
-                  )}
+                  <span className="title">{prettyName(s)}</span>
                   <span className="meta">
                     <span>{t("sidebarPanel.messageCount", { count: s.messageCount })}</span>
                     <span className="sep">·</span>
                     <span>{updated}</span>
                   </span>
                 </div>
-                {editing ? null : (
-                  <>
-                    <button
-                      type="button"
-                      className="rename-btn"
-                      title={t("sidebarPanel.renameSession")}
-                      aria-label={t("sidebarPanel.renameSession")}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingName(s.name);
-                        setEditValue(currentSummary);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-                      }}
-                    >
-                      <I.pencil size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      className="delete-btn"
-                      title={t("sidebarPanel.deleteSession")}
-                      aria-label={t("sidebarPanel.deleteSession")}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        setPendingDelete({
-                          name: s.name,
-                          pretty: prettyName(s),
-                          x: rect.right,
-                          y: rect.bottom,
-                        });
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-                      }}
-                    >
-                      <I.x size={12} />
-                    </button>
-                  </>
-                )}
+                <button
+                  type="button"
+                  className="reorder-btn"
+                  title={t("sidebarPanel.moveToTop")}
+                  aria-label={t("sidebarPanel.moveToTop")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReorderSession?.(s.name);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+                  }}
+                >
+                  <I.arrowUp size={12} />
+                </button>
+                <button
+                  type="button"
+                  className="delete-btn"
+                  title={t("sidebarPanel.deleteSession")}
+                  aria-label={t("sidebarPanel.deleteSession")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setPendingDelete({
+                      name: s.name,
+                      pretty: prettyName(s),
+                      x: rect.right,
+                      y: rect.bottom,
+                    });
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+                  }}
+                >
+                  <I.x size={12} />
+                </button>
               </div>
             );
           })}

@@ -1161,6 +1161,7 @@ export type OutgoingCommand = { tabId?: string } & (
   /** Focus an existing session agent or add it to the current workspace tab. */
   | { cmd: "session_open"; name: string }
   | { cmd: "session_rename"; name: string; title: string }
+  | { cmd: "session_reorder"; name: string; createdAt?: number }
   | { cmd: "memory_read"; path: string }
   | {
       cmd: "memory_write";
