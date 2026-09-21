@@ -35,6 +35,7 @@ import {
   bridgeMcpTools,
   registerSingleMcpTool,
 } from "../../mcp/registry.js";
+import type { SharedClientRegistry } from "../../mcp/shared-browser.js";
 import type { McpServerSpec } from "../../mcp/spec.js";
 import {
   getMcpServerEnv,
@@ -71,6 +72,8 @@ interface SpecRecord {
    *  a rotated extension token) must force a respawn — `specToRaw` omits these,
    *  so a raw-spec diff alone would silently keep a stale bridge. */
   runtimeKey: string;
+  /** Set when `client` is a daemon-shared browser client — release instead of close. */
+  sharedKey?: string;
 }
 
 export interface RuntimeContext {
@@ -79,6 +82,8 @@ export interface RuntimeContext {
   getRequestedCount: () => number;
   getWorkspaceDir?: () => string | undefined;
   progressSink: { current: ((info: ProgressInfo) => void) | null };
+  /** Daemon-scoped shared clients for browser servers (Playwright) — one client is one browser across tabs. */
+  browserRegistry?: SharedClientRegistry;
 }
 
 export type McpLifecycleSink = (event: McpLifecycleEvent) => void;
@@ -183,6 +188,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     const normalized = loadEffectiveMcpConfig(ctx.getWorkspaceDir?.());
     let label = "anon";
     let mcp: McpClient | undefined;
+    let sharedKey: string | undefined;
     // Per-server readiness gate — tool dispatches via the bridge await
     // this before calling into `live.callTool`. Resolved on `connected`,
     // rejected on `failed`, so a tool invoked mid-handshake waits
@@ -224,19 +230,33 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       // touches the browser, and surface the maintenance duty to the agent
       // via the bridge's first-call notice + description pointers.
       const playwrightTooling = isPlaywrightSpec(spec) ? ensurePlaywrightTooling() : undefined;
-      const transport = buildTransportFromSpec(spec, {
-        cwd: workspaceDir,
-        ...(isGmailMailSpec(spec)
-          ? {
-              headersResolver: async () => ({
-                authorization: `Bearer ${await resolveGmailToken()}`,
-              }),
-            }
-          : {}),
-      });
-      mcp = new McpClient({ transport, workspaceDir });
-      await mcp.initialize({ signal });
-      const host: McpClientHost = { client: mcp };
+      // Playwright's browser is process-global: one live MCP client is one
+      // browser. Bridge every tab through a daemon-scoped shared client so a
+      // new session attaches to the existing browser instead of spawning one.
+      let host: McpClientHost;
+      let bridgeReady: Promise<void> = ready;
+      if (isPlaywrightSpec(spec) && ctx.browserRegistry) {
+        const entry = await ctx.browserRegistry.acquire(spec, { workspaceDir, signal });
+        sharedKey = entry.key;
+        mcp = entry.client;
+        host = entry.host;
+        resolveReady();
+        bridgeReady = Promise.resolve();
+      } else {
+        const transport = buildTransportFromSpec(spec, {
+          cwd: workspaceDir,
+          ...(isGmailMailSpec(spec)
+            ? {
+                headersResolver: async () => ({
+                  authorization: `Bearer ${await resolveGmailToken()}`,
+                }),
+              }
+            : {}),
+        });
+        mcp = new McpClient({ transport, workspaceDir });
+        await mcp.initialize({ signal });
+        host = { client: mcp };
+      }
       const hiddenTools = new Set(managedMcpToolsHiddenFromModel(spec));
       if (isOutlookMailSpec(spec)) {
         const listed = await mcp.listTools();
@@ -254,7 +274,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         namePrefix,
         serverName: label,
         host,
-        ready,
+        ready: bridgeReady,
         disabledTools,
         ...(isOutlookMailSpec(spec)
           ? {
@@ -316,6 +336,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         registeredNames: bridge.registeredNames,
         registeredSpecs,
         runtimeKey: runtimeFingerprint(spec),
+        sharedKey,
         disabledTools: [...disabledTools],
       });
       insertionOrder.push(raw);
@@ -369,6 +390,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         registeredNames: bridge.registeredNames,
         registeredSpecs,
         runtimeKey: runtimeFingerprint(spec),
+        sharedKey,
         disabledTools: [...disabledTools],
       });
       // Hot-add: shift the prefix so the live loop sees the new tools
@@ -390,7 +412,8 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       // tools are already registered and usable even after a late failure.
       const reason = (err as Error).message;
       if (!records.has(raw)) {
-        await mcp?.close().catch(() => undefined);
+        if (sharedKey && ctx.browserRegistry) await ctx.browserRegistry.release(sharedKey);
+        else await mcp?.close().catch(() => undefined);
         rejectReady(new Error(`MCP server "${label}" failed to start: ${reason}`));
         sink({ state: "failed", name: label, reason });
         failureMap.set(raw, { spec: raw, name: label, reason, at: Date.now() });
@@ -405,7 +428,11 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     failureMap.delete(raw);
     const record = records.get(raw);
     if (!record) return false;
-    await record.client.close().catch(() => undefined);
+    if (record.sharedKey && ctx.browserRegistry) {
+      await ctx.browserRegistry.release(record.sharedKey);
+    } else {
+      await record.client.close().catch(() => undefined);
+    }
     const tools = ctx.getTools();
     for (const name of record.registeredNames) {
       tools?.unregister(name);
@@ -573,7 +600,13 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       .filter((s): s is McpServerSummary => Boolean(s));
   }
   async function closeAll(): Promise<void> {
-    for (const r of records.values()) await r.client.close().catch(() => undefined);
+    for (const r of records.values()) {
+      if (r.sharedKey && ctx.browserRegistry) {
+        await ctx.browserRegistry.release(r.sharedKey);
+      } else {
+        await r.client.close().catch(() => undefined);
+      }
+    }
     records.clear();
     insertionOrder.length = 0;
     failureMap.clear();

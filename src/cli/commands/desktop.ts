@@ -264,6 +264,7 @@ import {
   parseOutlookLoginStatus,
 } from "../../mcp/outlook-mail.js";
 import { isPlaywrightSpec } from "../../mcp/playwright-tooling.js";
+import { SharedClientRegistry } from "../../mcp/shared-browser.js";
 import { type McpServerSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
   type ModelPrefs,
@@ -3871,6 +3872,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
   const tabs = new Map<string, Tab>();
   const tabContext = new AsyncLocalStorage<string>();
+  // Daemon-scoped shared MCP clients for browser servers — one Playwright
+  // client (one browser) is reused by every tab, so switching sessions attaches
+  // to the existing browser instead of spawning a second one.
+  const browserRegistry = new SharedClientRegistry();
   // Frontend-reported focused tab — persisted so a restart reopens on it (#1244).
   let lastActiveTabId = "";
 
@@ -4176,6 +4181,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       getRequestedCount: () => requested,
       getWorkspaceDir: () => tab.rootDir,
       progressSink: { current: null },
+      browserRegistry,
     });
     tab.mcpRuntime = runtime;
     runtime.setLifecycleSink((event) => {
@@ -5025,6 +5031,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     await Promise.allSettled(
       [...tabs.values()].map((t) => t.toolset?.jobs.shutdown(1500) ?? Promise.resolve()),
     );
+    await browserRegistry.closeAll().catch(() => undefined);
     process.exit(0);
   }
   process.on("SIGTERM", () => {
