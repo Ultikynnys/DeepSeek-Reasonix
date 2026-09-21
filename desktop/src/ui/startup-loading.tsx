@@ -8,9 +8,17 @@ export function StartupLoadingOverlay() {
       role="status"
       aria-live="polite"
       aria-label={t("app.loadingWorkspaces")}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
     >
       <div className="startup-loading-card">
-        <div className="startup-loading-spinner" />
+        <span className="spin startup-loading-spinner" />
         <div className="startup-loading-text">
           <div className="startup-loading-title">{t("app.loadingWorkspaces")}</div>
           <div className="startup-loading-sub">{t("app.loadingSessions")}</div>

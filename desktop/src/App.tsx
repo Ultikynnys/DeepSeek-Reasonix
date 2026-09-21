@@ -4900,6 +4900,15 @@ function normalizeWorkspacePath(p?: string): string {
   return windowsPath ? normalized.toLowerCase() : normalized;
 }
 
+function areWorkspacesLoaded(expected: Set<string> | null, loaded: Set<string>): boolean {
+  if (!expected) return false;
+  if (expected.size === 0) return true;
+  for (const id of expected) {
+    if (!loaded.has(id)) return false;
+  }
+  return true;
+}
+
 export function App() {
   const [tabs, setTabs] = useState<TabMeta[]>([]);
   const [backendConnected, setBackendConnected] = useState(false);
@@ -5299,6 +5308,10 @@ export function App() {
               dispatchersRef.current.delete(tabId);
               pendingEventsRef.current.delete(tabId);
               pendingDeltasRef.current.delete(tabId);
+              expectedTabsRef.current?.delete(tabId);
+              if (areWorkspacesLoaded(expectedTabsRef.current, loadedSessionsTabsRef.current)) {
+                setLoadingWorkspaces(false);
+              }
               return;
             }
 
@@ -5310,10 +5323,7 @@ export function App() {
               // as ghosts that route events to the wrong tab.
               const ids = new Set(ev.tabs.map((t) => t.id));
               expectedTabsRef.current = ids;
-              if (
-                ids.size === 0 ||
-                Array.from(ids).every((id) => loadedSessionsTabsRef.current.has(id))
-              ) {
+              if (areWorkspacesLoaded(ids, loadedSessionsTabsRef.current)) {
                 setLoadingWorkspaces(false);
               }
               setTabs((prev) => {
@@ -5443,12 +5453,7 @@ export function App() {
               }
               if (ev.type === "$sessions" || ev.type === "$error") {
                 loadedSessionsTabsRef.current.add(target);
-                if (
-                  expectedTabsRef.current &&
-                  Array.from(expectedTabsRef.current).every((id) =>
-                    loadedSessionsTabsRef.current.has(id),
-                  )
-                ) {
+                if (areWorkspacesLoaded(expectedTabsRef.current, loadedSessionsTabsRef.current)) {
                   setLoadingWorkspaces(false);
                 }
               }
