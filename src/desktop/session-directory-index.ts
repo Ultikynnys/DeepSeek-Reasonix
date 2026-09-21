@@ -10,6 +10,9 @@ const READ_BUFFER_BYTES = 64 * 1024;
 const MAX_SESSION_FILES = 100_000;
 const MAX_SESSION_BYTES = 1024 * 1024 * 1024;
 const PARALLEL_READS = 32;
+/** How many times to rescan a session file that keeps changing under us (its own
+ *  live turn appending) before recording the best-effort count. */
+const SESSION_CHANGE_RETRIES = 3;
 
 export interface SessionFileIdentity {
   dev: string;
@@ -112,26 +115,31 @@ async function countLines(
   handle: Awaited<ReturnType<typeof open>>,
   start: number,
   length: number,
-): Promise<{ count: number; endedWithNewline: boolean }> {
+): Promise<{ count: number; endedWithNewline: boolean; bytesRead: number }> {
   const buffer = Buffer.allocUnsafe(Math.min(READ_BUFFER_BYTES, Math.max(1, length)));
   let position = start;
   let remaining = length;
   let count = 0;
+  let scanned = 0;
   let lastByte: number | undefined;
   while (remaining > 0) {
     const requested = Math.min(buffer.length, remaining);
     const { bytesRead } = await handle.read(buffer, 0, requested, position);
-    if (bytesRead === 0) throw new Error("session changed while it was being indexed");
+    // A live writer truncating the transcript mid-scan yields a short read.
+    // Stop rather than throwing: the caller re-stats, then retries or records
+    // the best-effort count for the range it actually read.
+    if (bytesRead === 0) break;
     for (let index = 0; index < bytesRead; index += 1) {
       if (buffer[index] === 0x0a) count += 1;
     }
     lastByte = buffer[bytesRead - 1];
     position += bytesRead;
     remaining -= bytesRead;
+    scanned += bytesRead;
   }
-  const endedWithNewline = length > 0 && lastByte === 0x0a;
-  if (length > 0 && !endedWithNewline) count += 1;
-  return { count, endedWithNewline };
+  const endedWithNewline = scanned > 0 && lastByte === 0x0a;
+  if (scanned > 0 && !endedWithNewline) count += 1;
+  return { count, endedWithNewline, bytesRead: scanned };
 }
 
 export class SessionDirectoryIndex<M> {
@@ -381,19 +389,43 @@ export class SessionDirectoryIndex<M> {
         sameFile(previous.identity, fileIdentity) &&
         previous.identity.size < fileIdentity.size &&
         previous.endedWithNewline;
-      const start = appendOnly ? previous.identity.size : 0;
-      const counted = await countLines(handle, start, fileIdentity.size - start);
-      const finalIdentity = identity(await handle.stat({ bigint: true }));
-      if (!unchanged(fileIdentity, finalIdentity)) {
-        throw new Error(`session changed while it was being indexed: ${name}`);
+      let start = appendOnly ? previous.identity.size : 0;
+      let base = appendOnly ? previous.messageCount : 0;
+      // A session's transcript is appended to (or, on rewrite, truncated) by its
+      // own running turn, so it can change while we scan it. That is a benign
+      // race, not corruption: the line count still describes exactly the byte
+      // range we read, and the next refresh re-reads from the fresh identity.
+      // Rescan a few times for a settled count, then record the best effort —
+      // never reject the whole listing over a concurrent append (which surfaced
+      // to users as a spurious, agent-stopping `session_list failed`). The stat
+      // is taken on the already-open handle, so the file can never be swapped
+      // out under us; a change is only ever a size/mtime bump on this same file.
+      let scannedStats = fileStats;
+      let scanned = fileIdentity;
+      let counted = await countLines(handle, start, scanned.size - start);
+      for (let attempt = 0; ; attempt += 1) {
+        const finalStats = await handle.stat({ bigint: true });
+        const finalIdentity = identity(finalStats);
+        const settled =
+          unchanged(scanned, finalIdentity) && counted.bytesRead === scanned.size - start;
+        if (settled || attempt >= SESSION_CHANGE_RETRIES) break;
+        // Same file, still changing — rescan against the fresh identity, and
+        // drop the append range if the transcript shrank below its boundary.
+        scanned = finalIdentity;
+        scannedStats = finalStats;
+        if (scanned.size < start) {
+          start = 0;
+          base = 0;
+        }
+        counted = await countLines(handle, start, scanned.size - start);
       }
       return {
         name,
         path,
-        identity: fileIdentity,
-        messageCount: appendOnly ? previous.messageCount + counted.count : counted.count,
+        identity: scanned,
+        messageCount: base + counted.count,
         endedWithNewline: counted.endedWithNewline,
-        mtime: new Date(Number(fileStats.mtimeMs)),
+        mtime: new Date(Number(scannedStats.mtimeMs)),
         meta,
         metaIdentity: nextMetaIdentity,
       };
