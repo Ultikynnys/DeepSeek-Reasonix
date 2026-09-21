@@ -3874,6 +3874,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     settleFirstBootstrap = resolve;
   });
 
+  function emitSessionsForWorkspace(
+    workspaceDir: string,
+    settledDeletes?: SessionsEvent["settledDeletes"],
+  ): void {
+    for (const t of tabs.values()) {
+      if (sameWorkspaceDir(t.rootDir, workspaceDir)) {
+        void emitSessions(t, settledDeletes);
+      }
+    }
+  }
+
   /** Synchronous tab construction — no I/O. All cheap, disk-only events (`$settings`, `$sessions`, `$memory`, `$skills`, `$mcp_specs`) can fire against this immediately. The heavy bits (`buildCodeToolset`, MCP probes, runtime construction) happen in `initTabToolset` so the UI shell paints without waiting for them. */
   function createTabSkeleton(
     initialDir?: string,
@@ -4736,8 +4747,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.recentMentions.length = 0;
     tab.hooks = loadHooks({ projectRoot: target });
     if (tab.currentSession) {
-      // Folder-per-session: a session without messages doesn't exist on disk
-      // (or only holds a meta.json husk) — drop it so it can never resurface.
+      // Virtual deletion replacements don't exist on disk — clean up if left dangling.
       if (!sessionExists(tab.currentSession)) {
         deleteSession(tab.currentSession);
       }
@@ -4795,7 +4805,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       void bridgeTabMcp(tab);
     }
     void settleTabSemantic(tab, target, toolset);
-    void emitSessions(tab);
+    emitSessionsForWorkspace(target);
     emitSettings(tab);
     emitSkills(tab);
     persistOpenTabs();
@@ -4892,7 +4902,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       },
       tab.id,
     );
-    void emitSessions(tab, options.settledDeletes);
+    emitSessionsForWorkspace(tab.rootDir, options.settledDeletes);
     emitTabDiagnostic(tab, `${diagnosticPrefix}.completed`, undefined, "info");
   }
 
@@ -5356,7 +5366,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         restored: restoredMessages !== undefined,
         restoredMessages: restoredMessages?.length ?? 0,
       });
-      void emitSessions(tab);
+      if (tab.currentSession) {
+        patchSessionWorkspaceIfMissing(tab.currentSession, tab.rootDir);
+      }
+      emitSessionsForWorkspace(tab.rootDir);
       emitMemory(tab);
       if (restoredMessages) {
         const meta = loadSessionMeta(tab.currentSession);
@@ -5525,6 +5538,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         void emitCodexQuota(activated, { force: true });
         void emitOllamaQuota(activated);
         void emitAntigravityQuota(activated);
+        void emitSessions(activated);
       } else {
         emitDiagnostic(
           "tab.activate.failed",
@@ -6176,7 +6190,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         const trimmed = normalizeSessionTitle(msg.title);
         patchSessionMeta(msg.name, { summary: trimmed || undefined });
-        void emitSessions(tab);
+        emitSessionsForWorkspace(tab.rootDir);
       } catch (err) {
         emit(
           { type: "$error", message: `session_rename failed: ${(err as Error).message}` },
@@ -6205,6 +6219,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             holder.id,
           );
         }
+        emitSessionsForWorkspace(holder.rootDir);
         return;
       }
       try {
@@ -6244,6 +6259,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           },
           existing.id,
         );
+        emitSessionsForWorkspace(existing.rootDir);
         return;
       }
       try {

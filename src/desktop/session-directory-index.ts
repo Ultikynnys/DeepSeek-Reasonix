@@ -312,7 +312,45 @@ export class SessionDirectoryIndex<M> {
     previous?: SessionDirectoryRecord<M>,
   ): Promise<SessionDirectoryRecord<M>> {
     const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
-    const handle = await open(path, constants.O_RDONLY | noFollow);
+    let handle: Awaited<ReturnType<typeof open>> | null = null;
+    try {
+      handle = await open(path, constants.O_RDONLY | noFollow);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (!handle) {
+      const sessionDirPath = join(this.directory(), name);
+      const metaStats = await stat(join(sessionDirPath, SESSION_META_FILENAME), {
+        bigint: true,
+      }).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      });
+      const dirStats = await stat(sessionDirPath, { bigint: true }).catch(() => null);
+      if (!dirStats || !dirStats.isDirectory()) {
+        throw Object.assign(new Error(`session directory missing: ${name}`), { code: "ENOENT" });
+      }
+      const nextMetaIdentity = metaStats ? identity(metaStats) : null;
+      let meta: M;
+      if (previous !== undefined && metaUnchanged(previous.metaIdentity, nextMetaIdentity)) {
+        meta = previous.meta;
+      } else {
+        meta = this.loadMeta(name);
+      }
+      const mtime = metaStats
+        ? new Date(Number(metaStats.mtimeMs))
+        : new Date(Number(dirStats.mtimeMs));
+      return {
+        name,
+        path,
+        identity: identity(dirStats),
+        messageCount: 0,
+        endedWithNewline: false,
+        mtime,
+        meta,
+        metaIdentity: nextMetaIdentity,
+      };
+    }
     try {
       const fileStats = await handle.stat({ bigint: true });
       if (!fileStats.isFile()) throw new Error(`session is not a regular file: ${name}`);

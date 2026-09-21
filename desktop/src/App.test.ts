@@ -1688,6 +1688,31 @@ describe("Desktop App session sorting", () => {
       event: { type: "$sessions", epoch: "daemon-1", revision: 2, items: [other, empty] },
     });
     expect(afterSwitch.sessions.map((s) => s.name)).toEqual([empty.name, other.name]);
+
+    // Now select the empty session again
+    const loadEmpty = reduce(afterSwitch, {
+      t: "incoming",
+      event: {
+        type: "$session_loaded",
+        name: empty.name,
+        messages: [],
+        carryover: {
+          totalCostUsd: 0,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          totalCompletionTokens: 0,
+        },
+      },
+    });
+    expect(loadEmpty.currentSession).toBe(empty.name);
+    expect(loadEmpty.sessions.map((s) => s.name)).toEqual([empty.name, other.name]);
+
+    // Another $sessions broadcast keeps it intact
+    const afterReselect = reduce(loadEmpty, {
+      t: "incoming",
+      event: { type: "$sessions", epoch: "daemon-1", revision: 3, items: [other, empty] },
+    });
+    expect(afterReselect.sessions.map((s) => s.name)).toEqual([empty.name, other.name]);
   });
 
   it("keeps optimistic deletion hidden until its authoritative snapshot settles", () => {

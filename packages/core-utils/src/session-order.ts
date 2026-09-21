@@ -5,6 +5,7 @@ export interface SessionRecencyInput {
    *  Wins over mtime when present so ordering survives file copies/restores
    *  that reset the filesystem timestamps. */
   lastActive?: number;
+  updatedAt?: number;
 }
 
 /** Parse compact timestamp (YYYYMMDDHHmmss or YYYYMMDDHHmm) from a session name. */
@@ -36,7 +37,9 @@ export function sessionRecency(session: SessionRecencyInput): number {
   const lastActive =
     typeof session.lastActive === "number" && Number.isFinite(session.lastActive)
       ? session.lastActive
-      : 0;
+      : typeof session.updatedAt === "number" && Number.isFinite(session.updatedAt)
+        ? session.updatedAt
+        : 0;
   return Math.max(lastActive, mtimeMilliseconds(session.mtime), parseSessionTimestamp(session.name));
 }
 

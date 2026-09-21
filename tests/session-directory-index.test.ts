@@ -216,4 +216,32 @@ describe("SessionDirectoryIndex", () => {
     expect(records).toHaveLength(count);
     expect(records.every((record) => record.messageCount === 3)).toBe(true);
   }, 30_000);
+
+  it("indexes empty session folders with or without messages.jsonl as zero-message sessions", async () => {
+    const dir = await fixture();
+    // Case 1: folder with empty messages.jsonl + meta.json
+    const s1 = join(dir, "empty-with-file");
+    await mkdir(s1, { recursive: true });
+    await writeFile(join(s1, "messages.jsonl"), "");
+    await writeFile(join(s1, "meta.json"), JSON.stringify({ workspace: "/workspace/a" }));
+
+    // Case 2: folder with only meta.json (e.g. freshly created or hand-made)
+    const s2 = join(dir, "empty-without-file");
+    await mkdir(s2, { recursive: true });
+    await writeFile(join(s2, "meta.json"), JSON.stringify({ workspace: "/workspace/a" }));
+
+    const index = new SessionDirectoryIndex(
+      () => dir,
+      (name) =>
+        name === "empty-without-file"
+          ? { workspace: "/workspace/a" }
+          : { workspace: "/workspace/a" },
+    );
+    const records = (await index.load().value).sort((a, b) => a.name.localeCompare(b.name));
+    expect(records).toHaveLength(2);
+    expect(records[0]?.name).toBe("empty-with-file");
+    expect(records[0]?.messageCount).toBe(0);
+    expect(records[1]?.name).toBe("empty-without-file");
+    expect(records[1]?.messageCount).toBe(0);
+  });
 });
