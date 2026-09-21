@@ -598,6 +598,13 @@ function nextMessageTurn(messages: ChatMessage[]): number {
   return lastTurn + 1;
 }
 
+function ensureAssistantTurn(messages: ChatMessage[], turn: number): ChatMessage[] {
+  if (messages.some((message) => message.kind === "assistant" && message.turn === turn)) {
+    return messages;
+  }
+  return [...messages, { kind: "assistant", turn, segments: [], pending: true }];
+}
+
 let noticeSequence = 0;
 function nextNoticeId(): string {
   noticeSequence += 1;
@@ -1955,7 +1962,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ...state,
         turnStatus: ev.channel === "reasoning" ? "reasoning" : "responding",
         turnLastEventMs: Date.now(),
-        messages: state.messages.map((m) => {
+        messages: ensureAssistantTurn(state.messages, ev.turn).map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           if (ev.channel === "content") {
             return { ...m, segments: appendTextSegment(m.segments, "text", ev.text) };
@@ -1992,7 +1999,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return {
         ...state,
         usage,
-        messages: state.messages.map((m) => {
+        messages: ensureAssistantTurn(state.messages, ev.turn).map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           // Abort-settled finals (emitAbortedFinal) carry the abort notice in
           // `content`, but the deltas never streamed it — append it so the card
@@ -2026,7 +2033,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         turnStatus: "calling_tool",
         turnStatusTool: ev.name,
         turnLastEventMs: Date.now(),
-        messages: state.messages.map((m) => {
+        messages: ensureAssistantTurn(state.messages, ev.turn).map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           if (m.segments.some((s) => s.kind === "tool" && s.callId === ev.callId)) return m;
           return {
@@ -2052,7 +2059,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         turnStatusTool: ev.name,
         turnLastEventMs: Date.now(),
         sessionFiles: mergeSessionFiles(state.sessionFiles, adds),
-        messages: state.messages.map((m) => {
+        messages: ensureAssistantTurn(state.messages, ev.turn).map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
           if (idx >= 0) {

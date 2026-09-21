@@ -304,6 +304,67 @@ describe("Desktop App reducer — usage", () => {
     ).toEqual(["notice-1", "user-2", "assistant-2"]);
   });
 
+  it("recovers model and tool cards when turn-start is missing after a model switch", () => {
+    let state = reduce(initialState(), {
+      t: "send_user",
+      text: "continue after switching models",
+      clientId: "c-1",
+    });
+
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "tool.intent",
+        id: 1,
+        ts: "t",
+        turn: 1,
+        callId: "tc-1",
+        name: "read_file",
+        args: '{"path":"src/App.tsx"}',
+      },
+    });
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "tool.result",
+        id: 2,
+        ts: "t",
+        turn: 1,
+        callId: "tc-1",
+        ok: true,
+        output: "file contents",
+      },
+    });
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.delta",
+        id: 3,
+        ts: "t",
+        turn: 1,
+        channel: "content",
+        text: "Done.",
+      },
+    });
+
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1]).toMatchObject({
+      kind: "assistant",
+      turn: 1,
+      pending: true,
+      segments: [
+        {
+          kind: "tool",
+          callId: "tc-1",
+          name: "read_file",
+          result: "file contents",
+          ok: true,
+        },
+        { kind: "text", text: "Done." },
+      ],
+    });
+  });
+
   it("keeps an active streaming card newest and slots a mid-turn notice above it", () => {
     let s = initialState();
     const act = (action: Parameters<typeof reduce>[1]) => {
