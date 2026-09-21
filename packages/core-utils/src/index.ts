@@ -30,7 +30,9 @@ export { messageOf } from "./error.js";
 export { DAY_MS, abortReason, sleep } from "./time.js";
 export {
   parseSessionTimestamp,
+  sessionCreationTime,
   sessionRecency,
+  sortSessionsByCreationDescending,
   sortSessionsDescending,
 } from "./session-order.js";
 export type { SessionRecencyInput } from "./session-order.js";

@@ -42,7 +42,9 @@ import {
   reduce,
   runningSessionNames,
   sanitizeSettingsPatch,
+  sessionCreationTime,
   sessionRecency,
+  sortSessionsByCreationDescending,
   sortSessionsDescending,
   workspaceTabRepresentatives,
 } from "./App";
@@ -1597,6 +1599,74 @@ describe("Desktop App session sorting", () => {
       "desktop-20260903110000-1",
       "desktop-20260901100000-1",
     ]);
+  });
+
+  it("sessionCreationTime prefers the meta stamp, then the name timestamp, then mtime", () => {
+    const name = "desktop-20260905120000-1";
+    const nameTs = Date.UTC(2026, 8, 5, 12, 0, 0);
+    const mtime = new Date(Date.UTC(2020, 0, 1)).toISOString();
+
+    expect(sessionCreationTime({ name, mtime })).toBe(nameTs);
+    expect(
+      sessionCreationTime({ name: "plain-session", mtime, createdAt: Date.UTC(2024, 5, 1) }),
+    ).toBe(Date.UTC(2024, 5, 1));
+    expect(sessionCreationTime({ name: "plain-session", mtime })).toBe(Date.UTC(2020, 0, 1));
+  });
+
+  it("sortSessionsByCreationDescending orders by creation date, not last activity", () => {
+    // old but recently active (name timestamp from Sep 1, meta stamp from Sep 6)
+    const oldButActive = {
+      name: "desktop-20260901100000-1",
+      messageCount: 9,
+      mtime: new Date(9000).toISOString(),
+      createdAt: Date.UTC(2026, 8, 1, 10, 0, 0),
+    };
+    // new and created Sep 5
+    const newest = {
+      name: "desktop-20260905120000-1",
+      messageCount: 0,
+      mtime: new Date(1000).toISOString(),
+      createdAt: Date.UTC(2026, 8, 5, 12, 0, 0),
+    };
+    // legacy session with no meta stamp — creation falls back to the name timestamp
+    const legacy = {
+      name: "desktop-20260903110000-1",
+      messageCount: 5,
+      mtime: new Date(1000).toISOString(),
+    };
+
+    const sorted = [...[legacy, oldButActive, newest]].sort(sortSessionsByCreationDescending);
+    expect(sorted.map((s) => s.name)).toEqual([newest.name, legacy.name, oldButActive.name]);
+  });
+
+  it("the $sessions reducer sorts the sidebar by creation date, not recency", () => {
+    const state = initialState();
+    const oldButActive = {
+      name: "desktop-20260901100000-1",
+      messageCount: 9,
+      mtime: new Date(9000).toISOString(),
+      updatedAt: 9000,
+      createdAt: Date.UTC(2026, 8, 1, 10, 0, 0),
+    };
+    const newestCreated = {
+      name: "desktop-20260905120000-1",
+      messageCount: 0,
+      mtime: new Date(1000).toISOString(),
+      updatedAt: 1000,
+      createdAt: Date.UTC(2026, 8, 5, 12, 0, 0),
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$sessions",
+        epoch: "daemon-1",
+        revision: 1,
+        items: [oldButActive, newestCreated],
+      },
+    });
+    // Creation order wins over the activity stamps: the Sep 5 session —
+    // never touched since mint — still lists first.
+    expect(next.sessions.map((s) => s.name)).toEqual([newestCreated.name, oldButActive.name]);
   });
 
   it("orders, deduplicates, and keeps empty sessions — empty is a real session", () => {

@@ -16,7 +16,12 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
-import { DAY_MS, messageOf, sortSessionsDescending } from "@reasonix/core-utils";
+import {
+  DAY_MS,
+  messageOf,
+  parseSessionTimestamp,
+  sortSessionsDescending,
+} from "@reasonix/core-utils";
 import { type ReasoningEffort, isReasoningEffort } from "../config.js";
 import { atomicWriteSync, tmpSiblingPath } from "../core/atomic-write.js";
 import { readJsonFileSilently } from "../core/json-file.js";
@@ -39,7 +44,9 @@ import {
 
 export {
   parseSessionTimestamp,
+  sessionCreationTime,
   sessionRecency,
+  sortSessionsByCreationDescending,
   sortSessionsDescending,
 } from "@reasonix/core-utils";
 export {
@@ -91,6 +98,9 @@ export interface SessionInfo {
   /** Explicit last-activity stamp (meta.updatedAt) — copy-safe sort key that
    *  beats a stale filesystem mtime. Undefined when the meta predates it. */
   lastActive?: number;
+  /** Creation epoch-ms (meta.createdAt, else the name-embedded timestamp).
+   *  Undefined only when neither is available; sorters fall back to mtime. */
+  createdAt?: number;
   /** How this item matched a workspace-scoped list. */
   workspaceStatus?: "matched" | "legacy_missing_meta";
 }
@@ -99,9 +109,14 @@ export interface SessionMeta {
   branch?: string;
   summary?: string;
   /** Epoch-ms timestamp of the last user-visible activity — written on every
-   *  message append and meta patch. Drives the sidebar sort so ordering
+   *  message append and meta patch. Drives the resume-pick so ordering
    *  survives file copies/restores that would reset the filesystem mtime. */
   updatedAt?: number;
+  /** Epoch-ms creation stamp — written once when the session first gains
+   *  meta (or its first message) and never overwritten. Drives the
+   *  sidebar's creation-date sort; sessions minted before this field
+   *  existed fall back to the timestamp embedded in their name. */
+  createdAt?: number;
   totalCostUsd?: number;
   turnCount?: number;
   /** Absolute path of the workspace root the session was created/used in. */
@@ -315,12 +330,38 @@ export function appendSessionMessage(name: string, message: ChatMessage): void {
   sessionDirectoryIndex.invalidate();
 }
 
-/** Stamp `meta.updatedAt` on every append so the sidebar has an explicit, copy-safe "last activity" timestamp (falls back to mtime on failure). */
+/** Finite-number guard for the write-once creation stamp. */
+function isFiniteStamp(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/** Resolve a session's creation stamp for a meta write, honoring the
+ *  write-once invariant: an existing stamp always wins; else an explicitly
+ *  provided one; else the timestamp embedded in the name (the true mint time
+ *  of legacy sessions — NOT `now`, which would jump them to the top of the
+ *  sidebar on first touch); else now. */
+function creationStampFor(
+  meta: SessionMeta | null | undefined,
+  name: string,
+  explicit?: number,
+): number {
+  if (isFiniteStamp(meta?.createdAt)) return meta.createdAt;
+  if (isFiniteStamp(explicit)) return explicit;
+  return parseSessionTimestamp(name) || Date.now();
+}
+
+/** Stamp `meta.updatedAt` on every append so resume-picking has an explicit, copy-safe "last activity" timestamp (falls back to mtime on failure). */
 function touchSessionUpdatedAt(name: string): void {
   try {
     const p = sessionMetaPath(name);
     const cur = readJsonFileSilently(p, (v): v is SessionMeta => !!v && typeof v === "object");
-    const next: SessionMeta = { ...(cur ?? {}), updatedAt: Date.now() };
+    const next: SessionMeta = {
+      ...(cur ?? {}),
+      updatedAt: Date.now(),
+      // Write-once: anchored to the name's mint timestamp for legacy
+      // sessions, never refreshed afterward.
+      createdAt: creationStampFor(cur, name),
+    };
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, JSON.stringify(next), "utf8");
     chmodPrivate(p);
@@ -396,12 +437,23 @@ export function listSessions(opts?: {
           messageCount,
           mtime,
           lastActive: meta.updatedAt,
+          createdAt: sessionCreatedAt(meta, name),
           meta,
           workspaceStatus,
         },
       ];
     })
     .sort(sortSessionsDescending);
+}
+
+/** Creation epoch-ms for a listed session: the explicit meta stamp when
+ *  present, else the timestamp embedded in the session name, else undefined
+ *  (sorters fall back to mtime). */
+function sessionCreatedAt(meta: SessionMeta, name: string): number | undefined {
+  if (typeof meta.createdAt === "number" && Number.isFinite(meta.createdAt)) {
+    return meta.createdAt;
+  }
+  return parseSessionTimestamp(name) || undefined;
 }
 
 /** Canonical form for workspace path comparisons — Windows drive-case + separator drift between session writes (yesterday) and reads (today) used to hide sessions from the sidebar. Issue #878. */
@@ -461,6 +513,7 @@ export function listSessionsForWorkspaceAsync(workspace: string): {
               messageCount: record.messageCount,
               mtime: record.mtime,
               lastActive: record.meta.updatedAt,
+              createdAt: sessionCreatedAt(record.meta, record.name),
               meta: record.meta,
               workspaceStatus,
             },
@@ -502,7 +555,13 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
   const cur = loadSessionMeta(name);
   // patchSessionMeta calls are user-visible activity (rename, model change,
   // cost accumulation) — keep the explicit activity stamp current.
-  const next: SessionMeta = { ...cur, ...patch, updatedAt: Date.now() };
+  const next: SessionMeta = {
+    ...cur,
+    ...patch,
+    updatedAt: Date.now(),
+    // Write-once, enforced AFTER the spread so no patch can rewrite it.
+    createdAt: creationStampFor(cur, name, patch.createdAt),
+  };
   const p = sessionMetaPath(name);
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, JSON.stringify(next), "utf8");
@@ -569,8 +628,31 @@ export function renameSession(oldName: string, newName: string): boolean {
     process.stderr.write(`reasonix: session rename failed — ${messageOf(err)}\n`);
     return false;
   }
+  preserveCreationStampAcrossRename(newName, oldName);
   sessionDirectoryIndex.invalidate();
   return true;
+}
+
+/** A folder rename orphans the creation timestamp embedded in the old name —
+ *  archive rotations would otherwise make the session jump to the top of the
+ *  creation-ordered sidebar. Anchor the write-once meta stamp to the old
+ *  name's mint time (or the folder's birthtime) before that fallback is lost. */
+function preserveCreationStampAcrossRename(newName: string, oldName: string): void {
+  try {
+    const meta = loadSessionMeta(newName);
+    if (isFiniteStamp(meta.createdAt)) return; // already anchored — nothing to do
+    let stamp = parseSessionTimestamp(oldName);
+    if (!stamp) {
+      try {
+        stamp = Math.floor(statSync(sessionDir(newName)).birthtimeMs);
+      } catch {
+        stamp = 0; /* fall through to now */
+      }
+    }
+    patchSessionMeta(newName, { createdAt: stamp || Date.now() });
+  } catch {
+    void 0; /* best-effort — the list falls back to the new name's timestamp */
+  }
 }
 
 /** Map a legacy sidecar suffix onto its folder-layout destination. */

@@ -2194,6 +2194,7 @@ async function emitSessions(
         messageCount: session.messageCount,
         mtime: session.mtime.toISOString(),
         updatedAt: session.meta.updatedAt,
+        createdAt: session.createdAt,
         summary: session.meta.summary,
         workspaceStatus: session.workspaceStatus,
       })),

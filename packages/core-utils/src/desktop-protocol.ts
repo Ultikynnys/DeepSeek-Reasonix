@@ -387,10 +387,13 @@ export interface SessionsEvent {
     name: string;
     messageCount: number;
     mtime: string;
-    /** Explicit last-activity epoch-ms from the session's meta — the sidebar
-     *  sorts on this (falling back to mtime) so ordering survives file
-     *  copies/restores that reset filesystem timestamps. */
+    /** Explicit last-activity epoch-ms from the session's meta — drives the
+     *  sidebar's relative-time label so it survives file copies/restores that
+     *  reset filesystem timestamps. */
     updatedAt?: number;
+    /** Creation epoch-ms (meta.createdAt, else the name-embedded timestamp) —
+     *  the sidebar sorts on this (falling back to mtime). */
+    createdAt?: number;
     summary?: string;
     workspaceStatus?: "matched" | "legacy_missing_meta";
   }[];

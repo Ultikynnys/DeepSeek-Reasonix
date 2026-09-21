@@ -1,6 +1,6 @@
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { type SessionInfo, sortSessionsDescending } from "../App";
+import { type SessionInfo, sortSessionsByCreationDescending } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import { useClampedPopupPosition } from "./file-menu";
@@ -89,7 +89,7 @@ export function Sidebar({
   const workspaceLabel = workspaceDir
     ? workspaceDir.split(/[\\/]/).pop() || workspaceDir
     : t("sidebarPanel.noWorkspace");
-  const sortedSessions = [...sessions].sort(sortSessionsDescending);
+  const sortedSessions = [...sessions].sort(sortSessionsByCreationDescending);
   const filtered = query
     ? sortedSessions.filter((s) => {
         const q = query.toLowerCase();

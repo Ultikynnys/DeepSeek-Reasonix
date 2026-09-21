@@ -1,6 +1,10 @@
 export interface SessionRecencyInput {
   name: string;
   mtime: Date | string | number;
+  /** Explicit creation epoch-ms from the session's meta (`createdAt`).
+   *  Wins over the name-embedded timestamp when present so renamed/archived
+   *  sessions keep their original creation date. */
+  createdAt?: number;
   /** Explicit last-activity epoch-ms from the session's meta (`updatedAt`).
    *  Wins over mtime when present so ordering survives file copies/restores
    *  that reset the filesystem timestamps. */
@@ -47,4 +51,23 @@ export function sessionRecency(session: SessionRecencyInput): number {
 export function sortSessionsDescending<T extends SessionRecencyInput>(a: T, b: T): number {
   const recencyDiff = sessionRecency(b) - sessionRecency(a);
   return recencyDiff || b.name.localeCompare(a.name);
+}
+
+/** Session creation time: the explicit meta stamp when present, else the
+ *  timestamp embedded in the name, else the filesystem mtime. Mirrors the
+ *  fallback chain of `sessionRecency` so legacy sessions without a meta
+ *  stamp still order sensibly. */
+export function sessionCreationTime(session: SessionRecencyInput): number {
+  if (typeof session.createdAt === "number" && Number.isFinite(session.createdAt)) {
+    return session.createdAt;
+  }
+  return parseSessionTimestamp(session.name) || mtimeMilliseconds(session.mtime);
+}
+
+/** Newest-created-first ordering with a descending-name tie-break — used for
+ *  workspace session lists, where the sidebar sorts by creation date rather
+ *  than last activity. */
+export function sortSessionsByCreationDescending<T extends SessionRecencyInput>(a: T, b: T): number {
+  const createdDiff = sessionCreationTime(b) - sessionCreationTime(a);
+  return createdDiff || b.name.localeCompare(a.name);
 }

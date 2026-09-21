@@ -10,7 +10,7 @@ import {
   redactDiagnosticText,
   redactDiagnosticValue,
   sanitizeFilename,
-  sortSessionsDescending,
+  sortSessionsByCreationDescending,
 } from "@reasonix/core-utils";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -368,14 +368,23 @@ export type SessionInfo = {
   name: string;
   messageCount: number;
   mtime: string;
-  /** Explicit last-activity epoch-ms from the session's meta — copy-safe
-   *  sort key that wins over a stale filesystem mtime. */
+  /** Explicit last-activity epoch-ms from the session's meta — drives the
+   *  sidebar's relative-time label and wins over a stale filesystem mtime. */
   updatedAt?: number;
+  /** Creation epoch-ms — the sidebar's primary sort key (newest-created
+   *  first). Falls back to the name-embedded timestamp, then mtime. */
+  createdAt?: number;
   summary?: string;
   workspaceStatus?: "matched" | "legacy_missing_meta";
 };
 
-export { parseSessionTimestamp, sessionRecency, sortSessionsDescending } from "@reasonix/core-utils";
+export {
+  parseSessionTimestamp,
+  sessionCreationTime,
+  sessionRecency,
+  sortSessionsByCreationDescending,
+  sortSessionsDescending,
+} from "@reasonix/core-utils";
 
 export type Settings = SettingsPayload;
 
@@ -1631,9 +1640,9 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return {
         ...state,
         sessions: [...unique.values()].sort((a, b) =>
-          sortSessionsDescending(
-            { name: a.name, mtime: a.mtime, lastActive: a.updatedAt },
-            { name: b.name, mtime: b.mtime, lastActive: b.updatedAt },
+          sortSessionsByCreationDescending(
+            { name: a.name, mtime: a.mtime, createdAt: a.createdAt },
+            { name: b.name, mtime: b.mtime, createdAt: b.createdAt },
           ),
         ),
         sessionsEpoch: ev.epoch,

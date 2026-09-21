@@ -45,6 +45,7 @@ import {
   sessionPath,
   sessionRecency,
   sessionsDir,
+  sortSessionsByCreationDescending,
   sortSessionsDescending,
   timestampSuffix,
 } from "../src/memory/session.js";
@@ -199,6 +200,26 @@ describe("session persistence", () => {
     ]);
   });
 
+  it("sortSessionsByCreationDescending orders by creation date even when a stale session was active more recently", () => {
+    const sessions = [
+      {
+        name: "desktop-20260901100000-1",
+        mtime: new Date(Date.UTC(2026, 8, 7)),
+        meta: { updatedAt: Date.UTC(2026, 8, 7).valueOf() },
+      },
+      { name: "desktop-20260905140000-1", mtime: new Date(Date.UTC(2026, 8, 5)), meta: {} },
+      { name: "desktop-20260903120000-1", mtime: new Date(Date.UTC(2026, 8, 3)), meta: {} },
+    ];
+    sessions.sort(sortSessionsByCreationDescending);
+    // Sep 1 session was active on Sep 7 — recency would put it first, but
+    // creation order keeps the Sep 5 session on top.
+    expect(sessions.map((s) => s.name)).toEqual([
+      "desktop-20260905140000-1",
+      "desktop-20260903120000-1",
+      "desktop-20260901100000-1",
+    ]);
+  });
+
   it("sortSessionsDescending breaks identical recency ties using descending session name", () => {
     const fixedMtime = new Date(0);
     const sessions = [
@@ -215,6 +236,82 @@ describe("session persistence", () => {
     writeFileSync(sessionPath("real").replace(/\.jsonl$/, ".events.jsonl"), '{"id":1}\n');
     const names = listSessions().map((s) => s.name);
     expect(names).toEqual(["real"]);
+  });
+
+  it("sessions minted via appendSessionMessage carry a write-once createdAt stamp", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 8, 5, 12, 0, 0));
+    try {
+      appendSessionMessage("stamped", { role: "user", content: "x" });
+      expect(loadSessionMeta("stamped").createdAt).toBe(Date.UTC(2026, 8, 5, 12, 0, 0));
+
+      // Later activity refreshes updatedAt but must NOT touch createdAt.
+      vi.setSystemTime(Date.UTC(2026, 8, 6, 9, 0, 0));
+      patchSessionMeta("stamped", { summary: "renamed" });
+      const meta = loadSessionMeta("stamped");
+      expect(meta.createdAt).toBe(Date.UTC(2026, 8, 5, 12, 0, 0));
+      expect(meta.updatedAt).toBe(Date.UTC(2026, 8, 6, 9, 0, 0));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("listSessions exposes createdAt from meta, falling back to the name timestamp", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 8, 5, 12, 0, 0));
+    try {
+      appendSessionMessage("created-20260905120000", { role: "user", content: "x" });
+      const mintTs = Date.UTC(2026, 8, 5, 12, 0, 0);
+      expect(loadSessionMeta("created-20260905120000").createdAt).toBe(mintTs);
+      expect(listSessions().find((s) => s.name === "created-20260905120000")?.createdAt).toBe(
+        mintTs,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Legacy session with no meta stamp: createdAt derives from the name.
+    mkdirSync(sessionDir("legacy-202605251200"), { recursive: true });
+    writeFileSync(sessionPath("legacy-202605251200"), "", "utf8");
+    const legacy = listSessions().find((s) => s.name === "legacy-202605251200")!;
+    expect(legacy.createdAt).toBe(parseSessionTimestamp("legacy-202605251200"));
+  });
+
+  it("touching a legacy timestamped session anchors createdAt to its name — not to now", () => {
+    // Pre-existing session (no meta yet) whose real mint time lives in the name.
+    mkdirSync(sessionDir("legacy-202605251200"), { recursive: true });
+    writeFileSync(sessionPath("legacy-202605251200"), "", "utf8");
+    const mintTs = parseSessionTimestamp("legacy-202605251200");
+    vi.useFakeTimers();
+    // "Much later": if first touch stamped now, the session would leap to the
+    // top of the creation-ordered sidebar — the exact instability to avoid.
+    vi.setSystemTime(Date.UTC(2027, 0, 1));
+    try {
+      appendSessionMessage("legacy-202605251200", { role: "user", content: "x" });
+      const meta = loadSessionMeta("legacy-202605251200");
+      expect(meta.createdAt).toBe(mintTs);
+      expect(meta.updatedAt).toBe(Date.UTC(2027, 0, 1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("renameSession anchors the creation stamp when the new name loses its embedded timestamp", () => {
+    // No meta.json — the name timestamp is the ONLY creation evidence, and the
+    // rename orphans it. The stamp must be written into meta before that.
+    mkdirSync(sessionDir("plain-202605251200"), { recursive: true });
+    writeFileSync(sessionPath("plain-202605251200"), "", "utf8");
+    const mintTs = parseSessionTimestamp("plain-202605251200");
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2027, 0, 1));
+    try {
+      expect(renameSession("plain-202605251200", "renamed-plain")).toBe(true);
+      // The new name parses to 0, so meta is now the only source of truth.
+      expect(parseSessionTimestamp("renamed-plain")).toBe(0);
+      expect(loadSessionMeta("renamed-plain").createdAt).toBe(mintTs);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("listSessionsForWorkspace matches meta.workspace and hides untagged sessions", () => {
