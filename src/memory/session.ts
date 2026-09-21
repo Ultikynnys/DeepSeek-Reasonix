@@ -112,10 +112,9 @@ export interface SessionMeta {
    *  message append and meta patch. Drives the resume-pick so ordering
    *  survives file copies/restores that would reset the filesystem mtime. */
   updatedAt?: number;
-  /** Epoch-ms creation stamp — written once when the session first gains
-   *  meta (or its first message) and never overwritten. Drives the
-   *  sidebar's creation-date sort; sessions minted before this field
-   *  existed fall back to the timestamp embedded in their name. */
+  /** Epoch-ms creation stamp — written once, never overwritten. Drives the
+   *  sidebar's creation-date sort; sessions minted before this field existed
+   *  fall back to the timestamp embedded in their name. */
   createdAt?: number;
   totalCostUsd?: number;
   turnCount?: number;
@@ -335,11 +334,9 @@ function isFiniteStamp(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-/** Resolve a session's creation stamp for a meta write, honoring the
- *  write-once invariant: an existing stamp always wins; else an explicitly
- *  provided one; else the timestamp embedded in the name (the true mint time
- *  of legacy sessions — NOT `now`, which would jump them to the top of the
- *  sidebar on first touch); else now. */
+/** Resolve the creation stamp for a meta write — write-once: existing stamp
+ *  wins; else explicit; else the name-embedded mint time (NOT `now`, which
+ *  would jump legacy sessions to the sidebar top on first touch); else now. */
 function creationStampFor(
   meta: SessionMeta | null | undefined,
   name: string,
@@ -633,10 +630,9 @@ export function renameSession(oldName: string, newName: string): boolean {
   return true;
 }
 
-/** A folder rename orphans the creation timestamp embedded in the old name —
- *  archive rotations would otherwise make the session jump to the top of the
- *  creation-ordered sidebar. Anchor the write-once meta stamp to the old
- *  name's mint time (or the folder's birthtime) before that fallback is lost. */
+/** A rename orphans the timestamp embedded in the old name — archive rotations
+ *  would otherwise make the session jump to the sidebar top. Anchor the
+ *  write-once meta stamp to the old name's mint time (or folder birthtime). */
 function preserveCreationStampAcrossRename(newName: string, oldName: string): void {
   try {
     const meta = loadSessionMeta(newName);
