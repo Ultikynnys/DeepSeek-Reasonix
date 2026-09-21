@@ -474,6 +474,12 @@ export function shouldMaterializeFreshSession(reason: "new-chat" | "session-dele
   return reason === "new-chat";
 }
 
+/** Boot restore: a persisted tab whose session was DELETED must not resurrect
+ * it on disk — mint a virtual one; only a genuinely new tab self-materializes. */
+export function shouldMaterializeRestoredSession(restore?: { session?: string }): boolean {
+  return !restore?.session;
+}
+
 /** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
 export function writeAllSync(
   fd: number,
@@ -3938,19 +3944,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       sessionsRevision: 0,
       hooks: loadHooks({ projectRoot: dir }),
     };
-    // A restored session is bound synchronously (when its jsonl still exists)
-    // so the $tab_opened emit carries the real session; otherwise mint a fresh
-    // empty conversation. A missing jsonl falls back to a fresh mint so the
-    // channel never points at a dangling session name.
+    // A restored session binds its real jsonl when it still exists. A restored
+    // tab whose session was DELETED must stay VIRTUAL (no folder) so it is not
+    // resurrected on restart; only a genuinely new tab materializes eagerly.
     const restoredSession =
       restore?.session && sessionExists(restore.session) ? restore.session : undefined;
     tab.currentSession = restoredSession
       ? restoredSession
-      : mintSessionFor(dir, {
-          model: tab.currentModel,
-          reasoningEffort: tab.currentReasoningEffort,
-          subagentModel: tab.currentSubagentModel,
-        });
+      : mintSessionFor(
+          dir,
+          {
+            model: tab.currentModel,
+            reasoningEffort: tab.currentReasoningEffort,
+            subagentModel: tab.currentSubagentModel,
+          },
+          { materialize: shouldMaterializeRestoredSession(restore) },
+        );
     tabs.set(tab.id, tab);
     emitTabDiagnostic(tab, "tab.created", { active: false }, "info");
     return tab;
