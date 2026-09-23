@@ -6830,6 +6830,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             // built a runtime for, and every later send misfires.
             const prevModel = tab.currentModel;
             const prevSystem = tab.system;
+            // Release a running turn before the rebuild. The in-flight runTurn
+            // captured the previous runtime, so it keeps driving the old
+            // loop/client and never adopts the new model; a wedged request then
+            // holds the turn (and every queued send behind it) until the
+            // client's 11-min timeout. Abort BEFORE the rebuild so the OLD loop
+            // is the one stopped, and WITHOUT the `switching` flag so the
+            // turn's $turn_complete still lands and the FE settles + drains.
+            if (tab.aborter) abortTurn(tab, desktopUserAbortLoopOptions());
             try {
               tab.currentModel = next;
               saveModel(next);
