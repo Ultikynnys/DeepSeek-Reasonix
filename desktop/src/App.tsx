@@ -1801,9 +1801,18 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
     case "$settings": {
       const prevWs = state.settings?.workspaceDir;
       const wsChanged = prevWs !== undefined && prevWs !== ev.workspaceDir;
+      // A model switch aborts the running turn daemon-side (the in-flight turn
+      // holds the previous loop/model) so it can't wedge the tab. Mirror that
+      // release here: any model change clears a busy/stuck turn so the FE
+      // unblocks and its queued sends drain, even if the abort's $turn_complete
+      // lands late — otherwise those queued messages inherit the same freeze.
+      const modelChanged = state.settings != null && state.settings.model !== ev.model;
+      const releaseTurn = wsChanged || modelChanged;
       return {
         ...state,
-        busy: wsChanged ? false : state.busy,
+        busy: releaseTurn ? false : state.busy,
+        turnStatus: releaseTurn ? null : state.turnStatus,
+        turnStatusTool: releaseTurn ? null : state.turnStatusTool,
         messages: wsChanged ? [] : state.messages,
         pendingConfirms: wsChanged ? [] : state.pendingConfirms,
         pendingPathAccess: wsChanged ? [] : state.pendingPathAccess,

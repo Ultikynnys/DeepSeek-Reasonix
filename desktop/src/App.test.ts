@@ -365,6 +365,80 @@ describe("Desktop App reducer — usage", () => {
     });
   });
 
+  it("releases a busy turn when the model changes so queued sends drain", () => {
+    const base: Parameters<typeof reduce>[0] = {
+      ...initialState(),
+      busy: true,
+      turnStatus: "waiting_tool",
+      turnStatusTool: "read_file",
+      settings: {
+        reasoningEffort: "high",
+        editMode: "review",
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "gpt-5.6-sol",
+        version: "0.50.1",
+      },
+      queuedSends: [{ text: "queued while the turn was wedged" }],
+    };
+
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "$settings",
+        reasoningEffort: "high",
+        editMode: "review",
+        quickSendId: "proceed",
+        quickSends: [],
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "glm-5.3-flash",
+        version: "0.50.1",
+      },
+    });
+
+    // The daemon aborts the running turn on a model switch; the FE must
+    // unblock too, or the queued sends stay stuck behind the dead turn.
+    expect(next.busy).toBe(false);
+    expect(next.turnStatus).toBeNull();
+    expect(next.turnStatusTool).toBeNull();
+    expect(next.queuedSends).toHaveLength(1);
+  });
+
+  it("keeps a running turn when $settings refreshes without a model change", () => {
+    const base: Parameters<typeof reduce>[0] = {
+      ...initialState(),
+      busy: true,
+      turnStatus: "waiting_tool",
+      settings: {
+        reasoningEffort: "high",
+        editMode: "review",
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "gpt-5.6-sol",
+        version: "0.50.1",
+      },
+    };
+
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "$settings",
+        reasoningEffort: "low",
+        editMode: "auto",
+        quickSendId: "proceed",
+        quickSends: [],
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "gpt-5.6-sol",
+        version: "0.50.1",
+      },
+    });
+
+    expect(next.busy).toBe(true);
+    expect(next.turnStatus).toBe("waiting_tool");
+  });
+
   it("recovers the turn card from any entry event when turn-start is missing", () => {
     const base = initialState();
     const incoming = (event: Record<string, unknown>) =>
