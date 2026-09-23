@@ -598,11 +598,24 @@ function nextMessageTurn(messages: ChatMessage[]): number {
   return lastTurn + 1;
 }
 
-function ensureAssistantTurn(messages: ChatMessage[], turn: number): ChatMessage[] {
-  if (messages.some((message) => message.kind === "assistant" && message.turn === turn)) {
-    return messages;
-  }
-  return [...messages, { kind: "assistant", turn, segments: [], pending: true }];
+/** Events that render into a turn's assistant card. Ensured centrally so a
+ *  dropped `model.turn.started` cannot silently swallow them. */
+const ASSISTANT_CARD_EVENTS: ReadonlySet<IncomingEvent["type"]> = new Set([
+  "model.delta",
+  "model.final",
+  "tool.preparing",
+  "tool.intent",
+]);
+
+/** Append the event's assistant card when absent; a no-op otherwise. */
+function ensureAssistantTurn(state: State, ev: IncomingEvent): State {
+  if (!ASSISTANT_CARD_EVENTS.has(ev.type)) return state;
+  const turn = (ev as { turn: number }).turn;
+  if (state.messages.some((m) => m.kind === "assistant" && m.turn === turn)) return state;
+  return {
+    ...state,
+    messages: [...state.messages, { kind: "assistant", turn, segments: [], pending: true }],
+  };
 }
 
 let noticeSequence = 0;
@@ -1467,6 +1480,10 @@ export function applySubagentProgress(
 }
 
 export function applyIncoming(state: State, ev: IncomingEvent): State {
+  return applyIncomingInner(ensureAssistantTurn(state, ev), ev);
+}
+
+function applyIncomingInner(state: State, ev: IncomingEvent): State {
   switch (ev.type) {
     case "user.message": {
       return {
@@ -1962,7 +1979,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         ...state,
         turnStatus: ev.channel === "reasoning" ? "reasoning" : "responding",
         turnLastEventMs: Date.now(),
-        messages: ensureAssistantTurn(state.messages, ev.turn).map((m) => {
+        messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           if (ev.channel === "content") {
             return { ...m, segments: appendTextSegment(m.segments, "text", ev.text) };
@@ -1999,7 +2016,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       return {
         ...state,
         usage,
-        messages: ensureAssistantTurn(state.messages, ev.turn).map((m) => {
+        messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           // Abort-settled finals (emitAbortedFinal) carry the abort notice in
           // `content`, but the deltas never streamed it — append it so the card
@@ -2033,7 +2050,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         turnStatus: "calling_tool",
         turnStatusTool: ev.name,
         turnLastEventMs: Date.now(),
-        messages: ensureAssistantTurn(state.messages, ev.turn).map((m) => {
+        messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           if (m.segments.some((s) => s.kind === "tool" && s.callId === ev.callId)) return m;
           return {
@@ -2059,7 +2076,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         turnStatusTool: ev.name,
         turnLastEventMs: Date.now(),
         sessionFiles: mergeSessionFiles(state.sessionFiles, adds),
-        messages: ensureAssistantTurn(state.messages, ev.turn).map((m) => {
+        messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
           if (idx >= 0) {

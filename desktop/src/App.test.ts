@@ -365,6 +365,50 @@ describe("Desktop App reducer — usage", () => {
     });
   });
 
+  it("recovers the turn card from any entry event when turn-start is missing", () => {
+    const base = initialState();
+    const incoming = (event: Record<string, unknown>) =>
+      reduce(base, { t: "incoming", event } as unknown as Parameters<typeof reduce>[1]);
+
+    // Streamed text arrives first (no turn-start): the card still appears.
+    expect(
+      incoming({ type: "model.delta", id: 1, ts: "t", turn: 2, channel: "content", text: "hi" })
+        .messages,
+    ).toEqual([
+      { kind: "assistant", turn: 2, pending: true, segments: [{ kind: "text", text: "hi" }] },
+    ]);
+
+    // A tool call announced first (no turn-start): the running tool appears.
+    expect(
+      incoming({ type: "tool.preparing", id: 2, ts: "t", turn: 3, callId: "tc-9", name: "shell" })
+        .messages[0],
+    ).toMatchObject({
+      kind: "assistant",
+      turn: 3,
+      pending: true,
+      segments: [{ kind: "tool", callId: "tc-9", name: "shell" }],
+    });
+  });
+
+  it("does not fabricate a card for events that only patch an existing one", () => {
+    const base = initialState();
+    // tool.result only patches an existing tool segment, so alone it must not
+    // spawn an empty assistant bubble.
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "tool.result",
+        id: 1,
+        ts: "t",
+        turn: 4,
+        callId: "tc-1",
+        ok: true,
+        output: "orphaned result",
+      },
+    } as unknown as Parameters<typeof reduce>[1]);
+    expect(next.messages).toEqual([]);
+  });
+
   it("keeps an active streaming card newest and slots a mid-turn notice above it", () => {
     let s = initialState();
     const act = (action: Parameters<typeof reduce>[1]) => {
