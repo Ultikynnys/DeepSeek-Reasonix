@@ -4011,12 +4011,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         ? configuredDir
         : defaultDir;
     const resolvedInitial =
-      initialDir && sameWorkspaceDir(initialDir, reasonixInstallDir())
-        ? defaultDir
-        : initialDir;
-    const dir = pending
-      ? ""
-      : resolve(resolvedInitial ?? opts.dir ?? fallbackDir);
+      initialDir && sameWorkspaceDir(initialDir, reasonixInstallDir()) ? defaultDir : initialDir;
+    const dir = pending ? "" : resolve(resolvedInitial ?? opts.dir ?? fallbackDir);
     if (!pending) pushRecentWorkspace(dir);
     const model = opts.model || loadModel() || DEFAULT_MODEL;
     // Restored tabs keep their persisted id so a backend restart doesn't
