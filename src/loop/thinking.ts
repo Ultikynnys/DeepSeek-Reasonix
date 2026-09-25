@@ -22,6 +22,9 @@ export function isThinkingModeModel(model: string): boolean {
 export function thinkingModeForModel(model: string): "enabled" | "disabled" | undefined {
   if (model.startsWith("gpt-")) return undefined;
   if (model === "deepseek-chat") return "disabled";
+  // Gemini 2.5+/3.x thinking models: opt into thought summaries so their
+  // reasoning is captured (and persisted) instead of silently dropped.
+  if (model.startsWith("gemini-")) return "enabled";
   if (model.startsWith("glm-")) return "enabled";
   if (model.includes("reasoner")) return "enabled";
   if (isDeepSeekV4ThinkingModel(model)) return "enabled";

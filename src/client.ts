@@ -1105,6 +1105,7 @@ export class DeepSeekClient {
     const candidate = inner.candidates?.[0];
     const parts = candidate?.content?.parts ?? [];
     let content = "";
+    let reasoning = "";
     let image: { dataUrl: string; mimeType: string } | undefined;
     const toolCalls: ToolCall[] = [];
     // Gemini 3 can return a thought signature as a sibling of functionCall,
@@ -1116,7 +1117,12 @@ export class DeepSeekClient {
       candidate,
     );
     for (const part of parts) {
-      if (typeof part.text === "string") content += part.text;
+      // `thought: true` marks a thought-summary part — capture it as reasoning,
+      // not answer text, so it persists as reasoning_content.
+      if (typeof part.text === "string") {
+        if (part.thought === true) reasoning += part.text;
+        else content += part.text;
+      }
       const sig = extractAntigravityThoughtSignature(part);
       if (sig) partThoughtSignature = sig;
       const inline = part.inlineData ?? part.inline_data;
@@ -1150,7 +1156,7 @@ export class DeepSeekClient {
     }
     return {
       content,
-      reasoningContent: null,
+      reasoningContent: reasoning || null,
       toolCalls,
       image,
       usage: this.usageForAntigravity(inner.usageMetadata),
@@ -1321,7 +1327,14 @@ export class DeepSeekClient {
     }
     for (const part of parts) {
       if (typeof part.text === "string" && part.text.length > 0) {
-        chunk.contentDelta = (chunk.contentDelta ?? "") + part.text;
+        // Gemini marks thought-summary parts with `thought: true`; keep them on
+        // the reasoning channel so they render as thinking and persist as
+        // reasoning_content instead of leaking into the answer text.
+        if (part.thought === true) {
+          chunk.reasoningDelta = (chunk.reasoningDelta ?? "") + part.text;
+        } else {
+          chunk.contentDelta = (chunk.contentDelta ?? "") + part.text;
+        }
       }
       const inline = part.inlineData ?? part.inline_data;
       if (inline?.data && inline?.mimeType) {
@@ -1352,6 +1365,7 @@ export class DeepSeekClient {
     if (envelopeThoughtSignature !== undefined) chunk.thoughtSignature = envelopeThoughtSignature;
     if (
       chunk.contentDelta !== undefined ||
+      chunk.reasoningDelta !== undefined ||
       chunk.usage !== undefined ||
       chunk.finishReason !== undefined ||
       chunk.stopReason !== undefined ||

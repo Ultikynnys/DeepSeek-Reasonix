@@ -93,8 +93,22 @@ export function truncateToolOutputsInMarkdown(markdown: string, maxLines = 3): s
   return result.join("\n");
 }
 
-/** Keep the newest blocks until the budget is spent; the oldest retained block is
- *  tail-truncated to fill whatever budget remains. */
+/** A block's must-survive essence: a user/input block (a `### ` header that is
+ *  not `### Reasonix`) is kept whole; an assistant block keeps its `<details>`
+ *  thinking. Bare fragments with neither return null (fully droppable). */
+function preservedOnly(block: string): string | null {
+  const newline = block.indexOf("\n");
+  const firstLine = newline === -1 ? block : block.slice(0, newline);
+  if (firstLine.startsWith("### ") && firstLine !== "### Reasonix") return block;
+  const thinking = block.match(/<details>[\s\S]*?<\/details>/g);
+  if (!thinking || thinking.length === 0) return null;
+  const header = firstLine.startsWith("### ") ? firstLine : "";
+  return [header, ...thinking].filter(Boolean).join("\n\n");
+}
+
+/** Keep newest blocks whole until the budget is spent, then keep only each older
+ *  block's essence (user input / thinking) so thinking survives; tool cards and
+ *  prose drop first. A block too big even for its essence is tail-truncated. */
 export function truncateMarkdownToTokens(markdown: string, budget: number): TruncatedContext {
   const trimmed = markdown.trim();
   if (!trimmed) return { text: "", droppedTokens: 0, truncated: false };
@@ -105,38 +119,46 @@ export function truncateMarkdownToTokens(markdown: string, budget: number): Trun
   if (total <= budget) return { text: processed, droppedTokens: 0, truncated: false };
 
   const blocks = processed.split(BLOCK_SEPARATOR);
-  const kept: string[] = [];
-  let remaining = budget;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const block = blocks[i]!;
-    const blockTokens = countTokens(block);
-    if (blockTokens <= remaining) {
-      kept.unshift(block);
-      remaining -= blockTokens;
-      continue;
-    }
-    const detailsMatch = block.match(/<details>[\s\S]*?<\/details>/);
-    if (detailsMatch && detailsMatch.index !== undefined) {
-      const thinking = detailsMatch[0];
-      const thinkingTokens = countTokens(thinking);
-      if (thinkingTokens <= remaining) {
-        const header = block.slice(0, detailsMatch.index);
-        const afterThinking = block.slice(detailsMatch.index + thinking.length);
-        const remForAfter = remaining - thinkingTokens - countTokens(header);
-        const tailAfter = remForAfter > 0 ? trailingWithinBudget(afterThinking, remForAfter) : "";
-        const partial = [header + thinking, tailAfter].filter(Boolean).join("\n\n");
-        if (partial) kept.unshift(partial);
-      }
-    } else {
-      const tail = trailingWithinBudget(block, remaining);
-      if (tail) kept.unshift(tail);
-    }
-    break;
+  // Reserve each block's essence — a user input in full, or an assistant block's
+  // `<details>` thinking — BEFORE spending budget on droppable tool cards and
+  // prose, so thinking and user inputs survive over-budget cuts instead of being
+  // front-dropped wholesale with the block that carried them.
+  const essence = blocks.map((block) => preservedOnly(block));
+  const essenceTokens = essence.map((e) => (e === null ? 0 : countTokens(e)));
+  const essenceTotal = essenceTokens.reduce((sum, n) => sum + n, 0);
+
+  if (essenceTotal > budget) {
+    // Even the essence alone can't fit: keep only its newest slice.
+    const essenceStream = essence.filter((e): e is string => e !== null).join(BLOCK_SEPARATOR);
+    const text = trailingWithinBudget(essenceStream, budget);
+    return { text, droppedTokens: Math.max(0, total - countTokens(text)), truncated: true };
   }
 
-  const text = kept.join(BLOCK_SEPARATOR);
-  const keptTokens = countTokens(text);
-  return { text, droppedTokens: Math.max(0, total - keptTokens), truncated: true };
+  // Spend what remains upgrading blocks to their full form (newest first) and
+  // keeping blocks that carry no essence; older blocks left over stay essence-only.
+  const keepFull = blocks.map(() => false);
+  let remaining = budget - essenceTotal;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const extra = countTokens(blocks[i]!) - essenceTokens[i]!;
+    if (extra <= remaining) {
+      keepFull[i] = true;
+      remaining -= extra;
+    }
+  }
+
+  const kept: string[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    if (keepFull[i]) kept.push(blocks[i]!);
+    else if (essence[i] !== null) kept.push(essence[i]!);
+  }
+
+  // A transcript of only huge, thinking-less blocks (nothing reserved, nothing
+  // fitting whole) must never collapse to empty — fall back to the newest tail.
+  const text =
+    kept.length > 0
+      ? kept.join(BLOCK_SEPARATOR)
+      : trailingWithinBudget(blocks[blocks.length - 1] ?? processed, budget);
+  return { text, droppedTokens: Math.max(0, total - countTokens(text)), truncated: true };
 }
 
 /** Full new-session seed: a truncation header (only when something was dropped),

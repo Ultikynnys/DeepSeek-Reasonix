@@ -55,6 +55,28 @@ describe("truncateMarkdownToTokens", () => {
     expect(r.text).not.toContain("HEAD-ONLY-MARKER");
     expect(countTokens(r.text)).toBeLessThanOrEqual(210);
   });
+
+  it("keeps every turn's thinking and user input when the transcript is over budget", () => {
+    const turns: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      // Segments within a message join with \n\n; messages join with SEP.
+      turns.push(`### You\n\nuser-input-${i}`);
+      const thinking = `<details>\n<summary>Reasoning</summary>\n\nTHINKING-${i} ${"reason ".repeat(20)}\n\n</details>`;
+      const tool = `> **Tool · \`run_command\`**\n\n\`\`\`json\n{"cmd":${i}}\n\`\`\`\n\n\`\`\`\n${"out\n".repeat(30)}\`\`\``;
+      turns.push(`### Reasonix\n\n${thinking}\n\n${tool}\n\nprose ${i} ${"word ".repeat(40)}`);
+    }
+    const r = truncateMarkdownToTokens(turns.join(SEP), 4000);
+    expect(r.truncated).toBe(true);
+    // Thinking and user inputs from the OLDEST and the NEWEST turns both survive:
+    // they are reserved before droppable tool output instead of being front-dropped
+    // with their block (the old behavior kept only the newest third).
+    expect(r.text).toContain("THINKING-0 ");
+    expect(r.text).toContain("THINKING-39 ");
+    expect(r.text).toContain("user-input-0");
+    expect(r.text).toContain("user-input-39");
+    // Bloated command output is still compressed to 3 lines.
+    expect(r.text).not.toContain("out\nout\nout\nout");
+  });
 });
 
 describe("buildDuplicateContext", () => {

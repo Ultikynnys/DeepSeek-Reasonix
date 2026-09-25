@@ -45,6 +45,10 @@ describe("thinkingModeForModel", () => {
     expect(thinkingModeForModel("deepseek-v4-pro")).toBe("enabled");
     expect(thinkingModeForModel("ollama/deepseek-v4-flash:0731")).toBe("enabled");
   });
+  it("gemini thinking models → enabled so their thought summaries are captured", () => {
+    expect(thinkingModeForModel("gemini-3.8-flash-tiered")).toBe("enabled");
+    expect(thinkingModeForModel("gemini-2.5-flash")).toBe("enabled");
+  });
   it("unknown models → undefined (let server decide)", () => {
     expect(thinkingModeForModel("gpt-4")).toBeUndefined();
     expect(thinkingModeForModel("anthropic-claude")).toBeUndefined();

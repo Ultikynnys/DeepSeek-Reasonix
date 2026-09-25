@@ -709,6 +709,27 @@ describe("gemini payload", () => {
     expect(bodies[1]?.request).not.toHaveProperty("generationConfig");
   });
 
+  it("captures thought-summary parts as reasoning_content, not content", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify(
+            wrappedResponse([{ text: "let me think", thought: true }, { text: "the answer" }]),
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    ) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    const res = await client.chat({
+      model: "gemini-3.8-flash-tiered",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(res.content).toBe("the answer");
+    expect(res.reasoningContent).toBe("let me think");
+  });
+
   it("strips Gemini-incompatible JSON-Schema keywords from tool parameters", async () => {
     let captured: unknown = null;
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
@@ -1199,6 +1220,32 @@ describe("gemini streaming", () => {
     const usageChunk = chunks.find((c) => c.usage);
     expect(usageChunk?.usage?.promptTokens).toBe(3);
     expect(usageChunk?.usage?.completionTokens).toBe(2);
+  });
+
+  it("routes thought-summary parts to reasoning deltas", async () => {
+    const frame = (parts: unknown[]) =>
+      `data: ${JSON.stringify({ response: { candidates: [{ content: { parts } }] } })}`;
+    const sse = [
+      frame([{ text: "hmm ", thought: true }]),
+      frame([{ text: "answer" }]),
+      "data: [DONE]",
+    ].join("\n\n");
+    const fetch = vi.fn(
+      async () =>
+        new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    ) as unknown as typeof fetch;
+    const client = geminiClient(fetch);
+
+    const chunks = [];
+    for await (const chunk of client.stream({
+      model: "gemini-3.8-flash-tiered",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.map((c) => c.reasoningDelta ?? "").join("")).toBe("hmm ");
+    expect(chunks.map((c) => c.contentDelta ?? "").join("")).toBe("answer");
   });
 
   it("parses cachedContentTokenCount in streaming SSE usageMetadata into cache hit and miss tokens", async () => {
