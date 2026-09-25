@@ -4737,7 +4737,7 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   min-width: 24px;
 }
 
-/* Duplicate-session picker inside the titlebar overflow popup. */
+/* Duplicate-session picker — a popover anchored to the thread-header button. */
 .dup-panel {
   display: flex;
   flex-direction: column;

@@ -544,6 +544,7 @@ export const en = {
       clickToSelect: "Click to select workspace",
       export: "Export",
       exportMd: "Export as Markdown file",
+      duplicate: "Duplicate",
     },
     duplicate: {
       hint: "Open a new session seeded from this conversation's most recent context.",

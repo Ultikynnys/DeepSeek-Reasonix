@@ -3452,15 +3452,12 @@ function TabRuntime({
         <TitleBar
           session={session}
           model={state.settings?.model}
-          subagentModel={state.settings?.subagentModel}
-          modelGroups={dupModelGroups}
           sideOn={!sideCollapsed}
           ctxOn={!ctxCollapsed}
           onToggleSide={onToggleSide}
           onToggleCtx={onToggleCtx}
           onOpenSettings={() => openSettingsAt("general")}
           onExport={exportConversation}
-          onDuplicate={duplicateSession}
           onCompact={() => sendRpc({ cmd: "compact_history" })}
           onClear={clearConversation}
           hasMessages={state.messages.length > 0}
@@ -3573,10 +3570,13 @@ function TabRuntime({
               <MainHead
                 session={session}
                 model={state.settings?.model}
+                subagentModel={state.settings?.subagentModel}
+                modelGroups={dupModelGroups}
                 workspaceDir={state.settings?.workspaceDir}
                 busy={state.busy}
                 hasMessages={state.messages.length > 0}
                 onExport={exportConversation}
+                onDuplicate={duplicateSession}
                 onOpenWorkdir={(anchor) => {
                   setWdAnchor(anchor);
                   setWdOpen(true);
@@ -4165,40 +4165,30 @@ function WinClose() {
 function TitleBar({
   session,
   model,
-  subagentModel,
-  modelGroups,
   sideOn,
   ctxOn,
   onToggleSide,
   onToggleCtx,
   onOpenSettings,
   onExport,
-  onDuplicate,
   onCompact,
   onClear,
   hasMessages,
 }: {
   session: string;
   model?: string;
-  subagentModel?: string;
-  /** Enabled/visible models for the Duplicate-session picker, grouped as the composer groups them. */
-  modelGroups: { key: string; label: string; ids: string[] }[];
   sideOn: boolean;
   ctxOn: boolean;
   onToggleSide: () => void;
   onToggleCtx: () => void;
   onOpenSettings: () => void;
   onExport: () => void;
-  onDuplicate: (mainModel: string, subagentModel: string) => void;
   onCompact?: () => void;
   onClear: () => void;
   hasMessages: boolean;
 }) {
   useLang();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [dupOpen, setDupOpen] = useState(false);
-  const [dupMain, setDupMain] = useState(model ?? DEFAULT_MODEL);
-  const [dupSub, setDupSub] = useState(subagentModel ?? model ?? DEFAULT_MODEL);
   const [isMaximized, setIsMaximized] = useState(false);
   const moreWrapRef = useRef<HTMLDivElement>(null);
   const isMac = document.documentElement.dataset.platform === "macos";
@@ -4221,7 +4211,6 @@ function TitleBar({
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => {
       if (moreWrapRef.current && !moreWrapRef.current.contains(e.target as Node)) {
-        setDupOpen(false);
         setMenuOpen(false);
       }
     };
@@ -4324,10 +4313,7 @@ function TitleBar({
             type="button"
             className="iconbtn"
             title={t("app.titlebar.more")}
-            onClick={() => {
-              setDupOpen(false);
-              setMenuOpen((v) => !v);
-            }}
+            onClick={() => setMenuOpen((v) => !v)}
           >
             <I.more size={14} />
           </button>
@@ -4339,55 +4325,10 @@ function TitleBar({
                 right: 0,
                 left: "auto",
                 bottom: "auto",
-                width: dupOpen ? 300 : 220,
+                width: 220,
               }}
             >
-              {dupOpen ? (
-                <div className="dup-panel">
-                  <div className="dup-title">{t("app.titlebar.duplicateSession")}</div>
-                  <div className="dup-hint">{t("app.duplicate.hint")}</div>
-                  <label className="dup-label" htmlFor="duplicate-main-model">
-                    {t("app.duplicate.mainModel")}
-                  </label>
-                  <select
-                    id="duplicate-main-model"
-                    className="field"
-                    value={dupMain}
-                    onChange={(e) => setDupMain(e.target.value)}
-                  >
-                    {duplicateModelOptions(modelGroups, dupMain)}
-                  </select>
-                  <label className="dup-label" htmlFor="duplicate-subagent-model">
-                    {t("app.duplicate.subagentModel")}
-                  </label>
-                  <select
-                    id="duplicate-subagent-model"
-                    className="field"
-                    value={dupSub}
-                    onChange={(e) => setDupSub(e.target.value)}
-                  >
-                    {duplicateModelOptions(modelGroups, dupSub)}
-                  </select>
-                  <div className="dup-actions">
-                    <button
-                      type="button"
-                      className="btn small"
-                      disabled={!dupMain || !dupSub}
-                      onClick={() => {
-                        onDuplicate(dupMain, dupSub);
-                        setDupOpen(false);
-                        setMenuOpen(false);
-                      }}
-                    >
-                      {t("app.duplicate.confirm")}
-                    </button>
-                    <button type="button" className="mini-btn" onClick={() => setDupOpen(false)}>
-                      {t("app.duplicate.back")}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="popup-list">
+              <div className="popup-list">
                   <div
                     className="popup-item"
                     onClick={closeAnd(() => {
@@ -4403,31 +4344,6 @@ function TitleBar({
                     </span>
                     <div className="nm">
                       <span>{t("app.titlebar.exportMd")}</span>
-                    </div>
-                  </div>
-                  <div
-                    className="popup-item"
-                    onClick={closeAnd(() => {
-                      if (hasMessages) {
-                        setDupMain(model ?? DEFAULT_MODEL);
-                        setDupSub(subagentModel ?? model ?? DEFAULT_MODEL);
-                        setDupOpen(true);
-                      }
-                    })}
-                    onKeyDown={activationHandler(() => {
-                      if (hasMessages) {
-                        setDupMain(model ?? DEFAULT_MODEL);
-                        setDupSub(subagentModel ?? model ?? DEFAULT_MODEL);
-                        setDupOpen(true);
-                      }
-                    })}
-                    style={{ opacity: hasMessages ? 1 : 0.5 }}
-                  >
-                    <span className="ico">
-                      <I.copy size={12} />
-                    </span>
-                    <div className="nm">
-                      <span>{t("app.titlebar.duplicateSession")}</span>
                     </div>
                   </div>
                   <div
@@ -4475,7 +4391,6 @@ function TitleBar({
                     </span>
                   </div>
                 </div>
-              )}
             </div>
           ) : null}
         </div>
@@ -4705,19 +4620,26 @@ export function TabBar({
 function MainHead({
   session,
   model,
+  subagentModel,
+  modelGroups,
   workspaceDir,
   busy,
   hasMessages,
   onExport,
+  onDuplicate,
   onOpenWorkdir,
   onRename,
 }: {
   session: string;
   model?: string;
+  subagentModel?: string;
+  /** Enabled/visible models for the Duplicate-session picker, grouped as the composer groups them. */
+  modelGroups: { key: string; label: string; ids: string[] }[];
   workspaceDir?: string;
   busy: boolean;
   hasMessages: boolean;
   onExport: () => void;
+  onDuplicate: (mainModel: string, subagentModel: string) => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
   onRename?: (title: string) => void;
 }) {
@@ -4725,12 +4647,32 @@ function MainHead({
   const [title, setTitle] = useState(session);
   const [isEditing, setIsEditing] = useState(false);
   const isEditingRef = useRef(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupMain, setDupMain] = useState(model ?? DEFAULT_MODEL);
+  const [dupSub, setDupSub] = useState(subagentModel ?? model ?? DEFAULT_MODEL);
+  const dupWrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isEditingRef.current) {
       setTitle(session);
     }
   }, [session]);
+
+  useEffect(() => {
+    if (!dupOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (dupWrapRef.current && !dupWrapRef.current.contains(e.target as Node)) setDupOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDupOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [dupOpen]);
 
   const commit = useCallback(() => {
     if (!isEditingRef.current) return;
@@ -4811,15 +4753,91 @@ function MainHead({
         </div>
       </div>
       <span className="grow" />
-      <button
-        type="button"
-        className="h-btn"
-        onClick={onExport}
-        disabled={!hasMessages}
-        title={t("app.header.exportMd")}
-      >
-        <I.download size={12} /> {t("app.header.export")}
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div ref={dupWrapRef} style={{ position: "relative" }}>
+          <button
+            type="button"
+            className="h-btn"
+            disabled={!hasMessages}
+            title={t("app.titlebar.duplicateSession")}
+            onClick={() => {
+              if (dupOpen) {
+                setDupOpen(false);
+                return;
+              }
+              setDupMain(model ?? DEFAULT_MODEL);
+              setDupSub(subagentModel ?? model ?? DEFAULT_MODEL);
+              setDupOpen(true);
+            }}
+          >
+            <I.copy size={12} /> {t("app.header.duplicate")}
+          </button>
+          {dupOpen ? (
+            <div
+              className="popup"
+              style={{
+                top: "calc(100% + 6px)",
+                right: 0,
+                left: "auto",
+                bottom: "auto",
+                width: 300,
+              }}
+            >
+              <div className="dup-panel">
+                <div className="dup-title">{t("app.titlebar.duplicateSession")}</div>
+                <div className="dup-hint">{t("app.duplicate.hint")}</div>
+                <label className="dup-label" htmlFor="duplicate-main-model">
+                  {t("app.duplicate.mainModel")}
+                </label>
+                <select
+                  id="duplicate-main-model"
+                  className="field"
+                  value={dupMain}
+                  onChange={(e) => setDupMain(e.target.value)}
+                >
+                  {duplicateModelOptions(modelGroups, dupMain)}
+                </select>
+                <label className="dup-label" htmlFor="duplicate-subagent-model">
+                  {t("app.duplicate.subagentModel")}
+                </label>
+                <select
+                  id="duplicate-subagent-model"
+                  className="field"
+                  value={dupSub}
+                  onChange={(e) => setDupSub(e.target.value)}
+                >
+                  {duplicateModelOptions(modelGroups, dupSub)}
+                </select>
+                <div className="dup-actions">
+                  <button
+                    type="button"
+                    className="btn small"
+                    disabled={!dupMain || !dupSub}
+                    onClick={() => {
+                      onDuplicate(dupMain, dupSub);
+                      setDupOpen(false);
+                    }}
+                  >
+                    {t("app.duplicate.confirm")}
+                  </button>
+                  <button type="button" className="mini-btn" onClick={() => setDupOpen(false)}>
+                    {t("app.duplicate.back")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className="h-btn"
+          onClick={onExport}
+          disabled={!hasMessages}
+          title={t("app.header.exportMd")}
+        >
+          <I.download size={12} /> {t("app.header.export")}
+        </button>
+      </div>
     </div>
   );
 }
