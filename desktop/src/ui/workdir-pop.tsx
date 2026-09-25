@@ -77,7 +77,7 @@ export function WorkdirPop({
   open: boolean;
   onClose: () => void;
   recent: string[];
-  /** Local Reasonix installation dir — pinned above the recents as an always-
+  /** Local Reasonix workspace dir — pinned above the recents as an always-
    *  available workspace choice. */
   local?: string;
   current?: string;
@@ -101,7 +101,7 @@ export function WorkdirPop({
     const list = recent.length > 0 ? recent : current ? [current] : [];
     const q = query.trim().toLowerCase();
     const filtered = q ? list.filter((p) => p.toLowerCase().includes(q)) : list;
-    // The local install dir is pinned above the list — never duplicate it here.
+    // The local workspace dir is pinned above the list — never duplicate it here.
     return local ? filtered.filter((p) => p !== local) : filtered;
   }, [recent, current, query, local]);
 

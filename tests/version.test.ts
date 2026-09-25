@@ -12,6 +12,7 @@ import {
   detectNpmInstallPrefix,
   getLatestVersion,
   isNpxInstall,
+  reasonixDefaultWorkspaceDir,
   reasonixInstallDir,
 } from "../src/version.js";
 
@@ -32,6 +33,18 @@ describe("reasonixInstallDir", () => {
 
   it("resolves to the repository root in the test environment", () => {
     expect(reasonixInstallDir()).toBe(process.cwd());
+  });
+});
+
+describe("reasonixDefaultWorkspaceDir", () => {
+  it("points at a local subfolder under the Reasonix install dir", () => {
+    const dir = reasonixDefaultWorkspaceDir();
+    expect(dir).toBe(join(reasonixInstallDir(), "local"));
+  });
+
+  it("ensures the directory exists", () => {
+    const dir = reasonixDefaultWorkspaceDir();
+    expect(existsSync(dir)).toBe(true);
   });
 });
 

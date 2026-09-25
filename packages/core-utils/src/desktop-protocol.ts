@@ -797,7 +797,7 @@ export interface SettingsEvent {
   apiKeyPrefix?: string;
   workspaceDir: string;
   recentWorkspaces: string[];
-  /** Local Reasonix installation directory — always offered as a pinned
+  /** Local Reasonix workspace directory — always offered as a pinned
    *  workspace choice when a new (workspace-less) tab asks for one. */
   reasonixLocalDir?: string;
   model: string;

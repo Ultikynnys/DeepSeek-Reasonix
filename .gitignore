@@ -48,4 +48,6 @@ desktop/src-tauri/binaries/
 # This also hides team-level settings and skills inside every .reasonix directory.
 **/.reasonix/
 
+local/
+
 cookingforblockheads/

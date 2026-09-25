@@ -325,7 +325,7 @@ import { billingContextForModel, resolveContextTokens } from "../../telemetry/st
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage, TurnImage } from "../../types.js";
-import { VERSION, reasonixInstallDir } from "../../version.js";
+import { VERSION, reasonixDefaultWorkspaceDir, reasonixInstallDir } from "../../version.js";
 import { dumpStartupProfile, markPhase } from "../startup-profile.js";
 import {
   type McpRuntime,
@@ -1184,7 +1184,9 @@ function emitSettings(tab: Tab): void {
   const ep = loadEndpoint();
   const editMode = loadEditMode();
   if (tab.toolset) applyPlanMode(tab.toolset.tools, editMode);
-  const recent = loadRecentWorkspaces().filter((p) => p !== tab.rootDir);
+  const recent = loadRecentWorkspaces().filter(
+    (p) => !sameWorkspaceDir(p, tab.rootDir) && !sameWorkspaceDir(p, reasonixInstallDir()),
+  );
   emit(
     {
       type: "$settings",
@@ -1209,7 +1211,7 @@ function emitSettings(tab: Tab): void {
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
       workspaceDir: tab.rootDir,
       recentWorkspaces: recent,
-      reasonixLocalDir: reasonixInstallDir(),
+      reasonixLocalDir: reasonixDefaultWorkspaceDir(),
       model: tab.currentModel,
       customModels: Object.keys(config.models ?? {})
         .filter((id) => providerForModel(id) !== "gemini" && !SUPPORTED_MODELS.includes(id))
@@ -4002,9 +4004,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     restore?: { groupId?: string; session?: string },
     pending = false,
   ): Tab {
+    const defaultDir = reasonixDefaultWorkspaceDir();
+    const configuredDir = loadWorkspaceDir();
+    const fallbackDir =
+      configuredDir && !sameWorkspaceDir(configuredDir, reasonixInstallDir())
+        ? configuredDir
+        : defaultDir;
+    const resolvedInitial =
+      initialDir && sameWorkspaceDir(initialDir, reasonixInstallDir())
+        ? defaultDir
+        : initialDir;
     const dir = pending
       ? ""
-      : resolve(initialDir ?? opts.dir ?? loadWorkspaceDir() ?? process.cwd());
+      : resolve(resolvedInitial ?? opts.dir ?? fallbackDir);
     if (!pending) pushRecentWorkspace(dir);
     const model = opts.model || loadModel() || DEFAULT_MODEL;
     // Restored tabs keep their persisted id so a backend restart doesn't
@@ -5569,13 +5581,20 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // loaded session and focused tab (issues #933, #1244). Missing dirs
   // are silently skipped — a deleted workspace shouldn't break boot.
   const savedTabs = normalizeWorkspaceTabGroups(
-    loadDesktopOpenTabs().filter((t) => {
-      try {
-        return existsSync(t.dir) && statSync(t.dir).isDirectory();
-      } catch {
-        return false;
-      }
-    }),
+    loadDesktopOpenTabs()
+      .map((t) => {
+        if (sameWorkspaceDir(t.dir, reasonixInstallDir())) {
+          return { ...t, dir: reasonixDefaultWorkspaceDir() };
+        }
+        return t;
+      })
+      .filter((t) => {
+        try {
+          return existsSync(t.dir) && statSync(t.dir).isDirectory();
+        } catch {
+          return false;
+        }
+      }),
   );
   // Never restore the same session into two channels — a session is a single
   // agent. Keep the first occurrence's session; later duplicates open fresh.

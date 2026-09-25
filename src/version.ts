@@ -1,6 +1,6 @@
 /** VERSION sourced from package.json so it never drifts from npm; latest-check returns null on any failure. */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJsonFileSilently, writeJsonFileSilently } from "./core/json-file.js";
@@ -44,6 +44,16 @@ function findInstallDir(): string | null {
  *  pins to the same folder. Used as a New tab's default workspace. */
 export function reasonixInstallDir(): string {
   return findInstallDir() ?? process.cwd();
+}
+
+export function reasonixDefaultWorkspaceDir(): string {
+  const dir = join(reasonixInstallDir(), "local");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* ignore */
+  }
+  return dir;
 }
 
 function readPackageVersion(): string {
