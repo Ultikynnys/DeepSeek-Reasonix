@@ -6,6 +6,7 @@ import {
   isFilePathTool,
   messageOf,
   modelAcceptsImages,
+  modelDisplayName,
   parseFilesDroppedMarker,
   redactDiagnosticText,
   redactDiagnosticValue,
@@ -24,13 +25,23 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
-import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  type ReactNode,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { WorkspaceProvider } from "./Markdown";
 import { type AbortDraftSource, nextAbortDraftCandidate, restoreAbortedDraft } from "./abort-draft";
 import { formatBytes } from "./format";
 import { t, useLang } from "./i18n";
 import { I } from "./icons";
 import { downscaleImage, fileToDataUrl, isImagePath, typedMentionImages } from "./image-attach";
+import { MODEL_CATALOG_GROUP_LABELS, deriveModelCatalog } from "./model-catalog";
 import {
   type ApprovalSnapshot,
   deriveDesktopNotifications,
@@ -2345,6 +2356,29 @@ function defaultExportFilename(session: string): string {
   return `${safe}.md`;
 }
 
+/** `<option>` / `<optgroup>` list shared by the two Duplicate-session selects.
+ *  Keeps the current selection visible even when it's off the enabled allow-list. */
+function duplicateModelOptions(
+  groups: { key: string; label: string; ids: string[] }[],
+  active: string,
+): ReactNode {
+  const listed = groups.some((g) => g.ids.includes(active));
+  return (
+    <>
+      {active && !listed ? <option value={active}>{modelDisplayName(active)}</option> : null}
+      {groups.map((g) => (
+        <optgroup key={g.key} label={g.label}>
+          {g.ids.map((id) => (
+            <option key={id} value={id}>
+              {modelDisplayName(id)}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </>
+  );
+}
+
 type TabAction = Action;
 type TabDispatcher = (action: TabAction) => void;
 
@@ -2651,6 +2685,13 @@ function TabRuntime({
   const toggleMcpTool = useCallback(
     (name: string, tool: string, disabled: boolean) =>
       sendRpc({ cmd: "mcp_specs_toggle", name, tool, disabled }),
+    [sendRpc],
+  );
+  // Per-session MCP toggle (Tools section) — edits the ACTIVE session's state,
+  // leaving the Settings default untouched.
+  const toggleSessionMcp = useCallback(
+    (name: string, disabled: boolean, tool?: string) =>
+      sendRpc({ cmd: "mcp_session_toggle", name, tool, disabled }),
     [sendRpc],
   );
   const requestMcpExtensionStatus = useCallback(
@@ -3326,6 +3367,58 @@ function TabRuntime({
     }
   }, [state.messages, session, appendNotice]);
 
+  // Enabled/visible models for the Duplicate-session picker, grouped the same
+  // way the composer groups them.
+  const dupModelGroups = useMemo(() => {
+    const enabled = new Set(state.settings?.enabledModels ?? []);
+    const visible = (id: string) => enabled.size === 0 || enabled.has(id);
+    const catalog = deriveModelCatalog({
+      discoveredAntigravityModels: state.settings?.antigravityOAuth?.models,
+      customModels: state.settings?.customModels,
+      opencodeModels,
+      includeAntigravity: Boolean(state.settings?.antigravityOAuth?.models),
+      ollamaVisionModels,
+      opencodeVisionModels,
+    });
+    const groups: { key: string; label: string; ids: string[] }[] = catalog.groups.map((g) => ({
+      key: g.key,
+      label: t(MODEL_CATALOG_GROUP_LABELS[g.key]),
+      ids: g.models.filter(visible),
+    }));
+    if (ollamaModels && ollamaModels.length > 0) {
+      groups.unshift({
+        key: "ollama",
+        label: t("composer.modelOllamaGroup"),
+        ids: ollamaModels.map((id) => `ollama/${id}`).filter(visible),
+      });
+    }
+    return groups.filter((g) => g.ids.length > 0);
+  }, [
+    state.settings?.enabledModels,
+    state.settings?.antigravityOAuth?.models,
+    state.settings?.customModels,
+    opencodeModels,
+    ollamaModels,
+    ollamaVisionModels,
+    opencodeVisionModels,
+  ]);
+
+  // Duplicate this conversation into a new trimmed session on the picked models:
+  // the daemon trims the export body to the configured token budget and opens
+  // the new session (auto-continuing only when that setting is enabled).
+  const duplicateSession = useCallback(
+    (mainModel: string, subagentModel: string) => {
+      const md = formatConversationMarkdown(state.messages, t("app.exportUserLabel"));
+      if (!md) {
+        appendNotice(t("app.toast.emptySession"));
+        return;
+      }
+      sendRpc({ cmd: "duplicate_session", markdown: md, model: mainModel, subagentModel });
+      appendNotice(t("app.toast.duplicatedSession"), "success");
+    },
+    [state.messages, sendRpc, appendNotice],
+  );
+
   // Sessions whose agent is ACTIVELY RUNNING (a turn in flight) in any tab on
   // this tab's workspace — the sidebar dots one per running session. A merely
   // open channel must NOT dot: the tab bar reserves the dot for running agents
@@ -3359,12 +3452,15 @@ function TabRuntime({
         <TitleBar
           session={session}
           model={state.settings?.model}
+          subagentModel={state.settings?.subagentModel}
+          modelGroups={dupModelGroups}
           sideOn={!sideCollapsed}
           ctxOn={!ctxCollapsed}
           onToggleSide={onToggleSide}
           onToggleCtx={onToggleCtx}
           onOpenSettings={() => openSettingsAt("general")}
           onExport={exportConversation}
+          onDuplicate={duplicateSession}
           onCompact={() => sendRpc({ cmd: "compact_history" })}
           onClear={clearConversation}
           hasMessages={state.messages.length > 0}
@@ -3745,6 +3841,7 @@ function TabRuntime({
           usage={state.usage}
           mcpSpecs={state.mcpSpecs}
           mcpBridged={state.mcpBridged}
+          onToggleSessionMcp={toggleSessionMcp}
           sessionFiles={state.sessionFiles}
           memory={state.memory}
           memoryDetail={state.memoryDetail}
@@ -4068,30 +4165,40 @@ function WinClose() {
 function TitleBar({
   session,
   model,
+  subagentModel,
+  modelGroups,
   sideOn,
   ctxOn,
   onToggleSide,
   onToggleCtx,
   onOpenSettings,
   onExport,
+  onDuplicate,
   onCompact,
   onClear,
   hasMessages,
 }: {
   session: string;
   model?: string;
+  subagentModel?: string;
+  /** Enabled/visible models for the Duplicate-session picker, grouped as the composer groups them. */
+  modelGroups: { key: string; label: string; ids: string[] }[];
   sideOn: boolean;
   ctxOn: boolean;
   onToggleSide: () => void;
   onToggleCtx: () => void;
   onOpenSettings: () => void;
   onExport: () => void;
+  onDuplicate: (mainModel: string, subagentModel: string) => void;
   onCompact?: () => void;
   onClear: () => void;
   hasMessages: boolean;
 }) {
   useLang();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupMain, setDupMain] = useState(model ?? DEFAULT_MODEL);
+  const [dupSub, setDupSub] = useState(subagentModel ?? model ?? DEFAULT_MODEL);
   const [isMaximized, setIsMaximized] = useState(false);
   const moreWrapRef = useRef<HTMLDivElement>(null);
   const isMac = document.documentElement.dataset.platform === "macos";
@@ -4113,8 +4220,10 @@ function TitleBar({
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (moreWrapRef.current && !moreWrapRef.current.contains(e.target as Node))
+      if (moreWrapRef.current && !moreWrapRef.current.contains(e.target as Node)) {
+        setDupOpen(false);
         setMenuOpen(false);
+      }
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
@@ -4215,7 +4324,10 @@ function TitleBar({
             type="button"
             className="iconbtn"
             title={t("app.titlebar.more")}
-            onClick={() => setMenuOpen((v) => !v)}
+            onClick={() => {
+              setDupOpen(false);
+              setMenuOpen((v) => !v);
+            }}
           >
             <I.more size={14} />
           </button>
@@ -4227,72 +4339,143 @@ function TitleBar({
                 right: 0,
                 left: "auto",
                 bottom: "auto",
-                width: 220,
+                width: dupOpen ? 300 : 220,
               }}
             >
-              <div className="popup-list">
-                <div
-                  className="popup-item"
-                  onClick={closeAnd(() => {
-                    if (hasMessages) onExport();
-                  })}
-                  onKeyDown={activationHandler(() => {
-                    if (hasMessages) onExport();
-                  })}
-                  style={{ opacity: hasMessages ? 1 : 0.5 }}
-                >
-                  <span className="ico">
-                    <I.download size={12} />
-                  </span>
-                  <div className="nm">
-                    <span>{t("app.titlebar.exportMd")}</span>
+              {dupOpen ? (
+                <div className="dup-panel">
+                  <div className="dup-title">{t("app.titlebar.duplicateSession")}</div>
+                  <div className="dup-hint">{t("app.duplicate.hint")}</div>
+                  <label className="dup-label" htmlFor="duplicate-main-model">
+                    {t("app.duplicate.mainModel")}
+                  </label>
+                  <select
+                    id="duplicate-main-model"
+                    className="field"
+                    value={dupMain}
+                    onChange={(e) => setDupMain(e.target.value)}
+                  >
+                    {duplicateModelOptions(modelGroups, dupMain)}
+                  </select>
+                  <label className="dup-label" htmlFor="duplicate-subagent-model">
+                    {t("app.duplicate.subagentModel")}
+                  </label>
+                  <select
+                    id="duplicate-subagent-model"
+                    className="field"
+                    value={dupSub}
+                    onChange={(e) => setDupSub(e.target.value)}
+                  >
+                    {duplicateModelOptions(modelGroups, dupSub)}
+                  </select>
+                  <div className="dup-actions">
+                    <button
+                      type="button"
+                      className="btn small"
+                      disabled={!dupMain || !dupSub}
+                      onClick={() => {
+                        onDuplicate(dupMain, dupSub);
+                        setDupOpen(false);
+                        setMenuOpen(false);
+                      }}
+                    >
+                      {t("app.duplicate.confirm")}
+                    </button>
+                    <button type="button" className="mini-btn" onClick={() => setDupOpen(false)}>
+                      {t("app.duplicate.back")}
+                    </button>
                   </div>
                 </div>
-                <div
-                  className="popup-item"
-                  onClick={closeAnd(() => {
-                    if (hasMessages && onCompact) onCompact();
-                  })}
-                  onKeyDown={activationHandler(() => {
-                    if (hasMessages && onCompact) onCompact();
-                  })}
-                  style={{ opacity: hasMessages ? 1 : 0.5 }}
-                >
-                  <span className="ico">
-                    <I.archive size={12} />
-                  </span>
-                  <div className="nm">
-                    <span>{t("app.titlebar.compactHistory")}</span>
+              ) : (
+                <div className="popup-list">
+                  <div
+                    className="popup-item"
+                    onClick={closeAnd(() => {
+                      if (hasMessages) onExport();
+                    })}
+                    onKeyDown={activationHandler(() => {
+                      if (hasMessages) onExport();
+                    })}
+                    style={{ opacity: hasMessages ? 1 : 0.5 }}
+                  >
+                    <span className="ico">
+                      <I.download size={12} />
+                    </span>
+                    <div className="nm">
+                      <span>{t("app.titlebar.exportMd")}</span>
+                    </div>
+                  </div>
+                  <div
+                    className="popup-item"
+                    onClick={closeAnd(() => {
+                      if (hasMessages) {
+                        setDupMain(model ?? DEFAULT_MODEL);
+                        setDupSub(subagentModel ?? model ?? DEFAULT_MODEL);
+                        setDupOpen(true);
+                      }
+                    })}
+                    onKeyDown={activationHandler(() => {
+                      if (hasMessages) {
+                        setDupMain(model ?? DEFAULT_MODEL);
+                        setDupSub(subagentModel ?? model ?? DEFAULT_MODEL);
+                        setDupOpen(true);
+                      }
+                    })}
+                    style={{ opacity: hasMessages ? 1 : 0.5 }}
+                  >
+                    <span className="ico">
+                      <I.copy size={12} />
+                    </span>
+                    <div className="nm">
+                      <span>{t("app.titlebar.duplicateSession")}</span>
+                    </div>
+                  </div>
+                  <div
+                    className="popup-item"
+                    onClick={closeAnd(() => {
+                      if (hasMessages && onCompact) onCompact();
+                    })}
+                    onKeyDown={activationHandler(() => {
+                      if (hasMessages && onCompact) onCompact();
+                    })}
+                    style={{ opacity: hasMessages ? 1 : 0.5 }}
+                  >
+                    <span className="ico">
+                      <I.archive size={12} />
+                    </span>
+                    <div className="nm">
+                      <span>{t("app.titlebar.compactHistory")}</span>
+                    </div>
+                  </div>
+                  <div
+                    className="popup-item"
+                    onClick={closeAnd(onClear)}
+                    onKeyDown={activationHandler(closeAnd(onClear))}
+                  >
+                    <span className="ico">
+                      <I.x size={12} />
+                    </span>
+                    <div className="nm">
+                      <span>{t("app.titlebar.clearChat")}</span>
+                    </div>
+                  </div>
+                  <div
+                    className="popup-item"
+                    onClick={closeAnd(onOpenSettings)}
+                    onKeyDown={activationHandler(closeAnd(onOpenSettings))}
+                  >
+                    <span className="ico">
+                      <I.cog size={12} />
+                    </span>
+                    <div className="nm">
+                      <span>{t("app.titlebar.settings")}</span>
+                    </div>
+                    <span className="kb">
+                      <Shortcut keys={["mod", ","]} />
+                    </span>
                   </div>
                 </div>
-                <div
-                  className="popup-item"
-                  onClick={closeAnd(onClear)}
-                  onKeyDown={activationHandler(closeAnd(onClear))}
-                >
-                  <span className="ico">
-                    <I.x size={12} />
-                  </span>
-                  <div className="nm">
-                    <span>{t("app.titlebar.clearChat")}</span>
-                  </div>
-                </div>
-                <div
-                  className="popup-item"
-                  onClick={closeAnd(onOpenSettings)}
-                  onKeyDown={activationHandler(closeAnd(onOpenSettings))}
-                >
-                  <span className="ico">
-                    <I.cog size={12} />
-                  </span>
-                  <div className="nm">
-                    <span>{t("app.titlebar.settings")}</span>
-                  </div>
-                  <span className="kb">
-                    <Shortcut keys={["mod", ","]} />
-                  </span>
-                </div>
-              </div>
+              )}
             </div>
           ) : null}
         </div>

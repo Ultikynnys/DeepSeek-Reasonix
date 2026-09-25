@@ -28,6 +28,7 @@ import {
   loadSessionMessages,
   loadSessionMeta,
   migrateLegacyFlatSessions,
+  normalizeSessionMcpState,
   normalizeWorkspace,
   parseSessionTimestamp,
   patchSessionMeta,
@@ -913,6 +914,44 @@ describe("session persistence", () => {
       reasoningEffort: "max",
       summary: "hello",
     });
+  });
+
+  it("session meta round-trips per-session MCP state", () => {
+    patchSessionMeta("mcpstate", {
+      mcp: { disabledServers: ["blender"], disabledTools: { blender: ["a", "b"] } },
+    });
+    expect(loadSessionMeta("mcpstate").mcp).toEqual({
+      disabledServers: ["blender"],
+      disabledTools: { blender: ["a", "b"] },
+    });
+    // A later unrelated patch must not clobber the stored MCP state.
+    patchSessionMeta("mcpstate", { summary: "chat" });
+    expect(loadSessionMeta("mcpstate").mcp).toEqual({
+      disabledServers: ["blender"],
+      disabledTools: { blender: ["a", "b"] },
+    });
+  });
+});
+
+describe("normalizeSessionMcpState", () => {
+  it("returns undefined for non-objects", () => {
+    expect(normalizeSessionMcpState(undefined)).toBeUndefined();
+    expect(normalizeSessionMcpState("nope")).toBeUndefined();
+    expect(normalizeSessionMcpState(null)).toBeUndefined();
+  });
+
+  it("collapses an empty/stateless object to undefined", () => {
+    expect(normalizeSessionMcpState({})).toBeUndefined();
+    expect(normalizeSessionMcpState({ disabledServers: [], disabledTools: {} })).toBeUndefined();
+  });
+
+  it("drops non-strings and empties, deduping what remains", () => {
+    expect(normalizeSessionMcpState({ disabledServers: ["a", "a", 3, ""] })).toEqual({
+      disabledServers: ["a"],
+    });
+    expect(
+      normalizeSessionMcpState({ disabledTools: { s: ["x", "x", 1], empty: [], bad: 5 } }),
+    ).toEqual({ disabledTools: { s: ["x"] } });
   });
 });
 

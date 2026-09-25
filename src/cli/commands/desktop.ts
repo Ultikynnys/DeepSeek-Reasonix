@@ -119,6 +119,8 @@ import {
   loadCustomQuickSends,
   loadDesktopOpenTabs,
   loadDisableAutoCompaction,
+  loadDuplicateSessionAutoProceed,
+  loadDuplicateSessionTokens,
   loadEditMode,
   loadEffectiveMcpConfig,
   loadElevationEnabled,
@@ -168,6 +170,8 @@ import {
   saveCustomQuickSends,
   saveDesktopOpenTabs,
   saveDisableAutoCompaction,
+  saveDuplicateSessionAutoProceed,
+  saveDuplicateSessionTokens,
   saveEditMode,
   saveElevationEnabled,
   saveEnableSubagents,
@@ -206,6 +210,7 @@ import {
   writeMemoryEntry,
 } from "../../desktop/memory-browser.js";
 import { recordDiagnostic } from "../../diagnostics.js";
+import { buildDuplicateContext } from "../../duplicate-session.js";
 import { normalizeImageToDataUrls } from "../../image-format.js";
 import { supervisePlaywrightInstaller } from "../../mcp/browser-installer.js";
 import {
@@ -271,7 +276,9 @@ import { type McpServerSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
   type ModelPrefs,
   type SessionInfo,
+  type SessionMcpState,
   type SessionMeta,
+  appendSessionMessage,
   deleteSession,
   ensureSessionDir,
   firstFreeSessionName,
@@ -281,6 +288,7 @@ import {
   loadSessionMessagesAsync,
   loadSessionMeta,
   migrateLegacyFlatSessions,
+  normalizeSessionMcpState,
   patchSessionMeta,
   patchSessionWorkspaceIfMissing,
   resolveSessionModelPrefs,
@@ -319,7 +327,12 @@ import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage, TurnImage } from "../../types.js";
 import { VERSION, reasonixInstallDir } from "../../version.js";
 import { dumpStartupProfile, markPhase } from "../startup-profile.js";
-import { type McpRuntime, createMcpRuntime } from "./mcp-runtime.js";
+import {
+  type McpRuntime,
+  type McpSpecOverrides,
+  applyMcpSessionOverrides,
+  createMcpRuntime,
+} from "./mcp-runtime.js";
 
 export interface DesktopOptions {
   model: string;
@@ -1189,6 +1202,8 @@ function emitSettings(tab: Tab): void {
       repetitionGuardEnabled:
         tab.runtime?.loop.repetitionGuardEnabled ?? loadRepetitionGuardEnabled(),
       questionTimerEnabled: loadQuestionTimerEnabled(),
+      duplicateSessionTokens: loadDuplicateSessionTokens(),
+      duplicateSessionAutoProceed: loadDuplicateSessionAutoProceed(),
       enabledModels: loadEnabledModels(),
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
@@ -2340,18 +2355,75 @@ function summarizeMcpSpec(raw: string): McpSpecInfo {
   }
 }
 
+/** Snapshot the Settings → MCP default as a fresh session's absolute state. An
+ *  empty object still marks the session as seeded, so later default edits don't
+ *  retroactively change an existing conversation. */
+function sessionMcpFromConfig(rootDir: string): SessionMcpState {
+  const disabledServers: string[] = [];
+  const disabledTools: Record<string, string[]> = {};
+  for (const spec of loadEffectiveMcpConfig(rootDir)) {
+    if (!spec.name) continue;
+    if (spec.disabled) disabledServers.push(spec.name);
+    if (spec.disabledTools?.length) disabledTools[spec.name] = [...spec.disabledTools];
+  }
+  const state: SessionMcpState = {};
+  if (disabledServers.length) state.disabledServers = disabledServers.sort();
+  if (Object.keys(disabledTools).length) state.disabledTools = disabledTools;
+  return state;
+}
+
+/** The active session's stored MCP state. `undefined` = a session created before
+ *  the field existed — callers fall back to the config default. */
+function sessionMcpState(name: string): SessionMcpState | undefined {
+  if (!name) return undefined;
+  const meta = loadSessionMeta(name);
+  if (meta.mcp === undefined) return undefined;
+  return normalizeSessionMcpState(meta.mcp) ?? {};
+}
+
+/** Session overlay for the MCP runtime; `undefined` (legacy session) = use default. */
+function sessionMcpOverrides(name: string): McpSpecOverrides | undefined {
+  const state = sessionMcpState(name);
+  if (state === undefined) return undefined;
+  return {
+    disabledServers: new Set(state.disabledServers ?? []),
+    disabledTools: new Map(
+      Object.entries(state.disabledTools ?? {}).map(([server, tools]) => [server, new Set(tools)]),
+    ),
+  };
+}
+
+/** Config specs for a tab with the active session's MCP overlay applied. */
+function effectiveMcpSpecs(tab: Tab): McpServerSpec[] {
+  return applyMcpSessionOverrides(
+    loadEffectiveMcpConfig(tab.rootDir),
+    sessionMcpOverrides(tab.currentSession),
+  );
+}
+
 function emitMcpSpecs(tab: Tab): void {
   const normalized = loadEffectiveMcpConfig(tab.rootDir);
+  // Session-scoped view. A legacy session (undefined) mirrors the default.
+  const session = sessionMcpState(tab.currentSession);
   const liveTools = tab.mcpRuntime?.toolFilterState() ?? [];
   const toolStateByRaw = new Map(liveTools.map((t) => [t.spec, t]));
   const specs = normalized.map((spec) => {
     const raw = specToRaw(spec);
     const base = summarizeMcpSpec(raw);
-    // Config-level toggle state — visible even before the first bridge.
+    // Settings-default toggle state — visible even before the first bridge.
     base.disabled = spec.disabled === true;
     // Reasonix-managed servers are built-in: disableable but not removable.
     base.builtin = isManagedMcpSpec(spec);
     if (spec.disabledTools?.length) base.disabledTools = spec.disabledTools;
+    // Session toggle state (Tools section). Legacy sessions mirror the default.
+    const sessionDisabled = session
+      ? Boolean(spec.name && session.disabledServers?.includes(spec.name))
+      : spec.disabled === true;
+    const sessionDisabledTools = session
+      ? ((spec.name ? session.disabledTools?.[spec.name] : undefined) ?? [])
+      : (spec.disabledTools ?? []);
+    if (sessionDisabled) base.sessionDisabled = true;
+    if (sessionDisabledTools.length) base.sessionDisabledTools = [...sessionDisabledTools].sort();
     const toolState = toolStateByRaw.get(raw);
     if (toolState) {
       base.tools = [...new Set([...toolState.enabled, ...toolState.disabled])].sort();
@@ -2361,8 +2433,8 @@ function emitMcpSpecs(tab: Tab): void {
     let merged: McpSpecInfo = live
       ? { ...base, status: live.kind, statusReason: live.reason, toolCount: live.toolCount }
       : base;
-    // A config-disabled server never reports live "connected" — the reload path stops it.
-    if (spec.disabled) merged = { ...merged, status: "disabled" };
+    // A session-disabled server never reports live "connected" — the reload path stops it.
+    if (sessionDisabled) merged = { ...merged, status: "disabled" };
     return merged;
   });
   const bridged = specs.length > 0 && specs.every((s) => s.status === "connected");
@@ -3429,7 +3501,7 @@ export function pickResumeSession(
 function mintSessionFor(
   rootDir: string,
   prefs?: ModelPrefs,
-  options: { materialize?: boolean } = {},
+  options: { materialize?: boolean; mcp?: SessionMcpState } = {},
 ): string {
   const materialize = options.materialize !== false;
   // Virtual deletion replacements need unique names even though they do not
@@ -3449,7 +3521,13 @@ function mintSessionFor(
   // removed by an explicit delete.
   try {
     ensureSessionDir(name);
-    patchSessionMeta(name, prefs ? { workspace: rootDir, ...prefs } : { workspace: rootDir });
+    // Seed the session's MCP state from the Settings default so later default
+    // edits don't retroactively change an existing conversation.
+    patchSessionMeta(name, {
+      workspace: rootDir,
+      ...(prefs ?? {}),
+      mcp: options.mcp ?? sessionMcpFromConfig(rootDir),
+    });
   } catch (err) {
     // meta is for filtering only: failure shouldn't block chat, but LOG
     emitDiagnosticError("session.meta.patch.failed", err, {
@@ -4148,7 +4226,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       tab.mcpBridgePromise = null;
       return Promise.resolve();
     }
-    const configured = loadEffectiveMcpConfig(tab.rootDir);
+    const configured = effectiveMcpSpecs(tab);
     emitTabDiagnostic(tab, "mcp.bridge.started", {
       configured: configured.length,
     });
@@ -4202,6 +4280,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       getMcpPrefix: () => undefined,
       getRequestedCount: () => requested,
       getWorkspaceDir: () => tab.rootDir,
+      getSpecOverrides: () => sessionMcpOverrides(tab.currentSession),
       progressSink: { current: null },
       browserRegistry,
     });
@@ -5994,6 +6073,40 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       return;
     }
+    if (msg.cmd === "mcp_session_toggle") {
+      if (!tab.currentSession) return;
+      try {
+        // Tools-section toggle: edit THIS session's absolute MCP state (seed a
+        // legacy session from the default first so its current state is frozen
+        // in), then re-bridge so the change is live.
+        const state = sessionMcpState(tab.currentSession) ?? sessionMcpFromConfig(tab.rootDir);
+        const next: SessionMcpState = { ...state };
+        if (msg.tool) {
+          const tools = new Set(state.disabledTools?.[msg.name] ?? []);
+          if (msg.disabled) tools.add(msg.tool);
+          else tools.delete(msg.tool);
+          const disabledTools = { ...(state.disabledTools ?? {}) };
+          if (tools.size > 0) disabledTools[msg.name] = [...tools].sort();
+          else delete disabledTools[msg.name];
+          next.disabledTools = Object.keys(disabledTools).length ? disabledTools : undefined;
+        } else {
+          const servers = new Set(state.disabledServers ?? []);
+          if (msg.disabled) servers.add(msg.name);
+          else servers.delete(msg.name);
+          next.disabledServers = servers.size ? [...servers].sort() : undefined;
+        }
+        patchSessionMeta(tab.currentSession, { mcp: next });
+        emitMcpSpecs(tab);
+        void bridgeTabMcp(tab);
+      } catch (err) {
+        emitDiagnosticError("mcp.session.toggle.failed", err, {
+          tabId: tab.id,
+          details: { name: msg.name, tool: msg.tool, disabled: msg.disabled },
+        });
+        emit({ type: "$error", message: `mcp_session_toggle: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
     if (msg.cmd === "mcp_extension_status") {
       emitMcpExtensionStatus(tab);
       return;
@@ -6504,6 +6617,72 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       return;
     }
+    if (msg.cmd === "duplicate_session") {
+      // Clone this conversation into a NEW session, trimmed to the newest
+      // `duplicateSessionTokens` tokens, opened on the user-picked models. The
+      // frontend ships the export markdown (the export format lives there); we
+      // trim it here where the accurate DeepSeek tokenizer lives.
+      if (tab.pending || !tab.rootDir) return;
+      const markdown = typeof msg.markdown === "string" ? msg.markdown : "";
+      if (!markdown.trim()) {
+        emit({ type: "$error", message: "Duplicate session: nothing to duplicate." }, tab.id);
+        return;
+      }
+      const model = msg.model || tab.currentModel;
+      const subagentModel = msg.subagentModel || tab.currentSubagentModel || model;
+      const context = buildDuplicateContext(markdown, loadDuplicateSessionTokens());
+      const autoProceed = loadDuplicateSessionAutoProceed();
+      try {
+        // Mint a real session for the duplicate, stamped with the chosen models
+        // so bootstrapTab restores them (resolveSessionModelPrefs reads meta).
+        const name = mintSessionFor(
+          tab.rootDir,
+          {
+            model,
+            reasoningEffort: tab.currentReasoningEffort,
+            subagentModel,
+          },
+          // Duplicate is the exception: inherit the SOURCE session's live MCP
+          // state, not the current Settings default.
+          { mcp: sessionMcpState(tab.currentSession) ?? sessionMcpFromConfig(tab.rootDir) },
+        );
+        // Auto-proceed off (default): seed the blob as the opening user turn and
+        // stop, so the user drives the next message. On: leave the log empty and
+        // let the runTurn below append + run it.
+        if (!autoProceed) appendSessionMessage(name, { role: "user", content: context });
+        const opened = bootstrapTab(tab.rootDir, {
+          session: name,
+          active: true,
+          groupId: tab.groupId,
+        });
+        lastActiveTabId = opened.id;
+        persistOpenTabs();
+        if (autoProceed) {
+          void opened.initialization
+            ?.then(() => {
+              // Runtime is built at the tail of initTabToolset; a null runtime
+              // means the chosen model isn't configured — leave it for setup.
+              if (opened.runtime) void runTurn(opened, context);
+            })
+            .catch((err) => {
+              emit(
+                { type: "$error", message: `duplicate_session failed: ${(err as Error).message}` },
+                opened.id,
+              );
+            });
+        }
+      } catch (err) {
+        emitDiagnosticError("session.duplicate.failed", err, {
+          tabId: tab.id,
+          details: tabDiagnosticState(tab),
+        });
+        emit(
+          { type: "$error", message: `duplicate_session failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
     if (msg.cmd === "oauth_begin") {
       oauthGen++;
       if (pendingOAuth) pendingOAuth.cancel();
@@ -6787,6 +6966,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             openTab.runtime?.loop.configure({ disableAutoCompaction: next });
             emitSettings(openTab);
           }
+        }
+        if (msg.duplicateSessionTokens !== undefined) {
+          saveDuplicateSessionTokens(msg.duplicateSessionTokens);
+          for (const openTab of tabs.values()) emitSettings(openTab);
+        }
+        if (msg.duplicateSessionAutoProceed !== undefined) {
+          saveDuplicateSessionAutoProceed(msg.duplicateSessionAutoProceed);
+          for (const openTab of tabs.values()) emitSettings(openTab);
         }
         if (msg.enableSubagents !== undefined) {
           saveEnableSubagents(msg.enableSubagents);

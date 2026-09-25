@@ -143,6 +143,48 @@ export interface SessionMeta {
   reasoningEffort?: ReasoningEffort;
   /** Per-tab subagent model the conversation last ran with — same resume semantics as `model`. Only the desktop UI's subagent selector writes this. */
   subagentModel?: string;
+  /** Per-session MCP enable/disable — an absolute snapshot of the Settings → MCP
+   *  default taken at mint. Absent on older sessions: those follow the current
+   *  default. Desktop "Duplicate session" copies the source session's value. */
+  mcp?: SessionMcpState;
+}
+
+/** Session-owned MCP enablement. Absolute, not a delta — a server is disabled iff
+ *  its name is listed, a tool iff it is listed under its server. */
+export interface SessionMcpState {
+  disabledServers?: string[];
+  disabledTools?: Record<string, string[]>;
+}
+
+/** Sanitize a stored/loaded `SessionMeta.mcp` — drops non-strings and empties and
+ *  returns `undefined` when the result carries no state. Keeps a hand-edited or
+ *  legacy meta from feeding junk into the bridge. */
+export function normalizeSessionMcpState(input: unknown): SessionMcpState | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const raw = input as { disabledServers?: unknown; disabledTools?: unknown };
+  let disabledServers: string[] | undefined;
+  if (Array.isArray(raw.disabledServers)) {
+    const clean = [
+      ...new Set(
+        raw.disabledServers.filter((s): s is string => typeof s === "string" && s.length > 0),
+      ),
+    ];
+    if (clean.length > 0) disabledServers = clean;
+  }
+  let disabledTools: Record<string, string[]> | undefined;
+  if (raw.disabledTools && typeof raw.disabledTools === "object") {
+    const out: Record<string, string[]> = {};
+    for (const [server, tools] of Object.entries(raw.disabledTools as Record<string, unknown>)) {
+      if (!Array.isArray(tools)) continue;
+      const clean = [
+        ...new Set(tools.filter((t): t is string => typeof t === "string" && t.length > 0)),
+      ];
+      if (clean.length > 0) out[server] = clean;
+    }
+    if (Object.keys(out).length > 0) disabledTools = out;
+  }
+  if (!disabledServers && !disabledTools) return undefined;
+  return { disabledServers, disabledTools };
 }
 
 /** `sessionPath` keeps its historical name and now points at the chat transcript

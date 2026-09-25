@@ -81,6 +81,9 @@ export interface RuntimeContext {
   getMcpPrefix: () => string | undefined;
   getRequestedCount: () => number;
   getWorkspaceDir?: () => string | undefined;
+  /** Per-session MCP enablement overlaid on the config default. Omitted (CLI /
+   *  tests / sessions with no stored state) leaves the config default untouched. */
+  getSpecOverrides?: () => McpSpecOverrides | undefined;
   progressSink: { current: ((info: ProgressInfo) => void) | null };
   /** Daemon-scoped shared clients for browser servers (Playwright) — one client is one browser across tabs. */
   browserRegistry?: SharedClientRegistry;
@@ -168,11 +171,48 @@ function bareToolName(env: BridgeEnv, registeredName: string): string {
     : registeredName;
 }
 
+/** Per-session MCP enablement, absolute — a server is disabled iff named, a tool
+ *  iff listed under its server. Overlaid on the config default by
+ *  `applyMcpSessionOverrides`. */
+export interface McpSpecOverrides {
+  disabledServers?: ReadonlySet<string>;
+  disabledTools?: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+/** Overlay a session's absolute MCP state onto specs from config. `overrides`
+ *  undefined passes specs through untouched (CLI / tests / legacy sessions); a
+ *  present override REPLACES the default — the session owns its set outright. */
+export function applyMcpSessionOverrides(
+  specs: McpServerSpec[],
+  overrides?: McpSpecOverrides,
+): McpServerSpec[] {
+  if (!overrides) return specs;
+  const disabledServers = overrides.disabledServers ?? new Set<string>();
+  return specs.map((spec): McpServerSpec => {
+    const name = spec.name;
+    const disabled = name ? disabledServers.has(name) : false;
+    const toolList = name ? [...(overrides.disabledTools?.get(name) ?? [])] : [];
+    return {
+      ...spec,
+      disabled,
+      disabledTools: toolList.length > 0 ? toolList : undefined,
+    };
+  });
+}
+
 export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
   const records = new Map<string, SpecRecord>();
   const insertionOrder: string[] = [];
   const failureMap = new Map<string, McpFailure>();
   let sink: McpLifecycleSink = stderrLifecycleSink;
+
+  /** Config specs for this workspace with the session's MCP overlay applied. */
+  function effectiveConfig(): McpServerSpec[] {
+    return applyMcpSessionOverrides(
+      loadEffectiveMcpConfig(ctx.getWorkspaceDir?.()),
+      ctx.getSpecOverrides?.(),
+    );
+  }
 
   async function addSpec(
     raw: string,
@@ -185,7 +225,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     failureMap.delete(raw);
     const tools = ctx.getTools();
     if (!tools) return { ok: false, reason: "no tool registry available" };
-    const normalized = loadEffectiveMcpConfig(ctx.getWorkspaceDir?.());
+    const normalized = effectiveConfig();
     let label = "anon";
     let mcp: McpClient | undefined;
     let sharedKey: string | undefined;
@@ -516,7 +556,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     failed: Array<{ spec: string; reason: string }>;
     summaries: McpServerSummary[];
   }> {
-    const normalized = loadEffectiveMcpConfig(ctx.getWorkspaceDir?.());
+    const normalized = effectiveConfig();
     const desiredMap = new Map<string, McpServerSpec>();
     const desired: string[] = [];
     for (const spec of normalized) {

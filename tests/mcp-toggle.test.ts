@@ -1,7 +1,7 @@
 /** Per-server + per-tool MCP toggles — config helpers, bridge filter, runtime hot-apply. */
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { createMcpRuntime } from "../src/cli/commands/mcp-runtime.js";
+import { applyMcpSessionOverrides, createMcpRuntime } from "../src/cli/commands/mcp-runtime.js";
 import {
   type ReasonixConfig,
   ensureMcpServersEntry,
@@ -10,7 +10,12 @@ import {
   setMcpToolDisabled,
 } from "../src/config.js";
 import { bridgeMcpTools } from "../src/mcp/registry.js";
-import { overlayMatchedSpec, parseMcpSpec, specToRaw } from "../src/mcp/spec.js";
+import {
+  type McpServerSpec,
+  overlayMatchedSpec,
+  parseMcpSpec,
+  specToRaw,
+} from "../src/mcp/spec.js";
 import type { CallToolResult, McpTool } from "../src/mcp/types.js";
 import { ToolRegistry } from "../src/tools.js";
 
@@ -363,5 +368,108 @@ describe("MCP runtime — server & per-tool toggle application", () => {
     await runtime.reloadFromConfig();
     expect(runtime.size()).toBe(1);
     expect(mocks.FakeMcpClient.instances).toHaveLength(1);
+  });
+});
+
+describe("applyMcpSessionOverrides — per-session overlay", () => {
+  const mk = (
+    name: string | null,
+    extra: { disabled?: boolean; disabledTools?: string[] } = {},
+  ): McpServerSpec => ({
+    transport: "stdio",
+    name,
+    command: "npx",
+    args: ["-y", "demo"],
+    ...extra,
+  });
+
+  it("passes specs through untouched when no overrides are given", () => {
+    const specs = [mk("demo", { disabled: true, disabledTools: ["a"] })];
+    expect(applyMcpSessionOverrides(specs, undefined)).toBe(specs);
+  });
+
+  it("replaces the default server enable/disable set outright", () => {
+    const specs = [mk("demo", { disabled: false }), mk("other", { disabled: true })];
+    const out = applyMcpSessionOverrides(specs, { disabledServers: new Set(["demo"]) });
+    expect(out.find((s) => s.name === "demo")!.disabled).toBe(true);
+    // Absent from the session set → enabled, overriding the config default.
+    expect(out.find((s) => s.name === "other")!.disabled).toBe(false);
+  });
+
+  it("replaces the per-server disabledTools list", () => {
+    const specs = [mk("demo", { disabledTools: ["a"] })];
+    const out = applyMcpSessionOverrides(specs, {
+      disabledTools: new Map([["demo", new Set(["b"])]]),
+    });
+    expect(out[0]!.disabledTools).toEqual(["b"]);
+  });
+
+  it("leaves anonymous (null-name) servers enabled", () => {
+    const out = applyMcpSessionOverrides([mk(null)], { disabledServers: new Set(["demo"]) });
+    expect(out[0]!.disabled).toBe(false);
+  });
+});
+
+describe("MCP runtime — per-session overlay applied on reload", () => {
+  beforeAll(async () => {
+    const configModule = await import("../src/config.js");
+    mocks.loadEffectiveMcpConfigMock.mockImplementation(() =>
+      configModule.normalizeMcpConfig(mocks.readConfigMock() as ReasonixConfig),
+    );
+  });
+  afterEach(() => {
+    mocks.readConfigMock.mockReset();
+  });
+
+  function buildWithOverrides(overrides: () => Parameters<typeof applyMcpSessionOverrides>[1]): {
+    tools: ToolRegistry;
+    runtime: ReturnType<typeof createMcpRuntime>;
+  } {
+    const tools = new ToolRegistry();
+    const runtime = createMcpRuntime({
+      getTools: () => tools,
+      getMcpPrefix: () => undefined,
+      getRequestedCount: () => 1,
+      progressSink: { current: null },
+      getSpecOverrides: overrides,
+    });
+    runtime.setLifecycleSink(() => {});
+    return { tools, runtime };
+  }
+
+  function names(tools: ToolRegistry): string[] {
+    return tools
+      .specs()
+      .map((s) => s.function.name)
+      .sort();
+  }
+
+  it("a session-disabled server never bridges, even when the config default enables it", async () => {
+    mocks.readConfigMock.mockReturnValue(demoCfg());
+    const { tools, runtime } = buildWithOverrides(() => ({ disabledServers: new Set(["demo"]) }));
+    const result = await runtime.reloadFromConfig();
+    expect(result.added).toEqual([]);
+    expect(runtime.size()).toBe(0);
+    expect(names(tools)).toEqual([]);
+  });
+
+  it("a session-disabled tool is filtered out of the bridge", async () => {
+    mocks.readConfigMock.mockReturnValue(demoCfg());
+    const { tools, runtime } = buildWithOverrides(() => ({
+      disabledTools: new Map([["demo", new Set(["b"])]]),
+    }));
+    await runtime.reloadFromConfig();
+    expect(names(tools)).toEqual(["demo_a"]);
+    expect(runtime.toolFilterState()).toEqual([
+      { spec: "demo=npx -y demo-pkg", enabled: ["a"], disabled: ["b"] },
+    ]);
+  });
+
+  it("a session-enabled server bridges even when the config default disables it", async () => {
+    mocks.readConfigMock.mockReturnValue(demoCfg({ disabled: true }));
+    const { tools, runtime } = buildWithOverrides(() => ({}));
+    await runtime.reloadFromConfig();
+    expect(runtime.size()).toBe(1);
+    expect(names(tools)).toEqual(["demo_a", "demo_b"]);
   });
 });

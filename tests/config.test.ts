@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  DEFAULT_DUPLICATE_SESSION_TOKENS,
   DEFAULT_MODEL,
   type DesktopOpenTab,
   GEMINI_MODELS,
@@ -29,6 +30,8 @@ import {
   loadBraveApiKey,
   loadContextTokens,
   loadDesktopOpenTabs,
+  loadDuplicateSessionAutoProceed,
+  loadDuplicateSessionTokens,
   loadEditMode,
   loadEnableSubagents,
   loadEndpoint,
@@ -78,6 +81,8 @@ import {
   saveBaseUrl,
   saveContextTokens,
   saveDesktopOpenTabs,
+  saveDuplicateSessionAutoProceed,
+  saveDuplicateSessionTokens,
   saveEditMode,
   saveEnableSubagents,
   saveIndexConfig,
@@ -1181,6 +1186,35 @@ describe("config", () => {
 
     saveContextTokens(null, path);
     expect(readConfig(path).contextTokens).toBeUndefined();
+  });
+
+  describe("duplicate session settings", () => {
+    it("defaults the token budget to 50K and clamps out-of-range values", () => {
+      expect(loadDuplicateSessionTokens(path)).toBe(DEFAULT_DUPLICATE_SESSION_TOKENS);
+      expect(DEFAULT_DUPLICATE_SESSION_TOKENS).toBe(50_000);
+      writeConfig({ duplicateSessionTokens: 100 } as any, path);
+      expect(loadDuplicateSessionTokens(path)).toBe(1_000);
+      writeConfig({ duplicateSessionTokens: 5_000_000 }, path);
+      expect(loadDuplicateSessionTokens(path)).toBe(1_000_000);
+    });
+
+    it("saveDuplicateSessionTokens persists a clamped value and clears on null", () => {
+      saveDuplicateSessionTokens(75_000, path);
+      expect(readConfig(path).duplicateSessionTokens).toBe(75_000);
+      saveDuplicateSessionTokens(100, path);
+      expect(readConfig(path).duplicateSessionTokens).toBe(1_000);
+      saveDuplicateSessionTokens(null, path);
+      expect(readConfig(path).duplicateSessionTokens).toBeUndefined();
+      expect(loadDuplicateSessionTokens(path)).toBe(DEFAULT_DUPLICATE_SESSION_TOKENS);
+    });
+
+    it("auto proceed defaults off and round-trips", () => {
+      expect(loadDuplicateSessionAutoProceed(path)).toBe(false);
+      saveDuplicateSessionAutoProceed(true, path);
+      expect(loadDuplicateSessionAutoProceed(path)).toBe(true);
+      saveDuplicateSessionAutoProceed(false, path);
+      expect(loadDuplicateSessionAutoProceed(path)).toBe(false);
+    });
   });
 
   it("resolves and atomically persists Ollama generation settings", () => {

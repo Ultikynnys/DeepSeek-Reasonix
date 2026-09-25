@@ -4737,6 +4737,38 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   min-width: 24px;
 }
 
+/* Duplicate-session picker inside the titlebar overflow popup. */
+.dup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 12px;
+}
+.dup-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.dup-hint {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.dup-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.dup-panel .field {
+  width: 100%;
+}
+.dup-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 /* ---------- CONTEXT PANEL ---------- */
 
 .ctx {

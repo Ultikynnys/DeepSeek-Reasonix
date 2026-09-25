@@ -466,10 +466,14 @@ export interface McpSpecInfo {
   status: McpSpecStatus;
   statusReason?: string;
   toolCount?: number;
-  /** Server-level user toggle from config — true while disabled, even before first bridge. */
+  /** Server-level DEFAULT from config (Settings) — true while disabled, even before first bridge. */
   disabled?: boolean;
-  /** Bare MCP tool names the user disabled for this server (per-tool toggles). */
+  /** Bare MCP tool names disabled in the DEFAULT (Settings) for this server. */
   disabledTools?: string[];
+  /** THIS session's server-level disable (Tools-section toggles). Absent = follow the default. */
+  sessionDisabled?: boolean;
+  /** Bare MCP tool names disabled in THIS session for this server (Tools-section toggles). */
+  sessionDisabledTools?: string[];
   /** Bare MCP tool names the server exposes — feeds the per-tool toggle UI. */
   tools?: string[];
   /** Reasonix-managed server (currently Playwright) — disableable and
@@ -785,6 +789,10 @@ export interface SettingsEvent {
    *  degenerating stream. Defaults to false (opt-in). */
   repetitionGuardEnabled?: boolean;
   questionTimerEnabled?: boolean;
+  /** Duplicate-session context budget in tokens (default 50 000); null = default. */
+  duplicateSessionTokens?: number | null;
+  /** When true, a duplicated session auto-runs one turn to continue; default off (user proceeds manually). */
+  duplicateSessionAutoProceed?: boolean;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -1107,6 +1115,10 @@ export interface SettingsPatch {
   /** Allow the stream repetition / "stuck re-thinking" guard to abort a degenerating stream. */
   repetitionGuardEnabled?: boolean;
   questionTimerEnabled?: boolean;
+  /** Duplicate-session context budget in tokens, clamped to [1000, 1000000]; null/undefined = default (50 000). */
+  duplicateSessionTokens?: number | null;
+  /** Auto-run one continuation turn in a freshly duplicated session. Default false. */
+  duplicateSessionAutoProceed?: boolean;
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;
@@ -1216,6 +1228,8 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mcp_specs_add"; spec: string }
   | { cmd: "mcp_specs_remove"; spec: string }
   | { cmd: "mcp_specs_toggle"; name: string; disabled: boolean; tool?: string }
+  /** Per-session MCP toggle (Tools section) — edits the active session's state, not the default. */
+  | { cmd: "mcp_session_toggle"; name: string; disabled: boolean; tool?: string }
   | { cmd: "mcp_extension_status" }
   | {
       cmd: "mcp_extension_configure";
@@ -1246,6 +1260,16 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "jobs_stop"; jobId: number }
   | { cmd: "jobs_stop_all" }
   | { cmd: "compact_history" }
+  /** Duplicate the current conversation as a new truncated session opened on the
+   *  chosen models. `markdown` is the current session's export body; the daemon
+   *  trims it to the last `duplicateSessionTokens` tokens and seeds the new
+   *  session (or auto-continues, per `duplicateSessionAutoProceed`). */
+  | {
+      cmd: "duplicate_session";
+      markdown: string;
+      model: string;
+      subagentModel: string;
+    }
   | { cmd: "retry" }
   | { cmd: "btw"; text: string }
 );

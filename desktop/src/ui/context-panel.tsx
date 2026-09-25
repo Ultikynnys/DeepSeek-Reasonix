@@ -32,6 +32,7 @@ export function ContextPanel({
   usage,
   mcpSpecs,
   mcpBridged,
+  onToggleSessionMcp,
   sessionFiles,
   memory,
   memoryDetail,
@@ -51,6 +52,8 @@ export function ContextPanel({
   usage: UsageStats;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
+  /** Per-session MCP enable/disable (Tools section) — edits THIS session, not the default. */
+  onToggleSessionMcp?: (name: string, disabled: boolean, tool?: string) => void;
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
@@ -210,6 +213,7 @@ export function ContextPanel({
               settings={settings}
               usage={usage}
               onSaveSettings={onSaveSettings}
+              onToggleSessionMcp={onToggleSessionMcp}
             />
           )}
           {tab === "memory" && (
@@ -768,14 +772,25 @@ function CtxTools({
   settings,
   usage,
   onSaveSettings,
+  onToggleSessionMcp,
 }: {
   specs: McpSpecInfo[];
   bridged: boolean;
   settings: Settings | null;
   usage: UsageStats;
   onSaveSettings?: (patch: SettingsPatch) => void;
+  /** Per-session MCP enable/disable — edits THIS session, not the Settings default. */
+  onToggleSessionMcp?: (name: string, disabled: boolean, tool?: string) => void;
 }) {
   const readyCount = specs.filter((s) => s.status === "connected").length;
+  const [expandedMcp, setExpandedMcp] = useState<Set<string>>(new Set());
+  const toggleMcpExpanded = (raw: string) =>
+    setExpandedMcp((prev) => {
+      const next = new Set(prev);
+      if (next.has(raw)) next.delete(raw);
+      else next.add(raw);
+      return next;
+    });
   const effectiveTokens = settings?.contextTokens ?? usage.ctxMax ?? 300_000;
   const clampedTokens = Math.min(1_000_000, Math.max(128_000, effectiveTokens));
   const [sliderValue, setSliderValue] = useState<number>(clampedTokens);
@@ -800,6 +815,19 @@ function CtxTools({
   const commitIter = (val: number) => {
     const next = Math.min(100, Math.max(50, val));
     onSaveSettings?.({ maxIterPerTurn: next });
+  };
+
+  const effectiveDupTokens = settings?.duplicateSessionTokens ?? 50_000;
+  const clampedDupTokens = Math.min(1_000_000, Math.max(1_000, effectiveDupTokens));
+  const [dupTokensValue, setDupTokensValue] = useState<number>(clampedDupTokens);
+
+  useEffect(() => {
+    setDupTokensValue(clampedDupTokens);
+  }, [clampedDupTokens]);
+
+  const commitDupTokens = (val: number) => {
+    const next = Math.min(1_000_000, Math.max(1_000, val));
+    onSaveSettings?.({ duplicateSessionTokens: next });
   };
 
   return (
@@ -1042,6 +1070,82 @@ function CtxTools({
         </div>
       </div>
 
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.duplicateSessionLimit")}</span>
+          <span className="right" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span>
+              {fmtCompact(dupTokensValue)} ({dupTokensValue.toLocaleString()})
+            </span>
+            {settings?.duplicateSessionTokens !== undefined &&
+            settings?.duplicateSessionTokens !== null ? (
+              <button
+                type="button"
+                className="mini-btn"
+                title={t("contextPanel.duplicateSessionLimitResetTooltip")}
+                onClick={() => onSaveSettings?.({ duplicateSessionTokens: null })}
+              >
+                {t("contextPanel.contextWindowReset")}
+              </button>
+            ) : null}
+          </span>
+        </div>
+        <div className="ctx-slider-container">
+          <input
+            type="range"
+            className="ctx-slider"
+            min={1_000}
+            max={1_000_000}
+            step={1_000}
+            value={dupTokensValue}
+            aria-label={t("contextPanel.duplicateSessionLimit")}
+            onChange={(e) => setDupTokensValue(Number(e.target.value))}
+            onPointerUp={(e) => commitDupTokens(Number(e.currentTarget.value))}
+            onKeyUp={(e) => commitDupTokens(Number(e.currentTarget.value))}
+          />
+          <div className="ctx-slider-bounds">
+            <span>1K</span>
+            <span>1M</span>
+          </div>
+        </div>
+        <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>
+          {t("contextPanel.duplicateSessionLimitDesc")}
+        </div>
+      </div>
+
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.duplicateSessionAutoProceed")}</span>
+          <span className="right">
+            <div className="seg-ctrl" style={{ fontSize: "10.5px" }}>
+              <button
+                type="button"
+                aria-label={t("contextPanel.enableDuplicateSessionAutoProceed")}
+                aria-pressed={settings?.duplicateSessionAutoProceed === true}
+                data-on={settings?.duplicateSessionAutoProceed === true}
+                onClick={() => onSaveSettings?.({ duplicateSessionAutoProceed: true })}
+              >
+                {t("contextPanel.duplicateSessionAutoProceedOn")}
+              </button>
+              <button
+                type="button"
+                aria-label={t("contextPanel.disableDuplicateSessionAutoProceed")}
+                aria-pressed={settings?.duplicateSessionAutoProceed !== true}
+                data-on={settings?.duplicateSessionAutoProceed !== true}
+                onClick={() => onSaveSettings?.({ duplicateSessionAutoProceed: false })}
+              >
+                {t("contextPanel.duplicateSessionAutoProceedOff")}
+              </button>
+            </div>
+          </span>
+        </div>
+        <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>
+          {settings?.duplicateSessionAutoProceed === true
+            ? t("contextPanel.duplicateSessionAutoProceedOnDesc")
+            : t("contextPanel.duplicateSessionAutoProceedOffDesc")}
+        </div>
+      </div>
+
       {settings &&
       (settings.modelEndpoint?.provider === "ollama" ||
         settings.subagentModelEndpoint?.provider === "ollama") ? (
@@ -1082,19 +1186,89 @@ function CtxTools({
                     : s.status === "failed"
                       ? ` · ${t("contextPanel.mcpFailed")}`
                       : ` · ${t("contextPanel.mcpConfigured")}`;
+            const canToggle = s.name !== null && Boolean(onToggleSessionMcp);
+            const sessionOff = s.sessionDisabled === true;
+            const tools = s.tools ?? [];
+            const offTools = new Set(s.sessionDisabledTools ?? []);
+            const expanded = expandedMcp.has(s.raw);
             return (
-              <div className="mcp-row" key={s.raw}>
-                <span className="ico">
-                  <I.wrench size={12} />
-                </span>
-                <div className="body">
-                  <div className="n">{s.name ?? s.summary}</div>
-                  <div className="m">
-                    {s.transport}
-                    {suffix}
+              <div key={s.raw} style={{ marginBottom: 6 }}>
+                <div className="mcp-row" style={{ marginBottom: tools.length > 0 ? 4 : 6 }}>
+                  <span className="ico">
+                    <I.wrench size={12} />
+                  </span>
+                  <div className="body">
+                    <div className="n">{s.name ?? s.summary}</div>
+                    <div className="m">
+                      {s.transport}
+                      {suffix}
+                    </div>
                   </div>
+                  {canToggle ? (
+                    <button
+                      type="button"
+                      className="mini-btn"
+                      style={{ fontSize: 11, flex: "0 0 auto", color: sessionOff ? "var(--accent)" : undefined }}
+                      onClick={() => onToggleSessionMcp?.(s.name as string, !sessionOff)}
+                    >
+                      {sessionOff ? t("contextPanel.mcpEnable") : t("contextPanel.mcpDisable")}
+                    </button>
+                  ) : null}
+                  <span className="status" data-s={dot} />
                 </div>
-                <span className="status" data-s={dot} />
+                {canToggle && tools.length > 0 ? (
+                  <div style={{ paddingLeft: 8 }}>
+                    <button
+                      type="button"
+                      className="mini-btn"
+                      style={{ fontSize: 11 }}
+                      onClick={() => toggleMcpExpanded(s.raw)}
+                    >
+                      {expanded ? "▾" : "▸"} {t("contextPanel.mcpToolsLabel", { count: tools.length })}
+                    </button>
+                    {expanded ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: 4 }}>
+                        {tools.map((tool) => {
+                          const off = offTools.has(tool);
+                          return (
+                            <div
+                              key={tool}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 6,
+                                padding: "1px 0",
+                              }}
+                            >
+                              <span
+                                className="mono"
+                                style={{
+                                  fontSize: 11,
+                                  color: off ? "var(--muted)" : undefined,
+                                  textDecoration: off ? "line-through" : undefined,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {tool}
+                              </span>
+                              <button
+                                type="button"
+                                className="mini-btn"
+                                style={{ fontSize: 11, flex: "0 0 auto", color: off ? "var(--accent)" : undefined }}
+                                onClick={() => onToggleSessionMcp?.(s.name as string, !off, tool)}
+                              >
+                                {off ? t("contextPanel.mcpEnable") : t("contextPanel.mcpDisable")}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             );
           })

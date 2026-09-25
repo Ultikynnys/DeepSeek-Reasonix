@@ -412,6 +412,10 @@ export interface ReasonixConfig {
   contextTokens?: number;
   /** When true, disable all automatic compaction (turn-start auto-fold, post-response fold, context guards). Manual compaction remains available. */
   disableAutoCompaction?: boolean;
+  /** Token budget for a duplicated session's retained context (newest-first). Default 50 000. */
+  duplicateSessionTokens?: number;
+  /** When true, a duplicated session auto-runs one continuation turn. Default false. */
+  duplicateSessionAutoProceed?: boolean;
   /** Whether subagent skills may run. Defaults to true when absent. */
   enableSubagents?: boolean;
   /** Whether `run_command` may run a command elevated via Windows UAC consent.
@@ -2141,6 +2145,56 @@ export function saveDisableAutoCompaction(
 ): void {
   const cfg = readConfig(path);
   cfg.disableAutoCompaction = disabled;
+  writeConfig(cfg, path);
+}
+
+/** Default retained-context budget (tokens) for a duplicated session. */
+export const DEFAULT_DUPLICATE_SESSION_TOKENS = 50_000;
+export const MIN_DUPLICATE_SESSION_TOKENS = 1_000;
+export const MAX_DUPLICATE_SESSION_TOKENS = 1_000_000;
+
+/** Retained-context budget (tokens, newest-first) for a duplicated session.
+ *  Unset / non-numeric → the 50 000 default; otherwise clamped to [1000, 1M]. */
+export function loadDuplicateSessionTokens(path: string = defaultConfigPath()): number {
+  const v = readConfig(path).duplicateSessionTokens;
+  if (typeof v !== "number" || !Number.isFinite(v)) return DEFAULT_DUPLICATE_SESSION_TOKENS;
+  return Math.min(
+    MAX_DUPLICATE_SESSION_TOKENS,
+    Math.max(MIN_DUPLICATE_SESSION_TOKENS, Math.floor(v)),
+  );
+}
+
+/** Persist the duplicated-session token budget. null / undefined clears it back to
+ *  the 50 000 default; out-of-range values clamp to [1000, 1M]. */
+export function saveDuplicateSessionTokens(
+  value: number | null | undefined,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    const { duplicateSessionTokens: _drop, ...rest } = cfg;
+    writeConfig(rest, path);
+    return;
+  }
+  const clamped = Math.min(
+    MAX_DUPLICATE_SESSION_TOKENS,
+    Math.max(MIN_DUPLICATE_SESSION_TOKENS, Math.floor(value)),
+  );
+  writeConfig({ ...cfg, duplicateSessionTokens: clamped }, path);
+}
+
+/** Whether a duplicated session auto-runs one continuation turn. Defaults to false. */
+export function loadDuplicateSessionAutoProceed(path: string = defaultConfigPath()): boolean {
+  return readConfig(path).duplicateSessionAutoProceed === true;
+}
+
+/** Persist whether a duplicated session auto-runs one continuation turn. */
+export function saveDuplicateSessionAutoProceed(
+  enabled: boolean,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.duplicateSessionAutoProceed = enabled;
   writeConfig(cfg, path);
 }
 
