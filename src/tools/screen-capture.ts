@@ -31,6 +31,14 @@ export interface CaptureArea {
   globalY: number;
 }
 
+/** Where a focused application window lives, so the capture targets the right monitor. */
+export interface FocusResult {
+  /** Monitor device name hosting the window (Windows device name), when known. */
+  monitorName?: string;
+  /** Window rectangle in virtual-screen coordinates, when known. */
+  bounds?: { left: number; top: number; width: number; height: number };
+}
+
 export interface ScreenCaptureToolOptions {
   /** Project root for resolving relative paths. Defaults to ctx.rootDir. */
   rootDir?: string;
@@ -40,14 +48,14 @@ export interface ScreenCaptureToolOptions {
     crop: CaptureArea;
     outputPath: string;
   }) => Promise<void>;
-  /** Optional custom focus runner (useful for mocking in tests). */
-  focusRunner?: (app: string) => Promise<void>;
+  /** Optional custom focus runner (useful for mocking in tests). Reports where the window lives. */
+  focusRunner?: (app: string) => Promise<FocusResult | undefined>;
   /** Optional custom monitor lister (useful for mocking in tests). */
   listMonitors?: () => Promise<MonitorInfo[]>;
 }
 
 const DESCRIPTION =
-  "Capture a screenshot from a chosen monitor with optional top-left and bottom-right corner crop coordinates. Supports bringing a specific application or window to the foreground before capture via `app`. Directly feeds the captured image to see_image so vision models can inspect it immediately. Specify `monitor` by index (0 for primary/first monitor) or display name. Specify `top_left_x`, `top_left_y`, `bottom_right_x`, `bottom_right_y` to capture a specific rectangular region (in pixels relative to the monitor's top-left corner), or omit them to capture the entire monitor.";
+  "Capture a screenshot from a chosen monitor with optional top-left and bottom-right corner crop coordinates. Supports bringing a specific application or window to the foreground before capture via `app`; when `app` is given, its hosting monitor is chosen automatically (the window may live on a secondary display) unless `monitor` is set explicitly. Directly feeds the captured image to see_image so vision models can inspect it immediately. Specify `monitor` by index (0 for primary/first monitor) or display name. Specify `top_left_x`, `top_left_y`, `bottom_right_x`, `bottom_right_y` to capture a specific rectangular region (in pixels relative to the monitor's top-left corner), or omit them to capture the entire monitor.";
 
 /** Common DPI-awareness preamble for Windows PowerShell operations. */
 const WIN_DPI_PREAMBLE = [
@@ -317,13 +325,14 @@ export async function defaultCaptureRunner(options: {
   }
 }
 
-/** Bring an application/window to the foreground on Windows via PowerShell and Win32. */
-async function focusAppWindows(appQuery: string): Promise<void> {
+/** Bring an application/window to the foreground on Windows and report where it lives. */
+async function focusAppWindows(appQuery: string): Promise<FocusResult | undefined> {
   const sanitized = appQuery.replace(/'/g, "''");
   const script = [
     `$query = '${sanitized}';`,
-    '$code = \'using System; using System.Runtime.InteropServices; public class WinFocus { [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow); [DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd); }\';',
+    '$code = \'using System; using System.Runtime.InteropServices; public class WinFocus { [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; } [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow); [DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect); }\';',
     "Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue;",
+    "Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue;",
     "$procs = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and ($_.MainWindowTitle -or $_.ProcessName) };",
     '$exact = $procs | Where-Object { $_.ProcessName -ieq $query -or "$($_.ProcessName).exe" -ieq $query } | Select-Object -First 1;',
     "if ($exact) { $p = $exact }",
@@ -346,11 +355,42 @@ async function focusAppWindows(appQuery: string): Promise<void> {
     "[WinFocus]::ShowWindow($p.MainWindowHandle, 5) | Out-Null;",
     "[WinFocus]::SetForegroundWindow($p.MainWindowHandle) | Out-Null;",
     "[WinFocus]::SwitchToThisWindow($p.MainWindowHandle, $true);",
-    "Start-Sleep -Milliseconds 200;",
+    "Start-Sleep -Milliseconds 250;",
+    "try {",
+    "    $rect = New-Object WinFocus+RECT;",
+    "    [WinFocus]::GetWindowRect($p.MainWindowHandle, [ref]$rect) | Out-Null;",
+    "    $screen = [System.Windows.Forms.Screen]::FromHandle($p.MainWindowHandle);",
+    "    $mon = if ($screen) { $screen.DeviceName } else { '' };",
+    "    Write-Output ('FOCUS_OK|' + $mon + '|' + $rect.Left + '|' + $rect.Top + '|' + $rect.Right + '|' + $rect.Bottom);",
+    "} catch {",
+    "    Write-Output 'FOCUS_OK||';",
+    "}",
   ].join("\n");
 
   try {
-    await runPowerShell(script, 15000);
+    const stdout = await runPowerShell(script, 15000);
+    const line = stdout
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l.startsWith("FOCUS_OK|"));
+    if (!line) return undefined;
+    const parts = line.split("|");
+    const monitorName = parts[1] && parts[1].length > 0 ? parts[1] : undefined;
+    const left = Number.parseInt(parts[2] ?? "", 10);
+    const top = Number.parseInt(parts[3] ?? "", 10);
+    const right = Number.parseInt(parts[4] ?? "", 10);
+    const bottom = Number.parseInt(parts[5] ?? "", 10);
+    const hasBounds =
+      Number.isFinite(left) &&
+      Number.isFinite(top) &&
+      Number.isFinite(right) &&
+      Number.isFinite(bottom) &&
+      right > left &&
+      bottom > top;
+    return {
+      monitorName,
+      bounds: hasBounds ? { left, top, width: right - left, height: bottom - top } : undefined,
+    };
   } catch (err) {
     const stderr = (err as { stderr?: string })?.stderr ?? "";
     const firstStderrLine = stderr
@@ -400,17 +440,16 @@ async function focusAppLinux(appName: string): Promise<void> {
 }
 
 /** Default application focus dispatcher by platform. */
-export async function defaultFocusRunner(app: string): Promise<void> {
+export async function defaultFocusRunner(app: string): Promise<FocusResult | undefined> {
   switch (process.platform) {
     case "win32":
-      await focusAppWindows(app);
-      break;
+      return focusAppWindows(app);
     case "darwin":
       await focusAppDarwin(app);
-      break;
+      return undefined;
     default:
       await focusAppLinux(app);
-      break;
+      return undefined;
   }
 }
 
@@ -707,11 +746,40 @@ export function registerScreenCaptureTool(
         return `screen_capture: failed to query monitors (${err instanceof Error ? err.message : String(err)})`;
       }
 
+      // Resolve an optional target app and focus it first: the window's monitor
+      // (which may be a secondary display) drives monitor selection below.
+      const rawApp = args.app ?? args.window ?? args.window_title ?? args.focus_app;
+      const targetApp =
+        (typeof rawApp === "string" && rawApp.trim().length > 0) || typeof rawApp === "number"
+          ? String(rawApp).trim()
+          : undefined;
+
+      let focusResult: FocusResult | undefined;
+      if (targetApp) {
+        const focuser = opts.focusRunner ?? defaultFocusRunner;
+        try {
+          focusResult = await focuser(targetApp);
+        } catch (err) {
+          return err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      // An explicit `monitor` wins; otherwise follow the focused window's monitor so a
+      // capture of app X never lands on whatever display the user is busy with.
+      const hasExplicitMonitor =
+        args.monitor !== undefined && args.monitor !== null && args.monitor !== "";
+      const monitorQuery = hasExplicitMonitor ? args.monitor : focusResult?.monitorName;
+
       let selectedMonitor: MonitorInfo;
       try {
-        selectedMonitor = selectMonitor(monitors, args.monitor);
+        selectedMonitor = selectMonitor(monitors, monitorQuery);
       } catch (err) {
-        return err instanceof Error ? err.message : String(err);
+        if (!hasExplicitMonitor && monitorQuery !== undefined) {
+          // App monitor name didn't resolve — fall back to primary rather than fail the capture.
+          selectedMonitor = selectMonitor(monitors, undefined);
+        } else {
+          return err instanceof Error ? err.message : String(err);
+        }
       }
 
       // Parse coordinates
@@ -747,22 +815,6 @@ export function registerScreenCaptureTool(
         typeof args.path === "string" && args.path.trim().length > 0 ? args.path.trim() : undefined;
       const rootDir = ctx?.rootDir ?? opts.rootDir;
       const outputPath = resolveOutputPath(customPath, rootDir);
-
-      // Bring target application to foreground if requested
-      const rawApp = args.app ?? args.window ?? args.window_title ?? args.focus_app;
-      const targetApp =
-        (typeof rawApp === "string" && rawApp.trim().length > 0) || typeof rawApp === "number"
-          ? String(rawApp).trim()
-          : undefined;
-
-      if (targetApp) {
-        const focuser = opts.focusRunner ?? defaultFocusRunner;
-        try {
-          await focuser(targetApp);
-        } catch (err) {
-          return err instanceof Error ? err.message : String(err);
-        }
-      }
 
       // Execute capture
       const runner = opts.captureRunner ?? defaultCaptureRunner;

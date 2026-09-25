@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ToolRegistry } from "../src/tools.js";
 import {
   type CaptureArea,
+  type FocusResult,
   type MonitorInfo,
   calculateCaptureArea,
   registerScreenCaptureTool,
@@ -61,7 +62,7 @@ describe("screen_capture", () => {
   function setupRegistry(
     opts: {
       includeSeeImage?: boolean;
-      focusRunner?: (app: string) => Promise<void>;
+      focusRunner?: (app: string) => Promise<FocusResult | undefined>;
     } = {},
   ): ToolRegistry {
     const registry = new ToolRegistry();
@@ -75,6 +76,7 @@ describe("screen_capture", () => {
         opts.focusRunner ??
         (async (app) => {
           focusedApps.push(app);
+          return undefined;
         }),
       captureRunner: async (opt) => {
         capturedOptions.push(opt);
@@ -296,6 +298,46 @@ describe("screen_capture", () => {
       | undefined;
     expect(textPart?.text).toContain('app "Blender"');
     expect(capturedOptions).toHaveLength(1);
+  });
+
+  it("follows the focused app's monitor instead of the primary when no monitor is given", async () => {
+    const reg = setupRegistry({
+      focusRunner: async () => ({ monitorName: mockMonitors[1]!.name }),
+    });
+
+    const result = await reg.dispatch("screen_capture", JSON.stringify({ app: "Blender" }), {
+      rootDir: root,
+    });
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(capturedOptions).toHaveLength(1);
+    expect(capturedOptions[0]?.monitor.index).toBe(1);
+    expect(capturedOptions[0]?.crop.width).toBe(2560);
+  });
+
+  it("lets an explicit monitor override the focused app's monitor", async () => {
+    const reg = setupRegistry({
+      focusRunner: async () => ({ monitorName: mockMonitors[1]!.name }),
+    });
+
+    await reg.dispatch("screen_capture", JSON.stringify({ app: "Blender", monitor: 0 }), {
+      rootDir: root,
+    });
+
+    expect(capturedOptions[0]?.monitor.index).toBe(0);
+  });
+
+  it("falls back to the primary monitor when the app's monitor cannot be resolved", async () => {
+    const reg = setupRegistry({
+      focusRunner: async () => ({ monitorName: "NO_SUCH_DISPLAY" }),
+    });
+
+    const result = await reg.dispatch("screen_capture", JSON.stringify({ app: "Blender" }), {
+      rootDir: root,
+    });
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(capturedOptions[0]?.monitor.index).toBe(0);
   });
 
   it("supports window and window_title aliases for focusing", async () => {
