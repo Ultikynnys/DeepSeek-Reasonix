@@ -832,6 +832,41 @@ describe("ContextPanel files", () => {
     expect(onSaveSettings).toHaveBeenCalledWith({ repetitionGuardEnabled: false });
   });
 
+  it("toggles the question timer setting from the context panel", () => {
+    const onSaveSettings = vi.fn();
+    render(
+      <ContextPanel
+        settings={settings}
+        usage={usage}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        memoryResult={null}
+        onReadMemory={() => {}}
+        onWriteMemory={() => {}}
+        onDeleteMemory={() => {}}
+        onExportMemories={() => {}}
+        onImportMemories={() => {}}
+        onDismissMemoryResult={() => {}}
+        onSaveSettings={onSaveSettings}
+      />,
+    );
+    fireEvent.click(screen.getByText("Tools"));
+
+    const enableBtn = screen.getByRole("button", { name: "Enable question timer" });
+    const disableBtn = screen.getByRole("button", { name: "Disable question timer" });
+
+    expect(enableBtn.getAttribute("data-on")).toBe("false");
+    expect(disableBtn.getAttribute("data-on")).toBe("true");
+
+    fireEvent.click(enableBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({ questionTimerEnabled: true });
+    fireEvent.click(disableBtn);
+    expect(onSaveSettings).toHaveBeenCalledWith({ questionTimerEnabled: false });
+  });
+
   it("displays auto-compaction disabled indicator in context meter legend when active", () => {
     render(
       <ContextPanel

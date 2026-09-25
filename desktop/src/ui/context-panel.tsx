@@ -1009,6 +1009,39 @@ function CtxTools({
         </div>
       </div>
 
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.questionTimer")}</span>
+          <span className="right">
+            <div className="seg-ctrl" style={{ fontSize: "10.5px" }}>
+              <button
+                type="button"
+                aria-label={t("contextPanel.enableQuestionTimer")}
+                aria-pressed={settings?.questionTimerEnabled === true}
+                data-on={settings?.questionTimerEnabled === true}
+                onClick={() => onSaveSettings?.({ questionTimerEnabled: true })}
+              >
+                {t("contextPanel.questionTimerEnabled")}
+              </button>
+              <button
+                type="button"
+                aria-label={t("contextPanel.disableQuestionTimer")}
+                aria-pressed={settings?.questionTimerEnabled !== true}
+                data-on={settings?.questionTimerEnabled !== true}
+                onClick={() => onSaveSettings?.({ questionTimerEnabled: false })}
+              >
+                {t("contextPanel.questionTimerDisabled")}
+              </button>
+            </div>
+          </span>
+        </div>
+        <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: 6, lineHeight: 1.4 }}>
+          {settings?.questionTimerEnabled === true
+            ? t("contextPanel.questionTimerEnabledDesc")
+            : t("contextPanel.questionTimerDisabledDesc")}
+        </div>
+      </div>
+
       {settings &&
       (settings.modelEndpoint?.provider === "ollama" ||
         settings.subagentModelEndpoint?.provider === "ollama") ? (

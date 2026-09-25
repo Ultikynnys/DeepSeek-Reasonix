@@ -1836,6 +1836,7 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
           enableSubagents: ev.enableSubagents ?? true,
           elevationEnabled: ev.elevationEnabled ?? false,
           repetitionGuardEnabled: ev.repetitionGuardEnabled ?? false,
+          questionTimerEnabled: ev.questionTimerEnabled ?? false,
           baseUrl: ev.baseUrl,
           apiKeyPrefix: ev.apiKeyPrefix,
           workspaceDir: ev.workspaceDir,

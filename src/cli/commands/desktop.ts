@@ -139,6 +139,7 @@ import {
   loadPerplexityApiKey,
   loadProjectPathAllowed,
   loadProjectShellAllowed,
+  loadQuestionTimerEnabled,
   loadQuickSendId,
   loadReasoningEffort,
   loadRecentWorkspaces,
@@ -178,6 +179,7 @@ import {
   saveOllamaGenerationPatch,
   saveOpenAIApiKey,
   saveOpenAIOAuth,
+  saveQuestionTimerEnabled,
   saveQuickSendId,
   saveReasoningEffort,
   saveRepetitionGuardEnabled,
@@ -707,6 +709,14 @@ function wireEventDetails(ev: EmittableEvent): Record<string, unknown> {
         weekly: ev.quota?.weekly ?? null,
         turnUsedPct: ev.quota?.turnUsedPct ?? null,
       };
+    case "$zai_quota":
+      return {
+        hasQuota: ev.quota !== null,
+        reason: ev.reason ?? null,
+        weekly: ev.quota?.weekly ?? null,
+        fiveHour: ev.quota?.fiveHour ?? null,
+        turnUsedPct: ev.quota?.turnUsedPct ?? null,
+      };
     case "$balance":
       return {
         currency: ev.currency,
@@ -1178,6 +1188,7 @@ function emitSettings(tab: Tab): void {
       elevationEnabled: loadElevationEnabled(),
       repetitionGuardEnabled:
         tab.runtime?.loop.repetitionGuardEnabled ?? loadRepetitionGuardEnabled(),
+      questionTimerEnabled: loadQuestionTimerEnabled(),
       enabledModels: loadEnabledModels(),
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
@@ -5048,7 +5059,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // Shared auto-resolve policy (e.g. plan_checkpoint in auto/yolo) — must
     // still run BEFORE we emit any UI event, otherwise the surface flickers
     // a card that we'd immediately tear down.
-    const auto = autoResolveVerdict(req, loadEditMode());
+    const auto = autoResolveVerdict(req, loadEditMode(), {
+      enableChoiceTimer: loadQuestionTimerEnabled(),
+    });
     if (auto?.kind === "instant") {
       // plan_checkpoint specifically needs the step-completed signal to flow
       // through so the rail progress ticks. Emit it before resolving.
@@ -6743,6 +6756,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             openTab.runtime?.loop.configure({ repetitionGuardEnabled: next });
             emitSettings(openTab);
           }
+        }
+        if (msg.questionTimerEnabled !== undefined) {
+          saveQuestionTimerEnabled(msg.questionTimerEnabled);
+          for (const openTab of tabs.values()) emitSettings(openTab);
         }
         if (msg.enabledModels !== undefined) {
           saveEnabledModels(Array.isArray(msg.enabledModels) ? msg.enabledModels : []);

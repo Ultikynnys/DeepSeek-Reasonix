@@ -553,6 +553,28 @@ function PageGeneral({
           </select>
         </div>
         <WebSearchEngineCredentials settings={settings} onSave={onSave} />
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.questionTimer")}</div>
+            <div className="h">{t("settings.questionTimerHint")}</div>
+          </div>
+          <div className="seg-ctrl">
+            <button
+              type="button"
+              data-on={!settings.questionTimerEnabled}
+              onClick={() => onSave({ questionTimerEnabled: false })}
+            >
+              {t("contextPanel.questionTimerDisabled")}
+            </button>
+            <button
+              type="button"
+              data-on={Boolean(settings.questionTimerEnabled)}
+              onClick={() => onSave({ questionTimerEnabled: true })}
+            >
+              {t("contextPanel.questionTimerEnabled")}
+            </button>
+          </div>
+        </div>
       </section>
 
       <section className="section">

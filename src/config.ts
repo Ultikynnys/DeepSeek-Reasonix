@@ -443,6 +443,8 @@ export interface ReasonixConfig {
   mcpServers?: Record<string, McpServerConfig>;
   session?: string | null;
   setupCompleted?: boolean;
+  questionTimer?: boolean;
+  questionTimerEnabled?: boolean;
   search?: boolean;
   /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "baidu" (Baidu AI Search API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
   webSearchEngine?:
@@ -2182,6 +2184,20 @@ export function saveRepetitionGuardEnabled(
 ): void {
   const cfg = readConfig(path);
   cfg.repetitionGuardEnabled = enabled;
+  writeConfig(cfg, path);
+}
+
+export function loadQuestionTimerEnabled(path: string = defaultConfigPath()): boolean {
+  const cfg = readConfig(path);
+  return cfg.questionTimer === true || cfg.questionTimerEnabled === true;
+}
+
+export function saveQuestionTimerEnabled(
+  enabled: boolean,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.questionTimerEnabled = enabled;
   writeConfig(cfg, path);
 }
 

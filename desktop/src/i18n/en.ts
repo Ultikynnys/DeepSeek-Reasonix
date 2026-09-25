@@ -118,6 +118,8 @@ export const en = {
     webSearchEngineOllama: "ollama — Ollama cloud web search (set OLLAMA_API_KEY)",
     webSearchEngineZai: "zai — Z.AI search-prime (set ZAI_API_KEY)",
     webSearchEngineNote: "applies to the next web_search call",
+    questionTimer: "Question timer",
+    questionTimerHint: "Auto-pick choices after a countdown in YOLO mode. Disabled by default.",
     webSearchEndpoint: "SearXNG endpoint",
     webSearchEndpointHint: "Base URL of your SearXNG instance. Defaults to http://localhost:8080.",
     webSearchApiKeySignup: "(get key)",
@@ -685,6 +687,8 @@ export const en = {
       "Antigravity usage · no data — sign in to Google Antigravity (Settings → Gemini) to see plan usage · click to retry",
     zaiQuota: "GLM usage",
     zaiQuotaTitle: "GLM Coding Plan {plan} · {left}% left · click to refresh",
+    zaiQuotaDualTitle:
+      "GLM Coding Plan {plan} · 5h: {fiveHour}% left · weekly: {weekly}% left · resets {resets} · click to refresh",
     zaiTurnQuotaTitle: "This turn used {pct}% of the GLM 5-hour quota",
     zaiNoData:
       "GLM usage · no data — set a Z.AI API key (Settings → Z.AI / GLM) to see plan usage · click to retry",
@@ -805,6 +809,15 @@ export const en = {
       "Auto-stops a stream whose output degenerates into a repeated pattern (reasoning, content, or tool calls).",
     repetitionGuardDisabledDesc:
       "Off by default: a degenerate stream is allowed to finish. Enable to auto-stop a model stuck re-thinking the same point.",
+    questionTimer: "Question timer",
+    questionTimerEnabled: "Enabled",
+    questionTimerDisabled: "Disabled",
+    enableQuestionTimer: "Enable question timer",
+    disableQuestionTimer: "Disable question timer",
+    questionTimerEnabledDesc:
+      "Auto-picks the first option after a 30s countdown for choice questions in YOLO mode.",
+    questionTimerDisabledDesc:
+      "Off by default: questions with options wait for manual selection.",
     compactionDisabled: "auto-compaction disabled",
     autoCompactionDisabledTooltip: "Auto-compaction disabled (manual button only)",
     ollamaGeneration: "Ollama generation",
@@ -935,6 +948,9 @@ export const en = {
     risk: "risk",
     planStepCount: "{count} step(s)",
     autoApproveIn: "auto-approving in {n}s — first option picks itself",
+    disableTimer: "Disable timer",
+    enableTimer: "Enable timer",
+    questionTimerDisabled: "Question timer disabled",
     planConfirmationKind: "plan confirmation",
     startPlan: "Start plan",
     approve: "Approve",

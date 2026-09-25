@@ -272,14 +272,23 @@ export function StatusBar({
   // Z.AI GLM Coding Plan: the 5-hour window is the primary ribbon value (finer
   // resolution than weekly), falling back to weekly when the plan omits it.
   const zaiQuotaData = zaiQuota && zaiQuotaBilling ? zaiQuota : null;
-  const zaiWindow = zaiQuotaData?.fiveHour ?? zaiQuotaData?.weekly ?? null;
+  const zaiFiveHour = zaiQuotaData?.fiveHour ?? null;
+  const zaiWeekly = zaiQuotaData?.weekly ?? null;
+  const zaiWindow = zaiFiveHour ?? zaiWeekly ?? null;
   const zaiTurnPct = zaiQuotaData?.turnUsedPct ?? null;
   const zaiQuotaTitle =
-    zaiQuotaData && zaiWindow
-      ? t("statusbar.zaiQuotaTitle", {
-          left: Math.round(zaiWindow.remainingPct),
-          plan: zaiQuotaData.plan ?? "GLM Coding Plan",
-        })
+    zaiQuotaData && (zaiFiveHour || zaiWeekly)
+      ? zaiFiveHour && zaiWeekly
+        ? t("statusbar.zaiQuotaDualTitle", {
+            fiveHour: Math.round(zaiFiveHour.remainingPct),
+            weekly: Math.round(zaiWeekly.remainingPct),
+            resets: zaiWeekly.resetsAt ? new Date(zaiWeekly.resetsAt).toLocaleString() : "—",
+            plan: zaiQuotaData.plan ?? "GLM Coding Plan",
+          })
+        : t("statusbar.zaiQuotaTitle", {
+            left: Math.round(zaiWindow!.remainingPct),
+            plan: zaiQuotaData.plan ?? "GLM Coding Plan",
+          })
       : t("statusbar.zaiNoData");
   const zaiQuotaTitleWithReason =
     !zaiQuotaData && zaiQuotaReason
@@ -638,11 +647,17 @@ export function StatusBar({
           >
             <I.coin size={11} style={{ color: "var(--accent)" }} />
             <span>{t("statusbar.zaiQuota")}</span>
-            {zaiQuotaData && zaiWindow ? (
+            {zaiQuotaData && (zaiFiveHour || zaiWeekly) ? (
               <>
-                <span className="v acc">
-                  {Math.round(zaiWindow.remainingPct)}% {t("statusbar.codexLeft")}
-                </span>
+                {zaiFiveHour && zaiWeekly ? (
+                  <span className="v acc">
+                    5h {Math.round(zaiFiveHour.remainingPct)}% · wk {Math.round(zaiWeekly.remainingPct)}% {t("statusbar.codexLeft")}
+                  </span>
+                ) : (
+                  <span className="v acc">
+                    {Math.round(zaiWindow!.remainingPct)}% {t("statusbar.codexLeft")}
+                  </span>
+                )}
                 <span className="conv">{zaiQuotaData.plan ?? "GLM"}</span>
               </>
             ) : zaiQuotaRefreshing ? (

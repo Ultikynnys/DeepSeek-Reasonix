@@ -4,11 +4,16 @@ import { YOLO_PLAN_COUNTDOWN_MS, autoResolveVerdict } from "../src/core/pause-po
 
 // Mirrors the yolo listener body in src/cli/commands/desktop.ts (the desktop
 // backend's pause-gate bridge — the TUI/ACP variants were removed with them).
-function makeListener(opts: { yolo?: boolean }, configEditMode: "review" | "auto" | "yolo") {
+function makeListener(
+  opts: { yolo?: boolean; enableChoiceTimer?: boolean },
+  configEditMode: "review" | "auto" | "yolo",
+) {
   return (gate: PauseGate, onBridge: (reqId: number) => void) => {
     gate.on((req) => {
       const editMode = opts.yolo ? "yolo" : configEditMode;
-      const auto = autoResolveVerdict(req, editMode);
+      const auto = autoResolveVerdict(req, editMode, {
+        enableChoiceTimer: opts.enableChoiceTimer,
+      });
       if (auto?.kind === "instant") {
         gate.resolve(req.id, auto.verdict as never);
         return;
@@ -261,12 +266,45 @@ describe("autoResolveVerdict (yolo mode)", () => {
     expect(bridgedReqId).not.toBeNull();
   });
 
-  it("waits 10 seconds before auto-picking the first ask_choice option with --yolo", async () => {
+  it("bridges ask_choice without timer by default with --yolo (timer disabled by default)", async () => {
     vi.useFakeTimers();
     try {
       const gate = new PauseGate();
       let bridged = false;
       makeListener({ yolo: true }, "review")(gate, () => {
+        bridged = true;
+      });
+
+      const promise = gate.ask({
+        kind: "choice",
+        payload: {
+          question: "Which approach?",
+          options: [
+            { id: "option-1", title: "First" },
+            { id: "option-2", title: "Second" },
+          ],
+          allowCustom: true,
+        },
+      });
+
+      let settled = false;
+      void promise.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(YOLO_PLAN_COUNTDOWN_MS + 5_000);
+      expect(settled).toBe(false);
+      expect(bridged).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits 30 seconds before auto-picking the first ask_choice option with --yolo when timer is enabled", async () => {
+    vi.useFakeTimers();
+    try {
+      const gate = new PauseGate();
+      let bridged = false;
+      makeListener({ yolo: true, enableChoiceTimer: true }, "review")(gate, () => {
         bridged = true;
       });
 
@@ -302,7 +340,7 @@ describe("autoResolveVerdict (yolo mode)", () => {
     try {
       const gate = new PauseGate();
       let bridgedReqId: number | null = null;
-      makeListener({ yolo: true }, "review")(gate, (id) => {
+      makeListener({ yolo: true, enableChoiceTimer: true }, "review")(gate, (id) => {
         bridgedReqId = id;
       });
 
@@ -330,10 +368,10 @@ describe("autoResolveVerdict (yolo mode)", () => {
     }
   });
 
-  it("cancels a malformed choice (no well-formed options) rather than hanging", async () => {
+  it("cancels a malformed choice (no well-formed options) rather than hanging when timer is enabled", async () => {
     const gate = new PauseGate();
     let bridged = false;
-    makeListener({ yolo: true }, "review")(gate, () => {
+    makeListener({ yolo: true, enableChoiceTimer: true }, "review")(gate, () => {
       bridged = true;
     });
 

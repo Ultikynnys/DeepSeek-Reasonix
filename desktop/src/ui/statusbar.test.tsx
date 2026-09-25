@@ -231,7 +231,7 @@ describe("StatusBar quota display", () => {
     expect(screen.getByText(/0\.5x|1x/)).toBeTruthy();
   });
 
-  it("shows GLM plan % left + plan + this-turn % for Z.AI tabs", () => {
+  it("shows GLM plan % left + plan + this-turn % for Z.AI tabs with both 5-hour and weekly limits", () => {
     renderBar({
       settings: { model: "glm-5.3-flash" } as Settings,
       zaiQuota: {
@@ -242,12 +242,26 @@ describe("StatusBar quota display", () => {
         fetchedAt: 0,
       } as ZaiQuota,
     });
-    expect(screen.getByText(/70%\s*left/)).toBeTruthy();
+    expect(screen.getByText(/5h\s*70%\s*·\s*wk\s*88%\s*left/)).toBeTruthy();
     expect(screen.getByText("pro")).toBeTruthy();
     expect(screen.getByText(/1\.5%/)).toBeTruthy();
     // The balance and $ amounts are replaced by the GLM usage percentages.
     expect(screen.queryByText("balance")).toBeNull();
     expect(screen.queryByText(/\$ 0\.0000/)).toBeNull();
+  });
+
+  it("shows single window % left when Z.AI reports only one limit window", () => {
+    renderBar({
+      settings: { model: "glm-5.3-flash" } as Settings,
+      zaiQuota: {
+        plan: "pro",
+        fiveHour: { usagePct: 30, remainingPct: 70, resetsAt: null },
+        weekly: null,
+        turnUsedPct: 1.5,
+        fetchedAt: 0,
+      } as ZaiQuota,
+    });
+    expect(screen.getByText(/70%\s*left/)).toBeTruthy();
   });
 
   it("keeps the GLM usage chip (em dash + retry) without data — never the DeepSeek balance", () => {

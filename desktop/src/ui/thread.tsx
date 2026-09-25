@@ -733,8 +733,9 @@ export function ChoiceApprovalCard({
   onCancel: () => void;
 }) {
   useLang();
+  const [timerDisabled, setTimerDisabled] = useState(false);
   const firstOptionId = c.options[0]?.id;
-  const remaining = useAutoApproveCountdown(c.countdownMs, () => {
+  const remaining = useAutoApproveCountdown(timerDisabled ? undefined : c.countdownMs, () => {
     if (firstOptionId) onPick(firstOptionId);
   });
   return (
@@ -745,11 +746,45 @@ export function ChoiceApprovalCard({
       sub={t("thread.optionCount", { count: c.options.length })}
       body={
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {remaining !== null ? (
-            <div style={{ marginBottom: 2, fontSize: 11.5, color: "var(--tone-warn)" }}>
-              {t("thread.autoApproveIn", { n: remaining })}
+          {c.countdownMs ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 2,
+                fontSize: 11.5,
+                color: timerDisabled ? "var(--muted)" : "var(--tone-warn)",
+              }}
+            >
+              <span>
+                {timerDisabled
+                  ? t("thread.questionTimerDisabled")
+                  : t("thread.autoApproveIn", { n: remaining ?? 0 })}
+              </span>
+              <button
+                type="button"
+                className="mini-btn"
+                style={{ fontSize: 11, cursor: "pointer", padding: "1px 6px" }}
+                onClick={() => setTimerDisabled((prev) => !prev)}
+              >
+                {timerDisabled ? t("thread.enableTimer") : t("thread.disableTimer")}
+              </button>
             </div>
-          ) : null}
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 2,
+                fontSize: 11,
+                color: "var(--muted)",
+              }}
+            >
+              <span>{t("thread.questionTimerDisabled")}</span>
+            </div>
+          )}
           {c.options.map((o) => (
             <button
               key={o.id}

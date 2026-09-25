@@ -15,12 +15,17 @@ export type AutoResolveOutcome =
   | { kind: "instant"; verdict: unknown }
   | { kind: "countdown"; verdict: unknown; ms: number };
 
+export interface PausePolicyOptions {
+  enableChoiceTimer?: boolean;
+}
+
 /** null = surface to user indefinitely; instant = resolve gate immediately;
  *  countdown = surface the picker — the UI shows a countdown and resolves with
  *  `verdict` (the first option) when it expires without a user pick. */
 export function autoResolveVerdict(
   req: PauseRequest,
   editMode: EditMode,
+  opts?: PausePolicyOptions,
 ): AutoResolveOutcome | null {
   if (req.kind === "plan_checkpoint" && shouldAutoResolveCheckpoint(editMode)) {
     return { kind: "instant", verdict: { type: "continue" } };
@@ -58,6 +63,9 @@ export function autoResolveVerdict(
   // Cancel malformed choices immediately as a hang-proof fallback; choice.ts
   // already sanitizes options before gating.
   if (req.kind === "choice" && editMode === "yolo") {
+    if (!opts?.enableChoiceTimer) {
+      return null;
+    }
     const payload = req.payload as { options?: unknown[] };
     const first = Array.isArray(payload.options) ? payload.options[0] : undefined;
     const id = first && typeof first === "object" ? (first as { id?: unknown }).id : undefined;

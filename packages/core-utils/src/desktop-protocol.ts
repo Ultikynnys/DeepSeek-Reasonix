@@ -784,6 +784,7 @@ export interface SettingsEvent {
   /** Whether the stream repetition / "stuck re-thinking" guard may abort a
    *  degenerating stream. Defaults to false (opt-in). */
   repetitionGuardEnabled?: boolean;
+  questionTimerEnabled?: boolean;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
@@ -1102,6 +1103,7 @@ export interface SettingsPatch {
   elevationEnabled?: boolean;
   /** Allow the stream repetition / "stuck re-thinking" guard to abort a degenerating stream. */
   repetitionGuardEnabled?: boolean;
+  questionTimerEnabled?: boolean;
   baseUrl?: string;
   workspaceDir?: string;
   model?: string;

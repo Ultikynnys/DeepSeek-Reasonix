@@ -49,6 +49,7 @@ import {
   loadProjectPathAllowed,
   loadProjectShellAllowed,
   loadProxyConfig,
+  loadQuestionTimerEnabled,
   loadRateLimit,
   loadReasoningEffort,
   loadRecentWorkspaces,
@@ -85,6 +86,7 @@ import {
   saveOllamaGenerationPatch,
   saveOpenAIApiKey,
   saveOpenAIOAuth,
+  saveQuestionTimerEnabled,
   saveReasoningEffort,
   saveSemanticEmbeddingConfig,
   saveSubagentModels,
@@ -1269,6 +1271,18 @@ describe("config", () => {
     saveEnableSubagents(true, path);
     expect(loadEnableSubagents(path)).toBe(true);
     expect(readConfig(path).enableSubagents).toBe(true);
+  });
+
+  it("questionTimerEnabled defaults to false and persists either state", () => {
+    expect(loadQuestionTimerEnabled(path)).toBe(false);
+
+    saveQuestionTimerEnabled(true, path);
+    expect(loadQuestionTimerEnabled(path)).toBe(true);
+    expect(readConfig(path).questionTimerEnabled).toBe(true);
+
+    saveQuestionTimerEnabled(false, path);
+    expect(loadQuestionTimerEnabled(path)).toBe(false);
+    expect(readConfig(path).questionTimerEnabled).toBe(false);
   });
 
   it("loadReasoningEffort defaults to 'high' when unset (safe for vLLM / Azure)", () => {
