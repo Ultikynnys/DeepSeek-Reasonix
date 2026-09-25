@@ -2316,7 +2316,17 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
   }
 }
 
-function formatConversationMarkdown(messages: ChatMessage[], userLabel: string): string {
+function truncateOutputLines(text: string, maxLines: number): string {
+  const lines = text.trimEnd().split("\n");
+  if (lines.length <= maxLines) return text;
+  return lines.slice(0, maxLines).join("\n");
+}
+
+function formatConversationMarkdown(
+  messages: ChatMessage[],
+  userLabel: string,
+  options?: { maxToolOutputLines?: number },
+): string {
   return messages
     .map((m) => {
       if (m.kind === "user") return `### ${userLabel}\n\n${m.text}`;
@@ -2328,7 +2338,11 @@ function formatConversationMarkdown(messages: ChatMessage[], userLabel: string):
               return `<details>\n<summary>${t("app.exportReasoningSummary")}</summary>\n\n${s.text}\n\n</details>`;
             if (s.kind === "tool") {
               const arg = s.args ? `\n\n\`\`\`json\n${s.args}\n\`\`\`` : "";
-              const res = s.result ? `\n\n\`\`\`\n${s.result}\n\`\`\`` : "";
+              let resText = s.result;
+              if (resText && options?.maxToolOutputLines !== undefined) {
+                resText = truncateOutputLines(resText, options.maxToolOutputLines);
+              }
+              const res = resText ? `\n\n\`\`\`\n${resText}\n\`\`\`` : "";
               return `> **${t("app.exportToolLabel")} · \`${s.name}\`**${arg}${res}`;
             }
             if (s.kind === "compaction") {
@@ -3408,7 +3422,9 @@ function TabRuntime({
   // the new session (auto-continuing only when that setting is enabled).
   const duplicateSession = useCallback(
     (mainModel: string, subagentModel: string) => {
-      const md = formatConversationMarkdown(state.messages, t("app.exportUserLabel"));
+      const md = formatConversationMarkdown(state.messages, t("app.exportUserLabel"), {
+        maxToolOutputLines: 3,
+      });
       if (!md) {
         appendNotice(t("app.toast.emptySession"));
         return;

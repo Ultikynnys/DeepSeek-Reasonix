@@ -43,17 +43,68 @@ function trailingWithinBudget(text: string, budget: number): string {
   return text.slice(start);
 }
 
+export function truncateToolOutputsInMarkdown(markdown: string, maxLines = 3): string {
+  const lines = markdown.split("\n");
+  const result: string[] = [];
+  let inToolBlock = false;
+  let inCodeFence = false;
+  let isJsonArgsFence = false;
+  let fenceLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+
+    if (!inCodeFence) {
+      if (line.startsWith("> **")) {
+        inToolBlock = true;
+      } else if (line.startsWith("### ") || line === "---") {
+        inToolBlock = false;
+      }
+
+      if (inToolBlock && line.startsWith("```")) {
+        inCodeFence = true;
+        isJsonArgsFence = line.startsWith("```json");
+        fenceLines = [];
+        result.push(line);
+        continue;
+      }
+      result.push(line);
+    } else {
+      if (line.startsWith("```")) {
+        inCodeFence = false;
+        if (!isJsonArgsFence && fenceLines.length > maxLines) {
+          result.push(...fenceLines.slice(0, maxLines));
+        } else {
+          result.push(...fenceLines);
+        }
+        result.push(line);
+        fenceLines = [];
+        isJsonArgsFence = false;
+      } else {
+        fenceLines.push(line);
+      }
+    }
+  }
+
+  if (inCodeFence) {
+    result.push(...fenceLines);
+  }
+
+  return result.join("\n");
+}
+
 /** Keep the newest blocks until the budget is spent; the oldest retained block is
  *  tail-truncated to fill whatever budget remains. */
 export function truncateMarkdownToTokens(markdown: string, budget: number): TruncatedContext {
   const trimmed = markdown.trim();
   if (!trimmed) return { text: "", droppedTokens: 0, truncated: false };
 
-  const total = countTokens(trimmed);
+  const processed = truncateToolOutputsInMarkdown(trimmed, 3);
+  const total = countTokens(processed);
   if (budget <= 0) return { text: "", droppedTokens: total, truncated: total > 0 };
-  if (total <= budget) return { text: trimmed, droppedTokens: 0, truncated: false };
+  if (total <= budget) return { text: processed, droppedTokens: 0, truncated: false };
 
-  const blocks = trimmed.split(BLOCK_SEPARATOR);
+  const blocks = processed.split(BLOCK_SEPARATOR);
   const kept: string[] = [];
   let remaining = budget;
   for (let i = blocks.length - 1; i >= 0; i--) {
@@ -64,8 +115,22 @@ export function truncateMarkdownToTokens(markdown: string, budget: number): Trun
       remaining -= blockTokens;
       continue;
     }
-    const tail = trailingWithinBudget(block, remaining);
-    if (tail) kept.unshift(tail);
+    const detailsMatch = block.match(/<details>[\s\S]*?<\/details>/);
+    if (detailsMatch && detailsMatch.index !== undefined) {
+      const thinking = detailsMatch[0];
+      const thinkingTokens = countTokens(thinking);
+      if (thinkingTokens <= remaining) {
+        const header = block.slice(0, detailsMatch.index);
+        const afterThinking = block.slice(detailsMatch.index + thinking.length);
+        const remForAfter = remaining - thinkingTokens - countTokens(header);
+        const tailAfter = remForAfter > 0 ? trailingWithinBudget(afterThinking, remForAfter) : "";
+        const partial = [header + thinking, tailAfter].filter(Boolean).join("\n\n");
+        if (partial) kept.unshift(partial);
+      }
+    } else {
+      const tail = trailingWithinBudget(block, remaining);
+      if (tail) kept.unshift(tail);
+    }
     break;
   }
 
