@@ -519,12 +519,7 @@ export const en = {
     titlebar: {
       sidebar: "Sidebar (⌘B)",
       contextPanel: "Context panel",
-      more: "More",
-      compactHistory: "Compact history",
-      exportMd: "Export Markdown",
       duplicateSession: "Duplicate session",
-      clearChat: "Clear screen",
-      settings: "Settings",
       windowControls: "Window controls",
       close: "Close",
       minimize: "Minimize",

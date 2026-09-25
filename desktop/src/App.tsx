@@ -121,7 +121,7 @@ import { JobsPop } from "./ui/jobs-pop";
 import { JumpBar } from "./ui/jump-bar";
 import { activationHandler, escapeHandler } from "./ui/keyboard";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
-import { Shortcut, localizeShortcutText } from "./ui/shortcut";
+import { localizeShortcutText } from "./ui/shortcut";
 import { Sidebar } from "./ui/sidebar";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import {
@@ -3039,11 +3039,6 @@ function TabRuntime({
     if (!state.busy) clearAbortDraft();
   }, [clearAbortDraft, state.busy]);
 
-  const clearConversation = useCallback(() => {
-    clearAbortDraft();
-    dispatch({ t: "clear" });
-  }, [clearAbortDraft]);
-
   // When /retry returns the last user text, set it as the composer draft.
   // Only fire when retryNonce changes — retryText alone would re-fire on re-renders.
   // biome-ignore lint/correctness/useExhaustiveDependencies: retryText deliberately left out (see above)
@@ -3472,11 +3467,6 @@ function TabRuntime({
           ctxOn={!ctxCollapsed}
           onToggleSide={onToggleSide}
           onToggleCtx={onToggleCtx}
-          onOpenSettings={() => openSettingsAt("general")}
-          onExport={exportConversation}
-          onCompact={() => sendRpc({ cmd: "compact_history" })}
-          onClear={clearConversation}
-          hasMessages={state.messages.length > 0}
         />
 
         <TabBar
@@ -4185,11 +4175,6 @@ function TitleBar({
   ctxOn,
   onToggleSide,
   onToggleCtx,
-  onOpenSettings,
-  onExport,
-  onCompact,
-  onClear,
-  hasMessages,
 }: {
   session: string;
   model?: string;
@@ -4197,16 +4182,9 @@ function TitleBar({
   ctxOn: boolean;
   onToggleSide: () => void;
   onToggleCtx: () => void;
-  onOpenSettings: () => void;
-  onExport: () => void;
-  onCompact?: () => void;
-  onClear: () => void;
-  hasMessages: boolean;
 }) {
   useLang();
-  const [menuOpen, setMenuOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
-  const moreWrapRef = useRef<HTMLDivElement>(null);
   const isMac = document.documentElement.dataset.platform === "macos";
 
   useEffect(() => {
@@ -4223,24 +4201,7 @@ function TitleBar({
     return () => unlisten?.();
   }, []);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (moreWrapRef.current && !moreWrapRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
-
   const win = getCurrentWindow();
-
-  /** Run a menu item's action, then close the overflow menu. */
-  const closeAnd = (fn: () => void) => () => {
-    fn();
-    setMenuOpen(false);
-  };
 
   return (
     <header className="titlebar">
@@ -4312,7 +4273,7 @@ function TitleBar({
       {/* center: drag region */}
       <span className="grow" data-tauri-drag-region />
 
-      {/* right: panel toggles + more + window controls */}
+      {/* right: panel toggles + window controls */}
       <div className="tb-right">
         <button
           type="button"
@@ -4323,93 +4284,6 @@ function TitleBar({
         >
           <I.panel_r size={14} />
         </button>
-
-        <div ref={moreWrapRef} style={{ position: "relative" }}>
-          <button
-            type="button"
-            className="iconbtn"
-            title={t("app.titlebar.more")}
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            <I.more size={14} />
-          </button>
-          {menuOpen ? (
-            <div
-              className="popup"
-              style={{
-                top: "calc(100% + 6px)",
-                right: 0,
-                left: "auto",
-                bottom: "auto",
-                width: 220,
-              }}
-            >
-              <div className="popup-list">
-                  <div
-                    className="popup-item"
-                    onClick={closeAnd(() => {
-                      if (hasMessages) onExport();
-                    })}
-                    onKeyDown={activationHandler(() => {
-                      if (hasMessages) onExport();
-                    })}
-                    style={{ opacity: hasMessages ? 1 : 0.5 }}
-                  >
-                    <span className="ico">
-                      <I.download size={12} />
-                    </span>
-                    <div className="nm">
-                      <span>{t("app.titlebar.exportMd")}</span>
-                    </div>
-                  </div>
-                  <div
-                    className="popup-item"
-                    onClick={closeAnd(() => {
-                      if (hasMessages && onCompact) onCompact();
-                    })}
-                    onKeyDown={activationHandler(() => {
-                      if (hasMessages && onCompact) onCompact();
-                    })}
-                    style={{ opacity: hasMessages ? 1 : 0.5 }}
-                  >
-                    <span className="ico">
-                      <I.archive size={12} />
-                    </span>
-                    <div className="nm">
-                      <span>{t("app.titlebar.compactHistory")}</span>
-                    </div>
-                  </div>
-                  <div
-                    className="popup-item"
-                    onClick={closeAnd(onClear)}
-                    onKeyDown={activationHandler(closeAnd(onClear))}
-                  >
-                    <span className="ico">
-                      <I.x size={12} />
-                    </span>
-                    <div className="nm">
-                      <span>{t("app.titlebar.clearChat")}</span>
-                    </div>
-                  </div>
-                  <div
-                    className="popup-item"
-                    onClick={closeAnd(onOpenSettings)}
-                    onKeyDown={activationHandler(closeAnd(onOpenSettings))}
-                  >
-                    <span className="ico">
-                      <I.cog size={12} />
-                    </span>
-                    <div className="nm">
-                      <span>{t("app.titlebar.settings")}</span>
-                    </div>
-                    <span className="kb">
-                      <Shortcut keys={["mod", ","]} />
-                    </span>
-                  </div>
-                </div>
-            </div>
-          ) : null}
-        </div>
 
         {/* window controls — use onMouseDown+stopPropagation so the drag region doesn't swallow the event */}
         {isMac ? null : (

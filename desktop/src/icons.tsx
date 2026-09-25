@@ -237,13 +237,6 @@ export const I = {
       <path d="M7 5v14l12-7Z" />
     </Ic>
   ),
-  more: (p: IconProps) => (
-    <Ic {...p}>
-      <circle cx="6" cy="12" r="1.6" fill="currentColor" />
-      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
-      <circle cx="18" cy="12" r="1.6" fill="currentColor" />
-    </Ic>
-  ),
   pin: (p: IconProps) => (
     <Ic {...p}>
       <path d="M15 3 9 9l-4 1 9 9 1-4 6-6ZM4 20l5-5" />

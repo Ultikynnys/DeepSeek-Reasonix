@@ -1015,7 +1015,7 @@ html[data-platform="macos"] .titlebar .tb-left {
   min-width: 0;
 }
 
-/* right cluster: panel toggles + more + win controls */
+/* right cluster: panel toggles + win controls */
 .titlebar .tb-right {
   display: flex;
   align-items: stretch;
