@@ -47,14 +47,11 @@ import {
   type IncomingEvent,
   type JobInfo,
   type LoadedMessage,
+  type MailAuthState,
+  MailProvider,
   type McpExtensionCheck,
   type McpExtensionStatus,
   type McpSpecInfo,
-  type MailAuthState,
-  type PlaywrightBrowserInstall,
-  type PlaywrightManagedBrowser,
-  type PlaywrightMcpConnectionMode,
-  type PlaywrightExtensionBrowser,
   type MemoryDetail,
   type MemoryEntryInfo,
   type ModelEndpointInfo,
@@ -62,6 +59,10 @@ import {
   type OutgoingCommand,
   type PlanStep,
   type PlanVerdict,
+  type PlaywrightBrowserInstall,
+  type PlaywrightExtensionBrowser,
+  type PlaywrightManagedBrowser,
+  type PlaywrightMcpConnectionMode,
   type RevisionVerdict,
   type SessionProviderCost,
   type SettingsPatch,
@@ -71,10 +72,10 @@ import {
   type TurnOutcome,
   type UserImageAttachment,
   type ZaiQuota,
-  MailProvider,
   resolveActiveQuickSend,
   rpcSend,
 } from "./protocol";
+import { StartupTimingTracker } from "./startup-timing";
 import {
   DEFAULT_TAB_THEME,
   type TabTheme,
@@ -138,7 +139,6 @@ import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { useResizable } from "./ui/useResizable";
 import { WorkdirPop } from "./ui/workdir-pop";
 import { anyVoiceModelDownloaded } from "./voice/models";
-import { StartupTimingTracker } from "./startup-timing";
 import { areWorkspacesLoaded } from "./workspace-loading";
 import { toWorkspaceRelative } from "./workspace-path";
 
@@ -1841,6 +1841,7 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
           apiKeyPrefix: ev.apiKeyPrefix,
           workspaceDir: ev.workspaceDir,
           recentWorkspaces: ev.recentWorkspaces,
+          reasonixLocalDir: ev.reasonixLocalDir,
           model: ev.model,
           customModels: ev.customModels,
           enabledModels: ev.enabledModels,
@@ -2397,7 +2398,13 @@ interface TabRuntimeProps {
   opencodeModelsError: string | null;
   opencodeVisionModels: ReadonlySet<string>;
   onRefreshOpencodeModels: (force?: boolean) => void;
-  tabsList: { id: string; workspaceDir?: string; session?: string; group?: string; busy?: boolean }[];
+  tabsList: {
+    id: string;
+    workspaceDir?: string;
+    session?: string;
+    group?: string;
+    busy?: boolean;
+  }[];
   activeTabId: string;
   setActiveTabId: (id: string) => void;
   onRemoveWorkspace: (path: string) => void;
@@ -3440,7 +3447,17 @@ function TabRuntime({
 
         <main className="main" style={{ position: "relative" }}>
           <JumpBar messages={state.messages} threadEl={threadRef.current} />
-          {state.needsSetup ? (
+          {state.settings != null && !state.settings.workspaceDir ? (
+            <PendingWorkspaceView
+              local={state.settings.reasonixLocalDir}
+              recent={mergedWorkspaces}
+              onPick={(path) => {
+                clearAbortDraft();
+                saveSettings({ workspaceDir: path });
+              }}
+              onBrowse={pickWorkspace}
+            />
+          ) : state.needsSetup ? (
             <NeedsSetupView
               workspaceDir={state.settings?.workspaceDir}
               onPickWorkspace={pickWorkspace}
@@ -3787,6 +3804,7 @@ function TabRuntime({
           open={wdOpen}
           onClose={() => setWdOpen(false)}
           recent={mergedWorkspaces}
+          local={state.settings?.reasonixLocalDir}
           current={state.settings?.workspaceDir}
           anchor={wdAnchor}
           onPick={(path) => {
@@ -4416,9 +4434,8 @@ export function TabBar({
     return representative ? [representative] : [];
   });
   const activeVisualId =
-    visualTabs.find((tab) =>
-      activeGroup?.items.some((candidate) => candidate.id === tab.id),
-    )?.id ?? activeId;
+    visualTabs.find((tab) => activeGroup?.items.some((candidate) => candidate.id === tab.id))?.id ??
+    activeId;
 
   return (
     <div
@@ -4431,15 +4448,15 @@ export function TabBar({
       {groups.map((g) => {
         const activeInGroup = g.items.find((t) => t.id === activeId);
         const rememberedId = lastActiveByWorkspace.current.get(g.key);
-        const head =
-          activeInGroup ?? g.items.find((t) => t.id === rememberedId) ?? g.items[0];
+        const head = activeInGroup ?? g.items.find((t) => t.id === rememberedId) ?? g.items[0];
         if (!head) return null;
         const ws = head.workspaceDir ?? "";
-        const label =
-          ws
-            .replace(/[\\/]$/, "")
-            .split(/[\\/]/)
-            .pop() || "workspace";
+        const label = ws
+          ? ws
+              .replace(/[\\/]$/, "")
+              .split(/[\\/]/)
+              .pop() || "workspace"
+          : t("sidebarPanel.noWorkspace");
         // Active agents = sessions in this tab with a running turn. No dot when
         // nothing is running.
         const activeAgents = g.items.filter((t) => t.busy).length;
@@ -4620,6 +4637,76 @@ function MainHead({
       >
         <I.download size={12} /> {t("app.header.export")}
       </button>
+    </div>
+  );
+}
+
+function PendingWorkspaceView({
+  local,
+  recent,
+  onPick,
+  onBrowse,
+}: {
+  local?: string;
+  recent: string[];
+  onPick: (path: string) => void;
+  onBrowse: () => void;
+}) {
+  useLang();
+  return (
+    <div className="pending-workspace">
+      <div className="pw-card">
+        <div className="pw-head">
+          <I.folder size={13} />
+          <span>{t("workdir.newTabHeading")}</span>
+        </div>
+        <p className="pw-sub">{t("workdir.newTabBody")}</p>
+        <div className="wd-list pw-list">
+          {local ? (
+            <div
+              className="wd-row"
+              onClick={() => onPick(local)}
+              onKeyDown={activationHandler(() => onPick(local))}
+              title={local}
+            >
+              <span className="ic">
+                <I.terminal size={12} />
+              </span>
+              <div className="b">
+                <div className="p">{t("workdir.reasonixLocal")}</div>
+                <div className="br">{local}</div>
+              </div>
+            </div>
+          ) : null}
+          {recent
+            .filter((p) => p !== local)
+            .map((p) => {
+              const name = p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+              return (
+                <div
+                  key={p}
+                  className="wd-row"
+                  onClick={() => onPick(p)}
+                  onKeyDown={activationHandler(() => onPick(p))}
+                  title={p}
+                >
+                  <span className="ic">
+                    <I.folder size={12} />
+                  </span>
+                  <div className="b">
+                    <div className="p">{name}</div>
+                    <div className="br">{p}</div>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+        <div className="pw-foot">
+          <button type="button" className="btn" onClick={onBrowse}>
+            <I.plus size={11} /> {t("workdir.newTabBrowse")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4949,7 +5036,8 @@ type TabMeta = {
 function normalizeWorkspacePath(p?: string): string {
   const raw = p ?? "";
   const normalized = raw.replace(/\\/g, "/").replace(/\/+$/, "");
-  const windowsPath = raw.includes("\\") || /^[a-z]:\//i.test(normalized) || normalized.startsWith("//");
+  const windowsPath =
+    raw.includes("\\") || /^[a-z]:\//i.test(normalized) || normalized.startsWith("//");
   return windowsPath ? normalized.toLowerCase() : normalized;
 }
 
@@ -5337,7 +5425,10 @@ export function App() {
                 const session = ev.activeSession ?? ev.sessions?.[0];
                 const idx = prev.findIndex((t) => t.id === tabId);
                 if (idx === -1) {
-                  return [...prev, { id: tabId, workspaceDir: ev.workspaceDir, session, group: ev.groupId }];
+                  return [
+                    ...prev,
+                    { id: tabId, workspaceDir: ev.workspaceDir, session, group: ev.groupId },
+                  ];
                 }
                 // Merge so a workspace switch / regroup updates the existing tab.
                 const merged: TabMeta = {
@@ -5377,9 +5468,7 @@ export function App() {
               // sibling between those events.
               tabsRef.current = remaining;
               setTabs(remaining);
-              setActiveTabId((prev) =>
-                prev === tabId ? (remaining[0]?.id ?? "") : prev,
-              );
+              setActiveTabId((prev) => (prev === tabId ? (remaining[0]?.id ?? "") : prev));
               setTabThemes((prev) => {
                 if (!prev[tabId]) return prev;
                 const { [tabId]: _dropped, ...rest } = prev;
@@ -5525,7 +5614,9 @@ export function App() {
                       : new Set((ev.visionModels ?? []).map((id) => `ollama/${id}`)),
                   error: ev.error ?? null,
                   plan: keepPrevious ? (ev.plan ?? prev.plan) : (ev.plan ?? null),
-                  hiddenCount: keepPrevious ? (ev.hiddenCount ?? prev.hiddenCount) : (ev.hiddenCount ?? 0),
+                  hiddenCount: keepPrevious
+                    ? (ev.hiddenCount ?? prev.hiddenCount)
+                    : (ev.hiddenCount ?? 0),
                 };
               });
               return;

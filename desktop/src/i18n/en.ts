@@ -19,10 +19,15 @@ export const en = {
   },
   workdir: {
     title: "Switch workspace",
+    newTabTitle: "Choose a workspace for this tab",
     searchPlaceholder: "Search recent paths…",
     empty: "No recent workspaces",
     browse: "Browse local…",
     removeRecent: "Remove from recent",
+    reasonixLocal: "Reasonix Local",
+    newTabHeading: "Pick a workspace",
+    newTabBody: "This tab has no workspace yet. Choose where its agent should work.",
+    newTabBrowse: "Choose a folder…",
   },
   sidebar: {
     newChat: "New chat",
@@ -231,15 +236,19 @@ export const en = {
     ollamaModelsRefresh: "Refresh",
     ollamaModelsError: "Couldn't fetch models — {error}",
     opencodeModels: "OpenCode Free Models",
-    opencodeModelsHint: "Synced from OpenCode Zen and models.dev. Zero-cost free tier with public auth.",
+    opencodeModelsHint:
+      "Synced from OpenCode Zen and models.dev. Zero-cost free tier with public auth.",
     opencodeModelsRefresh: "Sync models",
     opencodeSection: "OpenCode Zen",
     opencodeBaseUrl: "OpenCode base URL",
-    opencodeBaseUrlHint: "OpenAI-compatible endpoint override. Defaults to https://opencode.ai/zen/v1.",
+    opencodeBaseUrlHint:
+      "OpenAI-compatible endpoint override. Defaults to https://opencode.ai/zen/v1.",
     opencodeApiKey: "OpenCode API key",
-    opencodeApiKeyHint: "Optional. Without a key, requests use the shared public tier. Paste an API key from opencode.ai/auth for dedicated quota.",
+    opencodeApiKeyHint:
+      "Optional. Without a key, requests use the shared public tier. Paste an API key from opencode.ai/auth for dedicated quota.",
     typesafeSection: "TypeSafe JEV",
-    typesafeHint: "Validates your key with TypeSafe before enabling jev_evaluate. Models only receive the JEV tool after validation succeeds; missing, rejected, or unreachable credentials keep it unavailable. JEV is not a chat model.",
+    typesafeHint:
+      "Validates your key with TypeSafe before enabling jev_evaluate. Models only receive the JEV tool after validation succeeds; missing, rejected, or unreachable credentials keep it unavailable. JEV is not a chat model.",
     ollamaSubscription:
       "{count} models require an Ollama subscription (plan: {plan}). Upgrade at ollama.com to unlock them.",
     ollamaPlan: "Ollama plan: {plan}",
@@ -783,7 +792,8 @@ export const en = {
     autoCompactionEnabled: "Enabled",
     autoCompactionDisabled: "Disabled",
     autoCompactionEnabledDesc: "Turns fold automatically when context reaches 75% capacity.",
-    autoCompactionDisabledDesc: "Automatic compaction disabled. Use the manual compact button above to fold turns.",
+    autoCompactionDisabledDesc:
+      "Automatic compaction disabled. Use the manual compact button above to fold turns.",
     subagents: "Subagents",
     subagentsEnabled: "Enabled",
     subagentsDisabled: "Disabled",
@@ -816,8 +826,7 @@ export const en = {
     disableQuestionTimer: "Disable question timer",
     questionTimerEnabledDesc:
       "Auto-picks the first option after a 30s countdown for choice questions in YOLO mode.",
-    questionTimerDisabledDesc:
-      "Off by default: questions with options wait for manual selection.",
+    questionTimerDisabledDesc: "Off by default: questions with options wait for manual selection.",
     compactionDisabled: "auto-compaction disabled",
     autoCompactionDisabledTooltip: "Auto-compaction disabled (manual button only)",
     ollamaGeneration: "Ollama generation",
@@ -839,13 +848,16 @@ export const en = {
     ollamaPresetDefault: "Default",
     ollamaPresetDefaultTooltip: "Reset all sampling options to model defaults",
     ollamaPresetCoding: "Coding",
-    ollamaPresetCodingTooltip: "Low temperature (0.2) and top P (0.9) for precise code and tool calling",
+    ollamaPresetCodingTooltip:
+      "Low temperature (0.2) and top P (0.9) for precise code and tool calling",
     ollamaPresetBalanced: "Balanced",
     ollamaPresetBalancedTooltip: "Balanced temperature (0.7) and sampling for general reasoning",
     ollamaPresetCreative: "Creative",
-    ollamaPresetCreativeTooltip: "High temperature (1.0) and top P (0.95) for brainstorming and exploration",
+    ollamaPresetCreativeTooltip:
+      "High temperature (1.0) and top P (0.95) for brainstorming and exploration",
     ollamaPresetAntiLoop: "Anti-loop",
-    ollamaPresetAntiLoopTooltip: "Moderate temperature with gentle repetition penalty (1.1) to avoid loops",
+    ollamaPresetAntiLoopTooltip:
+      "Moderate temperature with gentle repetition penalty (1.1) to avoid loops",
     memoryTitle: "Long-term memory",
     itemCount: "{count} items",
     scopeProject: "project",

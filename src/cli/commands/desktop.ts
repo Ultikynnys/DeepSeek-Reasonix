@@ -1194,6 +1194,7 @@ function emitSettings(tab: Tab): void {
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
       workspaceDir: tab.rootDir,
       recentWorkspaces: recent,
+      reasonixLocalDir: reasonixInstallDir(),
       model: tab.currentModel,
       customModels: Object.keys(config.models ?? {})
         .filter((id) => providerForModel(id) !== "gemini" && !SUPPORTED_MODELS.includes(id))
@@ -3239,6 +3240,10 @@ interface Tab {
    *  this group id. */
   groupId: string;
   rootDir: string;
+  /** True until the user assigns a workspace. A pending tab has no rootDir,
+   *  session or toolset — it exists only so the UI can prompt for a workspace
+   *  without merging into an existing workspace tab. */
+  pending: boolean;
   currentSession: string;
   /** Session name the shell-output totals are anchored to; null until the first
    *  emitCtxBreakdown binds it. See the re-anchor block there. */
@@ -3917,9 +3922,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     initialDir?: string,
     restoreId?: string,
     restore?: { groupId?: string; session?: string },
+    pending = false,
   ): Tab {
-    const dir = resolve(initialDir ?? opts.dir ?? loadWorkspaceDir() ?? process.cwd());
-    pushRecentWorkspace(dir);
+    const dir = pending
+      ? ""
+      : resolve(initialDir ?? opts.dir ?? loadWorkspaceDir() ?? process.cwd());
+    if (!pending) pushRecentWorkspace(dir);
     const model = opts.model || loadModel() || DEFAULT_MODEL;
     // Restored tabs keep their persisted id so a backend restart doesn't
     // re-mint t1..tN over the frontend's still-open tabs. Bump the counter
@@ -3936,6 +3944,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       id,
       groupId,
       rootDir: dir,
+      pending,
       currentSession: "",
       shellMetricsSession: null,
       shellMetricsSince: 0,
@@ -3964,24 +3973,26 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       switching: false,
       sessionsEpoch: randomUUID(),
       sessionsRevision: 0,
-      hooks: loadHooks({ projectRoot: dir }),
+      hooks: pending ? [] : loadHooks({ projectRoot: dir }),
     };
     // A restored session binds its real jsonl when it still exists. A restored
     // tab whose session was DELETED must stay VIRTUAL (no folder) so it is not
     // resurrected on restart; only a genuinely new tab materializes eagerly.
     const restoredSession =
       restore?.session && sessionExists(restore.session) ? restore.session : undefined;
-    tab.currentSession = restoredSession
-      ? restoredSession
-      : mintSessionFor(
-          dir,
-          {
-            model: tab.currentModel,
-            reasoningEffort: tab.currentReasoningEffort,
-            subagentModel: tab.currentSubagentModel,
-          },
-          { materialize: shouldMaterializeRestoredSession(restore) },
-        );
+    tab.currentSession = pending
+      ? ""
+      : restoredSession
+        ? restoredSession
+        : mintSessionFor(
+            dir,
+            {
+              model: tab.currentModel,
+              reasoningEffort: tab.currentReasoningEffort,
+              subagentModel: tab.currentSubagentModel,
+            },
+            { materialize: shouldMaterializeRestoredSession(restore) },
+          );
     tabs.set(tab.id, tab);
     emitTabDiagnostic(tab, "tab.created", { active: false }, "info");
     return tab;
@@ -4291,13 +4302,17 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   function persistOpenTabs(): void {
     try {
       saveDesktopOpenTabs(
-        Array.from(tabs.values()).map((t) => ({
-          dir: t.rootDir,
-          id: t.id,
-          session: t.currentSession || undefined,
-          groupId: t.groupId,
-          active: t.id === lastActiveTabId,
-        })),
+        Array.from(tabs.values())
+          // Pending (workspace-less) tabs aren't persisted — a restart never
+          // reopens an unresolved tab.
+          .filter((t) => !t.pending && t.rootDir)
+          .map((t) => ({
+            dir: t.rootDir,
+            id: t.id,
+            session: t.currentSession || undefined,
+            groupId: t.groupId,
+            active: t.id === lastActiveTabId,
+          })),
       );
     } catch (err) {
       emitDiagnosticError("tabs.persist.failed", err, {
@@ -4367,7 +4382,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       lastActiveTabId = tabs.values().next().value?.id ?? "";
     }
     if (options.ensureFallback !== false && tabs.size === 0) {
-      const clean = bootstrapTab(undefined, { active: true });
+      const clean = bootstrapTab(undefined, { active: true, pending: true });
       first = clean;
       lastActiveTabId = clean.id;
     }
@@ -4388,7 +4403,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       await closeChannel(channel, { ensureFallback: false, persist: false });
     }
     if (options.ensureFallback !== false && tabs.size === 0) {
-      const clean = bootstrapTab(undefined, { active: true });
+      const clean = bootstrapTab(undefined, { active: true, pending: true });
       first = clean;
       lastActiveTabId = clean.id;
     } else if (!tabs.has(first?.id)) {
@@ -4399,6 +4414,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   async function runTurn(tab: Tab, text: string, images?: TurnImage[]): Promise<void> {
+    // A pending tab has no workspace/session/runtime — there is nothing to run.
+    if (tab.pending || !tab.rootDir) return;
     if (tab.mcpBridgePromise) {
       await tab.mcpBridgePromise.catch(() => undefined);
     }
@@ -4710,7 +4727,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   async function switchWorkspace(tab: Tab, nextDir: string): Promise<void> {
     const target = resolve(nextDir);
     emitTabDiagnostic(tab, "workspace.switch.started", { targetChars: target.length }, "info");
-    if (sameWorkspaceDir(target, tab.rootDir)) {
+    if (!tab.pending && sameWorkspaceDir(target, tab.rootDir)) {
       // Re-opening the current workspace means "new session", never a second
       // workspace tab and never a destructive reload of this agent.
       const opened = bootstrapTab(tab.rootDir, {
@@ -4747,7 +4764,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // is removed as a unit and the request becomes a new independent session in
     // the existing target tab—never a duplicate workspace ribbon entry.
     const targetTab = Array.from(tabs.values()).find(
-      (candidate) => candidate.id !== tab.id && sameWorkspaceDir(candidate.rootDir, target),
+      (candidate) =>
+        candidate.id !== tab.id &&
+        !candidate.pending &&
+        sameWorkspaceDir(candidate.rootDir, target),
     );
     if (targetTab) {
       await closeChannel(tab, { ensureFallback: false, persist: false });
@@ -4775,6 +4795,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       process.stderr.write(`reasonix: tab job shutdown failed — ${messageOf(err)}\n`);
     }
     tab.rootDir = target;
+    tab.pending = false;
     // The reused channel becomes the sole initial session in a new workspace
     // tab. Its former sibling agents were closed above.
     tab.groupId = nextGroupId();
@@ -4863,6 +4884,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       tab.id,
     );
     emitTabDiagnostic(tab, "workspace.switch.completed", { targetChars: target.length }, "info");
+    // Re-emit the setup/ready gate: a tab that was PENDING (no workspace) never
+    // got `$ready`, so the composer would stay disabled after assigning one.
+    emitTabGate(tab);
   }
 
   function forgetGate(id: number): Tab | undefined {
@@ -5284,9 +5308,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // exists. emitBalance was already fire-and-forget.
   function bootstrapTab(
     initialDir?: string,
-    restore?: { id?: string; session?: string; active?: boolean; groupId?: string },
+    restore?: {
+      id?: string;
+      session?: string;
+      active?: boolean;
+      groupId?: string;
+      pending?: boolean;
+    },
   ): Tab {
-    const tab = createTabSkeleton(initialDir, restore?.id, restore);
+    const tab = createTabSkeleton(initialDir, restore?.id, restore, restore?.pending ?? false);
     emitTabDiagnostic(
       tab,
       "tab.bootstrap.requested",
@@ -5313,6 +5343,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       tab.id,
     );
     emitSettings(tab);
+    // A pending (workspace-less) tab has no session, toolset, hooks or sidebar
+    // to build — it exists only so the UI can prompt for a workspace. Assigning
+    // one runs switchWorkspace, which does the full build. Do NOT emit $ready,
+    // so the composer stays disabled until a workspace is chosen.
+    if (restore?.pending) {
+      emit({ type: "$workspace_initialized", revision: ++tab.initializationRevision }, tab.id);
+      emitTabDiagnostic(tab, "tab.bootstrap.pending", undefined, "info");
+      return tab;
+    }
     emitMcpSpecs(tab);
     emitSkills(tab);
     // Defer the heavy per-tab work (session jsonl read+parse, sessions/memory
@@ -5551,14 +5590,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         // A workspace may appear in the ribbon only once. Opening an already-
         // visible workspace adds a fresh independent session to that tab.
-        const target = resolve(msg.workspaceDir ?? reasonixInstallDir());
-        const existing = Array.from(tabs.values()).find((candidate) =>
-          sameWorkspaceDir(candidate.rootDir, target),
-        );
-        const opened = bootstrapTab(target, {
-          active: true,
-          groupId: existing?.groupId,
-        });
+        //
+        // No workspace → a PENDING tab. It must not default to the local
+        // install dir: that merged every new tab into the existing "Reasonix
+        // Local" workspace group, so a second tab could never exist. The UI
+        // instead prompts for a workspace (local / recent / browse) and
+        // assigning one runs switchWorkspace.
+        const target = msg.workspaceDir ? resolve(msg.workspaceDir) : undefined;
+        const existing = target
+          ? Array.from(tabs.values()).find((candidate) =>
+              sameWorkspaceDir(candidate.rootDir, target),
+            )
+          : undefined;
+        const opened = target
+          ? bootstrapTab(target, { active: true, groupId: existing?.groupId })
+          : bootstrapTab(undefined, { active: true, pending: true });
         lastActiveTabId = opened.id;
         persistOpenTabs();
       } catch (err) {
@@ -5680,6 +5726,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           t.id,
         );
         emitSettings(t);
+        if (t.pending) continue;
         emitMcpSpecs(t);
         emitSkills(t);
         if (!tabHasCredential(t)) emit({ type: "$needs_setup", reason: "no_api_key" }, t.id);
@@ -5697,6 +5744,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       });
       void firstBootstrapSettled.then(async () => {
         for (const t of tabs.values()) {
+          if (t.pending) {
+            await emitWorkspaceInitialized(t, Promise.resolve());
+            continue;
+          }
           const sessionsInitialized = emitSessions(t);
           emitMemory(t);
           void emitBalance(t);
@@ -6436,6 +6487,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "new_chat") {
       // New chat is additive: preserve every existing agent in this workspace
       // tab and mount a fresh independent session beside them.
+      if (tab.pending || !tab.rootDir) return;
       try {
         const opened = bootstrapTab(tab.rootDir, {
           active: true,

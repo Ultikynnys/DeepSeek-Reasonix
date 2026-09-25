@@ -2012,7 +2012,6 @@ html[data-platform="macos"] .titlebar .tb-left {
   background: oklch(52% 0.22 25);
 }
 
-
 /* Folder-delete confirm needs more room: workspace name + session count */
 .folder-menu {
   max-width: 260px;
@@ -8435,6 +8434,54 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
 .wd-foot .btn.ghost {
   background: transparent;
   border-color: var(--border);
+}
+/* Workspace-less (pending) tab — a mandatory chooser in the main area. */
+.pending-workspace {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  overflow-y: auto;
+}
+.pw-card {
+  width: 100%;
+  max-width: 420px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+.pw-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.pw-sub {
+  margin: 0;
+  padding: 0 16px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.pw-list {
+  max-height: 320px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.pw-foot {
+  display: flex;
+  padding: 10px 12px;
+}
+.pw-foot .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .main-head .sub .ws-crumb:hover {
   color: var(--accent);

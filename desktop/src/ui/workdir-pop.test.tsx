@@ -114,4 +114,41 @@ describe("WorkdirPop component", () => {
     expect(screen.getByText("current")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Remove from recent" })).toBeNull();
   });
+
+  it("pins a Reasonix Local row and picks it", () => {
+    const onPick = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <WorkdirPop
+        open
+        onClose={onClose}
+        recent={["/repo/alpha"]}
+        local="/install/reasonix"
+        onPick={onPick}
+        onBrowse={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Reasonix Local")).toBeTruthy();
+    fireEvent.click(screen.getByText("Reasonix Local"));
+    expect(onPick).toHaveBeenCalledWith("/install/reasonix");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("does not duplicate the local row when it is also in recents", () => {
+    render(
+      <WorkdirPop
+        open
+        onClose={vi.fn()}
+        recent={["/install/reasonix", "/repo/alpha"]}
+        local="/install/reasonix"
+        onPick={vi.fn()}
+        onBrowse={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("/install/reasonix").length).toBe(1);
+    expect(screen.getByText("alpha")).toBeTruthy();
+  });
 });

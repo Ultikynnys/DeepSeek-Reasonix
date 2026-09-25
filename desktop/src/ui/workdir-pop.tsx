@@ -6,10 +6,68 @@ import { Shortcut } from "./shortcut";
 
 type Anchor = { top?: number; bottom?: number; left: number };
 
+/** One clickable workspace row: folder/terminal icon, name, full path, and a
+ *  current-check or remove button. Shared by the pinned Reasonix Local entry
+ *  and the recent list. */
+function WorkdirRow({
+  path,
+  label,
+  icon,
+  isCurrent,
+  canRemove,
+  onPick,
+  onRemove,
+}: {
+  path: string;
+  label?: string;
+  icon: React.ReactNode;
+  isCurrent: boolean;
+  canRemove: boolean;
+  onPick: () => void;
+  onRemove: () => void;
+}) {
+  const name = label ?? path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+  return (
+    <div className="wd-row" onClick={onPick} onKeyDown={activationHandler(onPick)} title={path}>
+      <span className="ic">{icon}</span>
+      <div className="b">
+        <div className="p">{name}</div>
+        <div className="br">{path}</div>
+      </div>
+      {isCurrent ? (
+        <span className="pin">
+          <I.check size={11} />
+        </span>
+      ) : canRemove ? (
+        <button
+          type="button"
+          className="wd-del"
+          title={t("workdir.removeRecent")}
+          aria-label={t("workdir.removeRecent")}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.stopPropagation();
+              onRemove();
+            }
+          }}
+        >
+          <I.x size={11} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function WorkdirPop({
   open,
   onClose,
   recent,
+  local,
   current,
   anchor,
   onPick,
@@ -19,6 +77,9 @@ export function WorkdirPop({
   open: boolean;
   onClose: () => void;
   recent: string[];
+  /** Local Reasonix installation dir — pinned above the recents as an always-
+   *  available workspace choice. */
+  local?: string;
   current?: string;
   anchor?: Anchor;
   onPick: (path: string) => void;
@@ -39,9 +100,10 @@ export function WorkdirPop({
   const items = useMemo(() => {
     const list = recent.length > 0 ? recent : current ? [current] : [];
     const q = query.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter((p) => p.toLowerCase().includes(q));
-  }, [recent, current, query]);
+    const filtered = q ? list.filter((p) => p.toLowerCase().includes(q)) : list;
+    // The local install dir is pinned above the list — never duplicate it here.
+    return local ? filtered.filter((p) => p !== local) : filtered;
+  }, [recent, current, query, local]);
 
   if (!open) return null;
 
@@ -86,7 +148,21 @@ export function WorkdirPop({
           }}
         />
         <div className="wd-list">
-          {items.length === 0 ? (
+          {local ? (
+            <WorkdirRow
+              path={local}
+              label={t("workdir.reasonixLocal")}
+              icon={<I.terminal size={12} />}
+              isCurrent={local === current}
+              canRemove={false}
+              onPick={() => {
+                if (local !== current) onPick(local);
+                onClose();
+              }}
+              onRemove={() => undefined}
+            />
+          ) : null}
+          {items.length === 0 && !local ? (
             <div
               style={{
                 padding: "16px 12px",
@@ -100,52 +176,19 @@ export function WorkdirPop({
           ) : null}
           {items.map((p) => {
             const isCurrent = p === current;
-            const name = p.split(/[\\/]/).filter(Boolean).pop() ?? p;
-            const pick = () => {
-              if (!isCurrent) onPick(p);
-              onClose();
-            };
             return (
-              <div
+              <WorkdirRow
                 key={p}
-                className="wd-row"
-                onClick={pick}
-                onKeyDown={activationHandler(pick)}
-                title={p}
-              >
-                <span className="ic">
-                  <I.folder size={12} />
-                </span>
-                <div className="b">
-                  <div className="p">{name}</div>
-                  <div className="br">{p}</div>
-                </div>
-                {isCurrent ? (
-                  <span className="pin">
-                    <I.check size={11} />
-                  </span>
-                ) : onRemove ? (
-                  <button
-                    type="button"
-                    className="wd-del"
-                    title={t("workdir.removeRecent")}
-                    aria-label={t("workdir.removeRecent")}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemove(p);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.stopPropagation();
-                        onRemove(p);
-                      }
-                    }}
-                  >
-                    <I.x size={11} />
-                  </button>
-                ) : null}
-              </div>
+                path={p}
+                icon={<I.folder size={12} />}
+                isCurrent={isCurrent}
+                canRemove={Boolean(onRemove)}
+                onPick={() => {
+                  if (!isCurrent) onPick(p);
+                  onClose();
+                }}
+                onRemove={() => onRemove?.(p)}
+              />
             );
           })}
         </div>
