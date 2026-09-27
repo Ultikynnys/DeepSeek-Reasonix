@@ -739,10 +739,21 @@ export function reduce(state: State, action: Action): State {
       };
     case "incoming":
       return applyIncoming(state, action.event);
-    case "settings_patch":
+    case "settings_patch": {
+      const modelChanged =
+        action.patch.model !== undefined &&
+        state.settings?.model !== undefined &&
+        action.patch.model !== state.settings.model;
       return state.settings
-        ? { ...state, settings: { ...state.settings, ...sanitizeSettingsPatch(action.patch) } }
+        ? {
+            ...state,
+            busy: modelChanged ? false : state.busy,
+            turnStatus: modelChanged ? null : state.turnStatus,
+            turnStatusTool: modelChanged ? null : state.turnStatusTool,
+            settings: { ...state.settings, ...sanitizeSettingsPatch(action.patch) },
+          }
         : state;
+    }
     case "session_delete_requested":
       return {
         ...state,
@@ -818,9 +829,18 @@ export function reduce(state: State, action: Action): State {
         if (bucket) bucket.push(it);
         else byTurn.set(it.turn, [it]);
       }
+      let messages = state.messages;
+      for (const turn of byTurn.keys()) {
+        if (!messages.some((m) => m.kind === "assistant" && m.turn === turn)) {
+          messages = [...messages, { kind: "assistant", turn, segments: [], pending: true }];
+        }
+      }
+      const lastItem = collapsed[collapsed.length - 1];
       return {
         ...state,
-        messages: state.messages.map((m) => {
+        turnStatus: lastItem?.channel === "reasoning" ? "reasoning" : "responding",
+        turnLastEventMs: Date.now(),
+        messages: messages.map((m) => {
           if (m.kind !== "assistant") return m;
           const relevant = byTurn.get(m.turn);
           if (!relevant || relevant.length === 0) return m;
