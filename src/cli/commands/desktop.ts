@@ -4001,7 +4001,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   function createTabSkeleton(
     initialDir?: string,
     restoreId?: string,
-    restore?: { groupId?: string; session?: string },
+    restore?: {
+      groupId?: string;
+      session?: string;
+      /** Fresh-channel (New chat) overrides — inherit the source session's prefs
+       *  rather than the global config default. */
+      model?: string;
+      reasoningEffort?: import("../../config.js").ReasoningEffort;
+      subagentModel?: string;
+    },
     pending = false,
   ): Tab {
     const defaultDir = reasonixDefaultWorkspaceDir();
@@ -4014,7 +4022,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       initialDir && sameWorkspaceDir(initialDir, reasonixInstallDir()) ? defaultDir : initialDir;
     const dir = pending ? "" : resolve(resolvedInitial ?? opts.dir ?? fallbackDir);
     if (!pending) pushRecentWorkspace(dir);
-    const model = opts.model || loadModel() || DEFAULT_MODEL;
+    const model = restore?.model || opts.model || loadModel() || DEFAULT_MODEL;
     // Restored tabs keep their persisted id so a backend restart doesn't
     // re-mint t1..tN over the frontend's still-open tabs. Bump the counter
     // past the restored id so freshly opened tabs never collide with it.
@@ -4035,7 +4043,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       shellMetricsSession: null,
       shellMetricsSince: 0,
       currentModel: model,
-      currentReasoningEffort: loadReasoningEffort(),
+      currentSubagentModel: restore?.subagentModel,
+      currentReasoningEffort: restore?.reasoningEffort ?? loadReasoningEffort(),
       ctxMaxOverride: loadContextTokens(),
       toolset: null,
       system: "",
@@ -5401,6 +5410,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       active?: boolean;
       groupId?: string;
       pending?: boolean;
+      /** Explicit model prefs for a fresh channel (New chat) so the new tab
+       *  inherits the current session's models instead of the global default. */
+      model?: string;
+      reasoningEffort?: import("../../config.js").ReasoningEffort;
+      subagentModel?: string;
     },
   ): Tab {
     const tab = createTabSkeleton(initialDir, restore?.id, restore, restore?.pending ?? false);
@@ -6620,6 +6634,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const opened = bootstrapTab(tab.rootDir, {
           active: true,
           groupId: tab.groupId,
+          // Inherit the source session's models/effort — otherwise the fresh
+          // channel falls back to the global config default and drops the
+          // per-conversation subagent override entirely.
+          model: tab.currentModel,
+          reasoningEffort: tab.currentReasoningEffort,
+          subagentModel: tab.currentSubagentModel,
         });
         lastActiveTabId = opened.id;
         persistOpenTabs();
