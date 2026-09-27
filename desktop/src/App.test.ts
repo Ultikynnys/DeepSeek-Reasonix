@@ -439,6 +439,84 @@ describe("Desktop App reducer — usage", () => {
     expect(next.turnStatus).toBe("waiting_tool");
   });
 
+  it("releases busy when $settings arrives after optimistic settings_patch model switch", () => {
+    let state: Parameters<typeof reduce>[0] = {
+      ...initialState(),
+      busy: true,
+      turnStatus: "waiting_tool",
+      turnStatusTool: "read_file",
+      settings: {
+        reasoningEffort: "high",
+        editMode: "review",
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "gpt-5.6-sol",
+        version: "0.50.1",
+      },
+      queuedSends: [{ text: "Proceed" }],
+    };
+
+    state = reduce(state, {
+      t: "settings_patch",
+      patch: { model: "glm-5.3-flash" },
+    });
+
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$settings",
+        reasoningEffort: "high",
+        editMode: "review",
+        quickSendId: "proceed",
+        quickSends: [],
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "glm-5.3-flash",
+        version: "0.50.1",
+      },
+    });
+
+    expect(state.busy).toBe(false);
+    expect(state.turnStatus).toBeNull();
+    expect(state.turnStatusTool).toBeNull();
+  });
+
+  it("recreates assistant card on batch_delta when turn-start is missing after model switch", () => {
+    let state = reduce(initialState(), {
+      t: "send_user",
+      text: "first turn",
+      clientId: "c-1",
+    });
+
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "$turn_complete",
+        outcome: "aborted",
+        turn: 1,
+      },
+    });
+
+    state = reduce(state, {
+      t: "send_user",
+      text: "Proceed",
+      clientId: "c-2",
+    });
+
+    state = reduce(state, {
+      t: "batch_delta",
+      items: [{ turn: 2, channel: "content", text: "executing task" }],
+    });
+
+    expect(state.messages).toHaveLength(3);
+    expect(state.messages[2]).toMatchObject({
+      kind: "assistant",
+      turn: 2,
+      pending: true,
+      segments: [{ kind: "text", text: "executing task" }],
+    });
+  });
+
   it("recovers the turn card from any entry event when turn-start is missing", () => {
     const base = initialState();
     const incoming = (event: Record<string, unknown>) =>
