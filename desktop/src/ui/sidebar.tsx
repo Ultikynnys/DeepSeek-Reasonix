@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type SessionInfo, sortSessionsByCreationDescending } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
+import { formatTokensPerSecond } from "../stream-rate";
 import { useClampedPopupPosition } from "./file-menu";
 import { activationHandler } from "./keyboard";
 import { Shortcut } from "./shortcut";
@@ -53,6 +54,7 @@ export function Sidebar({
   activeName,
   workspaceDir,
   runningSessions,
+  sessionRates,
   onNewChat,
   onLoadSession,
   onDeleteSession,
@@ -69,6 +71,10 @@ export function Sidebar({
    *  in the workspace — the ONLY thing that dots a session item, matching the
    *  tab bar's running-agents-only rule. No dot for a merely open channel. */
   runningSessions?: Set<string>;
+  /** Live provider output rate (tokens/second) keyed by session name. Only
+   *  present while the session's stream is running; a paused/stalled stream
+   *  reports 0. */
+  sessionRates?: Map<string, number>;
   onNewChat: () => void;
   onLoadSession: (name: string) => void;
   onDeleteSession: (name: string) => void;
@@ -226,6 +232,8 @@ export function Sidebar({
             const active = s.name === activeName;
             const mtime = Date.parse(s.mtime);
             const updated = Number.isFinite(mtime) ? relative(Date.now() - mtime) : s.mtime;
+            const running = runningSessions?.has(s.name) ?? false;
+            const rate = running ? sessionRates?.get(s.name) : undefined;
             return (
               <div
                 key={s.name}
@@ -244,13 +252,23 @@ export function Sidebar({
                   if (e.key === "Enter" && s.name !== activeName) onLoadSession(s.name);
                 }}
               >
-                {runningSessions?.has(s.name) ? <span className="state" /> : null}
+                {running ? <span className="state" /> : null}
                 <div className="body">
                   <span className="title">{prettyName(s)}</span>
                   <span className="meta">
                     <span>{t("sidebarPanel.messageCount", { count: s.messageCount })}</span>
                     <span className="sep">·</span>
                     <span>{updated}</span>
+                    {rate !== undefined ? (
+                      <>
+                        <span className="sep">·</span>
+                        <span className="rate" title={t("sidebarPanel.tokensPerSecondTitle")}>
+                          {t("sidebarPanel.tokensPerSecond", {
+                            rate: formatTokensPerSecond(rate),
+                          })}
+                        </span>
+                      </>
+                    ) : null}
                   </span>
                 </div>
                 <button

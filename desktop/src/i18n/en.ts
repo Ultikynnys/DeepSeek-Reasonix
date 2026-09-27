@@ -939,6 +939,8 @@ export const en = {
     noSessions: "No sessions yet",
     noMatches: "No matches",
     messageCount: "{count} messages",
+    tokensPerSecond: "{rate} tok/s",
+    tokensPerSecondTitle: "Live output rate from the provider",
     deleteSession: "Delete session",
     clearAllSessions: "Clear all sessions",
     clearAllConfirm: "{count} session(s) for this workspace",

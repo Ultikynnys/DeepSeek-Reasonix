@@ -87,6 +87,7 @@ import {
   rpcSend,
 } from "./protocol";
 import { StartupTimingTracker } from "./startup-timing";
+import { StreamRateTracker } from "./stream-rate";
 import {
   DEFAULT_TAB_THEME,
   type TabTheme,
@@ -2426,6 +2427,9 @@ interface TabRuntimeProps {
   onNewTab: () => void;
   /** Reports this channel's running-agent state so the tab dot can count them. */
   onBusyChange: (tabId: string, busy: boolean) => void;
+  /** Live provider output rate (tokens/second) keyed by session name, for the
+   *  sidebar readout beside every running session. */
+  sessionRates: Map<string, number>;
   theme: Theme;
   themeStyle: ThemeStyle;
   onSetThemeStyle: (style: ThemeStyle) => void;
@@ -2487,6 +2491,7 @@ function TabRuntime({
   onWorkspaceInitialized,
   onNewTab,
   onBusyChange,
+  sessionRates,
   theme,
   themeStyle,
   onSetThemeStyle,
@@ -3528,6 +3533,7 @@ function TabRuntime({
           workspaceDir={state.settings?.workspaceDir}
           onNewChat={newChat}
           runningSessions={runningSessions}
+          sessionRates={sessionRates}
           onLoadSession={(name) => {
             clearAbortDraft();
             // Open the session as its own channel (a new tab in this group), or
@@ -4352,15 +4358,21 @@ function TitleBar({
  *  `workspaceDir`. The ONLY input to the sidebar dot: a merely open channel
  *  must not dot — the tab bar reserves the dot for running agents and the
  *  sidebar follows the same rule (issue: 3 orange dots for 1 working agent). */
+/** The session name of a tab whose agent is actively running, or undefined.
+ *  The single source of the "is this tab running?" rule that both the sidebar
+ *  dot and its live tokens/second readout derive from. */
+function runningTabSession(t: { session?: string; busy?: boolean }): string | undefined {
+  return t.busy && t.session ? t.session : undefined;
+}
+
 export function runningSessionNames<
   T extends { id: string; workspaceDir?: string; session?: string; busy?: boolean },
 >(tabs: readonly T[], workspaceDir?: string): Set<string> {
   const target = normalizeWorkspacePath(workspaceDir);
   const out = new Set<string>();
   for (const t of tabs) {
-    if (t.busy && t.session && normalizeWorkspacePath(t.workspaceDir) === target) {
-      out.add(t.session);
-    }
+    const session = runningTabSession(t);
+    if (session && normalizeWorkspacePath(t.workspaceDir) === target) out.add(session);
   }
   return out;
 }
@@ -5181,6 +5193,11 @@ export function App() {
   const dispatchersRef = useRef<Map<string, TabDispatcher>>(new Map());
   const pendingEventsRef = useRef<Map<string, TabAction[]>>(new Map());
   const pendingDeltasRef = useRef<Map<string, DeltaBatchItem[]>>(new Map());
+  // Per-tab sliding-window trackers for the sidebar's live tokens/second
+  // readout. Raw `model.delta` events feed these; a throttled tick snapshots
+  // them into `sessionRates` (keyed by session name) for the running rows.
+  const streamRatesRef = useRef<Map<string, StreamRateTracker>>(new Map());
+  const [sessionRates, setSessionRates] = useState<Map<string, number>>(new Map());
   const rafScheduledRef = useRef(false);
   const startupStderrRef = useRef<string[]>([]);
   const tabsRef = useRef<TabMeta[]>([]);
@@ -5462,6 +5479,14 @@ export function App() {
         pendingDeltasRef.current.set(tabId, []);
       }
     };
+    // Drop every per-tab ref for a tab that no longer exists — one place, so a
+    // newly-added per-tab map can't be forgotten in one of the two close paths.
+    const forgetTab = (tabId: string) => {
+      dispatchersRef.current.delete(tabId);
+      pendingEventsRef.current.delete(tabId);
+      pendingDeltasRef.current.delete(tabId);
+      streamRatesRef.current.delete(tabId);
+    };
 
     const setup = async () => {
       const tracker = new StartupTimingTracker();
@@ -5586,9 +5611,7 @@ export function App() {
                 clearTabTheme(localStorage, tabId);
                 return rest;
               });
-              dispatchersRef.current.delete(tabId);
-              pendingEventsRef.current.delete(tabId);
-              pendingDeltasRef.current.delete(tabId);
+              forgetTab(tabId);
               expectedTabsRef.current?.delete(tabId);
               if (areWorkspacesLoaded(expectedTabsRef.current, initializedTabsRef.current)) {
                 setLoadingWorkspaces(false);
@@ -5628,11 +5651,7 @@ export function App() {
                 }));
               });
               for (const id of Array.from(dispatchersRef.current.keys())) {
-                if (!ids.has(id)) {
-                  dispatchersRef.current.delete(id);
-                  pendingEventsRef.current.delete(id);
-                  pendingDeltasRef.current.delete(id);
-                }
+                if (!ids.has(id)) forgetTab(id);
               }
               setTabThemes((prev) => {
                 let next = prev;
@@ -5652,6 +5671,11 @@ export function App() {
             }
 
             if (ev.type === "model.delta" && tabId) {
+              // Feed every provider-output channel into the live rate tracker
+              // (content, reasoning, and tool-call arguments all consume tokens).
+              const rateTracker = streamRatesRef.current.get(tabId) ?? new StreamRateTracker();
+              rateTracker.record(ev.text.length);
+              streamRatesRef.current.set(tabId, rateTracker);
               if (ev.channel === "content" || ev.channel === "reasoning") {
                 const bucket = pendingDeltasRef.current.get(tabId) ?? [];
                 bucket.push({ turn: ev.turn, channel: ev.channel, text: ev.text });
@@ -5659,6 +5683,13 @@ export function App() {
                 scheduleFlush();
                 return;
               }
+            }
+
+            // A completed model call closes its stream: drop the window so the
+            // next call's rate ramps from zero instead of averaging this one's
+            // tail across the tool-execution gap.
+            if (ev.type === "model.final" && tabId) {
+              streamRatesRef.current.get(tabId)?.reset();
             }
 
             if (ev.type === "$ready" && tabId) {
@@ -5867,6 +5898,9 @@ export function App() {
   // Tracks each tab's running-agent flag so the tab dot can show how many
   // agents are active in it. Every mounted TabRuntime reports its own busy.
   const reportTabBusy = useCallback((tabId: string, busy: boolean) => {
+    // A tab that stopped running has no live stream — drop its tracker so the
+    // next turn can't read a stale window.
+    if (!busy) streamRatesRef.current.delete(tabId);
     setTabs((prev) => {
       let changed = false;
       const next = prev.map((t) => {
@@ -5877,6 +5911,34 @@ export function App() {
       return changed ? next : prev;
     });
   }, []);
+
+  // Snapshot the per-tab rate trackers into `sessionRates` (keyed by session
+  // name) while any agent is running. Throttled to ~4Hz so the sidebar
+  // re-renders at a readable cadence instead of once per delta. When nothing is
+  // running the map clears, so the readout disappears along with the dot.
+  const anyBusy = tabs.some((t) => t.busy);
+  useEffect(() => {
+    if (!anyBusy) {
+      setSessionRates((prev) => (prev.size === 0 ? prev : new Map()));
+      return;
+    }
+    const tick = () => {
+      const now = Date.now();
+      const next = new Map<string, number>();
+      for (const t of tabsRef.current) {
+        const session = runningTabSession(t);
+        if (session) next.set(session, streamRatesRef.current.get(t.id)?.tokensPerSecond(now) ?? 0);
+      }
+      setSessionRates((prev) => {
+        if (prev.size !== next.size) return next;
+        for (const [k, v] of next) if (prev.get(k) !== v) return next;
+        return prev;
+      });
+    };
+    tick();
+    const id = setInterval(tick, 400);
+    return () => clearInterval(id);
+  }, [anyBusy]);
 
   const openTab = useCallback(() => {
     // New tab — defaults to the local Reasonix installation (a fresh group).
@@ -5994,6 +6056,7 @@ export function App() {
           onWorkspaceInitialized={markWorkspaceInitialized}
           onNewTab={openTab}
           onBusyChange={reportTabBusy}
+          sessionRates={sessionRates}
           theme={tabThemes[t.id]?.theme ?? DEFAULT_TAB_THEME.theme}
           themeStyle={tabThemes[t.id]?.themeStyle ?? DEFAULT_TAB_THEME.themeStyle}
           onSetThemeStyle={onSetThemeStyle}

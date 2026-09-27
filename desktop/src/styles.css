@@ -1723,6 +1723,13 @@ html[data-platform="macos"] .titlebar .tb-left {
 .session-item .body .meta .sep {
   color: var(--border-strong);
 }
+.session-item .body .meta .rate {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  /* Never wrap or shrink the figure — it's short and must stay legible. */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .session-item .delete-btn {
   flex-shrink: 0;
   width: 22px;
