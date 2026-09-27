@@ -67,6 +67,18 @@ describe("desktop modelEndpointFor (#1529)", () => {
       billingKind: "usd",
       openaiAuth: "none",
     });
+    expect(modelEndpointFor("gpt-6-sol", path)).toEqual({
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      billingKind: "usd",
+      openaiAuth: "none",
+    });
+    expect(modelEndpointFor("gpt-6-luna", path)).toEqual({
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      billingKind: "usd",
+      openaiAuth: "none",
+    });
     expect(modelEndpointFor("gpt-5.6-sol", path)).toEqual({
       provider: "openai",
       baseUrl: "https://api.openai.com/v1",

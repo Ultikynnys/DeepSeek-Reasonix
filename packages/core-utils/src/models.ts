@@ -19,6 +19,8 @@ export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
  *  model (see tests/config.test.ts "stale configs clamp"). */
 export const OPENAI_MODELS: readonly string[] = [
   "gpt-6-astra",
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",

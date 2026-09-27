@@ -185,7 +185,7 @@ export const en = {
     voiceDelete: "Delete",
     voiceDownloadError: "Voice model download failed: {error}",
     apiSection: "DeepSeek API",
-    openaiSection: "OpenAI (Astra / GPT-5.6)",
+    openaiSection: "OpenAI (GPT-6 / GPT-5.6)",
     ollamaSection: "Ollama",
     openaiSignInTitle: "Website sign-in",
     openaiSignIn: "Sign in with OpenAI",
