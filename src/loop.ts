@@ -1055,8 +1055,8 @@ export class CacheFirstLoop {
     if (this.sessionName) {
       try {
         patchSessionMeta(this.sessionName, { lastTurn: this._turn });
-      } catch {
-        // Non-fatal: next successful write supersedes it.
+      } catch (err) {
+        process.stderr.write(`reasonix: session meta lastTurn patch failed — ${messageOf(err)}\n`);
       }
     }
     const restoreModelIfNeeded = () => undefined;
