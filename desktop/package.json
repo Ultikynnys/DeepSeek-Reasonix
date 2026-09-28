@@ -1,7 +1,7 @@
 {
   "name": "reasonix-desktop",
   "private": true,
-  "version": "0.53.384",
+  "version": "0.53.385",
   "type": "module",
   "scripts": {
     "dev": "vite",
