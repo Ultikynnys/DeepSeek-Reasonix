@@ -145,12 +145,31 @@ export class AudioRecorder {
         noiseSuppression: true,
         autoGainControl: true,
       };
-      // A plain (non-exact) deviceId lets the browser fall back to the default
-      // device if the chosen one is no longer available.
-      if (this.deviceId) {
-        audioConstraints.deviceId = this.deviceId;
+      // Force the exact device the user picked in Settings. A plain (ideal)
+      // deviceId is only a preference: the browser may honor the system default
+      // or a stored permission-time choice instead, so the picker appeared to do
+      // nothing. `exact` makes it a hard requirement so the selected microphone
+      // is actually used.
+      const requestedConstraints: MediaTrackConstraints = this.deviceId
+        ? { ...audioConstraints, deviceId: { exact: this.deviceId } }
+        : audioConstraints;
+      try {
+        this.mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: requestedConstraints,
+        });
+      } catch (deviceErr) {
+        // The exact device is genuinely unavailable (unplugged, or its id rotated
+        // across sessions): getUserMedia rejects with OverconstrainedError naming
+        // `deviceId`. Fall back to the system default so capture still works
+        // instead of failing outright.
+        const constraintErr = deviceErr as DetailedError;
+        const deviceUnavailable =
+          Boolean(this.deviceId) &&
+          constraintErr.name === "OverconstrainedError" &&
+          (!constraintErr.constraint || constraintErr.constraint === "deviceId");
+        if (!deviceUnavailable) throw deviceErr;
+        this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       }
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     } catch (err) {
       const error = err as Error;
       const technicalDetails = errorDetails(err);

@@ -97,6 +97,87 @@ describe("AudioRecorder", () => {
     }
   });
 
+  it("forces the configured device with an exact deviceId constraint", async () => {
+    const originalMediaDevices = navigator.mediaDevices;
+    try {
+      const getUserMedia = vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error("nope"), { name: "NotAllowedError" }));
+      // @ts-expect-error test mock
+      navigator.mediaDevices = { getUserMedia };
+
+      const recorder = new AudioRecorder({ deviceId: "mic-1" });
+      await expect(recorder.start()).rejects.toThrow(/not allowed/i);
+
+      // `exact` is what stops the browser from substituting the system default.
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+      expect(getUserMedia.mock.calls[0][0]).toEqual({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          deviceId: { exact: "mic-1" },
+        },
+      });
+    } finally {
+      // @ts-expect-error restore
+      navigator.mediaDevices = originalMediaDevices;
+    }
+  });
+
+  it("falls back to the system default when the exact device is unavailable", async () => {
+    const originalMediaDevices = navigator.mediaDevices;
+    try {
+      const getUserMedia = vi
+        .fn()
+        .mockRejectedValueOnce(
+          Object.assign(new Error("device gone"), {
+            name: "OverconstrainedError",
+            constraint: "deviceId",
+          }),
+        )
+        .mockRejectedValueOnce(new Error("boom"));
+      // @ts-expect-error test mock
+      navigator.mediaDevices = { getUserMedia };
+
+      const recorder = new AudioRecorder({ deviceId: "mic-1" });
+      await expect(recorder.start()).rejects.toThrow();
+
+      expect(getUserMedia).toHaveBeenCalledTimes(2);
+      expect(getUserMedia.mock.calls[0][0].audio.deviceId).toEqual({ exact: "mic-1" });
+      // The retry drops the device constraint so the default is used.
+      expect(getUserMedia.mock.calls[1][0].audio.deviceId).toBeUndefined();
+      expect(getUserMedia.mock.calls[1][0].audio.channelCount).toBe(1);
+    } finally {
+      // @ts-expect-error restore
+      navigator.mediaDevices = originalMediaDevices;
+    }
+  });
+
+  it("does not fall back when a non-device constraint is overconstrained", async () => {
+    const originalMediaDevices = navigator.mediaDevices;
+    try {
+      const getUserMedia = vi.fn().mockRejectedValue(
+        Object.assign(new Error("bad channel count"), {
+          name: "OverconstrainedError",
+          constraint: "channelCount",
+        }),
+      );
+      // @ts-expect-error test mock
+      navigator.mediaDevices = { getUserMedia };
+
+      const recorder = new AudioRecorder({ deviceId: "mic-1" });
+      await expect(recorder.start()).rejects.toThrow(
+        /requested audio constraint.*constraint=channelCount/i,
+      );
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+    } finally {
+      // @ts-expect-error restore
+      navigator.mediaDevices = originalMediaDevices;
+    }
+  });
+
   it("stops the acquired microphone track when audio processing setup fails", async () => {
     const originalMediaDevices = navigator.mediaDevices;
     const originalWindow = globalThis.window;
