@@ -4681,16 +4681,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           if (next.done) break;
           const ev = next.value;
-          emitDiagnostic(
-            "turn.loop.event",
-            {
-              role: ev.role,
-              turn: ev.turn,
-              contentChars: ev.content?.length ?? 0,
-              toolName: ev.toolName ?? null,
-            },
-            { tabId: tab.id },
-          );
           lastTurn = ev.turn;
           if (!emittedTurnContext) {
             emittedTurnContext = true;
