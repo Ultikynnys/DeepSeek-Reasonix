@@ -188,10 +188,8 @@ export interface CacheFirstLoopOptions {
   disableAutoCompaction?: boolean;
   /** When true, the stream repetition / "stuck re-thinking" guard may abort a degenerating stream. Defaults to false (opt-in). */
   repetitionGuardEnabled?: boolean;
-  /** In-memory floor for the turn counter (runtime rebuilds within one process).
-   *  Combined with the persisted session-meta `lastTurn`, this guarantees turn
-   *  ordinals never regress — a rebuilt loop over a compacted log resumes above
-   *  every turn the desktop already holds cards for. */
+  /** In-memory floor for the turn counter across runtime rebuilds. Combined
+   *  with session-meta `lastTurn`, ordinals never regress. */
   turnFloor?: number;
 }
 

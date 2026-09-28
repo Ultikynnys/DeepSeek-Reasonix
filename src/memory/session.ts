@@ -118,10 +118,8 @@ export interface SessionMeta {
   createdAt?: number;
   totalCostUsd?: number;
   turnCount?: number;
-  /** Highest turn ordinal ever issued for this session. The loop floors its
-   *  resume baseline on this so a runtime rebuild over a compacted/retracted
-   *  log can never reissue a turn number the desktop already holds cards for
-   *  (the root cause of post-model-switch cards silently vanishing). */
+  /** Highest turn ordinal ever issued; the loop floors its resume baseline on
+   *  this so a rebuilt runtime can't reissue a number the desktop rendered. */
   lastTurn?: number;
   /** Absolute path of the workspace root the session was created/used in. */
   workspace?: string;
