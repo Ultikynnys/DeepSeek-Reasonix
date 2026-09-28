@@ -8800,10 +8800,20 @@ html[data-platform="macos"] .splash {
   font-size: 14px;
   font-weight: 500;
   color: var(--fg);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  word-break: break-word;
   font-family: inherit;
+}
+.jr-body .jr-out {
+  margin: 4px 0 0;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 4.4em;
+  overflow: hidden;
 }
 .jr-body .sub {
   font-size: 14px;
@@ -8812,9 +8822,6 @@ html[data-platform="macos"] .splash {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.jr-body .sub .ses {
-  color: var(--fg-2);
 }
 .jr-body .sub .rk {
   color: var(--warning);

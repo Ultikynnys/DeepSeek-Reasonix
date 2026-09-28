@@ -5102,7 +5102,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           running: j.running,
           exitCode: j.exitCode,
           startedAt: j.startedAt,
-          outputTail: tailLines(j.output, 8),
+          outputTail: tailLines(j.output, 30),
           spawnError: j.spawnError,
           persistent: j.persistent,
         });
