@@ -15,3 +15,11 @@ export function hitPercent(hit: number, miss: number): string {
   if (!(denom > 0)) return "0.0";
   return (Math.floor(((hit || 0) / denom) * 1000) / 10).toFixed(1);
 }
+
+/** Card duration label: sub-second stays in ms, one second and up switches to
+ *  seconds (one decimal) so a long reasoning run reads "8.4s", not "8421 ms".
+ *  One formatter for every card header so tool / shell / subagent / reasoning
+ *  durations all scale the same way. */
+export function formatDuration(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)} ms`;
+}

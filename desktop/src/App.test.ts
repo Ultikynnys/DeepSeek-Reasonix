@@ -2197,6 +2197,148 @@ describe("Desktop App session sorting", () => {
   });
 });
 
+describe("Desktop App reducer — reasoning duration", () => {
+  const turnStarted: ModelTurnStartedEvent = {
+    type: "model.turn.started",
+    id: 1,
+    ts: "2026-05-27T00:00:00.000Z",
+    turn: 1,
+    model: "deepseek-v4-flash",
+    reasoningEffort: "high",
+    prefixHash: "h",
+  };
+
+  const reasoningSeg = (state: Parameters<typeof reduce>[0]) => {
+    const assistant = state.messages.find((m) => m.kind === "assistant");
+    if (assistant?.kind !== "assistant") throw new Error("no assistant card");
+    return assistant.segments.find((s) => s.kind === "reasoning");
+  };
+
+  it("stamps a reasoning run's wall-clock duration once content follows", () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1000);
+      let state = reduce(initialState(), { t: "incoming", event: turnStarted });
+      state = reduce(state, {
+        t: "incoming",
+        event: {
+          type: "model.delta",
+          id: 2,
+          ts: "t",
+          turn: 1,
+          channel: "reasoning",
+          text: "step one",
+        },
+      });
+      now.mockReturnValue(2500);
+      state = reduce(state, {
+        t: "incoming",
+        event: {
+          type: "model.delta",
+          id: 3,
+          ts: "t",
+          turn: 1,
+          channel: "reasoning",
+          text: " step two",
+        },
+      });
+      now.mockReturnValue(3250);
+      state = reduce(state, {
+        t: "incoming",
+        event: {
+          type: "model.delta",
+          id: 4,
+          ts: "t",
+          turn: 1,
+          channel: "content",
+          text: "the answer",
+        },
+      });
+
+      expect(reasoningSeg(state)).toMatchObject({
+        kind: "reasoning",
+        text: "step one step two",
+        startedAt: 1000,
+        durationMs: 2250,
+      });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("closes an open reasoning run at model.final when nothing else streamed", () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(500);
+      let state = reduce(initialState(), { t: "incoming", event: turnStarted });
+      state = reduce(state, {
+        t: "incoming",
+        event: {
+          type: "model.delta",
+          id: 2,
+          ts: "t",
+          turn: 1,
+          channel: "reasoning",
+          text: "thinking",
+        },
+      });
+      now.mockReturnValue(1500);
+      state = reduce(state, {
+        t: "incoming",
+        event: {
+          type: "model.final",
+          id: 3,
+          ts: "t",
+          turn: 1,
+          content: "",
+          toolCalls: [],
+          usage: {},
+          costUsd: 0,
+        },
+      });
+
+      expect(reasoningSeg(state)).toMatchObject({ kind: "reasoning", durationMs: 1000 });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("closes an open reasoning run when a tool call starts", () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(200);
+      let state = reduce(initialState(), { t: "incoming", event: turnStarted });
+      state = reduce(state, {
+        t: "incoming",
+        event: {
+          type: "model.delta",
+          id: 2,
+          ts: "t",
+          turn: 1,
+          channel: "reasoning",
+          text: "reason",
+        },
+      });
+      now.mockReturnValue(1200);
+      state = reduce(state, {
+        t: "incoming",
+        event: {
+          type: "tool.preparing",
+          id: 3,
+          ts: "t",
+          turn: 1,
+          callId: "tc-1",
+          name: "read_file",
+        },
+      });
+
+      expect(reasoningSeg(state)).toMatchObject({ kind: "reasoning", durationMs: 1000 });
+    } finally {
+      now.mockRestore();
+    }
+  });
+});
+
 describe("Desktop App reducer — model.final content", () => {
   const turnStarted: ModelTurnStartedEvent = {
     type: "model.turn.started",

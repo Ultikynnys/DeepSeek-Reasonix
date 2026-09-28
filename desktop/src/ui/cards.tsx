@@ -2,8 +2,8 @@ import { type CSSProperties, type ReactNode, memo, useContext, useMemo, useState
 import { Markdown, WorkspaceContext, resolveAgainstWorkspace, revealInExplorer } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
-import { tokenLabel } from "./format";
 import { FileMenu } from "./file-menu";
+import { formatDuration, tokenLabel } from "./format";
 import { Shortcut } from "./shortcut";
 
 type Tone = "default" | "success" | "warning" | "danger" | "accent" | "violet";
@@ -243,13 +243,13 @@ export function ReasoningCard({
   text,
   streaming,
   tokens,
-  elapsed,
+  durationMs,
   model,
 }: {
   text: string;
   streaming: boolean;
   tokens?: number;
-  elapsed?: string;
+  durationMs?: number;
   model?: string;
 }) {
   useLang();
@@ -261,13 +261,10 @@ export function ReasoningCard({
       name={t("cards.reasoningName")}
       meta={
         <>
-          {elapsed || tokens ? (
-            <span>
-              {elapsed ?? ""}
-              {elapsed && tokens ? " · " : ""}
-              {tokens ? `${tokens.toLocaleString()} t` : ""}
-            </span>
+          {durationMs !== undefined ? (
+            <span className="meta-dur">{formatDuration(durationMs)}</span>
           ) : null}
+          {tokens ? <span>{tokens.toLocaleString()} t</span> : null}
           {streaming ? (
             <StatusIcon state="running" label={t("cards.streaming")} />
           ) : (
@@ -383,7 +380,7 @@ export function ShellCard({
             <StatusIcon state="done" label={t("cards.done")} />
           )}
           {(state === "done" || state === "failed") && durationMs ? (
-            <span className="meta-dur">{(durationMs / 1000).toFixed(2)}s</span>
+            <span className="meta-dur">{formatDuration(durationMs)}</span>
           ) : null}
         </>
       }
@@ -671,7 +668,7 @@ export function ToolCard({
             <StatusIcon state="done" label={t("cards.done")} />
           )}
           {!running && durationMs !== undefined ? (
-            <span className="meta-dur">{durationMs} ms</span>
+            <span className="meta-dur">{formatDuration(durationMs)}</span>
           ) : null}
           {engine ? <span className="pill-tag ok">{engine}</span> : null}
         </>
@@ -1123,9 +1120,7 @@ export function SubagentCard({
             <StatusIcon state="running" label={t("cards.subagentRunning")} />
           )}
           {settled && durationMs !== undefined ? (
-            <span className="meta-dur">
-              {durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs} ms`}
-            </span>
+            <span className="meta-dur">{formatDuration(durationMs)}</span>
           ) : null}
         </>
       }

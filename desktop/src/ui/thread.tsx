@@ -212,6 +212,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                 // biome-ignore lint/suspicious/noArrayIndexKey: streamed segments are append-only
                 key={i}
                 text={s.text}
+                durationMs={s.durationMs}
                 streaming={pending && !isInterventionPending && i === segments.length - 1}
               />
             );

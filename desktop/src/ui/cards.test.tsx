@@ -11,12 +11,14 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openPath: vi.fn(), openUrl: vi.fn(
 import { WorkspaceProvider } from "../Markdown";
 import {
   DiffCard,
+  ReasoningCard,
   ShellCard,
   SubagentCard,
   ToolCard,
   extractSubagentResultMeta,
   isSubagentTool,
 } from "./cards";
+import { formatDuration } from "./format";
 
 beforeAll(() => {
   Object.defineProperty(navigator, "clipboard", {
@@ -38,6 +40,39 @@ function wrap(ui: React.ReactNode) {
     </WorkspaceProvider>
   );
 }
+
+describe("card duration labels", () => {
+  it("keeps sub-second durations in ms and switches to seconds at 1s", () => {
+    expect(formatDuration(0)).toBe("0 ms");
+    expect(formatDuration(111)).toBe("111 ms");
+    expect(formatDuration(999)).toBe("999 ms");
+    expect(formatDuration(1000)).toBe("1.0s");
+    expect(formatDuration(2500)).toBe("2.5s");
+    expect(formatDuration(8421)).toBe("8.4s");
+  });
+
+  it("shows a reasoning card's duration in the header", () => {
+    const { container } = render(
+      wrap(<ReasoningCard text="weighing options" streaming={false} durationMs={1500} />),
+    );
+    expect(container.querySelector(".meta-dur")?.textContent).toBe("1.5s");
+  });
+
+  it("shows no duration on a reasoning card still streaming without a time", () => {
+    const { container } = render(wrap(<ReasoningCard text="…" streaming={true} />));
+    expect(container.querySelector(".meta-dur")).toBeNull();
+  });
+
+  it("renders a tool card's duration in seconds once it passes 1s", () => {
+    render(<ToolCard name="read_file" args="{}" result="ok" durationMs={2500} ok />);
+    expect(screen.getByText("2.5s")).toBeTruthy();
+  });
+
+  it("renders a sub-second tool duration in ms", () => {
+    render(<ToolCard name="read_file" args="{}" result="ok" durationMs={42} ok />);
+    expect(screen.getByText("42 ms")).toBeTruthy();
+  });
+});
 
 describe("ToolCard — show-in-explorer button", () => {
   it("shows the button for read_file even while the card body is collapsed", async () => {

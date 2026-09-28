@@ -220,7 +220,7 @@ export type SubagentRunProgress = {
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
-  | { kind: "reasoning"; text: string }
+  | { kind: "reasoning"; text: string; startedAt?: number; durationMs?: number }
   | {
       kind: "tool";
       callId: string;
@@ -1305,7 +1305,23 @@ function appendTextSegment(
   if (last && last.kind === kind) {
     return [...segments.slice(0, -1), { ...last, text: last.text + text }];
   }
-  return [...segments, { kind, text }];
+  const base = closeTrailingReasoning(segments);
+  return [...base, kind === "reasoning" ? { kind, text, startedAt: Date.now() } : { kind, text }];
+}
+
+// Stamp the wall-clock duration onto a trailing reasoning segment that's still
+// open (no `durationMs`) — called when the model moves on to text, a tool, or
+// the turn finalizes, so the reasoning card can show how long the thinking run
+// took. Idempotent: a closed or non-reasoning tail is returned unchanged.
+function closeTrailingReasoning(segments: AssistantSegment[]): AssistantSegment[] {
+  const last = segments[segments.length - 1];
+  if (last?.kind === "reasoning" && last.durationMs === undefined && last.startedAt !== undefined) {
+    return [
+      ...segments.slice(0, -1),
+      { ...last, durationMs: Math.max(0, Date.now() - last.startedAt) },
+    ];
+  }
+  return segments;
 }
 
 // Insert `message` into the transcript at its owning turn's boundary: right
@@ -2083,7 +2099,7 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
               { kind: "image", dataUrl: ev.image.dataUrl, mimeType: ev.image.mimeType },
             ];
           }
-          return { ...m, segments, pending: false };
+          return { ...m, segments: closeTrailingReasoning(segments), pending: false };
         }),
       };
     }
@@ -2099,7 +2115,7 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
           return {
             ...m,
             segments: [
-              ...m.segments,
+              ...closeTrailingReasoning(m.segments),
               {
                 kind: "tool",
                 callId: ev.callId,
