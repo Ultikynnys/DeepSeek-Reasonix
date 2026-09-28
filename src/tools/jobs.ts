@@ -10,6 +10,11 @@ const DEFAULT_OUTPUT_CAP_BYTES = 64 * 1024; // 64 KB
 /** Persistent jobs keep far more history — a long-lived server's console stays readable. */
 const PERSISTENT_OUTPUT_CAP_BYTES = 1024 * 1024; // 1 MB
 
+/** Hard char ceiling for any single output read — the startup preview, job_output,
+ *  and wait_for_job's latestOutput. Keeps a dense console from saturating context;
+ *  page the full ring in bounded chunks with `since` / `tailLines`. */
+export const DEFAULT_READ_MAX_CHARS = 32_000;
+
 /** First match cuts startup wait short; conservative patterns — a false negative costs a real stall. */
 const READY_SIGNALS: ReadonlyArray<RegExp> = [
   // HTTP server banners
@@ -274,26 +279,35 @@ export class JobRegistry {
       pid: job.pid,
       stillRunning: job.running,
       readyMatched,
-      preview: job.output,
+      preview: capJobOutput(job.output, DEFAULT_READ_MAX_CHARS, "tail"),
       exitCode: job.exitCode,
     };
   }
 
-  read(id: number, opts: { since?: number; tailLines?: number } = {}): JobReadResult | null {
+  read(
+    id: number,
+    opts: { since?: number; tailLines?: number; maxChars?: number } = {},
+  ): JobReadResult | null {
     const job = this.jobs.get(id);
     if (!job) return null;
     const full = job.output;
+    const maxChars = opts.maxChars ?? DEFAULT_READ_MAX_CHARS;
     let slice = full;
+    let keep: "head" | "tail" = "tail";
+    let fromByte = 0;
     if (typeof opts.since === "number" && opts.since >= 0 && opts.since < full.length) {
       slice = full.slice(opts.since);
+      keep = "head";
+      fromByte = opts.since;
     }
     if (typeof opts.tailLines === "number" && opts.tailLines > 0) {
       const lines = slice.split("\n");
-      const keep = lines.slice(Math.max(0, lines.length - opts.tailLines));
-      slice = keep.join("\n");
+      slice = lines.slice(Math.max(0, lines.length - opts.tailLines)).join("\n");
+      keep = "tail";
     }
+    const nextSince = keep === "head" ? fromByte + Math.min(slice.length, maxChars) : undefined;
     return {
-      output: slice,
+      output: capJobOutput(slice, maxChars, keep, nextSince),
       byteLength: full.length,
       running: job.running,
       exitCode: job.exitCode,
@@ -319,7 +333,7 @@ export class JobRegistry {
       return {
         exited: true,
         exitCode: job.exitCode,
-        latestOutput: job.output,
+        latestOutput: capJobOutput(job.output, DEFAULT_READ_MAX_CHARS, "tail"),
       };
     }
 
@@ -359,7 +373,11 @@ export class JobRegistry {
     return {
       exited: !job.running,
       exitCode: job.exitCode,
-      latestOutput: latestOutputSince(startOutput, job.output),
+      latestOutput: capJobOutput(
+        latestOutputSince(startOutput, job.output),
+        DEFAULT_READ_MAX_CHARS,
+        "tail",
+      ),
     };
   }
 
@@ -559,6 +577,21 @@ function snapshot(job: InternalJob): JobRecord {
     spawnError: job.spawnError,
     persistent: job.persistent,
   };
+}
+
+function capJobOutput(
+  text: string,
+  maxChars: number,
+  keep: "head" | "tail",
+  nextSince?: number,
+): string {
+  if (text.length <= maxChars) return text;
+  const elided = text.length - maxChars;
+  if (keep === "head") {
+    const cont = nextSince === undefined ? "" : ` — continue with since=${nextSince}`;
+    return `${text.slice(0, maxChars)}\n[… ${elided} chars elided${cont} …]`;
+  }
+  return `[… ${elided} chars elided — narrow with since/tailLines …]\n${text.slice(-maxChars)}`;
 }
 
 function latestOutputSince(before: string, after: string): string {

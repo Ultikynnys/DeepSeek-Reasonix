@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { JobRegistry } from "../src/tools/jobs.js";
+import { DEFAULT_READ_MAX_CHARS, JobRegistry } from "../src/tools/jobs.js";
 
 async function waitFor(cond: () => boolean, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -336,5 +336,41 @@ describe("JobRegistry", () => {
     const rec = await registry.stop(p.jobId, { graceMs: 200 });
     expect(rec?.running).toBe(false);
     expect(rec?.persistent).toBe(true);
+  });
+
+  it(
+    "read() caps a dense buffer to the char budget (context guard)",
+    { timeout: 20000 },
+    async () => {
+      const cmd = `node -e "for (let i=0;i<9000;i++) console.log('line'+i+'-'+'y'.repeat(30))"`;
+      const res = await registry.start(cmd, { cwd, waitSec: 3 });
+      await registry.waitForJob(res.jobId, { timeoutMs: 8000 });
+      const full = registry.read(res.jobId, { tailLines: 0 });
+      expect(full?.output.length ?? 0).toBeLessThanOrEqual(DEFAULT_READ_MAX_CHARS + 120);
+      expect(full?.output).toContain("elided");
+      // A plain tail read is bounded too.
+      const tail = registry.read(res.jobId);
+      expect(tail?.output.length ?? 0).toBeLessThanOrEqual(DEFAULT_READ_MAX_CHARS + 120);
+    },
+  );
+
+  it(
+    "read({ since }) caps a head read and points at the next cursor",
+    { timeout: 20000 },
+    async () => {
+      const cmd = `node -e "for (let i=0;i<9000;i++) console.log('line'+i+'-'+'y'.repeat(30))"`;
+      const res = await registry.start(cmd, { cwd, waitSec: 3 });
+      await registry.waitForJob(res.jobId, { timeoutMs: 8000 });
+      const head = registry.read(res.jobId, { since: 0 });
+      expect(head?.output.length ?? 0).toBeLessThanOrEqual(DEFAULT_READ_MAX_CHARS + 120);
+      expect(head?.output).toContain("continue with since=");
+    },
+  );
+
+  it("waitForJob() caps latestOutput to the char budget", { timeout: 20000 }, async () => {
+    const cmd = `node -e "for (let i=0;i<9000;i++) console.log('line'+i+'-'+'y'.repeat(30)); process.exit(0)"`;
+    const res = await registry.start(cmd, { cwd, waitSec: 0.1 });
+    const waited = await registry.waitForJob(res.jobId, { timeoutMs: 8000 });
+    expect(waited?.latestOutput.length ?? 0).toBeLessThanOrEqual(DEFAULT_READ_MAX_CHARS + 120);
   });
 });

@@ -376,7 +376,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "job_output",
     description:
-      "Read the latest output of a background job started with `run_background` (or a persistent `run_command`). By default returns the tail of the buffer (last 80 lines). Pass `since` (the `byteLength` from a previous call) to stream only new content incrementally; use `tailLines` for more or fewer lines. Works on persistent jobs at any point — read a long-running server's console output whenever you need it. Tells you whether the job is still running, so you can stop polling when it's done.",
+      "Read the latest output of a background job started with `run_background` (or a persistent `run_command`). By default returns the tail of the buffer (last 80 lines). Pass `since` (the `byteLength` from a previous call) to stream only new content incrementally; use `tailLines` for more or fewer lines. Works on persistent jobs at any point — read a long-running server's console output whenever you need it. A single read is capped (~32K chars) so a dense console can't saturate your context — page a larger buffer in range-bounded chunks with `since`, or narrow it with `tailLines`. Tells you whether the job is still running, so you can stop polling when it's done.",
     readOnly: true,
     parallelSafe: true,
     stormExempt: true,
@@ -409,7 +409,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "wait_for_job",
     description:
-      "Block server-side until a background job finishes (or, opt-in, until it produces new output), bounded by `timeoutMs`. Costs ONE tool call regardless of how long the wait runs — use this instead of polling `job_output` in a loop. Returns JSON with `exited`, `exitCode`, and `latestOutput`.\n\n`waitFor` controls the wake condition:\n- `'exit'` (default) — only wake on the job exiting (or the timeout). Right for downloads, installs, builds, anything one-shot. Chatty progress bars do NOT wake the wait.\n- `'output-or-exit'` — also wake whenever the job writes a new line. Right for tailing a dev server / watcher and reacting to a specific log line.\n\nFor a download or install, set `timeoutMs` to the slowest reasonable end-to-end (e.g. 300_000 for a 5-min wheel install).",
+      "Block server-side until a background job finishes (or, opt-in, until it produces new output), bounded by `timeoutMs`. Costs ONE tool call regardless of how long the wait runs — use this instead of polling `job_output` in a loop. Returns JSON with `exited`, `exitCode`, and `latestOutput`.\n\n`waitFor` controls the wake condition:\n- `'exit'` (default) — only wake on the job exiting (or the timeout). Right for downloads, installs, builds, anything one-shot. Chatty progress bars do NOT wake the wait.\n- `'output-or-exit'` — also wake whenever the job writes a new line. Right for tailing a dev server / watcher and reacting to a specific log line.\n\nFor a download or install, set `timeoutMs` to the slowest reasonable end-to-end (e.g. 300_000 for a 5-min wheel install).\n\n`latestOutput` is capped (~32K chars) just like `job_output` — page the full buffer in bounded chunks with `job_output` + `since`.",
     readOnly: true,
     parallelSafe: true,
     stormExempt: true,
