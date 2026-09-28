@@ -124,23 +124,26 @@ describe("SharedClientRegistry", () => {
     expect(client.closed).toBe(1); // last holder gone → browser closed
   });
 
-  it("spawns a separate client per workspace and closes all on closeAll", async () => {
+  it("shares one client across different workspaces (global) and closes it on closeAll", async () => {
     const registry = new SharedClientRegistry();
     mocks.FakeMcpClient.instances.length = 0;
-    await registry.acquire(PW_SPEC, { workspaceDir: "/ws-a" });
-    await registry.acquire(PW_SPEC, { workspaceDir: "/ws-b" });
-    expect(mocks.FakeMcpClient.instances).toHaveLength(2);
+    const a = await registry.acquire(PW_SPEC, { workspaceDir: "/ws-a" });
+    const b = await registry.acquire(PW_SPEC, { workspaceDir: "/ws-b" });
+    expect(a).toBe(b);
+    expect(mocks.FakeMcpClient.instances).toHaveLength(1);
     await registry.closeAll();
     expect(mocks.FakeMcpClient.instances.every((c) => c.closed === 1)).toBe(true);
   });
 });
 
 describe("sharedClientKey", () => {
-  it("is stable per spec+workspace and varies by workspace and env", () => {
-    expect(sharedClientKey(PW_SPEC, "/ws")).toBe(sharedClientKey(PW_SPEC, "/ws"));
-    expect(sharedClientKey(PW_SPEC, "/ws")).not.toBe(sharedClientKey(PW_SPEC, "/other"));
+  it("is stable per spec and varies by env, but ignores the workspace", () => {
+    expect(sharedClientKey(PW_SPEC)).toBe(sharedClientKey(PW_SPEC));
     const withEnv: McpServerSpec = { ...PW_SPEC, env: { PLAYWRIGHT_MCP_EXTENSION_TOKEN: "x" } };
-    expect(sharedClientKey(withEnv, "/ws")).not.toBe(sharedClientKey(PW_SPEC, "/ws"));
+    expect(sharedClientKey(withEnv)).not.toBe(sharedClientKey(PW_SPEC));
+    // A different spec (e.g. one project's own args) still maps to its own client.
+    const otherArgs: McpServerSpec = { ...PW_SPEC, args: [...PW_SPEC.args, "--headless"] };
+    expect(sharedClientKey(otherArgs)).not.toBe(sharedClientKey(PW_SPEC));
   });
 });
 
@@ -168,7 +171,10 @@ describe("MCP runtime — Playwright browser shared across tabs", () => {
     mocks.FakeMcpClient.instances.length = 0;
   });
 
-  function buildRuntime(registry: SharedClientRegistry): {
+  function buildRuntime(
+    registry: SharedClientRegistry,
+    workspaceDir = "/ws",
+  ): {
     tools: ToolRegistry;
     runtime: ReturnType<typeof createMcpRuntime>;
   } {
@@ -177,7 +183,7 @@ describe("MCP runtime — Playwright browser shared across tabs", () => {
       getTools: () => tools,
       getMcpPrefix: () => undefined,
       getRequestedCount: () => 1,
-      getWorkspaceDir: () => "/ws",
+      getWorkspaceDir: () => workspaceDir,
       progressSink: { current: null },
       browserRegistry: registry,
     });
@@ -202,6 +208,20 @@ describe("MCP runtime — Playwright browser shared across tabs", () => {
         .sort();
     expect(names(tabA.tools)).toEqual(["playwright_find", "playwright_navigate"]);
     expect(names(tabB.tools)).toEqual(["playwright_find", "playwright_navigate"]);
+  });
+
+  it("shares one client across tabs on different workspaces (global by design)", async () => {
+    mocks.readConfigMock.mockReturnValue(pwCfg());
+    const registry = new SharedClientRegistry();
+    const tabA = buildRuntime(registry, "/ws-a");
+    const tabB = buildRuntime(registry, "/ws-b");
+
+    await tabA.runtime.reloadFromConfig();
+    await tabB.runtime.reloadFromConfig();
+
+    // Two distinct workspaces, one server process.
+    expect(mocks.FakeMcpClient.instances).toHaveLength(1);
+    expect(mocks.FakeMcpClient.instances[0]!.initialized).toBe(1);
   });
 
   it("leaves the shared browser running when one tab closes and stops it with the last", async () => {

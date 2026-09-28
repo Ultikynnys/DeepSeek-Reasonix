@@ -270,29 +270,33 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       // touches the browser, and surface the maintenance duty to the agent
       // via the bridge's first-call notice + description pointers.
       const playwrightTooling = isPlaywrightSpec(spec) ? ensurePlaywrightTooling() : undefined;
-      // Playwright's browser is process-global: one live MCP client is one
-      // browser. Bridge every tab through a daemon-scoped shared client so a
-      // new session attaches to the existing browser instead of spawning one.
+      // Gmail rotates its bearer token, so it needs a live per-request resolver;
+      // every other spec carries its headers statically inside the spec.
+      const dynamicHeaders = isGmailMailSpec(spec)
+        ? {
+            headersResolver: async () => ({
+              authorization: `Bearer ${await resolveGmailToken()}`,
+            }),
+          }
+        : {};
+      // Every MCP server is daemon-global: one live client per configured spec,
+      // shared by all tabs/workspaces (browser servers included), so a new tab
+      // attaches to the running process instead of spawning a duplicate.
       let host: McpClientHost;
       let bridgeReady: Promise<void> = ready;
-      if (isPlaywrightSpec(spec) && ctx.browserRegistry) {
-        const entry = await ctx.browserRegistry.acquire(spec, { workspaceDir, signal });
+      if (ctx.browserRegistry) {
+        const entry = await ctx.browserRegistry.acquire(spec, {
+          workspaceDir,
+          signal,
+          ...dynamicHeaders,
+        });
         sharedKey = entry.key;
         mcp = entry.client;
         host = entry.host;
         resolveReady();
         bridgeReady = Promise.resolve();
       } else {
-        const transport = buildTransportFromSpec(spec, {
-          cwd: workspaceDir,
-          ...(isGmailMailSpec(spec)
-            ? {
-                headersResolver: async () => ({
-                  authorization: `Bearer ${await resolveGmailToken()}`,
-                }),
-              }
-            : {}),
-        });
+        const transport = buildTransportFromSpec(spec, { cwd: workspaceDir, ...dynamicHeaders });
         mcp = new McpClient({ transport, workspaceDir });
         await mcp.initialize({ signal });
         host = { client: mcp };

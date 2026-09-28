@@ -1,5 +1,5 @@
-/** Daemon-scoped singleton MCP clients for browser-bearing servers: one live
- *  client is one browser, so every tab sharing a spec attaches to the same one. */
+/** Daemon-scoped singleton MCP clients: one live client per configured server
+ *  spec, shared across every tab/workspace — an MCP server is global, not per-tab. */
 
 import { McpClient } from "./client.js";
 import type { McpClientHost } from "./registry.js";
@@ -15,8 +15,12 @@ export interface SharedClientEntry {
 }
 
 export interface SharedClientAcquireOptions {
+  /** stdio child cwd. Only the first acquirer's value is used: a shared client
+   *  is workspace-independent, so cwd is fixed when the process is spawned. */
   workspaceDir?: string;
   signal?: AbortSignal;
+  /** Dynamic per-request Streamable-HTTP headers (e.g. a rotating mail token). */
+  headersResolver?: () => Promise<Record<string, string>>;
 }
 
 function stableRecord(rec?: Record<string, string>): Array<[string, string]> | null {
@@ -32,10 +36,11 @@ function specIdentity(spec: McpServerSpec): string {
   return JSON.stringify([spec.transport, spec.url]);
 }
 
-/** Same workspace + connection args + env/headers resolve to one shared browser. */
-export function sharedClientKey(spec: McpServerSpec, workspaceDir?: string): string {
+/** Connection args + env/headers resolve to one shared client, GLOBALLY — the
+ *  workspace is deliberately excluded so every tab reuses the same server.
+ *  Servers that genuinely differ per project carry that in their args/env. */
+export function sharedClientKey(spec: McpServerSpec): string {
   return JSON.stringify([
-    workspaceDir ?? "",
     specIdentity(spec),
     stableRecord(getMcpServerEnv(spec)),
     stableRecord(getMcpServerHeaders(spec)),
@@ -50,7 +55,7 @@ export class SharedClientRegistry {
     spec: McpServerSpec,
     opts: SharedClientAcquireOptions = {},
   ): Promise<SharedClientEntry> {
-    const key = sharedClientKey(spec, opts.workspaceDir);
+    const key = sharedClientKey(spec);
     const live = this.entries.get(key);
     if (live) {
       live.refCount += 1;
@@ -97,8 +102,12 @@ export class SharedClientRegistry {
     spec: McpServerSpec,
     opts: SharedClientAcquireOptions,
   ): Promise<SharedClientEntry> {
-    const transport = buildTransportFromSpec(spec, { cwd: opts.workspaceDir });
-    const client = new McpClient({ transport, workspaceDir: opts.workspaceDir });
+    const transport = buildTransportFromSpec(spec, {
+      cwd: opts.workspaceDir,
+      ...(opts.headersResolver ? { headersResolver: opts.headersResolver } : {}),
+    });
+    // Global client — not bound to any single workspace, so it advertises no roots.
+    const client = new McpClient({ transport });
     try {
       await client.initialize({ signal: opts.signal });
     } catch (err) {
