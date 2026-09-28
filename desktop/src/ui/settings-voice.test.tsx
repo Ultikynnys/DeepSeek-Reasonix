@@ -4,9 +4,15 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../App";
 import { MailProvider } from "../protocol";
+import { AudioRecorder } from "../voice/audio-recorder";
 import { markVoiceModelDownloaded, setActiveVoiceModelId } from "../voice/models";
 import { speechTranscriber } from "../voice/transcriber";
-import { AudioInputDeviceSettings, SettingsModal, VoiceModelSettings } from "./settings";
+import {
+  AudioInputDeviceSettings,
+  AudioInputDeviceTest,
+  SettingsModal,
+  VoiceModelSettings,
+} from "./settings";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
@@ -252,14 +258,22 @@ describe("VoiceModelSettings", () => {
 });
 
 describe("AudioInputDeviceSettings", () => {
+  const grantConsent = async () => {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /allow microphone recording/i }));
+    });
+  };
+
   beforeEach(() => {
     localStorage.clear();
+    Object.defineProperty(navigator, "permissions", { value: undefined, configurable: true });
     Object.defineProperty(navigator, "mediaDevices", {
       value: {
         enumerateDevices: vi.fn().mockResolvedValue([
           { kind: "audioinput", deviceId: "mic-1", label: "Built-in Microphone" },
           { kind: "audioinput", deviceId: "mic-2", label: "USB Headset" },
         ]),
+        getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] }),
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
@@ -272,28 +286,35 @@ describe("AudioInputDeviceSettings", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the device picker with the system default and enumerated devices", async () => {
+  it("gates the device list behind an explicit consent button", () => {
     render(<AudioInputDeviceSettings />);
 
     expect(screen.getByText("Audio input device")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /allow microphone recording/i })).toBeTruthy();
+    // No enumeration, no picker, and no audio test until consent is granted.
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByText("Test microphone")).toBeNull();
+  });
+
+  it("reveals the real device list and audio test after granting access", async () => {
+    render(<AudioInputDeviceSettings />);
+    await grantConsent();
 
     const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
-    // Device enumeration is lazy — it only runs once the user opens the picker.
-    fireEvent.focus(select);
     await waitFor(() => {
       const options = Array.from(select.options).map((o) => o.textContent);
       expect(options).toContain("Built-in Microphone");
       expect(options).toContain("USB Headset");
+      expect(options).toContain("System default");
     });
-    const options = Array.from(select.options).map((o) => o.textContent);
-    expect(options).toContain("System default");
+    expect(screen.getByText("Test microphone")).toBeTruthy();
   });
 
   it("selects a device and persists the choice", async () => {
     render(<AudioInputDeviceSettings />);
+    await grantConsent();
 
     const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
-    fireEvent.focus(select);
     await waitFor(() => {
       expect(Array.from(select.options).map((o) => o.textContent)).toContain("USB Headset");
     });
@@ -303,15 +324,78 @@ describe("AudioInputDeviceSettings", () => {
     expect(select.value).toBe("mic-2");
   });
 
-  it("restores the previously selected device", async () => {
+  it("shows the list immediately when permission was already granted", async () => {
+    Object.defineProperty(navigator, "permissions", {
+      value: { query: vi.fn().mockResolvedValue({ state: "granted" }) },
+      configurable: true,
+    });
     localStorage.setItem("reasonix.voiceInputDevice", "mic-1");
     render(<AudioInputDeviceSettings />);
 
     const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
-    fireEvent.focus(select);
     await waitFor(() => {
       expect(Array.from(select.options).map((o) => o.textContent)).toContain("Built-in Microphone");
     });
     expect(select.value).toBe("mic-1");
+    expect(screen.queryByRole("button", { name: /allow microphone recording/i })).toBeNull();
+  });
+
+  it("surfaces a denial and keeps the picker gated when access is refused", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi
+          .fn()
+          .mockRejectedValue(Object.assign(new Error("blocked"), { name: "NotAllowedError" })),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+      configurable: true,
+    });
+    render(<AudioInputDeviceSettings />);
+    await grantConsent();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/not allowed/i);
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+});
+
+describe("AudioInputDeviceTest", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("records on start and stops on demand", async () => {
+    const start = vi.spyOn(AudioRecorder.prototype, "start").mockResolvedValue(undefined);
+    const stop = vi
+      .spyOn(AudioRecorder.prototype, "stop")
+      .mockResolvedValue({ audioData: new Float32Array(160), durationSeconds: 0.01 });
+
+    render(<AudioInputDeviceTest deviceId="" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /test microphone/i }));
+    });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status").textContent).toMatch(/recording/i);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^stop$/i }));
+    });
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a recorder startup failure", async () => {
+    vi.spyOn(AudioRecorder.prototype, "start").mockRejectedValue(new Error("no microphone"));
+
+    render(<AudioInputDeviceTest deviceId="" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /test microphone/i }));
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("no microphone");
   });
 });

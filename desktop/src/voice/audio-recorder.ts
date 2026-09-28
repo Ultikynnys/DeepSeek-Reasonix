@@ -4,7 +4,7 @@
  */
 
 export interface AudioRecordingResult {
-  audioData: Float32Array;
+  audioData: Float32Array<ArrayBuffer>;
   durationSeconds: number;
 }
 
@@ -33,10 +33,10 @@ function errorDetails(err: unknown): string {
  * Resamples a Float32Array PCM audio buffer from sourceSampleRate to targetSampleRate (default 16000).
  */
 export function resampleAudio(
-  audioData: Float32Array,
+  audioData: Float32Array<ArrayBuffer>,
   sourceSampleRate: number,
   targetSampleRate = 16000,
-): Float32Array {
+): Float32Array<ArrayBuffer> {
   if (sourceSampleRate === targetSampleRate || audioData.length === 0) {
     return audioData;
   }

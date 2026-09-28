@@ -4417,8 +4417,8 @@ html[data-platform="macos"] .startup-loading-overlay {
   color: var(--fg);
 }
 .voice-btn.recording {
-  background: var(--danger);
-  border-color: var(--danger);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
   animation: pulse-voice 1.5s infinite;
 }
@@ -4467,15 +4467,15 @@ html[data-platform="macos"] .startup-loading-overlay {
 @keyframes pulse-voice {
   0% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 50%, transparent);
   }
   50% {
     transform: scale(1.05);
-    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0);
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 0%, transparent);
   }
   100% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent);
   }
 }
 @keyframes spin-voice {
@@ -9339,6 +9339,58 @@ html[data-platform="macos"] .splash {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.voice-consent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 360px;
+}
+
+.voice-device-test {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 360px;
+}
+
+.voice-device-test-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.voice-device-test-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.voice-device-test-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.voice-test-meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+
+.voice-test-meter-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: var(--muted);
+  transition: width 0.08s linear;
+}
+
+.voice-test-meter-fill.active {
+  background: var(--accent);
 }
 
 .voice-error-banner {

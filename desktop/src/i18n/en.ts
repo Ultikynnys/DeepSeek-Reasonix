@@ -177,6 +177,16 @@ export const en = {
     voiceInputDeviceHint:
       "Choose the microphone used for voice input. The system default is used until you pick one.",
     voiceInputDeviceDefault: "System default",
+    voiceInputDeviceAllow: "Allow microphone recording",
+    voiceInputDeviceAllowHint:
+      "Voice input stays off until you grant microphone access. Granting it reveals your microphones and unlocks the audio test below.",
+    voiceInputDeviceTest: "Test microphone",
+    voiceInputDeviceTestAgain: "Play again",
+    voiceInputDeviceTestHint:
+      "Records a few seconds from the selected microphone and plays it back so you can confirm it captures audio.",
+    voiceInputDeviceTestRecording: "Recording — speak into the microphone…",
+    voiceInputDeviceTestPlaying: "Playing back…",
+    voiceInputDeviceTestStop: "Stop",
     voiceActive: "Active",
     voiceSelect: "Select",
     voiceDownload: "Download",

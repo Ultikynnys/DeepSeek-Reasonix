@@ -28,10 +28,13 @@ import {
   enforceQuickSendShorthand,
 } from "../protocol";
 import { FONT_FAMILY, FONT_SCALE, type FontFamily, type FontScale } from "../theme";
+import { AudioRecorder } from "../voice/audio-recorder";
 import {
   type AudioInputDevice,
   getSelectedAudioInputDeviceId,
+  hasMicrophonePermission,
   listAudioInputDevices,
+  requestMicrophoneAccess,
   setSelectedAudioInputDeviceId,
 } from "../voice/device";
 import {
@@ -682,12 +685,23 @@ function PageGeneral({
   );
 }
 
-/** Audio input device picker for voice input. Persists the choice in localStorage. */
+const AUDIO_TEST_DURATION_MS = 4000;
+
+/**
+ * Audio input device picker for voice input. Persists the choice in localStorage.
+ *
+ * Microphone access is gated behind an explicit consent button: browsers only
+ * reveal real device labels once permission is granted, and we never touch media
+ * hardware (enumeration surfaces connected cameras to the OS media stack in
+ * WebView2) until the user opts in. After consent the real device list and a live
+ * record/playback test are shown.
+ */
 export function AudioInputDeviceSettings() {
   const [devices, setDevices] = useState<AudioInputDevice[]>([]);
   const [selected, setSelected] = useState<string>(() => getSelectedAudioInputDeviceId());
   const [error, setError] = useState<string | null>(null);
-  const loadedRef = useRef(false);
+  const [phase, setPhase] = useState<"consent" | "ready">("consent");
+  const [granting, setGranting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -699,42 +713,50 @@ export function AudioInputDeviceSettings() {
     }
   }, []);
 
-  const loadDevices = useCallback(async () => {
-    loadedRef.current = true;
-    await refresh();
-  }, [refresh]);
-
-  // Never enumerate on mount. Enumerating all media devices in WebView2
-  // surfaces video/webcam devices to the OS media stack, which Windows privacy
-  // tools (e.g. Kaspersky Webcam Protection) flag as the WebView process
-  // "attempting to access the webcam" — even though we only ever use audio.
-  // The first enumeration is therefore tied to an explicit user gesture.
+  // Promote to "ready" on mount only when permission was already granted. The
+  // Permissions API touches no media hardware, so this is safe before a gesture;
+  // the enumeration itself is deferred to the ready-phase effect below.
   useEffect(() => {
-    // Re-enumerate only when devices are plugged/unplugged AND the picker has
-    // already been loaded once (i.e. the user opened it). Registering the
-    // listener itself touches no hardware.
+    let cancelled = false;
+    void (async () => {
+      if (await hasMicrophonePermission()) {
+        if (!cancelled) setPhase("ready");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Enumerate only once permission is granted (never on mount before consent,
+  // which in WebView2 surfaces video/webcam devices to the OS media stack and is
+  // flagged by Windows privacy tools). Re-enumerate on hotplug while ready.
+  useEffect(() => {
+    if (phase !== "ready") return;
+    void refresh();
     if (typeof navigator !== "undefined" && navigator?.mediaDevices?.addEventListener) {
-      const onChange = () => {
-        if (loadedRef.current) {
-          void refresh();
-        }
-      };
+      const onChange = () => void refresh();
       navigator.mediaDevices.addEventListener("devicechange", onChange);
       return () => navigator.mediaDevices.removeEventListener("devicechange", onChange);
     }
-  }, [refresh]);
+  }, [phase, refresh]);
+
+  const handleAllow = async () => {
+    setGranting(true);
+    setError(null);
+    try {
+      await requestMicrophoneAccess();
+      setPhase("ready");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGranting(false);
+    }
+  };
 
   const handleChange = (deviceId: string) => {
     setSelected(deviceId);
     setSelectedAudioInputDeviceId(deviceId);
-  };
-
-  // Enumerate lazily on the first time the user opens the picker, so we never
-  // touch media hardware until the user deliberately chooses a microphone.
-  const handleFocus = () => {
-    if (!loadedRef.current) {
-      void loadDevices();
-    }
   };
 
   return (
@@ -748,20 +770,208 @@ export function AudioInputDeviceSettings() {
         </div>
       )}
 
-      <select
-        className="voice-device-select"
-        value={selected}
-        onChange={(e) => handleChange(e.target.value)}
-        onFocus={handleFocus}
-        aria-label={t("settings.voiceInputDevice")}
-      >
-        <option value="">{t("settings.voiceInputDeviceDefault")}</option>
-        {devices.map((d) => (
-          <option key={d.deviceId} value={d.deviceId}>
-            {d.label}
-          </option>
-        ))}
-      </select>
+      {phase === "consent" ? (
+        <div className="voice-consent">
+          <button type="button" className="btn" onClick={handleAllow} disabled={granting}>
+            <I.mic size={13} />
+            <span>{t("settings.voiceInputDeviceAllow")}</span>
+          </button>
+          <div className="voice-section-hint">{t("settings.voiceInputDeviceAllowHint")}</div>
+        </div>
+      ) : (
+        <>
+          <select
+            className="voice-device-select"
+            value={selected}
+            onChange={(e) => handleChange(e.target.value)}
+            aria-label={t("settings.voiceInputDevice")}
+          >
+            <option value="">{t("settings.voiceInputDeviceDefault")}</option>
+            {devices.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+          <AudioInputDeviceTest deviceId={selected} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Records a few seconds from the chosen microphone and plays it back, with a
+ * live input-level meter, so the user can confirm the device actually captures
+ * audio before relying on it for voice input.
+ */
+export function AudioInputDeviceTest({ deviceId }: { deviceId: string }) {
+  const [state, setState] = useState<"idle" | "recording" | "playing">("idle");
+  const [level, setLevel] = useState(0);
+  const [hasRecording, setHasRecording] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const recorderRef = useRef<AudioRecorder | null>(null);
+  const audioRef = useRef<Float32Array | null>(null);
+  const playbackRef = useRef<{ ctx: AudioContext; source: AudioBufferSourceNode } | null>(null);
+  const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopPlayback = useCallback(() => {
+    const playback = playbackRef.current;
+    playbackRef.current = null;
+    if (!playback) return;
+    try {
+      playback.source.stop();
+    } catch {
+      // Already ended.
+    }
+    void playback.ctx.close().catch(() => {});
+  }, []);
+
+  const clearStopTimer = useCallback(() => {
+    if (stopTimerRef.current !== null) {
+      clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
+  }, []);
+
+  const playBack = useCallback(
+    (audioData: Float32Array) => {
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass || audioData.length === 0) {
+        setState("idle");
+        return;
+      }
+      stopPlayback();
+      const ctx = new AudioContextClass();
+      const buffer = ctx.createBuffer(1, audioData.length, 16000);
+      buffer.getChannelData(0).set(audioData);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.onended = () => {
+        if (playbackRef.current?.source === source) {
+          playbackRef.current = null;
+          void ctx.close().catch(() => {});
+          setState("idle");
+        }
+      };
+      playbackRef.current = { ctx, source };
+      setState("playing");
+      source.start();
+    },
+    [stopPlayback],
+  );
+
+  const stopRecording = useCallback(async () => {
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+    clearStopTimer();
+    recorderRef.current = null;
+    setLevel(0);
+    try {
+      const { audioData } = await recorder.stop();
+      audioRef.current = audioData;
+      setHasRecording(audioData.length > 0);
+      playBack(audioData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setState("idle");
+    }
+  }, [clearStopTimer, playBack]);
+
+  const startTest = useCallback(async () => {
+    setError(null);
+    stopPlayback();
+    const recorder = new AudioRecorder({
+      deviceId,
+      onVolumeChange: setLevel,
+      onError: (err) => setError(err.message),
+    });
+    recorderRef.current = recorder;
+    try {
+      await recorder.start();
+      setState("recording");
+      stopTimerRef.current = setTimeout(() => void stopRecording(), AUDIO_TEST_DURATION_MS);
+    } catch (err) {
+      recorder.cancel();
+      recorderRef.current = null;
+      setError(err instanceof Error ? err.message : String(err));
+      setState("idle");
+    }
+  }, [deviceId, stopPlayback, stopRecording]);
+
+  const replay = () => {
+    const audioData = audioRef.current;
+    if (audioData) playBack(audioData);
+  };
+
+  const stopPlaybackToIdle = () => {
+    stopPlayback();
+    setState("idle");
+  };
+
+  // Tear down any in-flight recording/playback when the test unmounts.
+  useEffect(() => {
+    return () => {
+      clearStopTimer();
+      recorderRef.current?.cancel();
+      recorderRef.current = null;
+      stopPlayback();
+    };
+  }, [clearStopTimer, stopPlayback]);
+
+  const recording = state === "recording";
+  const playing = state === "playing";
+
+  return (
+    <div className="voice-device-test">
+      <div className="voice-device-test-hint">{t("settings.voiceInputDeviceTestHint")}</div>
+      <div className="voice-device-test-controls">
+        {recording ? (
+          <button type="button" className="btn" onClick={() => void stopRecording()}>
+            <I.stop size={12} />
+            <span>{t("settings.voiceInputDeviceTestStop")}</span>
+          </button>
+        ) : (
+          <button type="button" className="btn" onClick={() => void startTest()}>
+            <I.mic size={12} />
+            <span>{t("settings.voiceInputDeviceTest")}</span>
+          </button>
+        )}
+        {!recording && hasRecording && (
+          <button
+            type="button"
+            className="btn btn-subtle"
+            onClick={playing ? stopPlaybackToIdle : replay}
+          >
+            {playing
+              ? t("settings.voiceInputDeviceTestStop")
+              : t("settings.voiceInputDeviceTestAgain")}
+          </button>
+        )}
+        {(recording || playing) && (
+          <span className="voice-device-test-status" role="status" aria-live="polite">
+            {recording
+              ? t("settings.voiceInputDeviceTestRecording")
+              : t("settings.voiceInputDeviceTestPlaying")}
+          </span>
+        )}
+      </div>
+
+      <div className="voice-test-meter" aria-hidden="true">
+        <div
+          className={`voice-test-meter-fill ${recording ? "active" : ""}`}
+          style={{ width: `${Math.round(level * 100)}%` }}
+        />
+      </div>
+
+      {error && (
+        <div className="voice-error-banner" role="alert">
+          <span>{error}</span>
+        </div>
+      )}
     </div>
   );
 }
