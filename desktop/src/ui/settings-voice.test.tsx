@@ -340,6 +340,43 @@ describe("AudioInputDeviceSettings", () => {
     expect(screen.queryByRole("button", { name: /allow microphone recording/i })).toBeNull();
   });
 
+  it("re-matches the selection by label when the device id rotates", async () => {
+    // First visit: pick the USB headset while the browser hands out one set of ids.
+    render(<AudioInputDeviceSettings />);
+    await grantConsent();
+    let select = (await screen.findByRole("combobox")) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(Array.from(select.options).map((o) => o.textContent)).toContain("USB Headset");
+    });
+    fireEvent.change(select, { target: { value: "mic-2" } });
+    expect(localStorage.getItem("reasonix.voiceInputDevice")).toBe("mic-2");
+    cleanup();
+
+    // Second visit: the same devices come back under fresh ids (WebView2 re-derives
+    // them from the current media-permission state).
+    Object.defineProperty(navigator, "permissions", {
+      value: { query: vi.fn().mockResolvedValue({ state: "granted" }) },
+      configurable: true,
+    });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: {
+        enumerateDevices: vi.fn().mockResolvedValue([
+          { kind: "audioinput", deviceId: "rotated-1", label: "Built-in Microphone" },
+          { kind: "audioinput", deviceId: "rotated-2", label: "USB Headset" },
+        ]),
+        getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] }),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+      configurable: true,
+    });
+    render(<AudioInputDeviceSettings />);
+    select = (await screen.findByRole("combobox")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("rotated-2"));
+    // The healed id is persisted so the composer records from the right device.
+    expect(localStorage.getItem("reasonix.voiceInputDevice")).toBe("rotated-2");
+  });
+
   it("surfaces a denial and keeps the picker gated when access is refused", async () => {
     Object.defineProperty(navigator, "mediaDevices", {
       value: {

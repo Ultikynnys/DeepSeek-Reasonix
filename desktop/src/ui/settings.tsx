@@ -35,6 +35,7 @@ import {
   hasMicrophonePermission,
   listAudioInputDevices,
   requestMicrophoneAccess,
+  resolveSelectedDeviceId,
   setSelectedAudioInputDeviceId,
 } from "../voice/device";
 import {
@@ -741,6 +742,16 @@ export function AudioInputDeviceSettings() {
     }
   }, [phase, refresh]);
 
+  // Reconcile the stored selection once the live list arrives: device ids can
+  // change across settings reopen in WebView2, so re-match by label and
+  // re-persist the resolved id, or fall back to default when the device is gone.
+  useEffect(() => {
+    if (phase !== "ready" || devices.length === 0) return;
+    const resolved = resolveSelectedDeviceId(devices);
+    setSelected(resolved);
+    setSelectedAudioInputDeviceId(resolved, devices.find((d) => d.deviceId === resolved)?.label);
+  }, [devices, phase]);
+
   const handleAllow = async () => {
     setGranting(true);
     setError(null);
@@ -756,7 +767,7 @@ export function AudioInputDeviceSettings() {
 
   const handleChange = (deviceId: string) => {
     setSelected(deviceId);
-    setSelectedAudioInputDeviceId(deviceId);
+    setSelectedAudioInputDeviceId(deviceId, devices.find((d) => d.deviceId === deviceId)?.label);
   };
 
   return (

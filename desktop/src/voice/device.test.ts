@@ -3,9 +3,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getSelectedAudioInputDeviceId,
+  getSelectedAudioInputDeviceLabel,
   hasMicrophonePermission,
   listAudioInputDevices,
   requestMicrophoneAccess,
+  resolveSelectedDeviceId,
   setSelectedAudioInputDeviceId,
 } from "../voice/device";
 
@@ -33,6 +35,39 @@ describe("voice/device", () => {
     setSelectedAudioInputDeviceId("");
     expect(getSelectedAudioInputDeviceId()).toBe("");
     expect(localStorage.getItem("reasonix.voiceInputDevice")).toBeNull();
+  });
+
+  it("persists the device label alongside the id and clears both on reset", () => {
+    setSelectedAudioInputDeviceId("mic-123", "USB Headset");
+    expect(getSelectedAudioInputDeviceLabel()).toBe("USB Headset");
+    setSelectedAudioInputDeviceId("");
+    expect(getSelectedAudioInputDeviceLabel()).toBe("");
+  });
+
+  describe("resolveSelectedDeviceId", () => {
+    const live = [
+      { deviceId: "id-x", label: "Built-in Microphone" },
+      { deviceId: "id-y", label: "USB Headset" },
+    ];
+
+    it("keeps the stored id when it is still enumerated", () => {
+      setSelectedAudioInputDeviceId("id-x", "Built-in Microphone");
+      expect(resolveSelectedDeviceId(live)).toBe("id-x");
+    });
+
+    it("re-matches by label when the browser rotated the device id", () => {
+      setSelectedAudioInputDeviceId("stale-id", "USB Headset");
+      expect(resolveSelectedDeviceId(live)).toBe("id-y");
+    });
+
+    it("returns the system default when neither the id nor the label matches", () => {
+      setSelectedAudioInputDeviceId("stale-id", "Gone Headset");
+      expect(resolveSelectedDeviceId(live)).toBe("");
+    });
+
+    it("returns the system default when nothing was stored", () => {
+      expect(resolveSelectedDeviceId(live)).toBe("");
+    });
   });
 
   it("returns an empty list when enumerateDevices is unavailable", async () => {

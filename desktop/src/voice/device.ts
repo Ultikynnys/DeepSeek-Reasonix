@@ -12,6 +12,7 @@ export interface AudioInputDevice {
 }
 
 const STORAGE_KEY_DEVICE = "reasonix.voiceInputDevice";
+const STORAGE_KEY_DEVICE_LABEL = "reasonix.voiceInputDeviceLabel";
 
 /** The stored audio input device id, or "" when the OS/browser default is used. */
 export function getSelectedAudioInputDeviceId(): string {
@@ -19,14 +20,43 @@ export function getSelectedAudioInputDeviceId(): string {
   return localStorage.getItem(STORAGE_KEY_DEVICE) ?? "";
 }
 
-/** Persist the chosen device id. Pass "" to fall back to the default device. */
-export function setSelectedAudioInputDeviceId(deviceId: string): void {
+/** The stored label of the selected device, or "". Persisted alongside the id so
+ *  the choice can be re-matched when the browser re-derives device ids. */
+export function getSelectedAudioInputDeviceLabel(): string {
+  if (typeof localStorage === "undefined") return "";
+  return localStorage.getItem(STORAGE_KEY_DEVICE_LABEL) ?? "";
+}
+
+/** Persist the chosen device (id + label). Pass "" to fall back to the default. */
+export function setSelectedAudioInputDeviceId(deviceId: string, label = ""): void {
   if (typeof localStorage === "undefined") return;
   if (deviceId) {
     localStorage.setItem(STORAGE_KEY_DEVICE, deviceId);
+    if (label) localStorage.setItem(STORAGE_KEY_DEVICE_LABEL, label);
+    else localStorage.removeItem(STORAGE_KEY_DEVICE_LABEL);
   } else {
     localStorage.removeItem(STORAGE_KEY_DEVICE);
+    localStorage.removeItem(STORAGE_KEY_DEVICE_LABEL);
   }
+}
+
+/** Resolve the stored selection against the live device list.
+ *
+ *  Device ids are not stable across sessions or settings reopen in some webviews
+ *  (WebView2 re-derives them from the current media-permission state), so the
+ *  stored id can stop matching any enumerated device — which silently flips the
+ *  picker back to "system default". Keep the id when it is still present,
+ *  otherwise re-match the same physical device by its stored label. Returns ""
+ *  (system default) when neither matches, e.g. the device was unplugged. */
+export function resolveSelectedDeviceId(devices: AudioInputDevice[]): string {
+  const storedId = getSelectedAudioInputDeviceId();
+  if (storedId && devices.some((d) => d.deviceId === storedId)) return storedId;
+  const storedLabel = getSelectedAudioInputDeviceLabel();
+  if (storedLabel) {
+    const match = devices.find((d) => d.label === storedLabel);
+    if (match) return match.deviceId;
+  }
+  return "";
 }
 
 /**
