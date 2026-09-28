@@ -306,8 +306,9 @@ export const AssistantMsg = memo(function AssistantMsg({
             // A `run_background` call returns as soon as its startup wait
             // elapses — long before the process ends. Resolve the card from the
             // job's LIVE status so a still-downloading curl never reads "done".
+            // Applies to a persistent `run_command` too (same `[job N …]` header).
             const job =
-              s.name === "run_background" && s.result !== undefined
+              s.result !== undefined
                 ? findBackgroundJob(jobs, tabId, parseBackgroundJobId(s.result))
                 : undefined;
             const state: "await" | "running" | "done" | "failed" =
@@ -336,6 +337,7 @@ export const AssistantMsg = memo(function AssistantMsg({
                 liveOutput={jobRunning ? job?.outputTail : s.liveOutput}
                 state={state}
                 background={jobRunning}
+                persistent={job?.persistent}
                 durationMs={jobRunning ? undefined : s.durationMs}
                 onApprove={pendingConfirm ? () => onApproveConfirm(pendingConfirm.id) : undefined}
                 onReject={pendingConfirm ? () => onRejectConfirm(pendingConfirm.id) : undefined}

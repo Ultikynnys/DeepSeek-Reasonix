@@ -3783,7 +3783,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     getEditMode: () => loadEditMode(),
     hooks: tab.hooks,
     hookCwd: tab.rootDir,
-    onPreCompaction: () => toolset.jobs.cancelAll(),
+    onPreCompaction: () => toolset.jobs.cancelAll({ keepPersistent: true }),
   });
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };
@@ -5001,7 +5001,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     abortTurn(tab, opts);
     cancelPendingGates(tab);
     void tab.toolset?.jobs
-      .shutdown(1500)
+      // Session-scoped teardown: Stop / New chat kill ephemeral jobs but spare
+      // workspace-scoped persistent shells (those end on workspace/app close).
+      .shutdown(1500, { keepPersistent: true })
       .catch((err) => {
         emitDiagnosticError("conversation.jobs.shutdown.failed", err, {
           tabId: tab.id,
@@ -5102,6 +5104,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           startedAt: j.startedAt,
           outputTail: tailLines(j.output, 8),
           spawnError: j.spawnError,
+          persistent: j.persistent,
         });
       }
     }

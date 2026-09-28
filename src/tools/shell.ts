@@ -20,7 +20,7 @@ import {
   applyOutputFilter,
   commandSupportsOutputFiltering,
 } from "./shell/output-filter.js";
-import { isCommandAllowed, tokenizeCommand } from "./shell/parse.js";
+import { detectShellOperator, isCommandAllowed, tokenizeCommand } from "./shell/parse.js";
 
 export {
   BUILTIN_ALLOWLIST,
@@ -141,7 +141,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "run_command",
     description:
-      'Run a shell command in the project root; returns combined stdout+stderr. Allowlisted read-only / test / lint / typecheck commands run immediately; mutating / network / install commands gate on user confirmation.\n\nDO NOT use run_command for file operations — use write_file, edit_file, multi_edit, copy_file, move_file, or delete_file instead. Shell utilities (echo, cp, sed, cat, tee, perl, python -c, etc.) bypass validation, lack rollback, and will trigger user confirmation gates that waste turns.\n\nNo real shell — argv parsed natively for cross-platform parity:\n• Supported: chains `|`/`||`/`&&`/`;` (each segment allowlist-checked) and file redirects `>`/`>>`/`<`/`2>`/`2>>`/`2>&1`/`&>`.\n• Rejected: background `&`, heredoc `<<`, `$(…)`, subshells, `$VAR` expansion, glob expansion. Quote operator chars as literals (`grep "a|b" file`).\n• `cd` is rejected in chains. By default, run generated scripts from the directory where the script was written; do not assume an input/data directory is the cwd. Pass input/data paths as arguments unless the command truly depends on that cwd. For package tools, use `npm --prefix <dir>`, `git -C <dir>`, `cargo -C <dir>`.\n• Filter at source — `grep -c` / `wc -l` / narrower paths over unbounded dumps.',
+      'Run a shell command in the project root; returns combined stdout+stderr. Allowlisted read-only / test / lint / typecheck commands run immediately; mutating / network / install commands gate on user confirmation.\n\nDO NOT use run_command for file operations — use write_file, edit_file, multi_edit, copy_file, move_file, or delete_file instead. Shell utilities (echo, cp, sed, cat, tee, perl, python -c, etc.) bypass validation, lack rollback, and will trigger user confirmation gates that waste turns.\n\nNo real shell — argv parsed natively for cross-platform parity:\n• Supported: chains `|`/`||`/`&&`/`;` (each segment allowlist-checked) and file redirects `>`/`>>`/`<`/`2>`/`2>>`/`2>&1`/`&>`.\n• Rejected: background `&`, heredoc `<<`, `$(…)`, subshells, `$VAR` expansion, glob expansion. Quote operator chars as literals (`grep "a|b" file`).\n• `cd` is rejected in chains. By default, run generated scripts from the directory where the script was written; do not assume an input/data directory is the cwd. Pass input/data paths as arguments unless the command truly depends on that cwd. For package tools, use `npm --prefix <dir>`, `git -C <dir>`, `cargo -C <dir>`.\n• Filter at source — `grep -c` / `wc -l` / narrower paths over unbounded dumps.\n\n`persistent: true` runs the command as a workspace-scoped job that survives Stop / New chat / turn-abort and appears in the Jobs panel; it stays alive until you close it with `stop_job` or the workspace/app closes. Persistent commands run as a single process (no chain operators / elevation). Default false.',
     // Plan-mode gate: allow allowlisted commands through (git status,
     // cargo check, ls, grep …) so the model can actually investigate
     // during planning. Anything that would otherwise trigger a
@@ -171,14 +171,26 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
           description:
             "Windows only. Run the command elevated via the OS UAC consent prompt (a real UAC dialog appears; the user must approve). Use only when the task genuinely needs admin rights (e.g. reading NVMe SMART / storage reliability counters). Requires elevation to be enabled in Settings → Tools. Elevated runs are always re-confirmed and can never be allowlisted.",
         },
+        persistent: {
+          type: "boolean",
+          description:
+            "Spawn as a workspace-scoped job that survives Stop / New chat / turn-abort — it appears in the Jobs panel and stays alive until you close it (`stop_job`) or the workspace/app closes. Runs as a single process (no chain operators / elevation). Default false.",
+        },
       },
       required: ["command"],
     },
-    fn: async (args: { command: string; timeoutSec?: number; elevate?: boolean }, ctx) => {
+    fn: async (
+      args: { command: string; timeoutSec?: number; elevate?: boolean; persistent?: boolean },
+      ctx,
+    ) => {
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_command: empty command");
       const effectiveTimeout = Math.max(1, Math.min(600, args.timeoutSec ?? timeoutSec));
       const elevate = args.elevate === true;
+      const persistent = args.persistent === true;
+      if (persistent && elevate) {
+        throw new Error("run_command: persistent and elevate are mutually exclusive.");
+      }
       const platform = opts.platform ?? process.platform;
       if (elevate && platform !== "win32") {
         throw new Error("run_command: elevate=true is only supported on Windows (UAC).");
@@ -205,6 +217,15 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         },
         onAlwaysAllow: (prefix) => addGlobalShellAllowed(prefix),
       });
+
+      if (persistent) {
+        return runPersistentCommand(cmd, {
+          jobs,
+          rootDir,
+          timeoutSec: effectiveTimeout,
+          onJobsChanged: opts.onJobsChanged,
+        });
+      }
 
       if (elevate) {
         // Validate parseability before elevating (unclosed quotes etc.), then run
@@ -280,7 +301,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "run_background",
     description:
-      "Spawn a long-running process and detach. Waits up to `waitSec` for startup or a readiness signal ('Local:', 'listening on', 'compiled successfully'), then returns job id + startup preview. Companion tools: `job_output`, `wait_for_job`, `stop_job`, `list_jobs`. Single process only — no chains/redirects. Use `cwd` (not `cd X && cmd`) for subdirs.\n\nUSE THIS — not run_command — for: dev servers / watchers (`npm dev`, `uvicorn`, `tsc --watch`, anything with dev/serve/watch in the name) AND one-shot long jobs (large `curl`, `pip install`, `cargo build`, `docker build`). Pair with `wait_for_job` for server-side blocking — one tool call regardless of duration.",
+      "Spawn a long-running process and detach. Waits up to `waitSec` for startup or a readiness signal ('Local:', 'listening on', 'compiled successfully'), then returns job id + startup preview. Companion tools: `job_output`, `wait_for_job`, `stop_job`, `list_jobs`. Single process only — no chains/redirects. Use `cwd` (not `cd X && cmd`) for subdirs.\n\nUSE THIS — not run_command — for: dev servers / watchers (`npm dev`, `uvicorn`, `tsc --watch`, anything with dev/serve/watch in the name) AND one-shot long jobs (large `curl`, `pip install`, `cargo build`, `docker build`). Pair with `wait_for_job` for server-side blocking — one tool call regardless of duration. Pass `persistent: true` to keep the job alive across Stop / New chat (workspace-scoped); it shows in the Jobs panel until you close it with `stop_job` or the workspace/app closes.",
     parameters: {
       type: "object",
       properties: {
@@ -299,12 +320,21 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
           description:
             "Max seconds to wait for startup before returning. 0..30, default 3. A ready-signal match short-circuits this.",
         },
+        persistent: {
+          type: "boolean",
+          description:
+            "Keep the job alive across Stop / New chat / turn-abort (workspace-scoped) — it shows in the Jobs panel until you close it with `stop_job` or the workspace/app closes. Default false.",
+        },
       },
       required: ["command"],
     },
-    fn: async (args: { command: string; cwd?: string; waitSec?: number }, ctx) => {
+    fn: async (
+      args: { command: string; cwd?: string; waitSec?: number; persistent?: boolean },
+      ctx,
+    ) => {
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_background: empty command");
+      const persistent = args.persistent === true;
       const cwd = resolveCwdInsideRoot(rootDir, args.cwd);
       await confirmShellCommand(cmd, {
         gate: ctx?.confirmationGate ?? pauseGate,
@@ -319,11 +349,15 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       const result = await jobs.start(cmd, {
         cwd,
         waitSec: args.waitSec,
-        signal: ctx?.signal,
-        cancelSignal: ctx?.cancelSignal,
+        // Persistent jobs are workspace-scoped — never wire the turn/cancel
+        // signal, so Esc / Ctrl+K / Stop leave them running. They end via
+        // stop_job, a full workspace/app shutdown, or the Jobs Close button.
+        ...(persistent
+          ? { persistent: true }
+          : { signal: ctx?.signal, cancelSignal: ctx?.cancelSignal }),
       });
       opts.onJobsChanged?.();
-      if (ctx?.cancelSignal?.aborted) {
+      if (!persistent && ctx?.cancelSignal?.aborted) {
         return JSON.stringify({
           cancelledByUser: true,
           error: `Background job startup force-stopped by the user. ${USER_CANCEL_NOTE}`,
@@ -332,7 +366,10 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
           exitCode: result.exitCode,
         });
       }
-      return formatJobStart(result);
+      const formatted = formatJobStart(result);
+      return persistent
+        ? `${formatted}\n[persistent — survives Stop / New chat; close with stop_job ${result.jobId}]`
+        : formatted;
     },
   });
 
@@ -428,7 +465,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "stop_job",
     description:
-      "Stop a background job started with `run_background`. SIGTERM first; SIGKILL after a short grace period if it doesn't exit cleanly. Returns the final output + exit code. Safe to call on an already-exited job.",
+      "Stop a background job started with `run_background`. SIGTERM first; SIGKILL after a short grace period if it doesn't exit cleanly. Returns the final output + exit code. Safe to call on an already-exited job. Also closes a persistent shell (from `run_background`/`run_command` with `persistent: true`) — the only agent-side way to end one.",
     parameters: {
       type: "object",
       properties: {
@@ -496,6 +533,34 @@ function resolveCwdInsideRoot(rootDir: string, raw: string | undefined): string 
   return resolved;
 }
 
+/** `run_command` with `persistent: true`: spawn through the JobRegistry (single
+ *  process — same rules as run_background) and wait up to a bounded foreground
+ *  window; if the process outlives it, leave it running as a persistent job. */
+async function runPersistentCommand(
+  cmd: string,
+  opts: { jobs: JobRegistry; rootDir: string; timeoutSec: number; onJobsChanged?: () => void },
+): Promise<string> {
+  const op = detectShellOperator(cmd);
+  if (op !== null) {
+    throw new Error(
+      `run_command: persistent=true runs a single process — shell operator "${op}" is not supported. Run a script file or drop persistent.`,
+    );
+  }
+  const result = await opts.jobs.start(cmd, {
+    cwd: opts.rootDir,
+    waitSec: Math.min(30, opts.timeoutSec),
+    persistent: true,
+  });
+  opts.onJobsChanged?.();
+  if (!result.stillRunning) {
+    const header =
+      result.exitCode !== null ? `$ ${cmd}\n[exit ${result.exitCode}]` : `$ ${cmd}\n[exited]`;
+    return result.preview ? `${header}\n${result.preview}` : header;
+  }
+  const header = `[job ${result.jobId} started · pid ${result.pid ?? "?"} · PERSISTENT — survives Stop / New chat; close with stop_job ${result.jobId}]`;
+  return result.preview ? `${header}\n${result.preview}` : header;
+}
+
 function formatJobStart(r: import("./jobs.js").JobStartResult): string {
   const header = r.stillRunning
     ? `[job ${r.jobId} started · pid ${r.pid ?? "?"} · ${r.readyMatched ? "READY signal matched" : "running (no ready signal yet)"}]`
@@ -513,7 +578,8 @@ function formatJobRead(jobId: number, r: import("./jobs.js").JobReadResult): str
       : r.spawnError
         ? `failed (${r.spawnError})`
         : "stopped";
-  const header = `[job ${jobId} · ${status} · byteLength=${r.byteLength}]\n$ ${r.command}`;
+  const tag = r.persistent ? " · persistent" : "";
+  const header = `[job ${jobId} · ${status}${tag} · byteLength=${r.byteLength}]\n$ ${r.command}`;
   return r.output ? `${header}\n${r.output}` : header;
 }
 
@@ -522,7 +588,8 @@ function formatJobStop(r: import("./jobs.js").JobRecord): string {
     ? "still running (SIGKILL may be pending)"
     : `exit ${r.exitCode ?? "?"}`;
   const tail = tailLines(r.output, 40);
-  const header = `[job ${r.id} stopped · ${running}]\n$ ${r.command}`;
+  const tag = r.persistent ? " · persistent" : "";
+  const header = `[job ${r.id} stopped · ${running}${tag}]\n$ ${r.command}`;
   return tail ? `${header}\n${tail}` : header;
 }
 
@@ -535,7 +602,8 @@ function formatJobRow(r: import("./jobs.js").JobRecord): string {
       : r.spawnError
         ? "failed"
         : "stopped";
-  return `  ${String(r.id).padStart(3)}  ${state.padEnd(24)}  ${age}s ago   $ ${r.command}`;
+  const tag = r.persistent ? "persistent · " : "";
+  return `  ${String(r.id).padStart(3)}  ${(tag + state).padEnd(24)}  ${age}s ago   $ ${r.command}`;
 }
 
 function tailLines(s: string, n: number): string {

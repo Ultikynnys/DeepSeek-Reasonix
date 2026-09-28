@@ -336,6 +336,7 @@ export function ShellCard({
   liveOutput,
   state,
   background,
+  persistent,
   durationMs,
   onApprove,
   onReject,
@@ -351,6 +352,9 @@ export function ShellCard({
   /** True when this is a detached `run_background` job still alive — the card
    *  labels it "Running in background" so it never reads as a finished command. */
   background?: boolean;
+  /** True when the detached job is workspace-scoped (persistent) — the label
+   *  notes it survives Stop / New chat. */
+  persistent?: boolean;
   durationMs?: number;
   onApprove?: () => void;
   onReject?: () => void;
@@ -359,7 +363,11 @@ export function ShellCard({
 }) {
   useLang();
   const tone: Tone = state === "failed" ? "danger" : state === "done" ? "success" : "warning";
-  const runningLabel = background ? t("cards.shellBackgroundRunning") : t("cards.shellRunning");
+  const runningLabel = background
+    ? persistent
+      ? t("cards.shellPersistentRunning")
+      : t("cards.shellBackgroundRunning")
+    : t("cards.shellRunning");
   return (
     <Card
       tone={tone}

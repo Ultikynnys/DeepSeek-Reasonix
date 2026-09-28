@@ -667,6 +667,9 @@ export interface JobInfo {
   startedAt: number;
   outputTail: string;
   spawnError?: string;
+  /** True for workspace-scoped jobs (the shell `persistent` flag) — they survive
+   *  Stop / New chat and end only on workspace/app close or an explicit close. */
+  persistent?: boolean;
 }
 
 export interface JobsEvent {

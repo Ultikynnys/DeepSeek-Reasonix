@@ -1137,6 +1137,9 @@ export const EN: TranslationSchema = {
       empty:
         "◈ jobs · 0 running · 0 total\n  (run_background spawns one — dev servers, watchers, long-running scripts)",
       header: "◈ jobs · {running} running · {total} total",
+      persistent: "persistent",
+      persistentHint:
+        "persistent shells survive Stop / New chat; close from the Jobs panel or /kill",
       footer: "  /logs <id> tail · /kill <id> SIGTERM → SIGKILL",
       killUsage: "usage: /kill <id>   (see /jobs for ids)",
       killNotFound: "job {id}: not found",

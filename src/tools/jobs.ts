@@ -35,6 +35,10 @@ export interface JobStartOptions {
   cancelSignal?: AbortSignal;
   /** Total per-job output buffer cap (bytes). Default 64 KB. */
   maxBufferBytes?: number;
+  /** Workspace-scoped instead of conversation-scoped: survives Stop / New-chat /
+   *  turn-abort / compaction. Killed only by explicit stop, a full workspace/app
+   *  shutdown, or the Jobs-panel Close button. Default false (session-scoped). */
+  persistent?: boolean;
 }
 
 export interface JobStartResult {
@@ -65,6 +69,8 @@ export interface JobRecord {
   running: boolean;
   /** Error from spawn() itself (ENOENT, etc.) once surfaced. */
   spawnError?: string;
+  /** True when spawned with `persistent: true` — session-scoped teardown spares it. */
+  persistent: boolean;
 }
 
 /** Returns an AbortSignal that fires when either of the two input signals
@@ -130,6 +136,7 @@ export class JobRegistry {
         totalBytesWritten: 0,
         running: false,
         spawnError: (err as Error).message,
+        persistent: opts.persistent === true,
         child: null,
         readyPromise: Promise.resolve(),
         signalReady: () => {},
@@ -166,6 +173,7 @@ export class JobRegistry {
       output: "",
       totalBytesWritten: 0,
       running: true,
+      persistent: opts.persistent === true,
       child,
       readyPromise,
       signalReady: readyResolve,
@@ -288,6 +296,7 @@ export class JobRegistry {
       command: job.command,
       pid: job.pid,
       spawnError: job.spawnError,
+      persistent: job.persistent,
     };
   }
 
@@ -398,11 +407,12 @@ export class JobRegistry {
   }
 
   /** Force-cancel every running job immediately (SIGKILL tree kill, no grace).
-   *  Wired to the loop's pre-compaction hook so no background shell (dev
-   *  server, long build) outlives a fold that summarizes its history away. */
-  cancelAll(): void {
+   *  Wired to the loop's pre-compaction hook so no background shell outlives a
+   *  fold; `keepPersistent` spares workspace-scoped persistent jobs. */
+  cancelAll(opts: { keepPersistent?: boolean } = {}): void {
     for (const job of this.jobs.values()) {
       if (!job.running || !job.child) continue;
+      if (opts.keepPersistent && job.persistent) continue;
       if (job.pid !== null) killProcessTree(job.pid, "SIGKILL");
       else {
         try {
@@ -426,9 +436,11 @@ export class JobRegistry {
     return [...this.jobs.values()].map(snapshot);
   }
 
-  async shutdown(deadlineMs = 5000): Promise<void> {
+  async shutdown(deadlineMs = 5000, opts: { keepPersistent?: boolean } = {}): Promise<void> {
     const start = Date.now();
-    const runningJobs = [...this.jobs.values()].filter((j) => j.running && j.child);
+    const runningJobs = [...this.jobs.values()].filter(
+      (j) => j.running && j.child && !(opts.keepPersistent && j.persistent),
+    );
     if (runningJobs.length === 0) return;
 
     for (const job of runningJobs) {
@@ -521,6 +533,7 @@ export interface JobReadResult {
   command: string;
   pid: number | null;
   spawnError?: string;
+  persistent: boolean;
 }
 
 export interface JobWaitResult {
@@ -540,6 +553,7 @@ function snapshot(job: InternalJob): JobRecord {
     totalBytesWritten: job.totalBytesWritten,
     running: job.running,
     spawnError: job.spawnError,
+    persistent: job.persistent,
   };
 }
 

@@ -784,6 +784,77 @@ describe("registerShellTools — dispatch integration", () => {
     }
   }, 15000);
 
+  it("run_background with persistent marks the job and notes it in the header", async () => {
+    const registry = new ToolRegistry();
+    const jobs = new (await import("../src/tools/jobs.js")).JobRegistry();
+    registerShellTools(registry, { rootDir: tmp, jobs, extraAllowed: ["node"] });
+    try {
+      const startOut = await registry.dispatch(
+        "run_background",
+        JSON.stringify({
+          command: `node -e "setInterval(()=>console.log('tick'), 50)"`,
+          waitSec: 0.1,
+          persistent: true,
+        }),
+      );
+      const jobId = Number(startOut.match(/job (\d+) started/)![1]);
+      expect(startOut).toContain("persistent");
+      expect(jobs.list().find((j) => j.id === jobId)?.persistent).toBe(true);
+
+      const listOut = await registry.dispatch("list_jobs", "{}");
+      expect(listOut.toLowerCase()).toContain("persistent");
+
+      const stopOut = await registry.dispatch("stop_job", JSON.stringify({ jobId }));
+      expect(stopOut).toContain(`job ${jobId}`);
+    } finally {
+      await jobs.shutdown(2000);
+    }
+  }, 15000);
+
+  it("run_command with persistent routes through the job registry", async () => {
+    const registry = new ToolRegistry();
+    const jobs = new (await import("../src/tools/jobs.js")).JobRegistry();
+    registerShellTools(registry, { rootDir: tmp, jobs, extraAllowed: ["node"] });
+    try {
+      // Long-lived command outlives the foreground window → returns a job handle.
+      const out = await registry.dispatch(
+        "run_command",
+        JSON.stringify({
+          command: `node -e "setTimeout(()=>{}, 10000)"`,
+          persistent: true,
+          timeoutSec: 1,
+        }),
+      );
+      const jobId = Number(out.match(/job (\d+) started/)![1]);
+      expect(out).toContain("PERSISTENT");
+      expect(jobs.list().find((j) => j.id === jobId)?.persistent).toBe(true);
+      await jobs.stop(jobId, { graceMs: 200 });
+    } finally {
+      await jobs.shutdown(2000);
+    }
+  }, 15000);
+
+  it("run_command with persistent rejects a shell operator (single-process rule)", async () => {
+    const registry = new ToolRegistry();
+    const jobs = new (await import("../src/tools/jobs.js")).JobRegistry();
+    registerShellTools(registry, {
+      rootDir: tmp,
+      jobs,
+      extraAllowed: ["node", "echo", "grep"],
+    });
+    try {
+      // dispatch captures a thrown tool error as `{ error }` rather than rejecting.
+      const out = await registry.dispatch(
+        "run_command",
+        JSON.stringify({ command: "echo hi | grep h", persistent: true, timeoutSec: 1 }),
+        { confirmationGate: new AutoGate({ type: "run_once" }) },
+      );
+      expect(out).toMatch(/shell operator/);
+    } finally {
+      await jobs.shutdown(2000);
+    }
+  });
+
   it("job_output / stop_job report not-found for unknown jobId", async () => {
     const registry = new ToolRegistry();
     registerShellTools(registry, { rootDir: tmp });
