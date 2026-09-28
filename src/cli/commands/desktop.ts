@@ -294,6 +294,7 @@ import {
   resolveSessionModelPrefs,
   sessionExists,
   sessionPath,
+  stampSessionWorkspace,
   timestampSuffix,
 } from "../../memory/session.js";
 import { createModelClient } from "../../model-client.js";
@@ -2267,7 +2268,8 @@ function loadSessionIntoTab(
 ): void {
   emitTabDiagnostic(tab, "session.load.started", { name });
   const records = loadSessionMessages(name);
-  const backfilledWorkspace = patchSessionWorkspaceIfMissing(name, tab.rootDir);
+  const backfilledWorkspace =
+    patchSessionWorkspaceIfMissing(name, tab.rootDir) || stampSessionWorkspace(name, tab.rootDir);
   const meta = loadSessionMeta(name);
   // Only set switching flag when there's a live turn to abort —
   // otherwise the flag stays true and suppresses the first turn's events (#1217).
@@ -4628,6 +4630,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
       }
     }
+    // A running channel's session must carry its workspace: the workspace's
+    // session list is filtered by meta.workspace, so a session that materialized
+    // without one (e.g. a virtual deletion-replacement on its first send) stays
+    // invisible in the sidebar while its tab badge counts it as an active agent
+    // — a "ghost" session. Stamp it, then re-emit so it appears immediately.
+    if (tab.currentSession && stampSessionWorkspace(tab.currentSession, tab.rootDir)) {
+      emitSessionsForWorkspace(tab.rootDir);
+    }
     if (tab.hooks.some((h) => h.event === "UserPromptSubmit")) {
       const report = await runHooks({
         hooks: tab.hooks,
@@ -5552,6 +5562,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       });
       if (tab.currentSession) {
         patchSessionWorkspaceIfMissing(tab.currentSession, tab.rootDir);
+        // Repair a session that materialized without a workspace stamp (see
+        // stampSessionWorkspace) so a restored ghost lists on the emitSessions
+        // below. No-op for an already-stamped or purely virtual session.
+        stampSessionWorkspace(tab.currentSession, tab.rootDir);
       }
       const sessionsInitialized = emitSessions(tab);
       emitMemory(tab);

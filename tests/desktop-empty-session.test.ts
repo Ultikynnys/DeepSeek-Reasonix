@@ -12,6 +12,7 @@ import {
   sessionDir,
   sessionExists,
   sessionPath,
+  stampSessionWorkspace,
 } from "../src/memory/session.js";
 
 describe("desktop empty session persistence and workspace visibility", () => {
@@ -74,6 +75,35 @@ describe("desktop empty session persistence and workspace visibility", () => {
 
     const after = await listSessionsForWorkspaceAsync("/test/workspace").value;
     expect(after.some((s) => s.name === name)).toBe(true);
+  });
+
+  it("a desktop session that materialized without workspace meta is hidden until stamped", async () => {
+    const name = "desktop-20260905150000-7-abcdef12";
+    ensureSessionDir(name);
+    // Materialized without a workspace stamp (e.g. a virtual deletion-
+    // replacement whose first send wrote messages before any meta.workspace).
+    patchSessionMeta(name, { summary: "New Chat" });
+
+    const before = await listSessionsForWorkspaceAsync("/test/workspace").value;
+    expect(before.some((s) => s.name === name)).toBe(false);
+
+    expect(stampSessionWorkspace(name, "/test/workspace")).toBe(true);
+    const after = await listSessionsForWorkspaceAsync("/test/workspace").value;
+    expect(after.some((s) => s.name === name)).toBe(true);
+  });
+
+  it("stampSessionWorkspace leaves a purely virtual session untouched", () => {
+    const name = "desktop-20260905160000-8-deadbeef";
+    expect(sessionExists(name)).toBe(false);
+    expect(stampSessionWorkspace(name, "/test/workspace")).toBe(false);
+    expect(sessionExists(name)).toBe(false);
+  });
+
+  it("stampSessionWorkspace never re-homes an already-stamped session", () => {
+    const name = "desktop-20260905170000-9";
+    ensureSessionDir(name);
+    patchSessionMeta(name, { workspace: "/test/workspace" });
+    expect(stampSessionWorkspace(name, "/other/workspace")).toBe(false);
   });
 
   it("sessionRecency honors updatedAt on SessionInfo", () => {

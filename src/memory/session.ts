@@ -579,6 +579,16 @@ export function patchSessionWorkspaceIfMissing(name: string, workspace: string):
   return true;
 }
 
+/** Stamp a channel's workspace on an on-disk session so the workspace-filtered
+ *  sidebar list includes it; a purely virtual session is left untouched so
+ *  delete-all can still empty the sidebar. */
+export function stampSessionWorkspace(name: string, workspace: string): boolean {
+  if (!sessionExists(name)) return false;
+  if (typeof loadSessionMeta(name).workspace === "string") return false;
+  patchSessionMeta(name, { workspace });
+  return true;
+}
+
 export function loadSessionMeta(name: string): SessionMeta {
   const p = sessionMetaPath(name);
   const fresh = readJsonFileSilently(p, (v): v is SessionMeta => !!v && typeof v === "object");
