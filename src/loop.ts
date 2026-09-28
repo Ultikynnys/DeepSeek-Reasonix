@@ -188,6 +188,11 @@ export interface CacheFirstLoopOptions {
   disableAutoCompaction?: boolean;
   /** When true, the stream repetition / "stuck re-thinking" guard may abort a degenerating stream. Defaults to false (opt-in). */
   repetitionGuardEnabled?: boolean;
+  /** In-memory floor for the turn counter (runtime rebuilds within one process).
+   *  Combined with the persisted session-meta `lastTurn`, this guarantees turn
+   *  ordinals never regress — a rebuilt loop over a compacted log resumes above
+   *  every turn the desktop already holds cards for. */
+  turnFloor?: number;
 }
 
 export interface ReconfigurableOptions {
@@ -453,6 +458,15 @@ export class CacheFirstLoop {
 
     // Heal-on-load: oversized tool results would 400 the next call before the user types.
     this.sessionName = opts.session ?? null;
+    // Turn floor applies even session-less: a runtime rebuild of a tab that
+    // lost its session must not regress either.
+    let metaTurnFloor = 0;
+    if (this.sessionName) {
+      metaTurnFloor = loadSessionMeta(this.sessionName).lastTurn ?? 0;
+    }
+    if (metaTurnFloor > 0 || (opts.turnFloor ?? 0) > 0) {
+      this._turn = Math.max(this._turn, metaTurnFloor, opts.turnFloor ?? 0);
+    }
     if (this.sessionName) {
       const prior = loadSessionMessages(this.sessionName);
       const shrunk = healLoadedMessagesByTokens(prior, DEFAULT_MAX_RESULT_TOKENS);
@@ -465,7 +479,11 @@ export class CacheFirstLoop {
       const tokensSaved = shrunk.tokensSaved;
       for (const msg of messages) this.log.append(msg);
       this.resumedMessageCount = messages.length;
-      this._turn = resumeTurnBaseline(messages);
+      // Floor on the pre-computed meta/rebuild floors: resumeTurnBaseline
+      // counts user records in the current log, which regresses after
+      // compaction and let a rebuilt runtime reissue ordinals the desktop
+      // already rendered.
+      this._turn = Math.max(this._turn, resumeTurnBaseline(messages));
       // Carry forward cumulative cost / turn count so the TUI's session
       // total continues across resumes; otherwise each restart resets to $0.
       if (messages.length > 0) {
@@ -1034,6 +1052,15 @@ export class CacheFirstLoop {
     this._turnImages = toTurnImages(images);
 
     this._turn++;
+    // Persist before any event for this turn is emitted so a mid-turn crash
+    // or rebuild can't reissue the ordinal. Best-effort.
+    if (this.sessionName) {
+      try {
+        patchSessionMeta(this.sessionName, { lastTurn: this._turn });
+      } catch {
+        // Non-fatal: next successful write supersedes it.
+      }
+    }
     const restoreModelIfNeeded = () => undefined;
 
     this._userTurnCount++;

@@ -202,13 +202,14 @@ export class Eventizer {
     return out;
   }
 
-  emitUserMessage(turn: number, text: string): UserMessageEvent {
+  emitUserMessage(turn: number, text: string, clientId?: string): UserMessageEvent {
     return {
       id: ++this.nextId,
       ts: new Date().toISOString(),
       turn,
       type: EventType.userMessage,
       text,
+      ...(clientId ? { clientId } : {}),
     };
   }
 

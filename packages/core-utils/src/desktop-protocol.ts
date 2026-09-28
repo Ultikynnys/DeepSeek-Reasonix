@@ -129,6 +129,9 @@ export interface KernelWireEventBase {
 export interface KernelUserMessageEvent extends KernelWireEventBase {
   type: "user.message";
   text: string;
+  /** Echo of the sender's optimistic-message id — lets the desktop reconcile
+   *  its bubble with the daemon-assigned turn instead of appending a duplicate. */
+  clientId?: string;
 }
 
 export interface KernelModelTurnStartedEvent extends KernelWireEventBase {
@@ -1157,7 +1160,14 @@ export type UserImageAttachment =
   | { source: "file"; path: string };
 
 export type OutgoingCommand = { tabId?: string } & (
-  | { cmd: "user_input"; text: string; images?: UserImageAttachment[] }
+  | {
+      cmd: "user_input";
+      text: string;
+      images?: UserImageAttachment[];
+      /** Sender's optimistic-message id — echoed back on the `user.message`
+       *  event so the desktop reconciles its bubble with the daemon turn. */
+      clientId?: string;
+    }
   | { cmd: "abort" }
   | { cmd: "cancel_tool" }
   | {

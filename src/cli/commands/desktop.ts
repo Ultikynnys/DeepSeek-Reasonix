@@ -3768,6 +3768,10 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     model: tab.currentModel,
     ctxMaxOverride,
     session: tab.currentSession,
+    // Turn ordinals are session-wide identity: a model switch rebuilds the
+    // runtime over a possibly-compacted log, and without this floor the new
+    // loop's baseline can regress below turns the desktop already rendered.
+    turnFloor: tab.runtime?.loop.currentTurn ?? 0,
     reasoningEffort,
     maxIterPerTurn: loadMaxIterPerTurn(),
     maxOutputTokens: loadMaxOutputTokens(),
@@ -4511,7 +4515,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (options.persist !== false) persistOpenTabs();
   }
 
-  async function runTurn(tab: Tab, text: string, images?: TurnImage[]): Promise<void> {
+  async function runTurn(
+    tab: Tab,
+    text: string,
+    images?: TurnImage[],
+    clientId?: string,
+  ): Promise<void> {
     // A pending tab has no workspace/session/runtime — there is nothing to run.
     if (tab.pending || !tab.rootDir) return;
     if (tab.mcpBridgePromise) {
@@ -4684,6 +4693,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           lastTurn = ev.turn;
           if (!emittedTurnContext) {
             emittedTurnContext = true;
+            // Daemon-authoritative turn echo, before this turn's events so
+            // the reconciled bubble sits above the turn's cards.
+            if (clientId) {
+              emitKernelEvent(
+                rt.eventizer.emitUserMessage(rt.loop.currentTurn, text, clientId),
+                tab.id,
+              );
+            }
             emitCtxBreakdown(tab);
           }
           if (ev.role === "assistant_final") {
@@ -7381,7 +7398,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             return;
           }
         }
-        void runTurn(tab, text, images);
+        void runTurn(tab, text, images, msg.clientId);
       })();
     }
   });

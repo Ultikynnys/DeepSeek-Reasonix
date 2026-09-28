@@ -481,7 +481,7 @@ describe("Desktop App reducer — usage", () => {
     expect(state.turnStatusTool).toBeNull();
   });
 
-  it("recreates assistant card on batch_delta when turn-start is missing after model switch", () => {
+  it("applies batch_delta to the card model.turn.started created (no synthesis)", () => {
     let state = reduce(initialState(), {
       t: "send_user",
       text: "first turn",
@@ -491,30 +491,93 @@ describe("Desktop App reducer — usage", () => {
     state = reduce(state, {
       t: "incoming",
       event: {
-        type: "$turn_complete",
-        outcome: "aborted",
+        type: "model.turn.started",
+        id: 1,
+        ts: "t",
         turn: 1,
+        model: "m",
+        reasoningEffort: "medium",
+        prefixHash: "h",
       },
     });
 
     state = reduce(state, {
-      t: "send_user",
-      text: "Proceed",
-      clientId: "c-2",
-    });
-
-    state = reduce(state, {
       t: "batch_delta",
-      items: [{ turn: 2, channel: "content", text: "executing task" }],
+      items: [{ turn: 1, channel: "content", text: "executing task" }],
     });
 
-    expect(state.messages).toHaveLength(3);
-    expect(state.messages[2]).toMatchObject({
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1]).toMatchObject({
       kind: "assistant",
-      turn: 2,
+      turn: 1,
       pending: true,
       segments: [{ kind: "text", text: "executing task" }],
     });
+  });
+
+  it("reconciles the optimistic user bubble with the daemon turn echo", () => {
+    // Simulate a post-compaction post-model-switch session: the daemon's
+    // monotonic counter sits far above the FE's optimistic guess.
+    let state: Parameters<typeof reduce>[0] = {
+      ...initialState(),
+      messages: [
+        { kind: "user", text: "old", clientId: "c-old", turn: 41 },
+        { kind: "assistant", turn: 41, segments: [], pending: false },
+      ],
+    };
+
+    state = reduce(state, {
+      t: "send_user",
+      text: "continue",
+      clientId: "c-42",
+    });
+    // Optimistic guess.
+    expect(state.messages.at(-1)).toMatchObject({ kind: "user", turn: 42, clientId: "c-42" });
+
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "user.message",
+        id: 7,
+        ts: "t",
+        turn: 4096,
+        text: "continue",
+        clientId: "c-42",
+      },
+    });
+
+    // The bubble is renumbered in place — no duplicate appended.
+    const users = state.messages.filter((m) => m.kind === "user");
+    expect(users).toHaveLength(2);
+    expect(users.at(-1)).toMatchObject({ turn: 4096, clientId: "c-42" });
+  });
+
+  it("always creates an assistant card for a model.turn.started with an unseen turn", () => {
+    // Post-compaction regression guard (the old skip-branch swallowed the
+    // whole turn when the ordinal collided with an ancient card): an unseen
+    // ordinal must always produce a fresh pending card.
+    let state: Parameters<typeof reduce>[0] = {
+      ...initialState(),
+      messages: [
+        { kind: "user", text: "old", clientId: "c-old", turn: 4095 },
+        { kind: "assistant", turn: 4095, segments: [], pending: false },
+      ],
+    };
+
+    state = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "model.turn.started",
+        id: 1,
+        ts: "t",
+        turn: 4096,
+        model: "m",
+        reasoningEffort: "medium",
+        prefixHash: "h",
+      },
+    });
+
+    expect(state.messages.at(-1)).toMatchObject({ kind: "assistant", turn: 4096, pending: true });
   });
 
   it("recovers the turn card from any entry event when turn-start is missing", () => {
@@ -1811,7 +1874,9 @@ describe("Desktop App reducer — $session_loaded resync echo", () => {
 
 describe("runningSessionNames — sidebar dot is running-agents only", () => {
   const WS = "C:\\repo";
-  const tab = (over: Partial<{ id: string; workspaceDir: string; session: string; busy: boolean }>) => ({
+  const tab = (
+    over: Partial<{ id: string; workspaceDir: string; session: string; busy: boolean }>,
+  ) => ({
     id: "t1",
     workspaceDir: WS,
     busy: false,

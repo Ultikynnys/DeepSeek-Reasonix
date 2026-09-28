@@ -830,18 +830,14 @@ export function reduce(state: State, action: Action): State {
         if (bucket) bucket.push(it);
         else byTurn.set(it.turn, [it]);
       }
-      let messages = state.messages;
-      for (const turn of byTurn.keys()) {
-        if (!messages.some((m) => m.kind === "assistant" && m.turn === turn)) {
-          messages = [...messages, { kind: "assistant", turn, segments: [], pending: true }];
-        }
-      }
+      // No missing-card synthesis: turn ordinals are monotonic daemon-side,
+      // so the card already exists (model.turn.started / ensureAssistantTurn).
       const lastItem = collapsed[collapsed.length - 1];
       return {
         ...state,
         turnStatus: lastItem?.channel === "reasoning" ? "reasoning" : "responding",
         turnLastEventMs: Date.now(),
-        messages: messages.map((m) => {
+        messages: state.messages.map((m) => {
           if (m.kind !== "assistant") return m;
           const relevant = byTurn.get(m.turn);
           if (!relevant || relevant.length === 0) return m;
@@ -1534,6 +1530,21 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
 function applyIncomingInner(state: State, ev: IncomingEvent): State {
   switch (ev.type) {
     case "user.message": {
+      // Daemon echo: renumber the optimistic bubble in place instead of
+      // appending a duplicate. Monotonic ordinals guarantee the daemon turn
+      // is unseen.
+      const existingIdx =
+        ev.clientId !== undefined
+          ? state.messages.findIndex((m) => m.kind === "user" && m.clientId === ev.clientId)
+          : -1;
+      if (existingIdx >= 0) {
+        const messages = [...state.messages];
+        const existing = messages[existingIdx];
+        if (existing?.kind === "user" && existing.turn === ev.turn) return state;
+        messages[existingIdx] =
+          existing?.kind === "user" ? { ...existing, turn: ev.turn } : existing;
+        return { ...state, busy: true, messages };
+      }
       return {
         ...state,
         busy: true,
@@ -1542,7 +1553,7 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
           {
             kind: "user",
             text: ev.text,
-            clientId: `remote-${ev.id}`,
+            clientId: ev.clientId ?? `remote-${ev.id}`,
             turn: ev.turn > 0 ? ev.turn : nextMessageTurn(state.messages),
           },
         ],
@@ -2019,6 +2030,8 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
     case "gemini_oauth_begin_result":
       return { ...state, antigravityOAuthWaiting: true };
     case "model.turn.started":
+      // Duplicate-delivery dedupe only: ordinals are monotonic daemon-side,
+      // so this can no longer swallow a post-compaction turn (fixed at source).
       if (state.messages.some((m) => m.kind === "assistant" && m.turn === ev.turn)) {
         return { ...state, model: ev.model, turnLastEventMs: Date.now() };
       }
