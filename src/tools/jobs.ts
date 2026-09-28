@@ -7,6 +7,8 @@ import { detectShellOperator, prepareSpawn, tokenizeCommand } from "./shell.js";
 
 /** Per-job output ring. Capped so a chatty dev server doesn't OOM. */
 const DEFAULT_OUTPUT_CAP_BYTES = 64 * 1024; // 64 KB
+/** Persistent jobs keep far more history — a long-lived server's console stays readable. */
+const PERSISTENT_OUTPUT_CAP_BYTES = 1024 * 1024; // 1 MB
 
 /** First match cuts startup wait short; conservative patterns — a false negative costs a real stall. */
 const READY_SIGNALS: ReadonlyArray<RegExp> = [
@@ -101,7 +103,9 @@ export class JobRegistry {
     const argv = tokenizeCommand(trimmed);
     if (argv.length === 0) throw new Error("run_background: empty command");
     const waitMs = Math.max(0, Math.min(30, opts.waitSec ?? 3)) * 1000;
-    const maxBytes = opts.maxBufferBytes ?? DEFAULT_OUTPUT_CAP_BYTES;
+    const maxBytes =
+      opts.maxBufferBytes ??
+      (opts.persistent ? PERSISTENT_OUTPUT_CAP_BYTES : DEFAULT_OUTPUT_CAP_BYTES);
 
     const { bin, args, spawnOverrides } = prepareSpawn(argv);
     const spawnOpts: SpawnOptions = {

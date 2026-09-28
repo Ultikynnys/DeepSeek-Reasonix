@@ -376,7 +376,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "job_output",
     description:
-      "Read the latest output of a background job started with `run_background`. By default returns the tail of the buffer (last 80 lines). Pass `since` (the `byteLength` from a previous call) to stream only new content incrementally. Tells you whether the job is still running, so you can stop polling when it's done.",
+      "Read the latest output of a background job started with `run_background` (or a persistent `run_command`). By default returns the tail of the buffer (last 80 lines). Pass `since` (the `byteLength` from a previous call) to stream only new content incrementally; use `tailLines` for more or fewer lines. Works on persistent jobs at any point — read a long-running server's console output whenever you need it. Tells you whether the job is still running, so you can stop polling when it's done.",
     readOnly: true,
     parallelSafe: true,
     stormExempt: true,
@@ -484,7 +484,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "list_jobs",
     description:
-      "List every background job started this session — running and exited — with id, command, pid, status. Use when you've lost track of which job_id corresponds to which process, or to see what's still alive.",
+      "List every background job in this workspace — running and exited — with id, command, pid, status; persistent jobs are marked. Use when you've lost track of which job_id corresponds to which process, to see what is still alive, to find a persistent job to close with `stop_job`, or to find the job id for `job_output`.",
     readOnly: true,
     parallelSafe: true,
     stormExempt: true,

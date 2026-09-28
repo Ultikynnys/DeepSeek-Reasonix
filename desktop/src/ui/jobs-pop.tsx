@@ -39,11 +39,6 @@ export function JobsPop({
 
   const running = useMemo(() => jobs.filter((j) => j.running), [jobs]);
   const exited = useMemo(() => jobs.filter((j) => !j.running), [jobs]);
-  // Workspace-scoped persistent shells get their own top group so they stay
-  // visible (and closeable) after a conversation stops.
-  const persistent = useMemo(() => jobs.filter((j) => j.persistent), [jobs]);
-  const restRunning = useMemo(() => running.filter((j) => !j.persistent), [running]);
-  const restExited = useMemo(() => exited.filter((j) => !j.persistent), [exited]);
 
   if (!open) return null;
 
@@ -83,18 +78,12 @@ export function JobsPop({
             <div className="jobs-empty">{t("jobs.empty")}</div>
           ) : (
             <>
-              {persistent.length > 0 ? (
-                <div className="jobs-grp">{t("jobs.persistentGroup")}</div>
-              ) : null}
-              {persistent.map((j) => (
+              {running.length > 0 ? <div className="jobs-grp">{t("jobs.running")}</div> : null}
+              {running.map((j) => (
                 <JobRow key={j.id} job={j} tick={tick} onStop={onStop} />
               ))}
-              {restRunning.length > 0 ? <div className="jobs-grp">{t("jobs.running")}</div> : null}
-              {restRunning.map((j) => (
-                <JobRow key={j.id} job={j} tick={tick} onStop={onStop} />
-              ))}
-              {restExited.length > 0 ? <div className="jobs-grp">{t("jobs.exited")}</div> : null}
-              {restExited.map((j) => (
+              {exited.length > 0 ? <div className="jobs-grp">{t("jobs.exited")}</div> : null}
+              {exited.map((j) => (
                 <JobRow key={j.id} job={j} tick={tick} onStop={onStop} />
               ))}
             </>

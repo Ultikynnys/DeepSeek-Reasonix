@@ -768,7 +768,6 @@ export const en = {
     stop: "Stop",
     stopOne: "Stop this job",
     persistent: "persistent",
-    persistentGroup: "persistent shells",
     close: "Close",
     closeOne: "Close this persistent shell",
     kbToggle: "toggle",
