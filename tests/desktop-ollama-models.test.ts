@@ -11,6 +11,7 @@ import {
   refreshOllamaModels,
   resetOllamaCatalogCacheForTest,
   showPayloadIsVision,
+  showPayloadVisionCapability,
 } from "../src/cli/commands/desktop.js";
 import { deriveNativeOllamaOrigin } from "../src/config.js";
 import {
@@ -217,6 +218,14 @@ describe("showPayloadIsVision", () => {
     );
   });
 
+  it("is true when the capabilities array lists vision", () => {
+    expect(showPayloadIsVision({ capabilities: ["completion", "vision"] })).toBe(true);
+  });
+
+  it("is false when the capabilities array omits vision", () => {
+    expect(showPayloadIsVision({ capabilities: ["completion", "tools"] })).toBe(false);
+  });
+
   it("is false for a text-only model", () => {
     expect(
       showPayloadIsVision({ model_info: { "general.architecture": "llama" }, projector_info: {} }),
@@ -228,6 +237,28 @@ describe("showPayloadIsVision", () => {
     expect(showPayloadIsVision(undefined)).toBe(false);
     expect(showPayloadIsVision("x")).toBe(false);
     expect(showPayloadIsVision({})).toBe(false);
+  });
+});
+
+describe("showPayloadVisionCapability", () => {
+  it("trusts a non-empty capabilities array either way", () => {
+    expect(showPayloadVisionCapability({ capabilities: ["completion", "vision"] })).toBe(true);
+    expect(showPayloadVisionCapability({ capabilities: ["completion"] })).toBe(false);
+  });
+
+  it("is true for a vision projector or a family-scoped vision.* key", () => {
+    expect(showPayloadVisionCapability({ projector_info: { arch: "clip" } })).toBe(true);
+    expect(showPayloadVisionCapability({ model_info: { "gemma4.vision.block_count": 16 } })).toBe(
+      true,
+    );
+  });
+
+  it("is undefined when no authoritative marker is present", () => {
+    expect(
+      showPayloadVisionCapability({ model_info: { "general.architecture": "llama" } }),
+    ).toBeUndefined();
+    expect(showPayloadVisionCapability({})).toBeUndefined();
+    expect(showPayloadVisionCapability(null)).toBeUndefined();
   });
 });
 
@@ -348,6 +379,25 @@ describe("probeOllamaVision / detectOllamaVision", () => {
     await expect(detectOllamaVision("https://ollama.com/v1", "llama3.1", "key")).resolves.toBe(
       false,
     );
+  });
+
+  it("detectOllamaVision reads the modern capabilities array without probing", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ capabilities: ["completion", "vision"] }));
+    await expect(
+      detectOllamaVision("https://ollama.com/v1", "deepseek-v4.1-flash:cloud", "key"),
+    ).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // capabilities trusted, no probe
+  });
+
+  it("detectOllamaVision probes when a 200 /api/show carries no vision marker", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ model_info: { "general.architecture": "deepseek4" } }),
+    );
+    fetchMock.mockResolvedValueOnce(jsonResponse({ choices: [] })); // probe → 2xx
+    await expect(
+      detectOllamaVision("https://ollama.com/v1", "deepseek-v4.1-flash:cloud", "key"),
+    ).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // native payload inconclusive → probe
   });
 });
 

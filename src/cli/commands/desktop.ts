@@ -1348,11 +1348,16 @@ export async function probeOllamaModel(
   return "error";
 }
 
-/** Parse a native `/api/show` payload for a vision encoder: non-empty
- *  `projector_info`, or any `model_info` key under `vision.`. */
-export function showPayloadIsVision(data: unknown): boolean {
-  if (typeof data !== "object" || data === null) return false;
+/** Vision capability from a native `/api/show` payload: a non-empty
+ *  `capabilities` array is authoritative ("vision" present), else a vision
+ *  projector/metadata marker, else undefined so the caller probes the image. */
+export function showPayloadVisionCapability(data: unknown): boolean | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
   const rec = data as Record<string, unknown>;
+  const capabilities = rec.capabilities;
+  if (Array.isArray(capabilities) && capabilities.length > 0) {
+    return capabilities.some((c) => c === "vision");
+  }
   const projector = rec.projector_info;
   if (typeof projector === "object" && projector !== null && Object.keys(projector).length > 0) {
     return true;
@@ -1360,10 +1365,17 @@ export function showPayloadIsVision(data: unknown): boolean {
   const modelInfo = rec.model_info;
   if (typeof modelInfo === "object" && modelInfo !== null) {
     for (const key of Object.keys(modelInfo as Record<string, unknown>)) {
-      if (key.startsWith("vision.")) return true;
+      if (/(^|\.)vision\./.test(key)) return true;
     }
   }
-  return false;
+  return undefined;
+}
+
+/** Boolean form of {@link showPayloadVisionCapability}: true only on a positive
+ *  marker. An inconclusive payload reports false here; callers needing the
+ *  probe fallback use the tri-state function. */
+export function showPayloadIsVision(data: unknown): boolean {
+  return showPayloadVisionCapability(data) === true;
 }
 
 /** A 1×1 transparent PNG data URL — the smallest payload that exercises a
@@ -1407,8 +1419,9 @@ export async function probeOllamaVision(
   }
 }
 
-/** One `/api/show` fetch for vision + context window; undefined when both
- *  /api/show and the image probe fail (vision is determinate when answered). */
+/** `/api/show` fetch for vision + context window. Prefers the native payload's
+ *  vision markers, else falls back to the image probe (inconclusive payload,
+ *  or `/api/show` 404/405 on a cloud gateway). */
 export async function fetchOllamaShowInfo(
   baseUrl: string,
   model: string,
@@ -1432,8 +1445,19 @@ export async function fetchOllamaShowInfo(
       const data = (await show.json().catch(() => undefined)) as unknown;
       const contextTokens = showPayloadContextLength(data);
       const parameters = showPayloadParameters(data);
+      const vision = showPayloadVisionCapability(data);
+      if (vision !== undefined) {
+        return {
+          vision,
+          ...(contextTokens !== undefined ? { contextTokens } : {}),
+          ...(parameters !== undefined ? { parameters } : {}),
+        };
+      }
+      // Inconclusive native payload (cloud gateways omit the vision markers):
+      // keep the window/params, but resolve vision with the image probe.
+      const probed = await probeOllamaVision(baseUrl, model, apiKey, timeoutMs);
       return {
-        vision: showPayloadIsVision(data),
+        ...(probed !== undefined ? { vision: probed } : {}),
         ...(contextTokens !== undefined ? { contextTokens } : {}),
         ...(parameters !== undefined ? { parameters } : {}),
       };
