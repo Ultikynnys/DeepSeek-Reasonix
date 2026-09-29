@@ -18,6 +18,7 @@ export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
  *  is intentionally absent — it was retired; stale configs clamp to the default
  *  model (see tests/config.test.ts "stale configs clamp"). */
 export const OPENAI_MODELS: readonly string[] = [
+  "gpt-6.1-sol",
   "gpt-6-astra",
   "gpt-6-sol",
   "gpt-6-luna",
@@ -172,7 +173,25 @@ export const DEEPSEEK_FLASH_VISION_MODELS: ReadonlySet<string> = new Set([
   "deepseek-flash",
   "deepseek-v4-flash",
   "deepseek-v4-flash-vision-exp",
+  // Ollama's catalog spells the V4.1 Flash build with the full version.
+  "deepseek-v4.1-flash",
 ]);
+
+/** Strips the `ollama/` scheme and any `:tag` quantization suffix —
+ *  `ollama/deepseek-v4.1-flash:cloud` → `deepseek-v4.1-flash`. */
+export function stripOllamaSchemeAndTag(model: string): string {
+  return model.replace(/^ollama\//, "").replace(/:[^/]*$/, "");
+}
+
+/** True when `model` is an `ollama/`-prefixed copy of a natively multimodal
+ *  DeepSeek V4.1 Flash id. The official DeepSeek build of these ids is
+ *  multimodal regardless of hosting, so a local/cloud Ollama tag inherits
+ *  image support even when the daemon's runtime probe was inconclusive or
+ *  mis-cached a text-only verdict. */
+export function isOllamaDeepSeekVisionModel(model: string): boolean {
+  if (!model.startsWith("ollama/")) return false;
+  return DEEPSEEK_FLASH_VISION_MODELS.has(stripOllamaSchemeAndTag(model));
+}
 
 /** Model ids that accept image attachments in user messages — the GPT-5.6
  *  family, DeepSeek's vision line, and every Gemini model (natively
@@ -199,5 +218,6 @@ export function modelAcceptsImages(
   if (opencodeVision ? opencodeVision.has(model) : OPENCODE_VISION_MODELS.has(model)) return true;
   if (isAntigravityModel(model)) return true;
   if (model.startsWith("ollama/") && ollamaVision && ollamaVision.has(model)) return true;
+  if (isOllamaDeepSeekVisionModel(model)) return true;
   return false;
 }

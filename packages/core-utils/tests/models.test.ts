@@ -23,6 +23,17 @@ describe("modelAcceptsImages", () => {
     expect(modelAcceptsImages("gpt-5.6-luna")).toBe(true);
   });
 
+  it("accepts Ollama-hosted DeepSeek V4.1 Flash copies regardless of the runtime probe", () => {
+    expect(modelAcceptsImages("ollama/deepseek-v4.1-flash")).toBe(true);
+    expect(modelAcceptsImages("ollama/deepseek-v4.1-flash:cloud")).toBe(true);
+    expect(modelAcceptsImages("ollama/deepseek-v4.1-flash:q4_K_M")).toBe(true);
+    // Probe-set membership still applies to non-DeepSeek ids.
+    expect(modelAcceptsImages("ollama/llava", new Set(["ollama/llava"]))).toBe(true);
+    // The static override never marks a text-only model vision.
+    expect(modelAcceptsImages("ollama/deepseek-v4-pro")).toBe(false);
+    expect(modelAcceptsImages("ollama/llama3.1:latest")).toBe(false);
+  });
+
   it("accepts DeepSeek, Z.AI, and OpenCode vision models", () => {
     expect(modelAcceptsImages("deepseek-flash")).toBe(true);
     expect(modelAcceptsImages("deepseek-v4-flash")).toBe(true);
@@ -97,12 +108,14 @@ describe("KNOWN_MODELS", () => {
   });
 
   it("offers the OpenAI models including GPT-6 family and the GPT-5.6 family", () => {
+    expect(KNOWN_MODELS).toContain("gpt-6.1-sol");
     expect(KNOWN_MODELS).toContain("gpt-6-astra");
     expect(KNOWN_MODELS).toContain("gpt-6-sol");
     expect(KNOWN_MODELS).toContain("gpt-6-luna");
     expect(KNOWN_MODELS).toContain("gpt-5.6-sol");
     expect(KNOWN_MODELS).toContain("gpt-5.6-terra");
     expect(KNOWN_MODELS).toContain("gpt-5.6-luna");
+    expect(OPENAI_MODELS).toContain("gpt-6.1-sol");
     expect(OPENAI_MODELS).toContain("gpt-6-astra");
     expect(OPENAI_MODELS).toContain("gpt-6-sol");
     expect(OPENAI_MODELS).toContain("gpt-6-luna");

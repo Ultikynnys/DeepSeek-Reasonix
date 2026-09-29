@@ -56,7 +56,7 @@ runtime, so no `npm install` or Node installation is needed.
 | Backend | Models | Auth |
 | --- | --- | --- |
 | DeepSeek (default) | `deepseek-v4-flash`, `deepseek-v4-pro`, `deepseek-v4-flash-vision-exp` (experimental vision line) | `DEEPSEEK_API_KEY` |
-| OpenAI-compatible | GPT-6 family (`gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`), GPT-5.6 family (`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`) | `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` for proxies / Azure-compatible gateways |
+| OpenAI-compatible | GPT-6 family (`gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`), GPT-5.6 family (`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`) | `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` for proxies / Azure-compatible gateways |
 | Ollama | any local model via `ollama/<name>`; cloud Ollama is also supported | local daemon is keyless; cloud needs `OLLAMA_API_KEY` |
 | Z.AI | GLM family, including `glm-5.3-flash` with vision and a 1M-token context window | `ZAI_API_KEY`; optional `ZAI_BASE_URL` |
 

@@ -42,6 +42,8 @@ export const DEEPSEEK_PRICING: Record<string, ModelPricing> = {
   "gpt-6-astra": { inputCacheHit: 1.0, inputCacheMiss: 10, output: 50 },
   "gpt-6-sol": { inputCacheHit: 0.2, inputCacheMiss: 2, output: 10 },
   "gpt-6-luna": { inputCacheHit: 0.01, inputCacheMiss: 0.1, output: 0.5 },
+  // GPT-6.1 Sol — cached reads bill at 5% of input (not the family's 10%).
+  "gpt-6.1-sol": { inputCacheHit: 0.1, inputCacheMiss: 2, output: 10 },
   "gpt-5.6": { inputCacheHit: 0.5, inputCacheMiss: 5, output: 30 },
   "gpt-5.6-sol": { inputCacheHit: 0.5, inputCacheMiss: 5, output: 30 },
   "gpt-5.6-terra": { inputCacheHit: 0.2, inputCacheMiss: 2, output: 12 },
@@ -70,6 +72,7 @@ const DEEPSEEK_PRICED_MODELS = new Set([
   "deepseek-reasoner",
 ]);
 const OPENAI_PRICED_MODELS = new Set([
+  "gpt-6.1-sol",
   "gpt-6-astra",
   "gpt-6-sol",
   "gpt-6-luna",
@@ -142,7 +145,9 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
   "deepseek-v4-pro": 300_000,
   "deepseek-chat": 300_000,
   "deepseek-reasoner": 300_000,
-  // GPT-6 family (1M token window)
+  // GPT-6 family (1M token window); 6.1 Sol advertises 1.05M but is held
+  // to the shared 1M API ceiling like the rest of the line.
+  "gpt-6.1-sol": 1_000_000,
   "gpt-6-astra": 1_000_000,
   "gpt-6-sol": 1_000_000,
   "gpt-6-luna": 1_000_000,
