@@ -1012,26 +1012,33 @@ export class CacheFirstLoop {
     return userText;
   }
 
-  /** Replace the system prompt + conversation log wholesale from the Raw
-   *  context editor. Heals the messages first so a hand edit can't ship an
-   *  invalid tool-call shape; caller must ensure no turn is in flight. */
+  /** Replace the system prompt + log wholesale from the Raw editor. The editor omits
+   *  reasoning, so each assistant turn keeps its prior reasoning by position (gaps
+   *  backfilled for a thinking model); heals first so an edit can't ship a bad shape. */
   replaceConversation(
     system: string,
     messages: ChatMessage[],
   ): { systemChanged: boolean; dropped: number } {
-    const healed = healLoadedMessages(messages, DEFAULT_MAX_RESULT_CHARS).messages.map((m) =>
-      m.role === "assistant" &&
-      typeof m.reasoning_content === "string" &&
-      m.reasoning_content.length > 0
-        ? { ...m, reasoning_manual: true }
-        : m,
-    );
+    const priorReasoning = this.log
+      .toMessages()
+      .filter((m) => m.role === "assistant")
+      .map((m) => (typeof m.reasoning_content === "string" ? m.reasoning_content : undefined));
+    let assistantIndex = 0;
+    const carried = messages.map((m) => {
+      if (m.role !== "assistant") return m;
+      const prior = priorReasoning[assistantIndex++];
+      return prior !== undefined && !Object.hasOwn(m, "reasoning_content")
+        ? { ...m, reasoning_content: prior }
+        : m;
+    });
+    const healed = healLoadedMessages(carried, DEFAULT_MAX_RESULT_CHARS).messages;
+    const stamped = stampMissingReasoningForThinkingMode(healed, this.model).messages;
     const systemChanged = this.prefix.replaceSystem(system);
-    this.log.compactInPlace(healed);
+    this.log.compactInPlace(stamped);
     this.readTracker.reset();
     this._abandonedCalls.clear();
-    this.persistLog(healed);
-    return { systemChanged, dropped: messages.length - healed.length };
+    this.persistLog(stamped);
+    return { systemChanged, dropped: messages.length - stamped.length };
   }
 
   async *step(

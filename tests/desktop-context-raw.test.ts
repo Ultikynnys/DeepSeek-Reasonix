@@ -22,6 +22,7 @@ function makeLoopTab(system: string, messages: ChatMessage[]) {
   const loop = new CacheFirstLoop({
     client: makeFakeClient([], { echoMessages: true }).client,
     prefix: new ImmutablePrefix({ system }),
+    model: "deepseek-chat",
     stream: false,
   });
   for (const m of messages) loop.log.append(m);
@@ -40,14 +41,16 @@ describe("contextRawPayload", () => {
     expect(payload.tokens).toBeGreaterThan(0);
   });
 
-  it("includes assistant thinking in the plaintext", () => {
+  it("omits assistant reasoning (output-only, not overwritable)", () => {
     const payload = contextRawPayload(
       makeTab("SYS", [
         { role: "user", content: "q" },
         { role: "assistant", content: "a", reasoning_content: "the reasoning" },
       ]),
     );
-    expect(payload.text).toContain("===== thinking =====\nthe reasoning");
+    expect(payload.text).not.toContain("===== thinking =====");
+    expect(payload.text).not.toContain("the reasoning");
+    expect(payload.text).toContain("===== assistant =====\na");
   });
 
   it("reports busy while a turn is in flight", () => {

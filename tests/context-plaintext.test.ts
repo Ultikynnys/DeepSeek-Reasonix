@@ -63,17 +63,6 @@ describe("serializeContext", () => {
     });
     expect(text).toContain("===== tool: read_file =====\nfile body");
   });
-
-  it("renders a thinking block before an assistant turn that carries reasoning", () => {
-    const text = serializeContext({
-      system: "s",
-      messages: [{ role: "assistant", content: "answer", reasoning_content: "why" }],
-    });
-    expect(text).toContain("===== thinking =====\nwhy");
-    expect(text.indexOf("===== thinking =====")).toBeLessThan(
-      text.indexOf("===== assistant ====="),
-    );
-  });
 });
 
 describe("parseContext", () => {
@@ -88,21 +77,6 @@ describe("parseContext", () => {
     const parsed = parseContext(serializeContext(original));
     expect(parsed.system).toBe("You are Reasonix.");
     expect(parsed.messages).toEqual(original.messages);
-  });
-
-  it("round-trips reasoning through a thinking block", () => {
-    const original = {
-      system: "s",
-      messages: [
-        { role: "user", content: "q" },
-        { role: "assistant", content: "a", reasoning_content: "because" },
-      ] as ChatMessage[],
-    };
-    expect(parseContext(serializeContext(original)).messages).toEqual(original.messages);
-  });
-
-  it("drops a thinking block that has no following assistant", () => {
-    expect(parseContext("===== thinking =====\nsolo").messages).toEqual([]);
   });
 
   it("drops the informational tool_calls note", () => {

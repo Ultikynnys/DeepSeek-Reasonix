@@ -2052,14 +2052,12 @@ function stampWireMessageIds(messages: readonly ChatMessage[]): ChatMessage[] {
   });
 }
 
-/** `synthetic` marks machine-generated user records; `reasoning_manual` marks reasoning the
- *  user set by hand in the Raw editor. Neither must reach the wire (a strict provider may
- *  reject unknown fields), so both markers are dropped here. */
+/** `synthetic` marks machine-generated user records (mid-turn steer, premature-stop nudge)
+ *  for log accounting and timeline filtering. It must never reach the wire: non-DeepSeek
+ *  payloads pass messages through verbatim and a strict provider may reject unknown fields. */
 export function stripSyntheticMarkers(messages: readonly ChatMessage[]): ChatMessage[] {
-  if (!messages.some((m) => m.synthetic === true || m.reasoning_manual === true)) {
-    return [...messages];
-  }
-  return messages.map(({ synthetic: _synthetic, reasoning_manual: _manual, ...rest }) => rest);
+  if (!messages.some((m) => m.synthetic === true)) return [...messages];
+  return messages.map(({ synthetic: _synthetic, ...rest }) => rest);
 }
 
 // Mid-stream chat-completions error frame → {message, code}. `type:

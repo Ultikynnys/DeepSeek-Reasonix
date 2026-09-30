@@ -67,9 +67,6 @@ export interface ChatMessage {
   /** Machine-generated user record (mid-turn steer, premature-stop nudge). Persisted for
    *  model replay, but never counted as a turn ordinal and never rendered as a user bubble. */
   synthetic?: boolean;
-  /** Reasoning the user set by hand in the Raw context editor. Persisted so the send/load
-   *  reasoning prune leaves it in place; stripped before the wire like `synthetic`. */
-  reasoning_manual?: boolean;
 }
 
 export interface RawUsage {

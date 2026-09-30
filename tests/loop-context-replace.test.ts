@@ -9,6 +9,7 @@ function makeLoop(system = "orig system"): CacheFirstLoop {
   return new CacheFirstLoop({
     client,
     prefix: new ImmutablePrefix({ system }),
+    model: "deepseek-chat",
     stream: false,
   });
 }

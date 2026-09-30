@@ -10,8 +10,7 @@ function hasToolCalls(msg: ChatMessage): boolean {
   return Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
 }
 
-/** Keep tool-call reasoning for DeepSeek validation; drop stale plain-turn reasoning.
- *  Reasoning the user set by hand (`reasoning_manual`) is always kept. */
+/** Keep tool-call reasoning for DeepSeek validation; drop stale plain-turn reasoning. */
 export function stripDroppableReasoningContent(messages: ChatMessage[]): ReasoningPruneResult {
   let lastUser = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -33,7 +32,6 @@ export function stripDroppableReasoningContent(messages: ChatMessage[]): Reasoni
       msg.role !== "assistant" ||
       i > lastUser ||
       hasToolCalls(msg) ||
-      msg.reasoning_manual === true ||
       !Object.hasOwn(msg, "reasoning_content")
     ) {
       continue;
