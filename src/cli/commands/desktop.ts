@@ -28,6 +28,7 @@ import type {
   ChoiceRequiredEvent,
   CodexQuotaEvent,
   ConfirmRequiredEvent,
+  ContextRawEvent,
   CtxBreakdownEvent,
   DesktopDiagnosticEvent,
   DirectKernelWireEvent,
@@ -192,6 +193,7 @@ import {
   setMcpToolDisabled,
   writeConfig,
 } from "../../config.js";
+import { parseContext, serializeContext } from "../../context-plaintext.js";
 import { ConcurrencyGate } from "../../core/concurrency-gate.js";
 import { redactEventValue } from "../../core/event-redaction.js";
 import { Eventizer } from "../../core/eventize.js";
@@ -461,6 +463,7 @@ type EmittableEvent =
   | PlaywrightBrowserInstallEvent
   | SkillsEvent
   | CtxBreakdownEvent
+  | ContextRawEvent
   | MemoryEvent
   | MemoryDetailEvent
   | MemoryResultEvent
@@ -3293,6 +3296,36 @@ function emitCtxBreakdown(tab: Tab): void {
     },
     tab.id,
   );
+}
+
+// Full request context (system + messages) as editable plaintext (the desktop
+// "Raw context" debug view). Exported for tests.
+export function contextRawPayload(tab: Tab, notice?: string): ContextRawEvent {
+  if (!tab.runtime) {
+    return {
+      type: "$context_raw",
+      text: "",
+      messageCount: 0,
+      tokens: 0,
+      busy: false,
+      ...(notice ? { notice } : {}),
+    };
+  }
+  const loop = tab.runtime.loop;
+  const messages = loop.log.toMessages();
+  const text = serializeContext({ system: loop.prefix.system, messages });
+  return {
+    type: "$context_raw",
+    text,
+    messageCount: messages.length,
+    tokens: countTokensForMeter(text),
+    busy: tab.aborter !== null,
+    ...(notice ? { notice } : {}),
+  };
+}
+
+function emitContextRaw(tab: Tab, notice?: string): void {
+  emit(contextRawPayload(tab, notice), tab.id);
 }
 
 function emitSkills(tab: Tab): void {
@@ -7339,6 +7372,48 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       // Claim priority synchronously before the abort completion can drain a
       // queued send. Repeated clicks coalesce on this one operation.
       tab.manualCompaction = task;
+      return;
+    }
+    if (msg.cmd === "context_raw_get") {
+      emitContextRaw(tab);
+      return;
+    }
+    if (msg.cmd === "context_raw_set") {
+      if (!tab.runtime) {
+        emit({ type: "$error", message: "No active agent to edit context for." }, tab.id);
+        return;
+      }
+      // A rewrite mid-turn would race the in-flight request; require idle.
+      if (tab.aborter !== null || tab.runtime.loop.isCompacting) {
+        emit(
+          { type: "$error", message: "Context is locked while a turn is running; stop first." },
+          tab.id,
+        );
+        return;
+      }
+      const before = tab.runtime.loop.log.length;
+      const { system, messages } = parseContext(msg.text);
+      const { dropped } = tab.runtime.loop.replaceConversation(system, messages);
+      // Swap the desktop transcript to the new log: the same out-of-band
+      // replacement channel retry / fold use, so the visible conversation
+      // matches the agent's live context instead of going stale.
+      emitKernelEvent(
+        tab.runtime.eventizer.emitSessionRetracted(
+          tab.runtime.loop.currentTurn,
+          "context-edit",
+          before,
+          tab.runtime.loop.log.length,
+          tab.runtime.loop.log.entries,
+        ),
+        tab.id,
+      );
+      emitContextRaw(
+        tab,
+        dropped > 0
+          ? `Applied. ${dropped} unpaired tool message(s) were dropped to keep the request valid.`
+          : undefined,
+      );
+      emitCtxBreakdown(tab);
       return;
     }
     if (msg.cmd === "retry") {

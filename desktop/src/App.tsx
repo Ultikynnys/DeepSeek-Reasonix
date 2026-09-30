@@ -54,6 +54,7 @@ import {
   type ChoiceVerdict,
   type CodexQuota,
   type ConfirmationChoice,
+  type ContextRawEvent,
   type DesktopDiagnosticEvent,
   type IncomingEvent,
   type JobInfo,
@@ -432,6 +433,9 @@ export type QueuedSend = {
   images?: { id: string; thumbnail: string; wire?: UserImageAttachment }[];
 };
 
+/** Raw-context debug payload ($context_raw minus the wire tag) held in state. */
+type ContextRaw = Omit<ContextRawEvent, "type">;
+
 type State = {
   ready: boolean;
   needsSetup: boolean;
@@ -494,6 +498,8 @@ type State = {
   memoryResult: { ok: boolean; message: string } | null;
   /** JSON bundle produced by memory_export — rendered in a copy modal. */
   memoryExport: string | null;
+  /** Latest $context_raw payload — the Raw context debug panel's read side. */
+  contextRaw: ContextRaw | null;
   jobs: JobInfo[];
   /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
   activeSkill: SkillOrigin | null;
@@ -1803,6 +1809,17 @@ function applyIncomingInner(state: State, ev: IncomingEvent): State {
       };
     case "$memory_detail":
       return { ...state, memoryDetail: ev.detail };
+    case "$context_raw":
+      return {
+        ...state,
+        contextRaw: {
+          text: ev.text,
+          messageCount: ev.messageCount,
+          tokens: ev.tokens,
+          busy: ev.busy,
+          notice: ev.notice,
+        },
+      };
     case "$memory_result":
       return { ...state, memoryResult: { ok: ev.ok, message: ev.message } };
     case "$memory_export":
@@ -2602,6 +2619,7 @@ function TabRuntime({
     memoryDetail: null,
     memoryResult: null,
     memoryExport: null,
+    contextRaw: null,
     jobs: [],
     activeSkill: null,
     lastTurnOutcome: null,
@@ -3916,6 +3934,9 @@ function TabRuntime({
           onImportMemories={(json) => sendRpc({ cmd: "memory_import", json })}
           onDismissMemoryResult={() => dispatch({ t: "dismiss_memory_result" })}
           onCompact={() => sendRpc({ cmd: "compact_history" })}
+          rawContext={state.contextRaw}
+          onReadContext={() => sendRpc({ cmd: "context_raw_get" })}
+          onWriteContext={(text) => sendRpc({ cmd: "context_raw_set", text })}
           onAddRule={addRule}
           onRemoveRule={removeRule}
           onSaveSettings={saveSettings}

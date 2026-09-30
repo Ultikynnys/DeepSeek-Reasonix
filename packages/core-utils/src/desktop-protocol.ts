@@ -657,6 +657,25 @@ export interface MemoryExportEvent {
 
 export type RetryResultEvent = { type: "$retry_result"; text: string };
 
+/** Full request context (system prompt + conversation) rendered as editable
+ *  plaintext: powers the desktop's read/write "Raw context" debug view.
+ *  Aimed at inspecting/hand-editing what gets sent to the model (esp. local
+ *  Ollama models). Writing back is refused while a turn is in flight. */
+export interface ContextRawEvent {
+  type: "$context_raw";
+  /** Editable plaintext of the full request context (system block + messages). */
+  text: string;
+  /** Conversation message count (excludes the system block). */
+  messageCount: number;
+  /** Bounded token estimate of the serialized context, for the UI header. */
+  tokens: number;
+  /** True while a turn is in flight; the UI disables Apply. */
+  busy: boolean;
+  /** Optional one-shot note surfaced after a write (e.g. unpaired tool messages
+   *  healed away to keep the request valid). Absent on a plain read. */
+  notice?: string;
+}
+
 export type BtwResultEvent = { type: "$btw_result"; question: string; answer: string };
 
 export interface JobInfo {
@@ -749,15 +768,15 @@ export interface SessionCompactedEvent {
   replacementMessages: LoadedMessage[];
 }
 
-/** A retry, rewind, or abort-discard replaced the live conversation. The
- *  replacement uses the same LoadedMessage wire shape as session loading and
- *  compaction, while retaining the edit reason for consumers that need it. */
+/** A retry, rewind, abort-discard, or raw-context edit replaced the live
+ *  conversation. The replacement uses the same LoadedMessage wire shape as
+ *  session loading and compaction, while retaining the edit reason. */
 export interface SessionRetractedEvent {
   type: "session.retracted";
   id: number;
   ts: string;
   turn: number;
-  kind: "retry" | "rewind" | "abort-discard";
+  kind: "retry" | "rewind" | "abort-discard" | "context-edit";
   beforeMessages: number;
   afterMessages: number;
   replacementMessages: LoadedMessage[];
@@ -1273,6 +1292,11 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "jobs_stop"; jobId: number }
   | { cmd: "jobs_stop_all" }
   | { cmd: "compact_history" }
+  /** Request the full request context as editable plaintext ($context_raw reply). */
+  | { cmd: "context_raw_get" }
+  /** Replace the live context (system prompt + messages) from edited plaintext.
+   *  Refused while a turn is in flight; re-healed server-side before applying. */
+  | { cmd: "context_raw_set"; text: string }
   /** Duplicate the current conversation as a new truncated session opened on the
    *  chosen models. `markdown` is the current session's export body; the daemon
    *  trims it to the last `duplicateSessionTokens` tokens and seeds the new

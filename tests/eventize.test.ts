@@ -441,6 +441,12 @@ describe("Eventizer.consume", () => {
     expect(ev.ts).toBeTruthy();
   });
 
+  it("emitSessionRetracted accepts a context-edit kind", () => {
+    const e = new Eventizer();
+    const ev = e.emitSessionRetracted(2, "context-edit", 5, 3, [{ role: "user", content: "x" }]);
+    expect(ev).toMatchObject({ type: "session.retracted", kind: "context-edit", afterMessages: 3 });
+  });
+
   it("emitSubagentProgress maps loop parentCallId to wire tool callId", () => {
     const e = new Eventizer();
     e.consume(lev({ turn: 1 }), ctx);

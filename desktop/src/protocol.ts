@@ -20,6 +20,7 @@ import type {
   ConfirmRequiredEvent,
   ConfirmationChoice,
   ConnectedEvent,
+  ContextRawEvent,
   CtxBreakdownEvent,
   DesktopDiagnosticEvent,
   DesktopDiagnosticLevel,
@@ -153,6 +154,7 @@ export type {
   CodexQuotaEvent,
   ConfirmRequiredEvent,
   ConfirmationChoice,
+  ContextRawEvent,
   CtxBreakdownEvent,
   EditMode,
   JobInfo,
@@ -287,6 +289,7 @@ export type IncomingEvent = { tabId?: string } & (
   | PlaywrightBrowserInstallEvent
   | SkillsEvent
   | CtxBreakdownEvent
+  | ContextRawEvent
   | MemoryEvent
   | MemoryDetailEvent
   | MemoryResultEvent

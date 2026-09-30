@@ -4992,6 +4992,37 @@ html:not([data-platform="macos"]) .popup-item .kb .shortcut kbd[data-key="mod"] 
   font-size: 12px;
   line-height: 1.4;
 }
+.raw-context {
+  width: 100%;
+  min-height: 220px;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--fg);
+  font-family: monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  resize: vertical;
+  white-space: pre;
+  overflow: auto;
+}
+.raw-context:disabled {
+  opacity: 0.6;
+}
+.raw-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.raw-notice {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
 .ollama-presets {
   display: flex;
   flex-wrap: wrap;

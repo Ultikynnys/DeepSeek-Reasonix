@@ -109,6 +109,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     memoryDetail: null,
     memoryResult: null,
     memoryExport: null,
+    contextRaw: null,
     jobs: [],
     activeSkill: null,
     lastTurnOutcome: null,
@@ -1813,6 +1814,49 @@ describe("Desktop App reducer — compaction file triage", () => {
     expect(next.messages).toHaveLength(2);
     expect(next.messages[0]).toMatchObject({ kind: "user", text: "kept", turn: 1 });
     expect(next.sessionFiles).toEqual([{ path: "src/keep.ts", status: "c" }]);
+  });
+
+  it("session.retracted with a context-edit kind swaps the transcript live", () => {
+    const base = {
+      ...initialState(),
+      messages: [{ kind: "user" as const, text: "before edit", clientId: "1", turn: 1 }],
+    };
+    const next = reduce(base, {
+      t: "incoming",
+      event: {
+        type: "session.retracted",
+        id: 4,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 2,
+        kind: "context-edit",
+        beforeMessages: 3,
+        afterMessages: 1,
+        replacementMessages: [{ kind: "user", text: "edited" }],
+      },
+    });
+    expect(next.messages).toHaveLength(1);
+    expect(next.messages[0]).toMatchObject({ kind: "user", text: "edited" });
+  });
+
+  it("$context_raw updates the raw-context state immediately", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$context_raw",
+        text: "===== system =====\nSYS",
+        messageCount: 2,
+        tokens: 99,
+        busy: false,
+        notice: "applied",
+      },
+    });
+    expect(next.contextRaw).toEqual({
+      text: "===== system =====\nSYS",
+      messageCount: 2,
+      tokens: 99,
+      busy: false,
+      notice: "applied",
+    });
   });
 });
 

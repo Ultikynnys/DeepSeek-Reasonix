@@ -1014,6 +1014,22 @@ export class CacheFirstLoop {
     return userText;
   }
 
+  /** Replace the system prompt + conversation log wholesale from the Raw
+   *  context editor. Heals the messages first so a hand edit can't ship an
+   *  invalid tool-call shape; caller must ensure no turn is in flight. */
+  replaceConversation(
+    system: string,
+    messages: ChatMessage[],
+  ): { systemChanged: boolean; dropped: number } {
+    const healed = healLoadedMessages(messages, DEFAULT_MAX_RESULT_CHARS).messages;
+    const systemChanged = this.prefix.replaceSystem(system);
+    this.log.compactInPlace(healed);
+    this.readTracker.reset();
+    this._abandonedCalls.clear();
+    this.persistLog(healed);
+    return { systemChanged, dropped: messages.length - healed.length };
+  }
+
   async *step(
     userInput: string,
     images?: ReadonlyArray<string | TurnImage>,

@@ -890,3 +890,120 @@ describe("ContextPanel files", () => {
     expect(screen.getByText("auto-compaction disabled")).toBeTruthy();
   });
 });
+
+describe("ContextPanel raw context", () => {
+  afterEach(cleanup);
+
+  const base = {
+    settings,
+    usage,
+    mcpSpecs: [],
+    mcpBridged: false,
+    sessionFiles: [],
+    memory: [],
+    memoryDetail: null,
+    memoryResult: null,
+    onReadMemory: () => {},
+    onWriteMemory: () => {},
+    onDeleteMemory: () => {},
+    onExportMemories: () => {},
+    onImportMemories: () => {},
+    onDismissMemoryResult: () => {},
+  };
+
+  it("fetches the context on open and shows it as plaintext", () => {
+    const onReadContext = vi.fn();
+    render(
+      <ContextPanel
+        {...base}
+        rawContext={{
+          text: "===== system =====\nSYS\n\n===== user =====\nhi",
+          messageCount: 1,
+          tokens: 42,
+          busy: false,
+        }}
+        onReadContext={onReadContext}
+        onWriteContext={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("Raw"));
+    expect(onReadContext).toHaveBeenCalled();
+    const box = screen.getByLabelText("Editable request context") as HTMLTextAreaElement;
+    expect(box.value).toContain("===== system =====\nSYS");
+    expect(screen.getByText("1 messages · 42 tokens")).toBeTruthy();
+  });
+
+  it("applies an edited context", () => {
+    const onWriteContext = vi.fn();
+    render(
+      <ContextPanel
+        {...base}
+        rawContext={{ text: "===== system =====\nOLD", messageCount: 0, tokens: 1, busy: false }}
+        onReadContext={() => {}}
+        onWriteContext={onWriteContext}
+      />,
+    );
+    fireEvent.click(screen.getByText("Raw"));
+    const box = screen.getByLabelText("Editable request context") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "===== system =====\nNEW" } });
+    fireEvent.click(screen.getByText("Apply"));
+    expect(onWriteContext).toHaveBeenCalledWith("===== system =====\nNEW");
+  });
+
+  it("applies with Cmd/Ctrl+Enter", () => {
+    const onWriteContext = vi.fn();
+    render(
+      <ContextPanel
+        {...base}
+        rawContext={{ text: "===== system =====\nOLD", messageCount: 0, tokens: 1, busy: false }}
+        onReadContext={() => {}}
+        onWriteContext={onWriteContext}
+      />,
+    );
+    fireEvent.click(screen.getByText("Raw"));
+    const box = screen.getByLabelText("Editable request context") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "===== system =====\nNEW" } });
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    expect(onWriteContext).toHaveBeenCalledWith("===== system =====\nNEW");
+  });
+
+  it("reseeeds the editor from the server text after apply", () => {
+    const { rerender } = render(
+      <ContextPanel
+        {...base}
+        rawContext={{ text: "===== system =====\nOLD", messageCount: 0, tokens: 1, busy: false }}
+        onReadContext={() => {}}
+        onWriteContext={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("Raw"));
+    const box = screen.getByLabelText("Editable request context") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "===== system =====\nUSER EDIT" } });
+    fireEvent.click(screen.getByText("Apply"));
+    rerender(
+      <ContextPanel
+        {...base}
+        rawContext={{ text: "===== system =====\nSERVER", messageCount: 0, tokens: 1, busy: false }}
+        onReadContext={() => {}}
+        onWriteContext={() => {}}
+      />,
+    );
+    const after = screen.getByLabelText("Editable request context") as HTMLTextAreaElement;
+    expect(after.value).toBe("===== system =====\nSERVER");
+  });
+
+  it("locks the editor while a turn is running", () => {
+    render(
+      <ContextPanel
+        {...base}
+        rawContext={{ text: "===== system =====\nSYS", messageCount: 0, tokens: 1, busy: true }}
+        onReadContext={() => {}}
+        onWriteContext={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("Raw"));
+    const box = screen.getByLabelText("Editable request context") as HTMLTextAreaElement;
+    expect(box.disabled).toBe(true);
+    expect((screen.getByText("Apply") as HTMLButtonElement).disabled).toBe(true);
+  });
+});

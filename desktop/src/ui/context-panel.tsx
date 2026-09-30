@@ -6,13 +6,19 @@ import type { SessionFile, Settings, UsageStats } from "../App";
 import { t, useLang } from "../i18n";
 import type { TKey } from "../i18n";
 import { I } from "../icons";
-import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo, SettingsPatch } from "../protocol";
+import type {
+  ContextRawEvent,
+  McpSpecInfo,
+  MemoryDetail,
+  MemoryEntryInfo,
+  SettingsPatch,
+} from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
 import { toWorkspaceAbsolute } from "../workspace-path";
 import { FileMenu } from "./file-menu";
 import { activationHandler } from "./keyboard";
 
-type Tab = "files" | "tools" | "memory" | "rules";
+type Tab = "files" | "tools" | "context" | "memory" | "rules";
 
 /** Fallback until the sidecar reports the real cap via $ctx_breakdown — the V4 context
  *  window is 300K (DEEPSEEK_CONTEXT_TOKENS); never show the old 1M API ceiling. */
@@ -47,6 +53,9 @@ export function ContextPanel({
   onAddRule,
   onRemoveRule,
   onSaveSettings,
+  onReadContext,
+  onWriteContext,
+  rawContext,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -73,6 +82,10 @@ export function ContextPanel({
   onAddRule?: (ruleType: "shell" | "path", pattern: string) => void;
   onRemoveRule?: (ruleType: "shell" | "path", pattern: string) => void;
   onSaveSettings?: (patch: SettingsPatch) => void;
+  /** Latest $context_raw payload — the Raw context read side. */
+  rawContext?: Omit<ContextRawEvent, "type"> | null;
+  onReadContext?: () => void;
+  onWriteContext?: (text: string) => void;
 }) {
   useLang();
   const [tab, setTab] = useState<Tab>("files");
@@ -108,6 +121,14 @@ export function ContextPanel({
           onKeyDown={activationHandler(() => setTab("tools"))}
         >
           {t("contextPanel.toolsTab")}
+        </div>
+        <div
+          className="ctx-tab"
+          data-active={tab === "context"}
+          onClick={() => setTab("context")}
+          onKeyDown={activationHandler(() => setTab("context"))}
+        >
+          {t("contextPanel.rawTab")}
         </div>
         <div
           className="ctx-tab"
@@ -216,6 +237,9 @@ export function ContextPanel({
               onToggleSessionMcp={onToggleSessionMcp}
             />
           )}
+          {tab === "context" && (
+            <CtxRaw raw={rawContext ?? null} onRead={onReadContext} onWrite={onWriteContext} />
+          )}
           {tab === "memory" && (
             <CtxMemory
               entries={memory}
@@ -291,6 +315,105 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
     });
   }
   return out;
+}
+
+function CtxRaw({
+  raw,
+  onRead,
+  onWrite,
+}: {
+  raw: Omit<ContextRawEvent, "type"> | null;
+  onRead?: () => void;
+  onWrite?: (text: string) => void;
+}) {
+  const [draft, setDraft] = useState(raw?.text ?? "");
+  const [dirty, setDirty] = useState(false);
+  // Read from the seeding effect without re-running it on the dirty flip, which
+  // would briefly flash the pre-apply text back before the refresh lands.
+  const dirtyRef = useRef(false);
+  const busy = raw?.busy ?? false;
+
+  // Fetch on tab open; the Refresh button re-requests.
+  useEffect(() => {
+    onRead?.();
+  }, []);
+
+  // Reseed only when the server text itself changes, never over an active edit.
+  useEffect(() => {
+    if (!dirtyRef.current) setDraft(raw?.text ?? "");
+  }, [raw?.text]);
+
+  const markDirty = (value: string) => {
+    dirtyRef.current = true;
+    setDraft(value);
+    setDirty(true);
+  };
+
+  // Direct apply: the button, or Cmd/Ctrl+Enter in the editor.
+  const apply = () => {
+    if (!dirty || busy || !onWrite) return;
+    onWrite(draft);
+    dirtyRef.current = false;
+    setDirty(false);
+  };
+
+  return (
+    <div className="ctx-block">
+      <div className="h">
+        <span>{t("contextPanel.rawTitle")}</span>
+        <span className="right">
+          {raw
+            ? t("contextPanel.rawMeta", {
+                count: raw.messageCount,
+                tokens: raw.tokens.toLocaleString(),
+              })
+            : "-"}
+        </span>
+      </div>
+      <p className="ollama-help">{t("contextPanel.rawHelp")}</p>
+      <textarea
+        className="raw-context"
+        spellCheck={false}
+        value={draft}
+        disabled={busy}
+        aria-label={t("contextPanel.rawAria")}
+        onChange={(e) => markDirty(e.target.value)}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            apply();
+          }
+        }}
+      />
+      {raw?.notice ? <div className="raw-notice">{raw.notice}</div> : null}
+      <div className="raw-actions">
+        <button type="button" className="mini-btn" onClick={() => onRead?.()} disabled={busy}>
+          {t("contextPanel.rawRefresh")}
+        </button>
+        <button
+          type="button"
+          className="mini-btn"
+          disabled={!dirty || busy || !onWrite}
+          title={busy ? t("contextPanel.rawBusy") : undefined}
+          onClick={apply}
+        >
+          {t("contextPanel.rawApply")}
+        </button>
+        <button
+          type="button"
+          className="mini-btn"
+          disabled={!dirty}
+          onClick={() => {
+            dirtyRef.current = false;
+            setDraft(raw?.text ?? "");
+            setDirty(false);
+          }}
+        >
+          {t("contextPanel.rawRevert")}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Settings | null }) {
