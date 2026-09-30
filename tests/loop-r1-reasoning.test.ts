@@ -1,4 +1,4 @@
-/** R1 thinking-mode contract: reasoning_content round-trips on all assistant turns, including after later user turns. */
+/** R1 thinking-mode contract: tool-call reasoning_content must round-trip; stale plain reasoning must age out. */
 
 import { describe, expect, it } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
@@ -146,9 +146,9 @@ describe("R1 reasoning_content round-trip", () => {
     expect(assistantWithCalls?.reasoning_content).toBe("I should call noop to check something.");
   });
 
-  it("preserves reasoning_content from plain-text turns on the next user request", async () => {
-    // Reasoning is kept on every assistant turn so it stays visible and
-    // editable in the raw context view; DeepSeek ignores it server-side.
+  it("omits stale reasoning_content from plain-text turns on the next user request", async () => {
+    // DeepSeek V4 ignores reasoning_content from prior no-tool turns.
+    // Carrying it forward only bloats long-session request bodies.
     const { fetch: fakeFetch, bodies } = capturingFetch([
       {
         content: "a plain answer",
@@ -174,9 +174,8 @@ describe("R1 reasoning_content round-trip", () => {
     const turn2Messages = bodies[1]!.messages;
     const assistant = turn2Messages.find((m) => m.role === "assistant");
     expect(assistant).toBeDefined();
-    expect(assistant?.reasoning_content).toBe(
-      "reasoning attached to a plain-text turn".repeat(200),
-    );
+    expect(Object.hasOwn(assistant!, "reasoning_content")).toBe(false);
+    expect(JSON.stringify(turn2Messages)).not.toContain("reasoning attached to a plain-text turn");
   });
 
   it("preserves tool-call reasoning_content across later user turns", async () => {
@@ -225,7 +224,7 @@ describe("R1 reasoning_content round-trip", () => {
       .filter((m) => m.role === "assistant" && (m.tool_calls?.length ?? 0) === 0)
       .at(-1);
     expect(assistantWithCalls?.reasoning_content).toBe("tool-call reasoning must stay available");
-    expect(finalAssistant?.reasoning_content).toBe("plain final reasoning can age out");
+    expect(Object.hasOwn(finalAssistant!, "reasoning_content")).toBe(false);
   });
 
   it("stamps empty reasoning_content on a thinking-mode turn that returned null reasoning", async () => {
@@ -256,8 +255,8 @@ describe("R1 reasoning_content round-trip", () => {
     const turn2Messages = bodies[1]!.messages;
     const assistant = turn2Messages.find((m) => m.role === "assistant");
     expect(assistant).toBeDefined();
-    // The required empty reasoning_content is retained across turns.
-    expect(assistant?.reasoning_content).toBe("");
+    // Plain assistant turns do not need stale reasoning in later user requests.
+    expect(Object.hasOwn(assistant!, "reasoning_content")).toBe(false);
   });
 
   it("does NOT stamp reasoning_content on a deepseek-chat turn that returned null", async () => {
@@ -287,9 +286,10 @@ describe("R1 reasoning_content round-trip", () => {
     expect(Object.hasOwn(assistant!, "reasoning_content")).toBe(false);
   });
 
-  it("keeps deepseek-chat reasoning_content on the next user request", async () => {
+  it("omits stale plain deepseek-chat reasoning_content on the next user request", async () => {
     // V4-era deepseek-chat can surface reasoning_content even with thinking
-    // disabled. Keep it so the raw context view stays faithful to what ran.
+    // disabled. Once the turn is a plain historical assistant message,
+    // carrying that body forward just grows the next request.
     const { fetch: fakeFetch, bodies } = capturingFetch([
       { content: "ok", reasoning_content: "v4-chat reasoning leaked" },
       { content: "bye" },
@@ -309,7 +309,7 @@ describe("R1 reasoning_content round-trip", () => {
     }
     const turn2Messages = bodies[1]!.messages;
     const assistant = turn2Messages.find((m) => m.role === "assistant");
-    expect(assistant?.reasoning_content).toBe("v4-chat reasoning leaked");
+    expect(Object.hasOwn(assistant!, "reasoning_content")).toBe(false);
   });
 
   it("pins thinking=enabled for v4-pro and sends the configured reasoning_effort", async () => {
