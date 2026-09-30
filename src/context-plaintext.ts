@@ -2,7 +2,7 @@ import type { ChatMessage, UserContentPart } from "./types.js";
 
 /** Delimiter line that opens each block. Restricted to the known labels so a
  *  content line that merely looks like a separator can't be mistaken for one. */
-const HEADER_RE = /^===== (system|user|assistant|tool)(?::\s*(.+?))? =====[ \t]*$/;
+const HEADER_RE = /^===== (system|user|assistant|thinking|tool)(?::\s*(.+?))? =====[ \t]*$/;
 /** Trailing informational marker appended to assistant blocks that carried
  *  tool_calls. Stripped on re-parse so it never leaks into edited content. */
 const TOOL_CALLS_NOTE_RE = /^\[tool_calls: .*\]$/;
@@ -30,8 +30,8 @@ function contentToText(content: ChatMessage["content"]): string {
 }
 
 /** Render the full request context (system prompt + conversation) as editable
- *  plaintext: one `===== role =====` block per message. tool_calls/reasoning
- *  are shown informationally but do NOT round-trip (see parseContext). */
+ *  plaintext: one `===== role =====` block per message, plus a `thinking` block
+ *  before each assistant turn that carries reasoning. */
 export function serializeContext(input: ContextPlaintextInput): string {
   const blocks: string[] = [`===== system =====\n${input.system.trimEnd()}`];
   for (const m of input.messages) {
@@ -43,6 +43,10 @@ export function serializeContext(input: ContextPlaintextInput): string {
       blocks.push(`===== tool${name ? `: ${name}` : ""} =====\n${body}`);
       continue;
     }
+    if (m.role === "assistant") {
+      const reasoning = typeof m.reasoning_content === "string" ? m.reasoning_content.trim() : "";
+      if (reasoning.length > 0) blocks.push(`===== thinking =====\n${reasoning}`);
+    }
     const lines = [contentToText(m.content).trimEnd()];
     if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
       const names = m.tool_calls.map((c) => c.function?.name ?? "?").join(", ");
@@ -53,9 +57,9 @@ export function serializeContext(input: ContextPlaintextInput): string {
   return `${blocks.join("\n\n")}\n`;
 }
 
-/** Parse edited plaintext back to `{ system, messages }`. Drops tool blocks
- *  and the `[tool_calls: …]` note (a bare result can't be re-validated without
- *  its call), so callers re-heal the result before applying. */
+/** Parse edited plaintext back to `{ system, messages }`. A `thinking` block
+ *  attaches as reasoning to the following assistant message; tool blocks and
+ *  the `[tool_calls: …]` note are dropped, so callers re-heal before applying. */
 export function parseContext(text: string): ParsedContext {
   const blocks: Array<{ label: string; lines: string[] }> = [];
   let cur: { label: string; lines: string[] } | null = null;
@@ -72,6 +76,8 @@ export function parseContext(text: string): ParsedContext {
   if (cur) blocks.push(cur);
 
   let system = "";
+  // A thinking block renders before its assistant turn; hold it until then.
+  let pendingReasoning: string | null = null;
   const messages: ChatMessage[] = [];
   for (const block of blocks) {
     const body = block.lines
@@ -80,10 +86,16 @@ export function parseContext(text: string): ParsedContext {
       .replace(/\s+$/, "");
     if (block.label === "system") {
       system = body;
+    } else if (block.label === "thinking") {
+      pendingReasoning = body;
     } else if (block.label === "user") {
+      pendingReasoning = null;
       messages.push({ role: "user", content: body });
     } else if (block.label === "assistant") {
-      messages.push({ role: "assistant", content: body });
+      const assistant: ChatMessage = { role: "assistant", content: body };
+      if (pendingReasoning !== null) assistant.reasoning_content = pendingReasoning;
+      pendingReasoning = null;
+      messages.push(assistant);
     }
     // `tool` blocks are intentionally dropped (see doc comment).
   }

@@ -783,7 +783,7 @@ export const en = {
     rawTab: "Raw",
     rawTitle: "Raw context",
     rawHelp:
-      "Plaintext of the exact context sent to the model (system prompt + messages). Edit, then Apply (or Cmd/Ctrl+Enter) to replace the live context, for debugging local models. Unpaired tool results are dropped.",
+      "Plaintext of the exact context sent to the model: system prompt, messages, and assistant thinking. Edit, then Apply (or Cmd/Ctrl+Enter) to replace the live context, for debugging local models. Unpaired tool results are dropped.",
     rawAria: "Editable request context",
     rawMeta: "{count} messages · {tokens} tokens",
     rawRefresh: "Refresh",

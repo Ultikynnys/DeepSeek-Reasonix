@@ -40,6 +40,16 @@ describe("contextRawPayload", () => {
     expect(payload.tokens).toBeGreaterThan(0);
   });
 
+  it("includes assistant thinking in the plaintext", () => {
+    const payload = contextRawPayload(
+      makeTab("SYS", [
+        { role: "user", content: "q" },
+        { role: "assistant", content: "a", reasoning_content: "the reasoning" },
+      ]),
+    );
+    expect(payload.text).toContain("===== thinking =====\nthe reasoning");
+  });
+
   it("reports busy while a turn is in flight", () => {
     const tab = makeTab("SYS", []);
     (tab as unknown as { aborter: unknown }).aborter = {};
