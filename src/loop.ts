@@ -35,7 +35,6 @@ import {
 import { hookWarnings, safeParseToolArgs } from "./loop/hook-events.js";
 import { buildAssistantMessage, buildSyntheticAssistantMessage } from "./loop/messages.js";
 import { looksLikePrematureStop } from "./loop/premature-stop.js";
-import { stripDroppableReasoningContent } from "./loop/reasoning-retention.js";
 import {
   looksLikeCompleteJson,
   shrinkOversizedToolCallArgsByTokens,
@@ -468,11 +467,8 @@ export class CacheFirstLoop {
     if (this.sessionName) {
       const prior = loadSessionMessages(this.sessionName);
       const shrunk = healLoadedMessagesByTokens(prior, DEFAULT_MAX_RESULT_TOKENS);
-      // Thinking-mode sessions still need tool-call reasoning_content, while stale
-      // plain-turn reasoning can be dropped before it bloats long-session requests.
       const stamped = stampMissingReasoningForThinkingMode(shrunk.messages, this.model);
-      const pruned = stripDroppableReasoningContent(stamped.messages);
-      const messages = pruned.messages;
+      const messages = stamped.messages;
       const healedCount = shrunk.healedCount + stamped.stampedCount;
       const tokensSaved = shrunk.tokensSaved;
       for (const msg of messages) this.log.append(msg);
@@ -496,7 +492,7 @@ export class CacheFirstLoop {
           costByProvider: meta.costByProvider,
         });
       }
-      if (healedCount > 0 || pruned.prunedCount > 0) {
+      if (healedCount > 0) {
         // Persist healed log so the same break isn't re-noticed every restart.
         this.persistLog(messages);
         if (healedCount > 0) {
@@ -868,7 +864,7 @@ export class CacheFirstLoop {
   }
 
   private healActiveLogBeforeSend(): ChatMessage[] {
-    // Skip the expensive 3-pass healing pipeline when the log hasn't
+    // Skip the expensive healing pipeline when the log hasn't
     // changed since the last call — the common case between iterations
     // where no new messages were appended.
     if (this._healedCache && this._healedVersion === this.log.version) {
@@ -880,17 +876,16 @@ export class CacheFirstLoop {
       healed.messages,
       DEFAULT_MAX_RESULT_TOKENS,
     );
-    const pruned = stripDroppableReasoningContent(argsShrunk.messages);
-    if (healed.healedCount === 0 && argsShrunk.healedCount === 0 && pruned.prunedCount === 0) {
+    if (healed.healedCount === 0 && argsShrunk.healedCount === 0) {
       this._healedCache = current;
       this._healedVersion = this.log.version;
       return current;
     }
-    this.log.compactInPlace(pruned.messages);
-    this._healedCache = pruned.messages;
+    this.log.compactInPlace(argsShrunk.messages);
+    this._healedCache = argsShrunk.messages;
     this._healedVersion = this.log.version;
-    this.persistLog(pruned.messages);
-    return pruned.messages;
+    this.persistLog(argsShrunk.messages);
+    return argsShrunk.messages;
   }
 
   abort(opts: LoopAbortOptions = {}): void {
