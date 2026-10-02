@@ -1206,6 +1206,12 @@ export type OutgoingCommand = { tabId?: string } & (
       id: number;
       response: import("./permission-types.js").RevisionVerdict;
     }
+  /** Pause/resume the backend auto-resolve countdown for one gate so it stays
+   *  in lockstep with the card's own clock. `enabled: false` cancels the pending
+   *  auto-resolve (the gate waits for a manual pick); `enabled: true` re-arms a
+   *  fresh full window. Without this, "disable timer" only stopped the UI while
+   *  the backend still resolved at expiry. */
+  | { cmd: "gate_timer"; id: number; enabled: boolean }
   | { cmd: "session_list" }
   | { cmd: "desktop_resync" }
   | { cmd: "session_delete"; name: string }

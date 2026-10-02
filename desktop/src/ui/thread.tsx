@@ -468,16 +468,17 @@ export function PlanApprovalCard({
   onApprove,
   onRefine,
   onCancel,
+  onTimerToggle,
 }: {
   p: PendingPlan;
   onApprove: () => void;
   onRefine: () => void;
   onCancel: () => void;
+  onTimerToggle?: (enabled: boolean) => void;
 }) {
   useLang();
   const stepCount = p.steps?.length ?? 0;
   const sub = stepCount > 0 ? t("thread.planStepCount", { count: stepCount }) : undefined;
-  const remaining = useAutoApproveCountdown(p.countdownMs, onApprove);
   return (
     <ApprovalCard
       kind={t("thread.planConfirmationKind")}
@@ -486,11 +487,11 @@ export function PlanApprovalCard({
       sub={sub}
       body={
         <>
-          {remaining !== null ? (
-            <div style={{ marginBottom: 6, fontSize: 11.5, color: "var(--tone-warn)" }}>
-              {t("thread.autoApproveIn", { n: remaining })}
-            </div>
-          ) : null}
+          <QuestionTimerRow
+            countdownMs={p.countdownMs}
+            onExpire={onApprove}
+            onToggleTimer={onTimerToggle}
+          />
           {p.summary ? <div style={{ marginBottom: 6 }}>{p.summary}</div> : null}
           <PreText>{p.plan}</PreText>
         </>
@@ -547,13 +548,14 @@ export function RevisionApprovalCard({
   r,
   onAccept,
   onReject,
+  onTimerToggle,
 }: {
   r: PendingRevision;
   onAccept: () => void;
   onReject: () => void;
+  onTimerToggle?: (enabled: boolean) => void;
 }) {
   useLang();
-  const remaining = useAutoApproveCountdown(r.countdownMs, onAccept);
   return (
     <ApprovalCard
       kind={t("thread.planRevisionKind")}
@@ -562,11 +564,11 @@ export function RevisionApprovalCard({
       sub={t("thread.keepSteps", { n: r.remainingSteps.length })}
       body={
         <>
-          {remaining !== null ? (
-            <div style={{ marginBottom: 8, fontSize: 11.5, color: "var(--tone-warn)" }}>
-              {t("thread.autoApproveIn", { n: remaining })}
-            </div>
-          ) : null}
+          <QuestionTimerRow
+            countdownMs={r.countdownMs}
+            onExpire={onAccept}
+            onToggleTimer={onTimerToggle}
+          />
           <div style={{ marginBottom: 8 }}>{r.reason}</div>
           {r.summary ? (
             <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>
@@ -726,21 +728,72 @@ export function PathAccessApprovalCard({
   );
 }
 
+/** Countdown + per-card enable/disable toggle shared by the question (ask_choice)
+ *  card and the plan cards (plan confirmation + plan revision). Owns the toggle
+ *  state so the timer logic lives in one place; disabling suppresses the countdown
+ *  and the frontend auto-pick until the timer is switched back on. */
+function QuestionTimerRow({
+  countdownMs,
+  onExpire,
+  onToggleTimer,
+}: {
+  countdownMs?: number;
+  onExpire: () => void;
+  /** Notifies the backend to pause/resume its matching auto-resolve timer so
+   *  the two clocks never desync. */
+  onToggleTimer?: (enabled: boolean) => void;
+}) {
+  useLang();
+  const [timerDisabled, setTimerDisabled] = useState(false);
+  const remaining = useAutoApproveCountdown(timerDisabled ? undefined : countdownMs, onExpire);
+  const active = Boolean(countdownMs) && !timerDisabled;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 2,
+        fontSize: countdownMs ? 11.5 : 11,
+        color: active ? "var(--tone-warn)" : "var(--muted)",
+      }}
+    >
+      <span>
+        {active
+          ? t("thread.autoApproveIn", { n: remaining ?? 0 })
+          : t("thread.questionTimerDisabled")}
+      </span>
+      {countdownMs ? (
+        <button
+          type="button"
+          className="mini-btn"
+          style={{ fontSize: 11, cursor: "pointer", padding: "1px 6px" }}
+          onClick={() => {
+            const next = !timerDisabled;
+            setTimerDisabled(next);
+            onToggleTimer?.(!next);
+          }}
+        >
+          {timerDisabled ? t("thread.enableTimer") : t("thread.disableTimer")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function ChoiceApprovalCard({
   c,
   onPick,
   onCancel,
+  onTimerToggle,
 }: {
   c: PendingChoice;
   onPick: (optionId: string) => void;
   onCancel: () => void;
+  onTimerToggle?: (enabled: boolean) => void;
 }) {
   useLang();
-  const [timerDisabled, setTimerDisabled] = useState(false);
   const firstOptionId = c.options[0]?.id;
-  const remaining = useAutoApproveCountdown(timerDisabled ? undefined : c.countdownMs, () => {
-    if (firstOptionId) onPick(firstOptionId);
-  });
   return (
     <ApprovalCard
       kind={t("thread.userChoiceKind")}
@@ -749,45 +802,13 @@ export function ChoiceApprovalCard({
       sub={t("thread.optionCount", { count: c.options.length })}
       body={
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {c.countdownMs ? (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 2,
-                fontSize: 11.5,
-                color: timerDisabled ? "var(--muted)" : "var(--tone-warn)",
-              }}
-            >
-              <span>
-                {timerDisabled
-                  ? t("thread.questionTimerDisabled")
-                  : t("thread.autoApproveIn", { n: remaining ?? 0 })}
-              </span>
-              <button
-                type="button"
-                className="mini-btn"
-                style={{ fontSize: 11, cursor: "pointer", padding: "1px 6px" }}
-                onClick={() => setTimerDisabled((prev) => !prev)}
-              >
-                {timerDisabled ? t("thread.enableTimer") : t("thread.disableTimer")}
-              </button>
-            </div>
-          ) : (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 2,
-                fontSize: 11,
-                color: "var(--muted)",
-              }}
-            >
-              <span>{t("thread.questionTimerDisabled")}</span>
-            </div>
-          )}
+          <QuestionTimerRow
+            countdownMs={c.countdownMs}
+            onExpire={() => {
+              if (firstOptionId) onPick(firstOptionId);
+            }}
+            onToggleTimer={onTimerToggle}
+          />
           {c.options.map((o) => (
             <button
               key={o.id}

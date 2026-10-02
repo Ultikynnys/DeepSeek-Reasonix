@@ -13,8 +13,10 @@ vi.mock("./cards", () => ({
 }));
 
 import {
+  ChoiceApprovalCard,
   ConfirmApprovalCard,
   PathAccessApprovalCard,
+  PlanApprovalCard,
   findBackgroundJob,
   parseBackgroundJobId,
 } from "./thread";
@@ -241,5 +243,59 @@ describe("background job card correlation", () => {
     expect(findBackgroundJob([running], "t1", 99)).toBeUndefined();
     expect(findBackgroundJob(undefined, "t1", 7)).toBeUndefined();
     expect(findBackgroundJob([running], "t1", undefined)).toBeUndefined();
+  });
+});
+
+describe("QuestionTimerRow — toggle stays in sync with the backend", () => {
+  it("signals disable then enable for a choice card with a countdown", () => {
+    const onTimerToggle = vi.fn();
+    render(
+      <ChoiceApprovalCard
+        c={{
+          id: 1,
+          question: "Pick one",
+          options: [
+            { id: "a", title: "A" },
+            { id: "b", title: "B" },
+          ],
+          allowCustom: true,
+          countdownMs: 30_000,
+        }}
+        onPick={() => {}}
+        onCancel={() => {}}
+        onTimerToggle={onTimerToggle}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Disable timer" }));
+    expect(onTimerToggle).toHaveBeenLastCalledWith(false);
+    fireEvent.click(screen.getByRole("button", { name: "Enable timer" }));
+    expect(onTimerToggle).toHaveBeenLastCalledWith(true);
+  });
+
+  it("exposes the same toggle on a plan card, and hides it when there is no countdown", () => {
+    const onTimerToggle = vi.fn();
+    const props = {
+      onApprove: () => {},
+      onRefine: () => {},
+      onCancel: () => {},
+      onTimerToggle,
+    };
+    const { rerender } = render(
+      <PlanApprovalCard
+        p={{
+          id: 2,
+          plan: "Do the thing",
+          steps: [{ id: "s1", title: "one", action: "edit" }],
+          countdownMs: 30_000,
+        }}
+        {...props}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Disable timer" }));
+    expect(onTimerToggle).toHaveBeenLastCalledWith(false);
+
+    rerender(<PlanApprovalCard p={{ id: 2, plan: "Do the thing" }} {...props} />);
+    expect(screen.queryByRole("button", { name: "Disable timer" })).toBeNull();
+    expect(screen.getByText("Question timer disabled")).toBeTruthy();
   });
 });

@@ -5066,6 +5066,55 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     return undefined;
   }
 
+  // Backend half of each YOLO auto-resolve countdown. One entry per pending gate
+  // so the desktop can pause/resume it in lockstep with the card's own clock
+  // (via the `gate_timer` command): without this, "disable timer" only stopped
+  // the UI countdown while the backend still resolved the gate at expiry — a
+  // silent desync where the card sat on screen after the gate was already gone.
+  type GateCountdown = {
+    handle: ReturnType<typeof setTimeout> | null;
+    verdict: unknown;
+    ms: number;
+  };
+  const gateCountdowns = new Map<number, GateCountdown>();
+
+  function startGateCountdown(id: number, entry: GateCountdown): void {
+    entry.handle = setTimeout(() => {
+      gateCountdowns.delete(id);
+      forgetGate(id);
+      pauseGate.resolve(id, entry.verdict);
+    }, entry.ms);
+  }
+
+  function armGateCountdown(id: number, verdict: unknown, ms: number): void {
+    const existing = gateCountdowns.get(id);
+    if (existing?.handle) clearTimeout(existing.handle);
+    const entry: GateCountdown = { handle: null, verdict, ms };
+    gateCountdowns.set(id, entry);
+    startGateCountdown(id, entry);
+  }
+
+  /** Pause the backend timer but keep the verdict so it can be resumed. */
+  function suspendGateCountdown(id: number): void {
+    const entry = gateCountdowns.get(id);
+    if (!entry?.handle) return;
+    clearTimeout(entry.handle);
+    entry.handle = null;
+  }
+
+  /** Re-arm a fresh full window — mirrors the card restarting its own clock. */
+  function resumeGateCountdown(id: number): void {
+    const entry = gateCountdowns.get(id);
+    if (!entry || entry.handle) return;
+    startGateCountdown(id, entry);
+  }
+
+  function clearGateCountdown(id: number): void {
+    const entry = gateCountdowns.get(id);
+    if (entry?.handle) clearTimeout(entry.handle);
+    gateCountdowns.delete(id);
+  }
+
   function abortTurn(tab: Tab, opts: LoopAbortOptions = {}): void {
     tab.aborter?.abort();
     tab.runtime?.loop.abort(opts);
@@ -5217,7 +5266,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const hadActivePlan = tab.planTotalSteps > 0 || tab.completedStepIds.size > 0;
     const ids = [...tab.pendingGateIds];
     tab.pendingGateIds.clear();
-    for (const id of ids) pauseGate.cancel(id);
+    for (const id of ids) {
+      clearGateCountdown(id);
+      pauseGate.cancel(id);
+    }
     if (hadActivePlan) {
       tab.completedStepIds.clear();
       tab.planTotalSteps = 0;
@@ -5302,13 +5354,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     // YOLO interactive gates: surface the picker so a watching user can override
     // the default. Keep a backend timer as the source of eventual resolution;
     // the frontend mirrors it for visible countdown feedback and resolves first
-    // when the user picks manually.
+    // when the user picks manually. The card's timer toggle drives this handle
+    // via `gate_timer`, so pausing the UI clock also pauses auto-resolve.
     const countdownMs = auto?.kind === "countdown" ? auto.ms : undefined;
     if (auto?.kind === "countdown") {
-      setTimeout(() => {
-        forgetGate(req.id);
-        pauseGate.resolve(req.id, auto.verdict);
-      }, auto.ms);
+      armGateCountdown(req.id, auto.verdict, auto.ms);
     }
     if (
       req.kind === "run_command" ||
@@ -5832,16 +5882,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "confirm_response") {
+      clearGateCountdown(msg.id);
       forgetGate(msg.id);
       pauseGate.resolve(msg.id, msg.response);
       return;
     }
     if (msg.cmd === "choice_response") {
+      clearGateCountdown(msg.id);
       forgetGate(msg.id);
       pauseGate.resolve(msg.id, msg.response);
       return;
     }
     if (msg.cmd === "plan_response") {
+      clearGateCountdown(msg.id);
       const tab = forgetGate(msg.id);
       if (tab && msg.response.type === "cancel") {
         tab.completedStepIds.clear();
@@ -5852,6 +5905,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "checkpoint_response") {
+      clearGateCountdown(msg.id);
       const tab = forgetGate(msg.id);
       if (tab && msg.response.type === "stop") {
         tab.completedStepIds.clear();
@@ -5862,8 +5916,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "revision_response") {
+      clearGateCountdown(msg.id);
       forgetGate(msg.id);
       pauseGate.resolve(msg.id, msg.response);
+      return;
+    }
+    if (msg.cmd === "gate_timer") {
+      // Card toggled its countdown: keep the backend timer from resolving the
+      // gate out from under the UI (or re-arm it when the timer is switched on).
+      if (msg.enabled) resumeGateCountdown(msg.id);
+      else suspendGateCountdown(msg.id);
       return;
     }
     if (msg.cmd === "setup_save_key") {

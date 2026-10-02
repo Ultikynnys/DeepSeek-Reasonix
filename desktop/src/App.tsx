@@ -3273,6 +3273,12 @@ function TabRuntime({
     },
     [sendRpc],
   );
+  /** Pause/resume a gate's backend auto-resolve countdown so it matches the
+   *  card's timer toggle — no front/back desync. */
+  const setGateTimer = useCallback(
+    (id: number, enabled: boolean) => sendRpc({ cmd: "gate_timer", id, enabled }),
+    [sendRpc],
+  );
 
   // Read the latest session inside the stable restore callback below.
   const currentSessionRef = useRef(state.currentSession);
@@ -3729,6 +3735,7 @@ function TabRuntime({
                           onApprove={() => resolvePlan(p.id, { type: "approve" })}
                           onRefine={() => resolvePlan(p.id, { type: "refine" })}
                           onCancel={() => resolvePlan(p.id, { type: "cancel" })}
+                          onTimerToggle={(enabled) => setGateTimer(p.id, enabled)}
                         />
                       ))}
                       {state.pendingCheckpoints.map((c) => (
@@ -3746,6 +3753,7 @@ function TabRuntime({
                           r={r}
                           onAccept={() => resolveRevision(r.id, { type: "accepted" })}
                           onReject={() => resolveRevision(r.id, { type: "rejected" })}
+                          onTimerToggle={(enabled) => setGateTimer(r.id, enabled)}
                         />
                       ))}
                       {state.pendingConfirms.map((c) => (
@@ -3776,6 +3784,7 @@ function TabRuntime({
                           c={c}
                           onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })}
                           onCancel={() => resolveChoice(c.id, { type: "cancel" })}
+                          onTimerToggle={(enabled) => setGateTimer(c.id, enabled)}
                         />
                       ))}
 
