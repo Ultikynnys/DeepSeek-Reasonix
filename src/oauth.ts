@@ -191,6 +191,12 @@ export async function resolveOpenAIToken(
   });
 }
 
+/** True when an OpenAI OAuth session is stored (an access token exists). Sync —
+ *  gates OAuth-only tools without a network refresh at toolset-build time. */
+export function hasOpenAIOAuthSession(path: string = defaultConfigPath()): boolean {
+  return Boolean(readConfig(path).openaiOAuth?.accessToken);
+}
+
 export interface OAuthFlow extends LocalhostOAuthFlow<OpenAIOAuthCreds> {}
 
 function redirectPort(uri: string): number {

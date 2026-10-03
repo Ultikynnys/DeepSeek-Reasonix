@@ -20,10 +20,12 @@ import {
 } from "../config.js";
 import { bootstrapSemanticSearchInCodeMode } from "../index/semantic/tool.js";
 import { createModelClient } from "../model-client.js";
+import { hasOpenAIOAuthSession } from "../oauth.js";
 import { ToolRegistry } from "../tools.js";
 import { registerChoiceTool } from "../tools/choice.js";
 import { registerCodeQueryTools } from "../tools/code-query.js";
 import { registerFilesystemTools } from "../tools/filesystem.js";
+import { registerImageGenTool } from "../tools/image-gen.js";
 import { registerJavaSourceTool } from "../tools/java-source.js";
 import { registerJevTool, validateTypesafeApiKeyCached } from "../tools/jev.js";
 import { JobRegistry } from "../tools/jobs.js";
@@ -154,6 +156,11 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   registerSeeImageTool(tools, { rootDir: opts.rootDir });
   registerScreenCaptureTool(tools, { rootDir: opts.rootDir });
   registerScaffoldTools(tools, { projectRoot: opts.rootDir });
+  // OAuth-only: image generation bills the user's ChatGPT/OpenAI plan, so it is
+  // registered solely when an OpenAI OAuth session is present.
+  if (hasOpenAIOAuthSession(opts.configPath)) {
+    registerImageGenTool(tools, { rootDir: opts.rootDir, configPath: opts.configPath });
+  }
   const typesafeApiKey = loadTypesafeApiKey(opts.configPath);
   if (typesafeApiKey) {
     try {

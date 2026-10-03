@@ -84,6 +84,16 @@ export { ToolRegistry } from "./tools.js";
 export type { ToolDefinition, ToolCallContext } from "./tools.js";
 export { registerFilesystemTools } from "./tools/filesystem.js";
 export type { FilesystemToolsOptions } from "./tools/filesystem.js";
+export { registerImageGenTool } from "./tools/image-gen.js";
+export type {
+  ImageGenToolOptions,
+  ImageSize,
+  ImageQuality,
+  ImageBackground,
+} from "./tools/image-gen.js";
+export { DEFAULT_IMAGE_MODEL, generateImageViaCodex, imageModel } from "./codex-backend.js";
+export type { GenerateImageOptions, GenerateImageResult } from "./codex-backend.js";
+export { hasOpenAIOAuthSession } from "./oauth.js";
 export { registerMemoryTools } from "./tools/memory.js";
 export type { MemoryToolsOptions } from "./tools/memory.js";
 export { ChoiceRequestedError, registerChoiceTool } from "./tools/choice.js";
