@@ -21,7 +21,7 @@ import type { EditMode, ReasoningEffort, UserImageAttachment } from "../protocol
 import { AudioRecorder } from "../voice/audio-recorder";
 import { getSelectedAudioInputDeviceId } from "../voice/device";
 import { speechTranscriber } from "../voice/transcriber";
-import { DEFAULT_COMPOSER_ROWS, applyComposerTextareaAutosize } from "./composer-sizing";
+import { DEFAULT_COMPOSER_ROWS, applyComposerTextareaSize } from "./composer-sizing";
 import { activationHandler } from "./keyboard";
 import { TimerSpan } from "./live";
 import { Shortcut } from "./shortcut";
@@ -213,7 +213,7 @@ export function Composer({
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    applyComposerTextareaAutosize(textarea);
+    applyComposerTextareaSize(textarea);
   });
 
   useEffect(() => {

@@ -1,12 +1,16 @@
 export const DEFAULT_COMPOSER_ROWS = 2;
-export const AUTOSIZE_COMPOSER_ROWS = 5;
-export const MAX_COMPOSER_ROWS = 15;
 
 export type ComposerTextareaSizing = {
   heightPx: number;
   overflowY: "hidden" | "auto";
 };
 
+/**
+ * The composer textarea keeps a fixed height and never resizes — input taller
+ * than {@link DEFAULT_COMPOSER_ROWS} scrolls inside the box instead of growing
+ * it. It used to expand past a row threshold, so the box jumped as the user
+ * typed across that boundary.
+ */
 export function getComposerTextareaSizing({
   contentRows,
   lineHeightPx,
@@ -17,18 +21,15 @@ export function getComposerTextareaSizing({
   verticalPaddingPx: number;
 }): ComposerTextareaSizing {
   const safeRows = Math.max(1, Math.ceil(contentRows));
-  const visibleRows =
-    safeRows < AUTOSIZE_COMPOSER_ROWS
-      ? DEFAULT_COMPOSER_ROWS
-      : Math.min(safeRows, MAX_COMPOSER_ROWS);
 
   return {
-    heightPx: visibleRows * lineHeightPx + verticalPaddingPx,
-    overflowY: safeRows > visibleRows ? "auto" : "hidden",
+    heightPx: DEFAULT_COMPOSER_ROWS * lineHeightPx + verticalPaddingPx,
+    overflowY: safeRows > DEFAULT_COMPOSER_ROWS ? "auto" : "hidden",
   };
 }
 
-export function applyComposerTextareaAutosize(textarea: HTMLTextAreaElement) {
+/** Applies the composer textarea's fixed height and overflow in place. */
+export function applyComposerTextareaSize(textarea: HTMLTextAreaElement) {
   const style = window.getComputedStyle(textarea);
   const lineHeightPx = Number.parseFloat(style.lineHeight);
   const paddingTopPx = Number.parseFloat(style.paddingTop);
